@@ -51,8 +51,7 @@ jobs:
         run: ./gradlew :app:assembleDebug --no-daemon --stacktrace
 
       - name: Upload debug APK
-        if: github.event_name == 'workflow_dispatch'
-        continue-on-error: true
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: coding-agent-debug-apk
@@ -62,8 +61,7 @@ jobs:
           compression-level: 9
 
       - name: Upload lint report
-        if: always() && github.event_name == 'workflow_dispatch'
-        continue-on-error: true
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: coding-agent-lint-report
