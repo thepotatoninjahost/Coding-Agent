@@ -152,6 +152,7 @@ private fun CodingAgentApp(privateDir: File) {
     var modelStatus by remember { mutableStateOf("Preparing Qwen3-8B NPU model") }
     var modelProgress by remember { mutableStateOf<ModelDownloadProgress?>(null) }
     var localModel by remember { mutableStateOf<NexaLocalModelGateway?>(null) }
+    var modelLoadError by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) {
         withContext(Dispatchers.IO) {
@@ -165,11 +166,16 @@ private fun CodingAgentApp(privateDir: File) {
                 runCatching { NexaLocalModelGateway(context, it.directory) }
                     .onSuccess { gateway ->
                         localModel = gateway
+                        modelLoadError = null
                         modelStatus = "Qwen3-8B NPU active"
                     }
-                    .onFailure { error -> modelStatus = "Model files ready; NPU load failed: ${error.message.orEmpty().ifBlank { error.javaClass.simpleName }.take(140)}" }
+                    .onFailure { error ->
+                        modelLoadError = error.message.orEmpty().ifBlank { error.javaClass.simpleName }
+                        modelStatus = "Model load failed: ${modelLoadError.orEmpty().take(140)}"
+                    }
             }.onFailure {
-                modelStatus = "Model download blocked: ${it.message.orEmpty()}"
+                modelLoadError = it.message.orEmpty().ifBlank { it.javaClass.simpleName }
+                modelStatus = "Model setup failed: ${modelLoadError.orEmpty().take(140)}"
             }
         }
     }
@@ -187,7 +193,19 @@ private fun CodingAgentApp(privateDir: File) {
             }
         }
     }
-    val chat = remember(agent) { ChatWorkspace(store) { agent } }
+    val chat = remember(agent, workspace, modelLoadError) {
+        ChatWorkspace(
+            store = store,
+            runtimeProvider = { agent },
+            unavailableMessageProvider = {
+                when {
+                    workspace == null -> "Choose a project folder before sending coding requests."
+                    modelLoadError != null -> "Model unavailable. ${modelLoadError.orEmpty()}"
+                    else -> "Model is still loading. Wait for the model status to show active before sending coding requests."
+                }
+            }
+        )
+    }
 
     val modelPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult

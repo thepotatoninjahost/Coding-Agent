@@ -10,6 +10,8 @@ import com.nexa.sdk.bean.ModelConfig
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.runBlocking
 import java.io.File
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 class NexaLocalModelGateway(
     context: Context,
@@ -19,18 +21,19 @@ class NexaLocalModelGateway(
     private val wrapper: LlmWrapper
 
     init {
-        var initError: String? = null
-        var initialized = false
-        NexaSdk.Companion.getInstance().init(context, object : NexaSdk.InitCallback {
-            override fun onSuccess() { initialized = true }
-            override fun onFailure(message: String) { initError = message }
-        })
-        check(initialized || initError == null) { "Nexa SDK initialization failed: $initError" }
+        awaitSdkInitialization(context)
+        val modelFile = modelDirectory.resolve(Qwen3NpuPackage.files.first().name)
+        check(modelFile.isFile && modelFile.length() > 0L) {
+            "Nexa model entry point is missing: ${modelFile.absolutePath}"
+        }
         val input = LlmCreateInput(
             modelName,
-            modelDirectory.absolutePath,
+            modelFile.absolutePath,
             "",
-            ModelConfig(),
+            ModelConfig(
+                max_tokens = 4096,
+                enable_thinking = false
+            ),
             NexaSdk.PLUGIN_ID_NPU,
             ""
         )
@@ -63,6 +66,20 @@ class NexaLocalModelGateway(
     }
 
     fun close() { wrapper.close() }
+
+    private fun awaitSdkInitialization(context: Context) {
+        val completed = CountDownLatch(1)
+        var failure: String? = null
+        NexaSdk.Companion.getInstance().init(context, object : NexaSdk.InitCallback {
+            override fun onSuccess() { completed.countDown() }
+            override fun onFailure(message: String) {
+                failure = message
+                completed.countDown()
+            }
+        })
+        check(completed.await(60, TimeUnit.SECONDS)) { "Nexa SDK initialization timed out" }
+        check(failure == null) { "Nexa SDK initialization failed: $failure" }
+    }
 
     private fun buildPrompt(request: ModelRequest): String = buildString {
         append(request.system).append("\n\n")

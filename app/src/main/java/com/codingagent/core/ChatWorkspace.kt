@@ -23,6 +23,7 @@ fun interface CodingAgentExecutor {
 
 class ChatWorkspace(
     private val store: ChatMessageStore,
+    private val unavailableMessageProvider: () -> String = { "Model unavailable. Finish model setup before sending coding requests." },
     private val runtimeProvider: () -> CodingAgentExecutor?
 ) {
     fun history(limit: Int = 100): List<ChatMessage> = store.recentChatMessages(limit).asReversed()
@@ -38,7 +39,7 @@ class ChatWorkspace(
             is AgentRuntimeResult.NeedsInput -> ChatMessage(role = ChatRole.AGENT, content = result.question, taskId = result.task.id)
             is AgentRuntimeResult.NeedsApproval -> ChatMessage(role = ChatRole.AGENT, content = result.question, taskId = result.task.id)
             is AgentRuntimeResult.Failed -> ChatMessage(role = ChatRole.AGENT, content = formatTask(result.task), taskId = result.task.id)
-            null -> ChatMessage(role = ChatRole.SYSTEM, content = "Choose a project folder before sending coding requests.")
+            null -> ChatMessage(role = ChatRole.SYSTEM, content = unavailableMessageProvider())
         }
         store.recordChatMessage(response)
         return ChatTurn(response, result)
