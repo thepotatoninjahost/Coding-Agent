@@ -27,15 +27,11 @@ class NexaLocalModelGateway(
             "Nexa model entry point is missing: ${modelFile.absolutePath}"
         }
         val input = LlmCreateInput(
-            modelName,
-            modelFile.absolutePath,
-            "",
-            ModelConfig(
-                max_tokens = 4096,
-                enable_thinking = false
-            ),
-            NexaSdk.PLUGIN_ID_NPU,
-            ""
+            model_name = modelName,
+            model_path = modelFile.absolutePath,
+            config = ModelConfig(nCtx = 8192, nGpuLayers = 999, max_tokens = 4096),
+            plugin_id = NexaSdk.PLUGIN_ID_CPU_GPU,
+            device_id = "dev0"
         )
         wrapper = runBlocking {
             val result = LlmWrapper.Companion.builder().llmCreateInput(input).build()
