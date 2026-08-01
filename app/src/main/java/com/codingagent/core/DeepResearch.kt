@@ -36,6 +36,8 @@ interface DeepResearchProvider {
  */
 class DurableDeepResearchProvider(
     private val researchRoot: File,
+    private val pageTimeoutMillis: Int = 15_000,
+    private val connectionFactory: (String) -> HttpURLConnection = { URL(it).openConnection() as HttpURLConnection },
     private val searchProvider: WebResearchProvider = CompositeWebResearchProvider(),
     private val maxSourceFetches: Int = 40
 ) : DeepResearchProvider {
@@ -97,7 +99,7 @@ class DurableDeepResearchProvider(
         val sources = mutableListOf<ResearchSource>()
         var failed = 0
         diverse.forEachIndexed { index, candidate ->
-            val fetched = runCatching { ArticleExtractor.fetch(candidate.url) }.getOrNull()
+            val fetched = runCatching { ArticleExtractor.fetch(candidate.url, connectionFactory, pageTimeoutMillis) }.getOrNull()
             if (fetched != null && fetched.wordCount >= 40) {
                 sources += ResearchSource(
                     title = candidate.title.ifBlank { fetched.title },
@@ -133,7 +135,7 @@ class DurableDeepResearchProvider(
     fun recent(limit: Int = 20): List<ResearchSession> {
         if (!sessionsDir.exists()) return emptyList()
         return sessionsDir.listFiles()
-            ?.filter { it.extension == "json" }
+            ?.filter { it.isFile && it.name.endsWith(".json") }
             ?.sortedByDescending { it.lastModified() }
             ?.take(limit)
             ?.mapNotNull { file ->
@@ -253,18 +255,21 @@ object QueryLanes {
     fun expand(query: String, mode: ResearchMode = ResearchMode.BROAD, salt: String = ""): List<ResearchLane> {
         val base = query.trim()
         val variants = mutableListOf(
-            ResearchLane("primary", base),
-            ResearchLane("code", "$base code example OR snippet OR implementation"),
-            ResearchLane("docs", "$base documentation OR guide OR reference"),
-            ResearchLane("android", "$base Android Kotlin"),
-            ResearchLane("github", "$base site:github.com"),
-            ResearchLane("so", "$base site:stackoverflow.com")
+            ResearchLane("primary documentation", "$base documentation OR guide OR reference OR official docs"),
+            ResearchLane("implementation examples", "$base code example OR snippet OR implementation"),
+            ResearchLane("community solutions", "$base site:stackoverflow.com OR site:reddit.com/r/androiddev OR site:github.com"),
+            ResearchLane("standards and papers", "$base RFC OR specification OR paper OR standard"),
+            ResearchLane("failure modes", "$base pitfalls OR bugs OR failure OR limitations OR common mistakes"),
+            ResearchLane("theoretical foundations", "$base theory OR formal model OR foundations OR hypothesis"),
+            ResearchLane("experimental research", "$base experimental OR prototype OR novel OR unconventional"),
+            ResearchLane("empirical evidence", "$base benchmark OR evaluation OR performance OR comparison OR measure"),
+            ResearchLane("alternatives and criticism", "$base alternatives OR criticism OR tradeoffs OR vs OR compared")
         )
         when (mode) {
-            ResearchMode.EXPERIMENTAL -> variants += ResearchLane("experimental", "$base experimental OR prototype OR novel")
-            ResearchMode.THEORETICAL -> variants += ResearchLane("theory", "$base theory OR formal OR model")
-            ResearchMode.EMPIRICAL -> variants += ResearchLane("benchmark", "$base benchmark OR performance OR evaluation")
-            else -> {}
+            ResearchMode.EXPERIMENTAL -> variants.add(0, ResearchLane("experimental focus", "$base experimental OR prototype OR novel"))
+            ResearchMode.THEORETICAL -> variants.add(0, ResearchLane("theory focus", "$base theory OR formal OR model"))
+            ResearchMode.EMPIRICAL -> variants.add(0, ResearchLane("empirical focus", "$base benchmark OR performance OR evaluation"))
+            ResearchMode.BROAD -> {}
         }
         val rotated = if (salt.isBlank()) variants else {
             val shift = (salt.hashCode().and(0x7fffffff)) % variants.size
@@ -312,17 +317,24 @@ object SourceQuality {
 }
 
 object ArticleExtractor {
-    private val timeoutMillis = 15_000
-
-    data class Extracted(val title: String, val text: String, val wordCount: Int, val codeBlocks: List<String>) {
-        /** Back-compat alias used by unit tests. */
+    data class Extracted(
+        val title: String,
+        val text: String,
+        val wordCount: Int,
+        val codeBlocks: List<String>
+    ) {
+        /** Compatibility alias used by unit tests. */
         val code: List<String> get() = codeBlocks
     }
 
-    fun extract(html: String, url: String = "https://example.com"): Extracted = parse(html, url)
+    fun extract(html: String, fallbackTitle: String = "document"): Extracted = parse(html, fallbackTitle)
 
-    fun fetch(url: String): Extracted? {
-        val connection = (URL(url).openConnection() as HttpURLConnection).apply {
+    fun fetch(
+        url: String,
+        connectionFactory: (String) -> HttpURLConnection = { URL(it).openConnection() as HttpURLConnection },
+        timeoutMillis: Int = 15_000
+    ): Extracted? {
+        val connection = connectionFactory(url).apply {
             connectTimeout = timeoutMillis
             readTimeout = timeoutMillis
             requestMethod = "GET"
@@ -350,11 +362,11 @@ object ArticleExtractor {
             .replace(Regex("<footer[\\s\\S]*?</footer>", RegexOption.IGNORE_CASE), " ")
         val codeBlocks = Regex("<pre[^>]*>([\\s\\S]*?)</pre>", RegexOption.IGNORE_CASE).findAll(cleaned)
             .map { it.groupValues[1].replace(Regex("<[^>]+>"), "").trim() }
-            .filter { it.length in 40..4000 }
+            .filter { it.length in 8..4000 }
             .take(8)
             .toList()
         val text = cleaned.replace(Regex("<[^>]+>"), " ").replace(Regex("\\s+"), " ").trim()
-        val words = text.split(Regex("\\s+").toRegex()).filter { it.isNotBlank() }
+        val words = text.split(Regex("\\s+")).filter { it.isNotBlank() }
         return Extracted(title, text.take(20_000), words.size, codeBlocks)
     }
 }
