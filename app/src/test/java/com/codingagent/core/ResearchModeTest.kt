@@ -24,4 +24,12 @@ class ResearchModeTest {
         val lanes = QueryLanes.expand("type systems", ResearchMode.THEORETICAL).map { it.name }
         assertTrue(lanes.any { it.contains("theory", ignoreCase = true) })
     }
+
+    @Test
+    fun shortQueryAvoidsTradeoffsLane() {
+        val lanes = QueryLanes.expand("ch experimental code involvi", ResearchMode.EXPERIMENTAL).map { it.name }
+        assertTrue(lanes.none { it.contains("tradeoff", ignoreCase = true) || it.contains("criticism", ignoreCase = true) })
+        assertTrue(lanes.any { it.contains("experimental", ignoreCase = true) })
+        assertTrue(lanes.any { it.contains("implementation", ignoreCase = true) || it.contains("code", ignoreCase = true) })
+    }
 }
