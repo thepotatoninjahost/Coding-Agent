@@ -217,6 +217,7 @@ class DurableDeepResearchProvider(
             if (key.isNotBlank()) seen.putIfAbsent(key, c)
         }
         return seen.values.toList()
+    ident
     }
 
     private fun selectDiverse(candidates: List<Candidate>, target: Int): List<Candidate> {
@@ -368,6 +369,60 @@ object ArticleExtractor {
         val text = cleaned.replace(Regex("<[^>]+>"), " ").replace(Regex("\\s+"), " ").trim()
         val words = text.split(Regex("\\s+")).filter { it.isNotBlank() }
         return Extracted(title, text.take(20_000), words.size, codeBlocks)
+    }
+}
+
+data class ResearchBrief(
+    val query: String,
+    val sourceCount: Int,
+    val laneCount: Int,
+    val wordCount: Int,
+    val codeExampleCount: Int,
+    val sourceLines: List<String>,
+    val evidence: String
+)
+
+/**
+ * Turns a ResearchSession into the evidence block the model receives.
+ * Required by CodingAgentRuntime and AutonomousAgent.
+ */
+object ResearchBriefBuilder {
+    fun build(session: ResearchSession, maxCharacters: Int = 48_000): ResearchBrief {
+        val usable = session.sources.filter { it.content.isNotBlank() }
+        val ranked = usable.sortedWith(
+            compareByDescending<ResearchSource> { authority(it.domain) }
+                .thenByDescending { it.wordCount }
+        )
+        val evidence = buildString {
+            append("Research corpus for: ").append(session.query).append("\n")
+            append("Full sources read: ").append(usable.size)
+            append("; distinct lanes: ").append(usable.map { it.lane }.distinct().size)
+            append("; words: ").append(usable.sumOf { it.wordCount }).append("\n\n")
+            ranked.forEachIndexed { index, source ->
+                append("SOURCE ").append(index + 1)
+                append(" [").append(source.lane).append("] ")
+                append(source.title).append(" <").append(source.url).append(">\n")
+                append(source.content.take(4_000)).append("\n")
+                source.codeExamples.take(2).forEach { append("CODE: ").append(it.take(2_000)).append("\n") }
+                append("\n")
+            }
+        }.take(maxCharacters)
+        return ResearchBrief(
+            query = session.query,
+            sourceCount = usable.size,
+            laneCount = usable.map { it.lane }.distinct().size,
+            wordCount = usable.sumOf { it.wordCount },
+            codeExampleCount = usable.sumOf { it.codeExamples.size },
+            sourceLines = ranked.map { "${it.title} — ${it.url}" },
+            evidence = evidence
+        )
+    }
+
+    private fun authority(domain: String): Int = when {
+        domain.contains("developer.android.com") || domain.contains("kotlinlang.org") || domain.contains("sqlite.org") -> 5
+        domain.contains("rfc-editor.org") || domain.contains("github.com") -> 4
+        domain.contains("stackoverflow.com") -> 3
+        else -> 1
     }
 }
 
