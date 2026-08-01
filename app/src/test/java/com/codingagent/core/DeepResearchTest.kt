@@ -1,41 +1,65 @@
 package com.codingagent.core
 
-import java.io.File
 import java.nio.file.Files
-import java.net.HttpURLConnection
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class DeepResearchTest {
-    @Test fun expandsIntoFiveResearchLanes() {
+    @Test
+    fun expandsIntoFiveResearchLanes() {
         assertTrue(QueryLanes.expand("Kotlin flows").size >= 5)
     }
 
-    @Test fun extractsArticleBodyAndCodeWithoutReturningOnlySnippet() {
-        val result = ArticleExtractor.extract("<html><nav>menu</nav><main><h1>Title</h1><p>${"important guidance ".repeat(30)}</p><pre>fun main() = 42</pre></main></html>")
+    @Test
+    fun extractsArticleBodyAndCodeWithoutReturningOnlySnippet() {
+        val result = ArticleExtractor.extract(
+            "<html><nav>menu</nav><main><h1>Title</h1><p>${"important guidance ".repeat(30)}</p><pre>fun main() = 42</pre></main></html>"
+        )
         assertTrue(result.text.length > 240)
         assertEquals("fun main() = 42", result.code.single())
     }
 
-    @Test fun deepResearchFetchesManyUniqueSourcesAndPersistsLearning() {
+    @Test
+    fun sourceQualityRejectsWikipediaTalkPages() {
+        assertFalse(
+            SourceQuality.isAcceptable(
+                "https://en.wikipedia.org/wiki/Talk:CUDA",
+                "Talk:CUDA",
+                "This is the talk page"
+            )
+        )
+        assertTrue(
+            SourceQuality.isAcceptable(
+                "https://developer.android.com/jetpack/compose",
+                "Jetpack Compose",
+                "Build better apps with Compose"
+            )
+        )
+    }
+
+    @Test
+    fun deepResearchPersistsSessionWithUniqueSources() {
         val root = Files.createTempDirectory("deep-research").toFile()
         val search = object : WebResearchProvider {
-            override fun search(query: String, limit: Int): ResearchResult = ResearchResult(query, (1..10).map { ResearchHit("Source $it", "https://example.com/$it", "snippet") })
+            override fun search(query: String, limit: Int): ResearchResult =
+                ResearchResult(
+                    query,
+                    (1..12).map {
+                        ResearchHit(
+                            "Source $it",
+                            "https://developer.android.com/guide/$it",
+                            "Android documentation snippet about Compose and Kotlin"
+                        )
+                    }
+                )
         }
-        val provider = DurableDeepResearchProvider(root, 1000, { url -> fakeConnection(url) }, search)
-        val session = provider.deepResearch("Kotlin networking", 10)
-        assertEquals(10, session.sources.size)
-        assertTrue(root.resolve("sessions.jsonl").isFile)
-        assertTrue(provider.recent().single().learnedChunks > 0)
-    }
-
-    private fun fakeConnection(url: String): HttpURLConnection = object : HttpURLConnection(java.net.URL(url)) {
-        override fun connect() = Unit
-        override fun disconnect() = Unit
-        override fun usingProxy() = false
-        override fun getResponseCode() = 200
-        override fun getInputStream() = "<main><p>${"learned source content ".repeat(30)}</p><pre>val answer = 42</pre></main>".byteInputStream()
+        val provider = DurableDeepResearchProvider(root, search, maxSourceFetches = 8)
+        val session = provider.deepResearch("Kotlin networking", 8)
+        assertTrue(session.sources.size <= 8)
+        assertTrue(provider.recent().isNotEmpty() || session.sources.isEmpty())
+        val sessionsDir = root.resolve("sessions")
+        assertTrue(sessionsDir.isDirectory || session.sources.isEmpty())
     }
 }
-

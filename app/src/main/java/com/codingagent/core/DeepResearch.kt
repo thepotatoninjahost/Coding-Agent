@@ -314,7 +314,12 @@ object SourceQuality {
 object ArticleExtractor {
     private val timeoutMillis = 15_000
 
-    data class Extracted(val title: String, val text: String, val wordCount: Int, val codeBlocks: List<String>)
+    data class Extracted(val title: String, val text: String, val wordCount: Int, val codeBlocks: List<String>) {
+        /** Back-compat alias used by unit tests. */
+        val code: List<String> get() = codeBlocks
+    }
+
+    fun extract(html: String, url: String = "https://example.com"): Extracted = parse(html, url)
 
     fun fetch(url: String): Extracted? {
         val connection = (URL(url).openConnection() as HttpURLConnection).apply {
@@ -349,7 +354,7 @@ object ArticleExtractor {
             .take(8)
             .toList()
         val text = cleaned.replace(Regex("<[^>]+>"), " ").replace(Regex("\\s+"), " ").trim()
-        val words = text.split(Regex("\\s+")).filter { it.isNotBlank() }
+        val words = text.split(Regex("\\s+").toRegex()).filter { it.isNotBlank() }
         return Extracted(title, text.take(20_000), words.size, codeBlocks)
     }
 }
