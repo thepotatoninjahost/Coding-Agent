@@ -22,16 +22,15 @@ class NexaLocalModelGateway(
 
     init {
         awaitSdkInitialization(context)
-        val modelFile = modelDirectory.resolve(Qwen3NpuPackage.files.first().name)
-        check(modelFile.isFile && modelFile.length() > 0L) {
-            "Nexa model entry point is missing: ${modelFile.absolutePath}"
+        check(modelDirectory.resolve("nexa.manifest").isFile) {
+            "Nexa model manifest is missing: ${modelDirectory.absolutePath}"
         }
         val input = LlmCreateInput(
-            model_name = modelName,
-            model_path = modelFile.absolutePath,
-            config = ModelConfig(nCtx = 8192, nGpuLayers = 999, max_tokens = 4096),
-            plugin_id = NexaSdk.PLUGIN_ID_CPU_GPU,
-            device_id = "dev0"
+            model_name = "qwen3-4b",
+            model_path = modelDirectory.absolutePath,
+            config = ModelConfig(max_tokens = 4096),
+            plugin_id = "npu",
+            device_id = null
         )
         wrapper = runBlocking {
             val result = LlmWrapper.Companion.builder().llmCreateInput(input).build()

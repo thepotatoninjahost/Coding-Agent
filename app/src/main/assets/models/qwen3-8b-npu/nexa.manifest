@@ -1,6 +1,0 @@
-{
-    "ModelName": "qwen3-8b",
-    "ModelType": "llm",
-    "PluginId": "npu",
-    "MinSDKVersion": "v0.2.53"
-}

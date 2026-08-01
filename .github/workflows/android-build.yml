@@ -51,21 +51,10 @@ jobs:
         run: ./gradlew :app:assembleDebug --no-daemon --stacktrace
 
       - name: Upload debug APK
-        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: coding-agent-debug-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
-          retention-days: 1
-          compression-level: 9
-
-      - name: Upload lint report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: coding-agent-lint-report
-          path: app/build/reports/lint-results-debug.html
-          if-no-files-found: ignore
           retention-days: 1
           compression-level: 9

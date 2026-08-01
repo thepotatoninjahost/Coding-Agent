@@ -149,7 +149,7 @@ private fun CodingAgentApp(privateDir: File) {
     var pendingProposal by remember { mutableStateOf<PendingChangeProposal?>(null) }
     val mutationCoordinator = remember(workspace) { workspace?.let { MutationCoordinator(it) } }
     var messageQueue by remember { mutableStateOf(emptyList<String>()) }
-    var modelStatus by remember { mutableStateOf("Preparing Qwen3-8B NPU model") }
+    var modelStatus by remember { mutableStateOf("Preparing Qwen3-4B NPU (mobile) model") }
     var modelProgress by remember { mutableStateOf<ModelDownloadProgress?>(null) }
     var localModel by remember { mutableStateOf<NexaLocalModelGateway?>(null) }
     var modelLoadError by remember { mutableStateOf<String?>(null) }
@@ -162,20 +162,20 @@ private fun CodingAgentApp(privateDir: File) {
                     modelStatus = "${progress.phase}: ${progress.percent}% (${progress.currentFile})"
                 }
             }.onSuccess {
-                modelStatus = "Qwen3-8B NPU files verified; loading NPU runtime"
+                modelStatus = "Qwen3-4B NPU (mobile) files verified; loading NPU runtime"
                 runCatching { NexaLocalModelGateway(context, it.directory) }
                     .onSuccess { gateway ->
                         localModel = gateway
                         modelLoadError = null
-                        modelStatus = "Qwen3-8B NPU active"
+                        modelStatus = "Qwen3-4B NPU (mobile) active"
                     }
                     .onFailure { error ->
                         modelLoadError = error.message.orEmpty().ifBlank { error.javaClass.simpleName }
-                        modelStatus = "Model load failed: ${modelLoadError.orEmpty().take(140)}"
+                        modelStatus = "Model load failed: ${modelLoadError.orEmpty().take(300)}"
                     }
             }.onFailure {
                 modelLoadError = it.message.orEmpty().ifBlank { it.javaClass.simpleName }
-                modelStatus = "Model setup failed: ${modelLoadError.orEmpty().take(140)}"
+                modelStatus = "Model setup failed: ${modelLoadError.orEmpty().take(300)}"
             }
         }
     }

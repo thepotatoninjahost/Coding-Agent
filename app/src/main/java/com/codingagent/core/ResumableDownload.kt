@@ -2,6 +2,7 @@ package com.codingagent.core
 
 import java.io.File
 import java.net.HttpURLConnection
+import java.net.URL
 import java.security.MessageDigest
 
 class DownloadBlockedException(message: String, cause: Throwable? = null) : Exception(message, cause)
@@ -36,22 +37,54 @@ class ResumableFileDownloader(
 
     private fun transfer(url: String, destination: File, expectedBytes: Long, onProgress: (Long) -> Unit) {
         val existing = destination.length().coerceAtMost(expectedBytes)
-        val connection = connectionFactory(url)
+        var connection = connectionFactory(url)
+        var resumed = existing > 0L
         try {
-            connection.connectTimeout = 30_000
-            connection.readTimeout = 120_000
-            connection.setRequestProperty("Accept-Encoding", "identity")
-            if (existing > 0L) connection.setRequestProperty("Range", "bytes=$existing-")
+            configure(connection, resumed, existing)
             connection.connect()
-            val response = connection.responseCode
-            if (response !in 200..299) throw DownloadBlockedException("HTTP $response")
-            val append = existing > 0L && response == HttpURLConnection.HTTP_PARTIAL
+            var response = connection.responseCode
+            if (response == 301 || response == 302 || response == 303 || response == 307) {
+                val location = connection.getHeaderField("Location")
+                    ?: throw DownloadBlockedException("HTTP $response ${connection.responseMessage ?: "Redirect without Location"}")
+                connection.disconnect()
+                connection = connectionFactory(location)
+                configure(connection, resumed, existing)
+                connection.connect()
+                response = connection.responseCode
+            }
+            if (response != HttpURLConnection.HTTP_OK && response != HttpURLConnection.HTTP_PARTIAL) {
+                val message = connection.responseMessage.orEmpty().ifBlank { "Unknown response" }
+                throw DownloadBlockedException("HTTP $response $message")
+            }
+            if (resumed && response == HttpURLConnection.HTTP_OK) {
+                destination.delete()
+                resumed = false
+                val retryUrl = connection.url.toString()
+                connection.disconnect()
+                connection = connectionFactory(retryUrl)
+                configure(connection, false, 0L)
+                connection.connect()
+                response = connection.responseCode
+                if (response == 301 || response == 302 || response == 303 || response == 307) {
+                    val location = connection.getHeaderField("Location")
+                        ?: throw DownloadBlockedException("HTTP $response ${connection.responseMessage ?: "Redirect without Location"}")
+                    connection.disconnect()
+                    connection = connectionFactory(location)
+                    configure(connection, false, 0L)
+                    connection.connect()
+                    response = connection.responseCode
+                }
+                if (response != HttpURLConnection.HTTP_OK) {
+                    val message = connection.responseMessage.orEmpty().ifBlank { "Unknown response" }
+                    throw DownloadBlockedException("HTTP $response $message")
+                }
+            }
+            val append = resumed && response == HttpURLConnection.HTTP_PARTIAL
             val start = if (append) existing else 0L
-            if (!append && existing > 0L) destination.delete()
             var downloaded = start
             connection.inputStream.use { input ->
-                destination.outputStream().use { output ->
-                    if (append) output.channel.position(start)
+                java.io.RandomAccessFile(destination, "rw").use { output ->
+                    if (append) output.seek(start) else output.setLength(0L)
                     val buffer = ByteArray(1024 * 1024)
                     while (true) {
                         val read = input.read(buffer)
@@ -66,6 +99,16 @@ class ResumableFileDownloader(
         } finally {
             connection.disconnect()
         }
+    }
+
+    private fun configure(connection: HttpURLConnection, resume: Boolean, existing: Long) {
+        connection.instanceFollowRedirects = true
+        connection.connectTimeout = 30_000
+        connection.readTimeout = 120_000
+        connection.setRequestProperty("User-Agent", "CodingAgent/1.0 (Android)")
+        connection.setRequestProperty("Accept", "*/*")
+        connection.setRequestProperty("Accept-Encoding", "identity")
+        if (resume && existing > 0L) connection.setRequestProperty("Range", "bytes=$existing-")
     }
 
     private fun sha256(file: File): String = file.inputStream().use { input ->

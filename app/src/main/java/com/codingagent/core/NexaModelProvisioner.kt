@@ -20,20 +20,18 @@ data class ProvisionedModel(val directory: File, val totalBytes: Long)
 fun ProvisionedModel.modelPath(): File = directory
 
 object Qwen3NpuPackage {
-    const val assetRoot = "models/qwen3-8b-npu"
-    const val packageName = "qwen3-8b-npu"
-    const val modelName = "qwen3-8b"
+    const val assetRoot = "models/qwen3-4b-npu-mobile"
+    const val packageName = "qwen3-4b-npu-mobile"
+    const val modelName = "qwen3-4b"
     const val sdkVersion = "v0.2.53"
-    private const val baseUrl = "https://huggingface.co/NexaAI/Qwen3-8B-NPU/resolve/main"
+    private const val baseUrl = "https://huggingface.co/NexaAI/Qwen3-4B-Instruct-2507-npu-mobile/resolve/main"
 
     val files: List<ModelShard> = listOf(
-        ModelShard("files-1-2.nexa", 644L, "09e96eadb9dfc55116088098fe510ffacdf18e6725a3bda7ea214deb84bb103b"),
-        ModelShard("files-2-2.nexa", 11422670L, "491c18ada2fc244ab71ca26cbc235abcd319a2a5570828fbc82287409b4fbdcd"),
-        ModelShard("weights-1-5.nexa", 943585212L, "3353f6e25847d39223ca51f83dbe8614f98a6d9c32b1e6b5535d87f3989ef9f8"),
-        ModelShard("weights-2-5.nexa", 965374644L, "41486a79dc2e38600618c516e8ffcf42a8fae578a1ffd15b14389d51e3793ae3"),
-        ModelShard("weights-3-5.nexa", 965374788L, "b26a361cd8df81eed8a1eb2d6bdab79c61651b20fc75e9fe606791b8bd4314f0"),
-        ModelShard("weights-4-5.nexa", 1722640740L, "0536c197ba9fa545bfe473f829b187c791b4c1ac8fb56c7ff268db0cb665232c"),
-        ModelShard("weights-5-5.nexa", 2489319588L, "efd741e84aac373bd959163809323d4901125f913146badb2bd89a9302a5f715")
+        ModelShard("attachments-1-1.nexa", 575L, "3561414751276171067a70c1f72e4a4a42e0d00161c731ed6c2f29517ee53874"),
+        ModelShard("files-1-1.nexa", 11422670L, "bf63e9e2b4960732b5ed44d5950f22d134101e0ab9712a5399ca3778b299fbc1"),
+        ModelShard("weights-1-3.nexa", 1050538636L, "c49de0a951471875604c52c26782ccc41469a297f324ad7669a535ae114d6a87"),
+        ModelShard("weights-2-3.nexa", 1506706324L, "8ccb9815d520ada5052e2f0fdb2e3d5596168ca626e0c14850e4294e95b5d7b4"),
+        ModelShard("weights-3-3.nexa", 1555824804L, "04841b614cebdcad2e1a4a23458438cc2e8871b1467ad9f156ed38f8b3dd5bd8")
     )
 
     val totalBytes: Long = files.sumOf { it.sizeBytes }
