@@ -32,11 +32,8 @@ interface DeepResearchProvider {
 
 /**
  * Durable deep research backed by CompositeWebResearchProvider.
- * Uses ProjectModels ResearchSession / ResearchSource / DeepResearchProgress (no local redeclarations).
- *
- * Quality focus: short/truncated queries (common on mobile) must not expand into
- * tradeoffs / criticism / news lanes. Prefer GitHub, StackOverflow, official docs,
- * and require query-term overlap before accepting a hit.
+ * Quality focus: short/truncated queries must not expand into tradeoffs/criticism/news.
+ * Prefer GitHub, StackOverflow, official docs; require query-term overlap.
  */
 class DurableDeepResearchProvider(
     private val researchRoot: File,
@@ -430,7 +427,7 @@ object ArticleExtractor {
             .take(8)
             .toList()
         val text = cleaned.replace(Regex("<[^>]+>"), " ").replace(Regex("\\s+"), " ").trim()
-        val words = text.split(Regex("\\s+" )).filter { it.isNotBlank() }
+        val words = text.split(Regex("\\s+")).filter { it.isNotBlank() }
         return Extracted(title, text.take(20_000), words.size, codeBlocks)
     }
 }
