@@ -217,7 +217,6 @@ class DurableDeepResearchProvider(
             if (key.isNotBlank()) seen.putIfAbsent(key, c)
         }
         return seen.values.toList()
-    ident
     }
 
     private fun selectDiverse(candidates: List<Candidate>, target: Int): List<Candidate> {
