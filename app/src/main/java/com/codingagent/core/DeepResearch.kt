@@ -58,12 +58,15 @@ class DurableDeepResearchProvider(
         val lanes = QueryLanes.expand(normalized, mode, salt)
         onProgress(DeepResearchProgress("searching", 0, effectiveTarget, 0, 0))
 
+        val queryTerms = normalized.lowercase().split(Regex("[^a-z0-9]+")).filter { it.length >= 3 }.toSet()
+
         val candidates = lanes.flatMap { lane ->
             searchProvider.search(lane.query, 16).hits
                 .filter { hit -> SourceQuality.isAcceptable(hit.url, hit.title, hit.excerpt) }
                 .filter { hit -> hit.url.substringBefore('#').lowercase() !in alreadyLearned }
+                .filter { hit -> SourceQuality.hasQueryRelevance(hit.title, hit.excerpt, queryTerms) }
                 .map { Candidate(it, lane.name) }
-        }.dedupe().sortedByDescending { SourceQuality.rankBoost(it.url) }.toMutableList()
+        }.dedupe().sortedByDescending { SourceQuality.rankBoost(it.url) + SourceQuality.relevanceScore(it.hit.title, it.hit.excerpt, queryTerms) }.toMutableList()
 
         if (candidates.size > effectiveTarget) {
             val selected = mutableListOf<Candidate>()
@@ -80,12 +83,14 @@ class DurableDeepResearchProvider(
                 "$normalized site:github.com",
                 "$normalized site:stackoverflow.com",
                 "$normalized android kotlin",
+                "$normalized code example OR implementation",
                 "$normalized documentation"
             )
             val fallback = fallbackQueries.flatMap { fq ->
                 searchProvider.search(fq, 10).hits
                     .filter { hit -> SourceQuality.isAcceptable(hit.url, hit.title, hit.excerpt) }
                     .filter { hit -> hit.url.substringBefore('#').lowercase() !in alreadyLearned }
+                    .filter { hit -> SourceQuality.hasQueryRelevance(hit.title, hit.excerpt, queryTerms) }
                     .map { Candidate(it, "fallback") }
             }.dedupe()
             fallback.forEach { c ->
@@ -254,26 +259,46 @@ class DurableDeepResearchProvider(
 object QueryLanes {
     fun expand(query: String, mode: ResearchMode = ResearchMode.BROAD, salt: String = ""): List<ResearchLane> {
         val base = query.trim()
-        val variants = mutableListOf(
+        val words = base.split(Regex("\\s+")).filter { it.isNotBlank() }
+        val isShort = words.size <= 4 || base.length < 36
+
+        // Core code-focused lanes always present
+        val core = mutableListOf(
             ResearchLane("primary documentation", "$base documentation OR guide OR reference OR official docs"),
-            ResearchLane("implementation examples", "$base code example OR snippet OR implementation"),
-            ResearchLane("community solutions", "$base site:stackoverflow.com OR site:reddit.com/r/androiddev OR site:github.com"),
-            ResearchLane("standards and papers", "$base RFC OR specification OR paper OR standard"),
-            ResearchLane("failure modes", "$base pitfalls OR bugs OR failure OR limitations OR common mistakes"),
-            ResearchLane("theoretical foundations", "$base theory OR formal model OR foundations OR hypothesis"),
-            ResearchLane("experimental research", "$base experimental OR prototype OR novel OR unconventional"),
-            ResearchLane("empirical evidence", "$base benchmark OR evaluation OR performance OR comparison OR measure"),
-            ResearchLane("alternatives and criticism", "$base alternatives OR criticism OR tradeoffs OR vs OR compared")
+            ResearchLane("implementation examples", "$base code example OR snippet OR implementation OR sample"),
+            ResearchLane("community solutions", "$base site:stackoverflow.com OR site:github.com")
         )
+
+        // Mode-specific focus first
         when (mode) {
-            ResearchMode.EXPERIMENTAL -> variants.add(0, ResearchLane("experimental focus", "$base experimental OR prototype OR novel"))
-            ResearchMode.THEORETICAL -> variants.add(0, ResearchLane("theory focus", "$base theory OR formal OR model"))
-            ResearchMode.EMPIRICAL -> variants.add(0, ResearchLane("empirical focus", "$base benchmark OR performance OR evaluation"))
+            ResearchMode.EXPERIMENTAL -> {
+                core.add(0, ResearchLane("experimental focus", "$base experimental OR prototype OR novel OR research code"))
+                core.add(1, ResearchLane("github experimental", "$base experimental OR prototype site:github.com"))
+            }
+            ResearchMode.THEORETICAL -> {
+                core.add(0, ResearchLane("theory focus", "$base theory OR formal OR model OR foundations"))
+            }
+            ResearchMode.EMPIRICAL -> {
+                core.add(0, ResearchLane("empirical focus", "$base benchmark OR performance OR evaluation OR ablation"))
+            }
             ResearchMode.BROAD -> {}
         }
-        val rotated = if (salt.isBlank()) variants else {
-            val shift = (salt.hashCode().and(0x7fffffff)) % variants.size
-            variants.drop(shift) + variants.take(shift)
+
+        // Extra lanes only when query is long enough to avoid diluting short/truncated input
+        if (!isShort) {
+            core += listOf(
+                ResearchLane("standards and papers", "$base RFC OR specification OR paper OR standard"),
+                ResearchLane("failure modes", "$base pitfalls OR bugs OR failure OR limitations OR common mistakes"),
+                ResearchLane("alternatives and criticism", "$base alternatives OR criticism OR tradeoffs OR vs OR compared")
+            )
+        } else {
+            // Short queries get one extra focused code lane instead of tradeoffs/criticism
+            core += ResearchLane("code search", "$base programming OR library OR framework OR api")
+        }
+
+        val rotated = if (salt.isBlank()) core else {
+            val shift = (salt.hashCode().and(0x7fffffff)) % core.size
+            core.drop(shift) + core.take(shift)
         }
         return rotated
     }
@@ -281,37 +306,69 @@ object QueryLanes {
 
 data class ResearchLane(val name: String, val query: String)
 
-/** Reject Wikipedia talk/disambiguation boilerplate and other low-signal pages. */
+/** Reject low-signal pages and non-technical noise. Prefer code hosts. */
 object SourceQuality {
     private val junkTitle = Pattern.compile(
-        """\\b(talk|disambiguation|user talk|wikiProject|sandbox|article talk)\\b""",
+        """\\b(talk|disambiguation|user talk|wikiProject|sandbox|article talk|slideshow|slide share)\\b""",
         Pattern.CASE_INSENSITIVE
     )
     private val junkExcerpt = Pattern.compile(
-        """(please help improve|this article needs|not a guidebook|learn how and when to remove|for other uses, see)""",
+        """(please help improve|this article needs|not a guidebook|learn how and when to remove|for other uses, see|sign in upload|download free for)""",
+        Pattern.CASE_INSENSITIVE
+    )
+    // Domains that produced garbage in production for coding queries
+    private val blockedDomains = setOf(
+        "chess.com", "slideshare.net", "fullframeinitiative.org", "thisvsthat.io",
+        "espn.com", "cnn.com", "bbc.com", "nytimes.com", "forbes.com",
+        "pinterest.com", "instagram.com", "facebook.com", "twitter.com", "x.com",
+        "youtube.com", "tiktok.com", "reddit.com" // reddit kept out of primary; community lane already scopes
+    )
+    private val blockedTitleTokens = Pattern.compile(
+        """\\b(chess|wellbeing|well-being|rapid chess|blitz|miami rapid|tradeoffs in professional|criticism vs\\.? critique)\\b""",
         Pattern.CASE_INSENSITIVE
     )
 
     fun isAcceptable(url: String, title: String, excerpt: String): Boolean {
         val u = url.lowercase()
         val t = title.lowercase()
+        val domain = runCatching { URI(url).host?.removePrefix("www.")?.lowercase() }.getOrNull() ?: ""
+        if (domain in blockedDomains) return false
+        if (blockedDomains.any { domain.endsWith(".$it") }) return false
         if (u.contains("wikipedia.org") && (t.contains("talk") || u.contains("talk:") || u.contains("disambiguation"))) return false
         if (junkTitle.matcher(title).find()) return false
         if (junkExcerpt.matcher(excerpt).find()) return false
+        if (blockedTitleTokens.matcher(title).find()) return false
         if (u.contains("/wiki/Talk:") || u.contains("/wiki/User:") || u.contains("/wiki/Wikipedia:")) return false
+        // Reject pure news / sports style paths
+        if (u.contains("/news/") && !u.contains("github.com") && !u.contains("stackoverflow.com")) return false
         return true
+    }
+
+    fun hasQueryRelevance(title: String, excerpt: String, queryTerms: Set<String>): Boolean {
+        if (queryTerms.isEmpty()) return true
+        val text = (title + " " + excerpt).lowercase()
+        val hits = queryTerms.count { term -> text.contains(term) }
+        // Require at least one meaningful term overlap for short/noisy queries
+        return hits >= 1 || queryTerms.size <= 1
+    }
+
+    fun relevanceScore(title: String, excerpt: String, queryTerms: Set<String>): Int {
+        if (queryTerms.isEmpty()) return 0
+        val text = (title + " " + excerpt).lowercase()
+        return queryTerms.count { term -> text.contains(term) } * 2
     }
 
     fun rankBoost(url: String): Int {
         val u = url.lowercase()
         return when {
-            u.contains("developer.android.com") || u.contains("kotlinlang.org") -> 10
-            u.contains("github.com") -> 8
-            u.contains("stackoverflow.com") -> 7
-            u.contains("android.com") || u.contains("developer.apple.com") -> 6
-            u.contains("medium.com") || u.contains("dev.to") -> 2
+            u.contains("developer.android.com") || u.contains("kotlinlang.org") -> 12
+            u.contains("github.com") -> 10
+            u.contains("stackoverflow.com") -> 9
+            u.contains("android.com") || u.contains("developer.apple.com") || u.contains("docs.oracle.com") -> 7
+            u.contains("arxiv.org") || u.contains("acm.org") || u.contains("ieee.org") -> 6
+            u.contains("medium.com") || u.contains("dev.to") || u.contains("baeldung.com") -> 3
             u.contains("wikipedia.org") -> 1
-            else -> 3
+            else -> 2
         }
     }
 }
