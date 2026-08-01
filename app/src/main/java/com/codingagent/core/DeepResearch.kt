@@ -6,13 +6,8 @@ import java.io.File
 import java.net.HttpURLConnection
 import java.net.URI
 import java.net.URL
-import java.net.URLEncoder
-import java.nio.charset.StandardCharsets
 import java.util.LinkedHashMap
 import java.util.UUID
-import java.util.concurrent.Callable
-import java.util.concurrent.Executors
-import java.util.concurrent.Future
 import java.util.regex.Pattern
 
 enum class ResearchMode { BROAD, EXPERIMENTAL, THEORETICAL, EMPIRICAL }
@@ -27,36 +22,18 @@ object ResearchModeDetector {
 }
 
 interface DeepResearchProvider {
-    fun deepResearch(query: String, targetSources: Int = 50, mode: ResearchMode = ResearchMode.BROAD, onProgress: (DeepResearchProgress) -> Unit = {}): ResearchSession
+    fun deepResearch(
+        query: String,
+        targetSources: Int = 50,
+        mode: ResearchMode = ResearchMode.BROAD,
+        onProgress: (DeepResearchProgress) -> Unit = {}
+    ): ResearchSession
 }
 
-data class DeepResearchProgress(
-    val stage: String,
-    val completed: Int,
-    val total: Int,
-    val successful: Int = 0,
-    val failed: Int = 0,
-    val message: String = ""
-)
-
-data class ResearchSource(
-    val title: String,
-    val url: String,
-    val content: String,
-    val wordCount: Int,
-    val codeExamples: List<String>,
-    val lane: String = "primary"
-)
-
-data class ResearchSession(
-    val id: String,
-    val query: String,
-    val mode: ResearchMode,
-    val sources: List<ResearchSource>,
-    val brief: String,
-    val createdAt: Long = System.currentTimeMillis()
-)
-
+/**
+ * Durable deep research backed by CompositeWebResearchProvider.
+ * Uses ProjectModels ResearchSession / ResearchSource / DeepResearchProgress (no local redeclarations).
+ */
 class DurableDeepResearchProvider(
     private val researchRoot: File,
     private val searchProvider: WebResearchProvider = CompositeWebResearchProvider(),
@@ -77,7 +54,7 @@ class DurableDeepResearchProvider(
         val alreadyLearned = recent(50).flatMap { it.sources }.map { it.url.substringBefore('#').lowercase() }.toSet()
         val salt = (System.currentTimeMillis() / 60_000L).toString()
         val lanes = QueryLanes.expand(normalized, mode, salt)
-        onProgress(DeepResearchProgress("searching", 0, effectiveTarget, message = "Expanding ${lanes.size} lanes"))
+        onProgress(DeepResearchProgress("searching", 0, effectiveTarget, 0, 0))
 
         val candidates = lanes.flatMap { lane ->
             searchProvider.search(lane.query, 16).hits
@@ -88,8 +65,10 @@ class DurableDeepResearchProvider(
 
         if (candidates.size > effectiveTarget) {
             val selected = mutableListOf<Candidate>()
-            selected += candidates.take(effectiveTarget / 2)
-            candidates.filter { candidate -> selected.none { it.url == candidate.url } }.forEach { candidate -> if (selected.size < effectiveTarget) selected += candidate }
+            selected += candidates.take((effectiveTarget / 2).coerceAtLeast(1))
+            candidates.filter { c -> selected.none { it.url == c.url } }.forEach { c ->
+                if (selected.size < effectiveTarget) selected += c
+            }
             candidates.clear()
             candidates += selected
         }
@@ -107,18 +86,13 @@ class DurableDeepResearchProvider(
                     .filter { hit -> hit.url.substringBefore('#').lowercase() !in alreadyLearned }
                     .map { Candidate(it, "fallback") }
             }.dedupe()
-            fallback.forEach { candidate -> if (candidates.size < effectiveTarget && candidates.none { it.url == candidate.url }) candidates += candidate }
-        }
-
-        if (candidates.size < effectiveTarget) {
-            val learned = recent(20).flatMap { it.sources }
-                .filter { it.url.substringBefore('#').lowercase() !in alreadyLearned }
-                .map { Candidate(ResearchHit(it.title, it.url, it.content.take(200)), "memory") }
-            learned.forEach { candidate -> if (candidates.size < effectiveTarget) candidates += candidate }
+            fallback.forEach { c ->
+                if (candidates.size < effectiveTarget && candidates.none { it.url == c.url }) candidates += c
+            }
         }
 
         val diverse = selectDiverse(candidates, effectiveTarget).take(maxSourceFetches)
-        onProgress(DeepResearchProgress("fetching", 0, diverse.size, message = "Fetching ${diverse.size} sources"))
+        onProgress(DeepResearchProgress("fetching", 0, diverse.size, 0, 0))
 
         val sources = mutableListOf<ResearchSource>()
         var failed = 0
@@ -128,10 +102,12 @@ class DurableDeepResearchProvider(
                 sources += ResearchSource(
                     title = candidate.title.ifBlank { fetched.title },
                     url = candidate.url,
-                    content = fetched.text,
+                    domain = DurableDeepResearchProvider.domainOf(candidate.url),
+                    lane = candidate.lane,
+                    status = 200,
                     wordCount = fetched.wordCount,
-                    codeExamples = fetched.codeBlocks.take(8),
-                    lane = candidate.lane
+                    content = fetched.text,
+                    codeExamples = fetched.codeBlocks.take(8)
                 )
             } else {
                 failed++
@@ -139,86 +115,92 @@ class DurableDeepResearchProvider(
             onProgress(DeepResearchProgress("fetching", index + 1, diverse.size, sources.size, failed))
         }
 
-        val brief = buildBrief(normalized, mode, sources)
         val session = ResearchSession(
             id = UUID.randomUUID().toString(),
             query = normalized,
-            mode = mode,
+            createdAt = System.currentTimeMillis(),
+            requestedSources = effectiveTarget,
             sources = sources,
-            brief = brief
+            learnedChunks = sources.size,
+            errors = if (failed > 0) listOf("$failed source fetch(es) failed") else emptyList(),
+            mode = mode.name.lowercase()
         )
         persist(session)
-        onProgress(DeepResearchProgress("learned", sources.size, sources.size, sources.size, failed, "Learned ${sources.size} distinct full sources"))
+        onProgress(DeepResearchProgress("learned", sources.size, sources.size, sources.size, failed))
         return session
     }
 
     fun recent(limit: Int = 20): List<ResearchSession> {
         if (!sessionsDir.exists()) return emptyList()
-        return sessionsDir.listFiles()?.filter { it.extension == "json" }?.sortedByDescending { it.lastModified() }?.take(limit)?.mapNotNull { file ->
-            runCatching {
-                val json = JSONObject(file.readText())
-                val sourcesArr = json.optJSONArray("sources") ?: JSONArray()
-                val sources = (0 until sourcesArr.length()).mapNotNull { i ->
-                    val s = sourcesArr.optJSONObject(i) ?: return@mapNotNull null
-                    ResearchSource(
-                        title = s.optString("title"),
-                        url = s.optString("url"),
-                        content = s.optString("content"),
-                        wordCount = s.optInt("wordCount"),
-                        codeExamples = (s.optJSONArray("codeExamples") ?: JSONArray()).let { arr -> (0 until arr.length()).map { arr.optString(it) } },
-                        lane = s.optString("lane", "primary")
+        return sessionsDir.listFiles()
+            ?.filter { it.extension == "json" }
+            ?.sortedByDescending { it.lastModified() }
+            ?.take(limit)
+            ?.mapNotNull { file ->
+                runCatching {
+                    val json = JSONObject(file.readText())
+                    val sourcesArr = json.optJSONArray("sources") ?: JSONArray()
+                    val sources = (0 until sourcesArr.length()).mapNotNull { i ->
+                        val s = sourcesArr.optJSONObject(i) ?: return@mapNotNull null
+                        ResearchSource(
+                            title = s.optString("title"),
+                            url = s.optString("url"),
+                            domain = s.optString("domain").ifBlank { DurableDeepResearchProvider.domainOf(s.optString("url")) },
+                            lane = s.optString("lane", "primary"),
+                            status = s.optInt("status", 200),
+                            wordCount = s.optInt("wordCount"),
+                            content = s.optString("content"),
+                            codeExamples = (s.optJSONArray("codeExamples") ?: JSONArray()).let { arr ->
+                                (0 until arr.length()).map { arr.optString(it) }
+                            },
+                            error = s.optString("error").takeIf { it.isNotBlank() }
+                        )
+                    }
+                    ResearchSession(
+                        id = json.optString("id"),
+                        query = json.optString("query"),
+                        createdAt = json.optLong("createdAt", file.lastModified()),
+                        requestedSources = json.optInt("requestedSources", sources.size),
+                        sources = sources,
+                        learnedChunks = json.optInt("learnedChunks", sources.size),
+                        errors = (json.optJSONArray("errors") ?: JSONArray()).let { arr ->
+                            (0 until arr.length()).map { arr.optString(it) }
+                        },
+                        mode = json.optString("mode", "broad")
                     )
-                }
-                ResearchSession(
-                    id = json.optString("id"),
-                    query = json.optString("query"),
-                    mode = runCatching { ResearchMode.valueOf(json.optString("mode", "BROAD")) }.getOrDefault(ResearchMode.BROAD),
-                    sources = sources,
-                    brief = json.optString("brief"),
-                    createdAt = json.optLong("createdAt", file.lastModified())
-                )
-            }.getOrNull()
-        }.orEmpty()
+                }.getOrNull()
+            }.orEmpty()
     }
 
     private fun persist(session: ResearchSession) {
         val file = File(sessionsDir, "${session.id}.json")
         val sourcesArr = JSONArray()
         session.sources.forEach { s ->
-            sourcesArr.put(JSONObject()
-                .put("title", s.title)
-                .put("url", s.url)
-                .put("content", s.content.take(12_000))
-                .put("wordCount", s.wordCount)
-                .put("codeExamples", JSONArray(s.codeExamples))
-                .put("lane", s.lane))
+            sourcesArr.put(
+                JSONObject()
+                    .put("title", s.title)
+                    .put("url", s.url)
+                    .put("domain", s.domain)
+                    .put("lane", s.lane)
+                    .put("status", s.status)
+                    .put("wordCount", s.wordCount)
+                    .put("content", s.content.take(12_000))
+                    .put("codeExamples", JSONArray(s.codeExamples))
+                    .put("error", s.error)
+            )
         }
-        file.writeText(JSONObject()
-            .put("id", session.id)
-            .put("query", session.query)
-            .put("mode", session.mode.name)
-            .put("brief", session.brief)
-            .put("createdAt", session.createdAt)
-            .put("sources", sourcesArr)
-            .toString())
-    }
-
-    private fun buildBrief(query: String, mode: ResearchMode, sources: List<ResearchSource>): String {
-        if (sources.isEmpty()) return "No usable sources for: $query"
-        val sb = StringBuilder()
-        sb.appendLine("Research brief for: $query")
-        sb.appendLine("Mode: $mode | Sources: ${sources.size}")
-        sources.forEachIndexed { i, s ->
-            sb.appendLine()
-            sb.appendLine("[${i + 1}] ${s.title}")
-            sb.appendLine(s.url)
-            sb.appendLine(s.content.take(900))
-            if (s.codeExamples.isNotEmpty()) {
-                sb.appendLine("Code excerpts:")
-                s.codeExamples.take(2).forEach { sb.appendLine(it.take(400)) }
-            }
-        }
-        return sb.toString()
+        file.writeText(
+            JSONObject()
+                .put("id", session.id)
+                .put("query", session.query)
+                .put("createdAt", session.createdAt)
+                .put("requestedSources", session.requestedSources)
+                .put("learnedChunks", session.learnedChunks)
+                .put("mode", session.mode)
+                .put("errors", JSONArray(session.errors))
+                .put("sources", sourcesArr)
+                .toString()
+        )
     }
 
     private data class Candidate(val hit: ResearchHit, val lane: String) {
@@ -239,16 +221,14 @@ class DurableDeepResearchProvider(
         if (candidates.size <= target) return candidates
         val byDomain = LinkedHashMap<String, MutableList<Candidate>>()
         candidates.forEach { c ->
-            val domain = runCatching { URI(c.url).host?.removePrefix("www.") ?: "unknown" }.getOrDefault("unknown")
+            val domain = DurableDeepResearchProvider.domainOf(c.url)
             byDomain.getOrPut(domain) { mutableListOf() }.add(c)
         }
         val result = mutableListOf<Candidate>()
         var round = 0
         while (result.size < target && byDomain.values.any { it.isNotEmpty() }) {
             byDomain.entries.sortedByDescending { authority(it.key) }.forEach { (_, list) ->
-                if (result.size < target && list.isNotEmpty()) {
-                    result += list.removeAt(0)
-                }
+                if (result.size < target && list.isNotEmpty()) result += list.removeAt(0)
             }
             round++
             if (round > 20) break
@@ -261,6 +241,11 @@ class DurableDeepResearchProvider(
         domain.contains("rfc-editor.org") || domain.contains("github.com") -> 4
         domain.contains("stackoverflow.com") -> 3
         else -> 1
+    }
+
+    companion object {
+        fun domainOf(url: String): String =
+            runCatching { URI(url).host?.removePrefix("www.") ?: "unknown" }.getOrDefault("unknown")
     }
 }
 
@@ -305,7 +290,6 @@ object SourceQuality {
     fun isAcceptable(url: String, title: String, excerpt: String): Boolean {
         val u = url.lowercase()
         val t = title.lowercase()
-        val e = excerpt.lowercase()
         if (u.contains("wikipedia.org") && (t.contains("talk") || u.contains("talk:") || u.contains("disambiguation"))) return false
         if (junkTitle.matcher(title).find()) return false
         if (junkExcerpt.matcher(excerpt).find()) return false
