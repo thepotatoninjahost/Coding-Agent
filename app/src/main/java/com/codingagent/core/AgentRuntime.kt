@@ -55,8 +55,8 @@ class CodingAgentRuntime(
         if (web.error != null && web.hits.isEmpty()) return failure(taskId, request, plan, emptyList(), "Internet research failed before coding: ${web.error}", events)
         events += "retrieved ${web.hits.size} internet search candidates"
         val mode = ResearchModeDetector.detect(request)
-        val learned = deepResearch?.deepResearch(intake.goal, 50, mode) { progress -> events += "research ${progress.stage}: ${progress.completed}/${progress.total}, learned=${progress.successful}, failed=${progress.failed}" }
-        if (deepResearch == null || learned == null || learned.sources.size < 4) return failure(taskId, request, plan, emptyList(), "Deep research did not produce at least 4 usable sources before coding.", events)
+        val learned = deepResearch?.deepResearch(intake.goal, 12, mode) { progress -> events += "research ${progress.stage}: ${progress.completed}/${progress.total}, learned=${progress.successful}, failed=${progress.failed}" }
+        if (deepResearch == null || learned == null || learned.sources.size < 2) return failure(taskId, request, plan, emptyList(), "Deep research did not produce at least 2 usable sources before coding. Last web status: ${web.error ?: "${web.hits.size} hits"}.", events)
         val brief = ResearchBriefBuilder.build(learned)
         events += "learned ${brief.sourceCount} full sources across ${brief.laneCount} lanes, ${brief.wordCount} words, and ${brief.codeExampleCount} code examples"
         val before = workspace.summary()
