@@ -255,7 +255,7 @@ class StackOverflowResearchProvider(
             val hits = mutableListOf<ResearchHit>()
             for (i in 0 until items.length()) {
                 val item = items.optJSONObject(i) ?: continue
-                val title = item.optString("title").replace(Regex("&#\\d+;"), " ").replace(""", "\"")
+                val title = item.optString("title").replace(Regex("&#\\d+;"), " ").replace("&" + "quot;", "\"")
                 val link = item.optString("link")
                 val tags = item.optJSONArray("tags")?.let { arr ->
                     (0 until arr.length()).mapNotNull { arr.optString(it).takeIf(String::isNotBlank) }
@@ -310,7 +310,7 @@ object HtmlResearchParser {
     }
 
     private fun decodeUrl(raw: String): String {
-        val value = raw.replace("&", "&")
+        val value = raw.replace("&" + "amp;", "&")
         return runCatching {
             URI(value).query?.split('&')?.firstOrNull { it.startsWith("uddg=") }?.substringAfter("uddg=")
                 ?.let { java.net.URLDecoder.decode(it, "UTF-8") } ?: value
@@ -318,5 +318,5 @@ object HtmlResearchParser {
     }
 
     private fun clean(raw: String): String =
-        raw.replace(Regex("<[^>]+>"), " ").replace(Regex("\\s+"), " ").replace("&", "&").replace("&#x27;", "'").trim()
+        raw.replace(Regex("<[^>]+>"), " ").replace(Regex("\\s+"), " ").replace("&" + "amp;", "&").replace("&#x27;", "'").trim()
 }
