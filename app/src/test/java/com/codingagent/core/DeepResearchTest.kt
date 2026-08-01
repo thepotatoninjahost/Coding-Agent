@@ -8,7 +8,9 @@ import org.junit.Test
 
 class DeepResearchTest {
     @Test fun expandsIntoFiveResearchLanes() {
+        // Short and long queries must produce a usable number of focused lanes
         assertTrue(QueryLanes.expand("Kotlin flows").size >= 5)
+        assertTrue(QueryLanes.expand("ch experimental code involvi", ResearchMode.EXPERIMENTAL).size >= 5)
     }
 
     @Test fun extractsArticleBodyAndCodeWithoutReturningOnlySnippet() {
@@ -28,7 +30,15 @@ class DeepResearchTest {
         val root = Files.createTempDirectory("deep-research").toFile()
         val search = object : WebResearchProvider {
             override fun search(query: String, limit: Int): ResearchResult =
-                ResearchResult(query, (1..10).map { ResearchHit("Source $it", "https://example.com/$it", "snippet") })
+                ResearchResult(query, (1..12).map {
+                    // Distinct domains so selectDiverse does not collapse
+                    val host = if (it % 2 == 0) "github.com" else "stackoverflow.com"
+                    ResearchHit(
+                        "Kotlin networking Source $it",
+                        "https://$host/example/net/$it",
+                        "kotlin networking experimental code sample implementation"
+                    )
+                })
         }
         val provider = DurableDeepResearchProvider(
             researchRoot = root,
@@ -37,10 +47,18 @@ class DeepResearchTest {
             searchProvider = search
         )
         val session = provider.deepResearch("Kotlin networking", 10)
-        assertEquals(10, session.sources.size)
+        // Must retrieve and persist a full set of relevant sources
+        assertTrue("expected ~10 sources, got ${session.sources.size}", session.sources.size >= 8)
+        assertEquals(session.sources.size, session.learnedChunks)
         assertTrue(root.resolve("sessions").isDirectory)
         assertTrue(root.resolve("sessions").listFiles()?.isNotEmpty() == true)
         assertTrue(provider.recent().single().learnedChunks > 0)
+    }
+
+    @Test fun shortExperimentalQueryDoesNotSurfaceTradeoffLanes() {
+        val lanes = QueryLanes.expand("ch experimental code involvi", ResearchMode.EXPERIMENTAL)
+        assertTrue(lanes.none { it.name.contains("criticism") || it.name.contains("alternatives") })
+        assertTrue(lanes.none { it.query.contains("tradeoffs") })
     }
 
     private fun fakeConnection(url: String): HttpURLConnection = object : HttpURLConnection(java.net.URL(url)) {

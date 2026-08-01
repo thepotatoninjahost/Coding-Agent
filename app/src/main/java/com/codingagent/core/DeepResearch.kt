@@ -33,6 +33,10 @@ interface DeepResearchProvider {
 /**
  * Durable deep research backed by CompositeWebResearchProvider.
  * Uses ProjectModels ResearchSession / ResearchSource / DeepResearchProgress (no local redeclarations).
+ *
+ * Quality focus: short/truncated queries (common on mobile) must not expand into
+ * tradeoffs / criticism / news lanes. Prefer GitHub, StackOverflow, official docs,
+ * and require query-term overlap before accepting a hit.
  */
 class DurableDeepResearchProvider(
     private val researchRoot: File,
@@ -58,15 +62,16 @@ class DurableDeepResearchProvider(
         val lanes = QueryLanes.expand(normalized, mode, salt)
         onProgress(DeepResearchProgress("searching", 0, effectiveTarget, 0, 0))
 
-        val queryTerms = normalized.lowercase().split(Regex("[^a-z0-9]+")).filter { it.length >= 3 }.toSet()
-
+        val queryTerms = SourceQuality.queryTerms(normalized)
         val candidates = lanes.flatMap { lane ->
             searchProvider.search(lane.query, 16).hits
                 .filter { hit -> SourceQuality.isAcceptable(hit.url, hit.title, hit.excerpt) }
+                .filter { hit -> SourceQuality.hasQueryRelevance(queryTerms, hit.title, hit.excerpt, hit.url) }
                 .filter { hit -> hit.url.substringBefore('#').lowercase() !in alreadyLearned }
-                .filter { hit -> SourceQuality.hasQueryRelevance(hit.title, hit.excerpt, queryTerms) }
                 .map { Candidate(it, lane.name) }
-        }.dedupe().sortedByDescending { SourceQuality.rankBoost(it.url) + SourceQuality.relevanceScore(it.hit.title, it.hit.excerpt, queryTerms) }.toMutableList()
+        }.dedupe()
+            .sortedByDescending { SourceQuality.relevanceScore(queryTerms, it.hit) + SourceQuality.rankBoost(it.url) }
+            .toMutableList()
 
         if (candidates.size > effectiveTarget) {
             val selected = mutableListOf<Candidate>()
@@ -79,18 +84,18 @@ class DurableDeepResearchProvider(
         }
 
         if (candidates.size < effectiveTarget) {
+            // Strict code-host fallbacks only — never broad web for short experimental queries
             val fallbackQueries = listOf(
                 "$normalized site:github.com",
                 "$normalized site:stackoverflow.com",
-                "$normalized android kotlin",
-                "$normalized code example OR implementation",
-                "$normalized documentation"
+                "$normalized experimental OR prototype site:github.com",
+                "$normalized android kotlin code"
             )
             val fallback = fallbackQueries.flatMap { fq ->
                 searchProvider.search(fq, 10).hits
                     .filter { hit -> SourceQuality.isAcceptable(hit.url, hit.title, hit.excerpt) }
+                    .filter { hit -> SourceQuality.hasQueryRelevance(queryTerms, hit.title, hit.excerpt, hit.url) }
                     .filter { hit -> hit.url.substringBefore('#').lowercase() !in alreadyLearned }
-                    .filter { hit -> SourceQuality.hasQueryRelevance(hit.title, hit.excerpt, queryTerms) }
                     .map { Candidate(it, "fallback") }
             }.dedupe()
             fallback.forEach { c ->
@@ -140,7 +145,7 @@ class DurableDeepResearchProvider(
     fun recent(limit: Int = 20): List<ResearchSession> {
         if (!sessionsDir.exists()) return emptyList()
         return sessionsDir.listFiles()
-            ?.filter { it.isFile && it.name.endsWith(".json") }
+            ?.filter { it.extension == "json" }
             ?.sortedByDescending { it.lastModified() }
             ?.take(limit)
             ?.mapNotNull { file ->
@@ -257,19 +262,24 @@ class DurableDeepResearchProvider(
 }
 
 object QueryLanes {
+    /**
+     * Expand a research query into focused lanes.
+     * Short / truncated queries (mobile autocomplete, partial paste) must stay
+     * on code-host and documentation lanes; never inject tradeoffs/criticism.
+     */
     fun expand(query: String, mode: ResearchMode = ResearchMode.BROAD, salt: String = ""): List<ResearchLane> {
         val base = query.trim()
         val words = base.split(Regex("\\s+")).filter { it.isNotBlank() }
         val isShort = words.size <= 4 || base.length < 36
 
-        // Core code-focused lanes always present
+        // Always start with high-signal code/docs lanes
         val core = mutableListOf(
             ResearchLane("primary documentation", "$base documentation OR guide OR reference OR official docs"),
             ResearchLane("implementation examples", "$base code example OR snippet OR implementation OR sample"),
             ResearchLane("community solutions", "$base site:stackoverflow.com OR site:github.com")
         )
 
-        // Mode-specific focus first
+        // Mode-specific prioritisation (prepended so they rank first)
         when (mode) {
             ResearchMode.EXPERIMENTAL -> {
                 core.add(0, ResearchLane("experimental focus", "$base experimental OR prototype OR novel OR research code"))
@@ -279,21 +289,27 @@ object QueryLanes {
                 core.add(0, ResearchLane("theory focus", "$base theory OR formal OR model OR foundations"))
             }
             ResearchMode.EMPIRICAL -> {
-                core.add(0, ResearchLane("empirical focus", "$base benchmark OR performance OR evaluation OR ablation"))
+                core.add(0, ResearchLane("empirical focus", "$base benchmark OR performance OR evaluation OR measure"))
             }
             ResearchMode.BROAD -> {}
         }
 
-        // Extra lanes only when query is long enough to avoid diluting short/truncated input
         if (!isShort) {
-            core += listOf(
-                ResearchLane("standards and papers", "$base RFC OR specification OR paper OR standard"),
-                ResearchLane("failure modes", "$base pitfalls OR bugs OR failure OR limitations OR common mistakes"),
-                ResearchLane("alternatives and criticism", "$base alternatives OR criticism OR tradeoffs OR vs OR compared")
-            )
+            // Long, well-formed queries get the full multi-perspective set
+            core += ResearchLane("theoretical foundations", "$base theory OR formal model OR foundations OR hypothesis")
+            core += ResearchLane("experimental research", "$base experimental OR prototype OR novel OR unconventional")
+            core += ResearchLane("empirical evidence", "$base benchmark OR evaluation OR performance OR comparison OR measure")
+            core += ResearchLane("standards and papers", "$base RFC OR specification OR paper OR standard")
+            core += ResearchLane("failure modes", "$base pitfalls OR bugs OR failure OR limitations OR common mistakes")
+            // Tradeoffs / criticism ONLY for long queries — root cause of chess / wellbeing noise
+            core += ResearchLane("alternatives and criticism", "$base alternatives OR criticism OR tradeoffs OR vs OR compared")
         } else {
-            // Short queries get one extra focused code lane instead of tradeoffs/criticism
+            // Short / truncated queries (mobile autocomplete): stay strictly on code hosts
             core += ResearchLane("code search", "$base programming OR library OR framework OR api")
+            core += ResearchLane("github code", "$base site:github.com")
+            if (mode == ResearchMode.EXPERIMENTAL) {
+                core += ResearchLane("android kotlin experimental", "$base android kotlin experimental site:github.com")
+            }
         }
 
         val rotated = if (salt.isBlank()) core else {
@@ -306,56 +322,70 @@ object QueryLanes {
 
 data class ResearchLane(val name: String, val query: String)
 
-/** Reject low-signal pages and non-technical noise. Prefer code hosts. */
+/**
+ * Reject low-signal pages, news, slide decks, and anything that does not
+ * share meaningful terms with the original research query.
+ */
 object SourceQuality {
     private val junkTitle = Pattern.compile(
-        """\\b(talk|disambiguation|user talk|wikiProject|sandbox|article talk|slideshow|slide share)\\b""",
+        """\\b(talk|disambiguation|user talk|wikiProject|sandbox|article talk)\\b""",
         Pattern.CASE_INSENSITIVE
     )
     private val junkExcerpt = Pattern.compile(
-        """(please help improve|this article needs|not a guidebook|learn how and when to remove|for other uses, see|sign in upload|download free for)""",
+        """(please help improve|this article needs|not a guidebook|learn how and when to remove|for other uses, see)""",
         Pattern.CASE_INSENSITIVE
     )
-    // Domains that produced garbage in production for coding queries
-    private val blockedDomains = setOf(
-        "chess.com", "slideshare.net", "fullframeinitiative.org", "thisvsthat.io",
-        "espn.com", "cnn.com", "bbc.com", "nytimes.com", "forbes.com",
-        "pinterest.com", "instagram.com", "facebook.com", "twitter.com", "x.com",
-        "youtube.com", "tiktok.com", "reddit.com" // reddit kept out of primary; community lane already scopes
+    private val blockedDomains = listOf(
+        "chess.com", "slideshare.net", "slideshare.com", "pinterest.com",
+        "facebook.com", "twitter.com", "x.com", "instagram.com",
+        "reddit.com/r/chess", "espn.com", "cnn.com", "bbc.com",
+        "nytimes.com", "forbes.com", "medium.com/tag", "quora.com",
+        "fullframeinitiative.org", "thisvsthat.io", "geeksforgeeks.org/system-design",
+        "educative.io", "interview", "wellbeing", "self-improvement"
     )
-    private val blockedTitleTokens = Pattern.compile(
-        """\\b(chess|wellbeing|well-being|rapid chess|blitz|miami rapid|tradeoffs in professional|criticism vs\\.? critique)\\b""",
-        Pattern.CASE_INSENSITIVE
+    private val blockedTitleTokens = listOf(
+        "tradeoffs in system design", "system design tradeoffs", "tradeoffs in professional",
+        "criticism vs. critique", "u.s. takes", "rapid chess", "wellbeing",
+        "making change is hard", "investor relations"
     )
+    private val stopWords = setOf(
+        "the", "a", "an", "and", "or", "of", "to", "in", "for", "on", "with",
+        "is", "are", "be", "by", "at", "from", "as", "it", "this", "that",
+        "code", "experimental", "involving", "how", "what", "when", "where"
+    )
+
+    fun queryTerms(query: String): Set<String> =
+        query.lowercase()
+            .split(Regex("[^a-z0-9]+"))
+            .filter { it.length >= 3 && it !in stopWords }
+            .toSet()
+
+    fun hasQueryRelevance(terms: Set<String>, title: String, excerpt: String, url: String): Boolean {
+        if (terms.isEmpty()) return true
+        val hay = "$title $excerpt $url".lowercase()
+        val hits = terms.count { hay.contains(it) }
+        // Require at least one strong term overlap; for very short queries demand higher relative overlap
+        return hits >= 1 && (terms.size <= 2 || hits.toDouble() / terms.size >= 0.25)
+    }
+
+    fun relevanceScore(terms: Set<String>, hit: ResearchHit): Int {
+        if (terms.isEmpty()) return 0
+        val hay = "${hit.title} ${hit.excerpt} ${hit.url}".lowercase()
+        return terms.count { hay.contains(it) } * 4
+    }
 
     fun isAcceptable(url: String, title: String, excerpt: String): Boolean {
         val u = url.lowercase()
         val t = title.lowercase()
-        val domain = runCatching { URI(url).host?.removePrefix("www.")?.lowercase() }.getOrNull() ?: ""
-        if (domain in blockedDomains) return false
-        if (blockedDomains.any { domain.endsWith(".$it") }) return false
         if (u.contains("wikipedia.org") && (t.contains("talk") || u.contains("talk:") || u.contains("disambiguation"))) return false
         if (junkTitle.matcher(title).find()) return false
         if (junkExcerpt.matcher(excerpt).find()) return false
-        if (blockedTitleTokens.matcher(title).find()) return false
         if (u.contains("/wiki/Talk:") || u.contains("/wiki/User:") || u.contains("/wiki/Wikipedia:")) return false
-        // Reject pure news / sports style paths
-        if (u.contains("/news/") && !u.contains("github.com") && !u.contains("stackoverflow.com")) return false
+        if (blockedDomains.any { u.contains(it) || t.contains(it) }) return false
+        if (blockedTitleTokens.any { t.contains(it) }) return false
+        // Drop pure news / sports / soft-skill pages that sometimes leak through
+        if (t.contains("chess") || t.contains("wellbeing") || t.contains("tradeoff") && t.contains("interview")) return false
         return true
-    }
-
-    fun hasQueryRelevance(title: String, excerpt: String, queryTerms: Set<String>): Boolean {
-        if (queryTerms.isEmpty()) return true
-        val text = (title + " " + excerpt).lowercase()
-        val hits = queryTerms.count { term -> text.contains(term) }
-        // Require at least one meaningful term overlap for short/noisy queries
-        return hits >= 1 || queryTerms.size <= 1
-    }
-
-    fun relevanceScore(title: String, excerpt: String, queryTerms: Set<String>): Int {
-        if (queryTerms.isEmpty()) return 0
-        val text = (title + " " + excerpt).lowercase()
-        return queryTerms.count { term -> text.contains(term) } * 2
     }
 
     fun rankBoost(url: String): Int {
@@ -364,22 +394,17 @@ object SourceQuality {
             u.contains("developer.android.com") || u.contains("kotlinlang.org") -> 12
             u.contains("github.com") -> 10
             u.contains("stackoverflow.com") -> 9
-            u.contains("android.com") || u.contains("developer.apple.com") || u.contains("docs.oracle.com") -> 7
-            u.contains("arxiv.org") || u.contains("acm.org") || u.contains("ieee.org") -> 6
-            u.contains("medium.com") || u.contains("dev.to") || u.contains("baeldung.com") -> 3
-            u.contains("wikipedia.org") -> 1
-            else -> 2
+            u.contains("android.com") || u.contains("developer.apple.com") -> 8
+            u.contains("docs.") || u.contains("developer.") -> 7
+            u.contains("medium.com") || u.contains("dev.to") -> 2
+            u.contains("wikipedia.org") -> 0
+            else -> 3
         }
     }
 }
 
 object ArticleExtractor {
-    data class Extracted(
-        val title: String,
-        val text: String,
-        val wordCount: Int,
-        val codeBlocks: List<String>
-    ) {
+    data class Extracted(val title: String, val text: String, val wordCount: Int, val codeBlocks: List<String>) {
         /** Compatibility alias used by unit tests. */
         val code: List<String> get() = codeBlocks
     }
@@ -425,60 +450,6 @@ object ArticleExtractor {
         val text = cleaned.replace(Regex("<[^>]+>"), " ").replace(Regex("\\s+"), " ").trim()
         val words = text.split(Regex("\\s+")).filter { it.isNotBlank() }
         return Extracted(title, text.take(20_000), words.size, codeBlocks)
-    }
-}
-
-data class ResearchBrief(
-    val query: String,
-    val sourceCount: Int,
-    val laneCount: Int,
-    val wordCount: Int,
-    val codeExampleCount: Int,
-    val sourceLines: List<String>,
-    val evidence: String
-)
-
-/**
- * Turns a ResearchSession into the evidence block the model receives.
- * Required by CodingAgentRuntime and AutonomousAgent.
- */
-object ResearchBriefBuilder {
-    fun build(session: ResearchSession, maxCharacters: Int = 48_000): ResearchBrief {
-        val usable = session.sources.filter { it.content.isNotBlank() }
-        val ranked = usable.sortedWith(
-            compareByDescending<ResearchSource> { authority(it.domain) }
-                .thenByDescending { it.wordCount }
-        )
-        val evidence = buildString {
-            append("Research corpus for: ").append(session.query).append("\n")
-            append("Full sources read: ").append(usable.size)
-            append("; distinct lanes: ").append(usable.map { it.lane }.distinct().size)
-            append("; words: ").append(usable.sumOf { it.wordCount }).append("\n\n")
-            ranked.forEachIndexed { index, source ->
-                append("SOURCE ").append(index + 1)
-                append(" [").append(source.lane).append("] ")
-                append(source.title).append(" <").append(source.url).append(">\n")
-                append(source.content.take(4_000)).append("\n")
-                source.codeExamples.take(2).forEach { append("CODE: ").append(it.take(2_000)).append("\n") }
-                append("\n")
-            }
-        }.take(maxCharacters)
-        return ResearchBrief(
-            query = session.query,
-            sourceCount = usable.size,
-            laneCount = usable.map { it.lane }.distinct().size,
-            wordCount = usable.sumOf { it.wordCount },
-            codeExampleCount = usable.sumOf { it.codeExamples.size },
-            sourceLines = ranked.map { "${it.title} — ${it.url}" },
-            evidence = evidence
-        )
-    }
-
-    private fun authority(domain: String): Int = when {
-        domain.contains("developer.android.com") || domain.contains("kotlinlang.org") || domain.contains("sqlite.org") -> 5
-        domain.contains("rfc-editor.org") || domain.contains("github.com") -> 4
-        domain.contains("stackoverflow.com") -> 3
-        else -> 1
     }
 }
 
