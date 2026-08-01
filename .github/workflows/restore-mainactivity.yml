@@ -1,0 +1,59 @@
+name: Restore MainActivity
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Restore MainActivity from last good commit and apply UI patches
+        run: |
+          set -euo pipefail
+          git checkout b8589b08d9d86eea02228666e0b182e767ba8c9e -- app/src/main/java/com/codingagent/ui/MainActivity.kt
+          python3 <<'PY'
+          from pathlib import Path
+          p = Path("app/src/main/java/com/codingagent/ui/MainActivity.kt")
+          t = p.read_text()
+          t = t.replace(
+              'Text("Model: $modelStatus", color = Muted, fontSize = 11.sp, maxLines = 1)',
+              'Text("Model: $modelStatus", color = Muted, fontSize = 11.sp, maxLines = 4)',
+          )
+          t = t.replace(".take(300)", ".take(500)")
+          t = t.replace(
+              "modelLoadError = error.message.orEmpty().ifBlank { error.javaClass.simpleName }",
+              'modelLoadError = listOf(error.message, error.cause?.message, error.javaClass.name).mapNotNull { it?.takeIf(String::isNotBlank) }.joinToString(" | ").ifBlank { error.stackTraceToString().take(500) }',
+          )
+          t = t.replace(
+              "modelLoadError = it.message.orEmpty().ifBlank { it.javaClass.simpleName }",
+              'modelLoadError = listOf(it.message, it.cause?.message, it.javaClass.name).mapNotNull { m -> m?.takeIf(String::isNotBlank) }.joinToString(" | ").ifBlank { it.stackTraceToString().take(500) }',
+          )
+          if "CodingAgentApp" not in t:
+              raise SystemExit("Restored MainActivity is incomplete")
+          if "maxLines = 4" not in t:
+              raise SystemExit("maxLines patch missing")
+          p.write_text(t)
+          print("Restored and patched MainActivity, bytes=", len(t))
+          PY
+
+      - name: Commit and push if changed
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/src/main/java/com/codingagent/ui/MainActivity.kt
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          git commit -m "Restore full MainActivity from b8589b0 with error UI patches"
+          git push origin main
