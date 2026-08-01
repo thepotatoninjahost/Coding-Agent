@@ -10,6 +10,25 @@ class LocalStore(context: Context) : ChatMessageStore {
     private val lessonsFile = File(root, "lessons.jsonl")
     private val docsFile = File(root, "documents.jsonl")
     private val chatFile = File(root, "chat.jsonl")
+    private val prefs = context.getSharedPreferences("coding_agent_session", Context.MODE_PRIVATE)
+
+    /** Persist the on-device project directory path so rotate/relaunch can remount it. */
+    fun saveProjectPath(path: String?) {
+        prefs.edit().putString(KEY_PROJECT_PATH, path).apply()
+    }
+
+    fun loadProjectPath(): String? = prefs.getString(KEY_PROJECT_PATH, null)?.takeIf { it.isNotBlank() }
+
+    fun saveLastResearchQuery(query: String?) {
+        prefs.edit().putString(KEY_LAST_RESEARCH, query).apply()
+    }
+
+    fun loadLastResearchQuery(): String? = prefs.getString(KEY_LAST_RESEARCH, null)?.takeIf { it.isNotBlank() }
+
+    companion object {
+        private const val KEY_PROJECT_PATH = "project_path"
+        private const val KEY_LAST_RESEARCH = "last_research_query"
+    }
 
     @Synchronized
     fun recordTask(record: TaskRecord) = append(tasksFile, JSONObject()
