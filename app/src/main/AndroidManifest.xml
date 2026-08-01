@@ -6,7 +6,8 @@
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:label="Coding Agent"
         android:supportsRtl="true"
-        android:theme="@style/Theme.CodingAgent">
+        android:theme="@style/Theme.CodingAgent"
+        android:extractNativeLibs="true">
         <activity
             android:name=".ui.MainActivity"
             android:exported="true">

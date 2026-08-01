@@ -25,16 +25,31 @@ class NexaLocalModelGateway(
         check(modelDirectory.resolve("nexa.manifest").isFile) {
             "Nexa model manifest is missing: ${modelDirectory.absolutePath}"
         }
+        val entry = modelDirectory.resolve("files-1-1.nexa")
+        check(entry.isFile && entry.length() > 0L) {
+            "Nexa model entry missing: ${entry.absolutePath}"
+        }
         val input = LlmCreateInput(
             model_name = "qwen3-4b",
-            model_path = modelDirectory.absolutePath,
-            config = ModelConfig(max_tokens = 4096),
-            plugin_id = "npu",
-            device_id = null
+            model_path = entry.absolutePath,
+            config = ModelConfig(
+                nCtx = 4096,
+                max_tokens = 2048
+            ),
+            plugin_id = "npu"
         )
         wrapper = runBlocking {
             val result = LlmWrapper.Companion.builder().llmCreateInput(input).build()
-            result.getOrElse { error("Nexa model load failed: ${it.message.orEmpty()}") }
+            result.getOrElse { err ->
+                val detail = buildString {
+                    append(err.message.orEmpty())
+                    append(" | cause=")
+                    append(err.cause?.message.orEmpty())
+                    append(" | class=")
+                    append(err.javaClass.name)
+                }
+                error("Nexa model load failed: $detail")
+            }
         }
     }
 
@@ -55,18 +70,27 @@ class NexaLocalModelGateway(
                 }
             }
         }
-        if (output.isBlank()) ModelResponse.Failure("Nexa returned no output") else JsonModelResponseParser().parse(output.toString())
+        if (output.isBlank()) {
+            ModelResponse.Failure("Nexa returned no output")
+        } else {
+            JsonModelResponseParser().parse(output.toString())
+        }
     } catch (error: Exception) {
         ModelResponse.Failure("Nexa local inference failed: ${error.message.orEmpty()}")
     }
 
-    fun close() { wrapper.close() }
+    fun close() {
+        wrapper.close()
+    }
 
     private fun awaitSdkInitialization(context: Context) {
         val completed = CountDownLatch(1)
         var failure: String? = null
         NexaSdk.Companion.getInstance().init(context, object : NexaSdk.InitCallback {
-            override fun onSuccess() { completed.countDown() }
+            override fun onSuccess() {
+                completed.countDown()
+            }
+
             override fun onFailure(message: String) {
                 failure = message
                 completed.countDown()
@@ -78,8 +102,15 @@ class NexaLocalModelGateway(
 
     private fun buildPrompt(request: ModelRequest): String = buildString {
         append(request.system).append("\n\n")
-        if (request.researchRequired) append("RESEARCH_GATE: satisfied by the attached multi-source research brief; do not skip research or claim knowledge without evidence.\n\n")
-        request.transcript.forEach { append(it.role).append(": ").append(it.content).append("\n") }
+        if (request.researchRequired) {
+            append(
+                "RESEARCH_GATE: satisfied by the attached multi-source research brief; " +
+                    "do not skip research or claim knowledge without evidence.\n\n"
+            )
+        }
+        request.transcript.forEach {
+            append(it.role).append(": ").append(it.content).append("\n")
+        }
         append("user: ").append(request.user)
     }
 }
