@@ -98,17 +98,30 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 
-// Pip-Boy-inspired layout - neon green, fluorescent orange, dark purple
-private val Ink = Color(0xFF39FF14)
-private val Muted = Color(0xFF7ACC7A)
-private val Canvas = Color(0xFF1A0A2E)
-private val Panel = Color(0xFF2D1B4E)
-private val PanelRaised = Color(0xFF3D2A5C)
-private val Line = Color(0xFF5A3D7A)
-private val Accent = Color(0xFF39FF14)
-private val Blue = Color(0xFFFF5F1F)
-private val Amber = Color(0xFFFF5F1F)
-private val Danger = Color(0xFFFF4500)
+// ============================================================
+// FALL OUT PIP-BOY THEME
+// neon green + fluorescent orange + dark purple
+// ============================================================
+private val NeonGreen = Color(0xFF39FF14)
+private val FluoroOrange = Color(0xFFFF6B00)
+private val DarkPurple = Color(0xFF12081F)
+private val PanelPurple = Color(0xFF1E1033)
+private val RaisedPurple = Color(0xFF2A1848)
+private val LinePurple = Color(0xFF4A2F6A)
+private val SoftGreen = Color(0xFF7ACC7A)
+private val DangerRed = Color(0xFFFF4500)
+
+// aliases used throughout the UI
+private val Ink = NeonGreen
+private val Muted = SoftGreen
+private val Canvas = DarkPurple
+private val Panel = PanelPurple
+private val PanelRaised = RaisedPurple
+private val Line = LinePurple
+private val Accent = NeonGreen
+private val Blue = FluoroOrange
+private val Amber = FluoroOrange
+private val Danger = DangerRed
 
 private enum class SurfaceTab(val label: String) { CHAT("Chat"), FILES("Files"), REVIEW("Review"), TERMINAL("Terminal"), RESEARCH("Research") }
 private enum class AgentStatus(val label: String, val color: Color) { READY("Ready", Accent), RESEARCHING("Researching", Blue), PLANNING("Planning", Blue), EDITING("Editing", Amber), APPROVAL("Waiting for approval", Amber), RUNNING("Verifying", Blue), STOPPED("Stopped", Danger) }
@@ -322,13 +335,12 @@ private fun CodingAgentApp(privateDir: File) {
         Scaffold(
             containerColor = Canvas,
             topBar = {
-                // Compact status bar so conversation has room
                 CompactStatusBar(status, detail, workspace != null, modelStatus, modelProgress,
                     onImport = { folderPicker.launch(null) },
                     onModelImport = { modelPicker.launch(null) },
                     onStop = ::stopAgent)
             },
-            // Hide bottom nav when keyboard is open so it does not steal space / leave a blank band
+            // Hide bottom nav when keyboard is open so it does not steal space
             bottomBar = {
                 if (!imeVisible) {
                     NavigationBar(containerColor = Panel, contentColor = Ink) {
@@ -336,8 +348,8 @@ private fun CodingAgentApp(privateDir: File) {
                             NavigationBarItem(
                                 selected = tab == item,
                                 onClick = { tab = item },
-                                icon = { Text(item.label.take(1), fontWeight = FontWeight.Bold) },
-                                label = { Text(item.label, fontSize = 10.sp) }
+                                icon = { Text(item.label.take(1), fontWeight = FontWeight.Bold, color = if (tab == item) NeonGreen else SoftGreen) },
+                                label = { Text(item.label, fontSize = 10.sp, color = if (tab == item) NeonGreen else SoftGreen) }
                             )
                         }
                     }
@@ -417,13 +429,19 @@ private fun CompactStatusBar(
     onModelImport: () -> Unit,
     onStop: () -> Unit
 ) {
-    Column(Modifier.fillMaxWidth().background(Panel).padding(horizontal = 12.dp, vertical = 8.dp)) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .background(Panel)
+            .border(1.dp, NeonGreen.copy(alpha = 0.35f))
+            .padding(horizontal = 12.dp, vertical = 8.dp)
+    ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text("CODING AGENT", color = Ink, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                Text("CODING AGENT", color = NeonGreen, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                 Text(
                     if (mounted) "project mounted · $modelStatus" else "no project · $modelStatus",
-                    color = Muted,
+                    color = SoftGreen,
                     fontSize = 11.sp,
                     maxLines = 2
                 )
@@ -431,8 +449,8 @@ private fun CompactStatusBar(
             if (status != AgentStatus.READY && status != AgentStatus.STOPPED) {
                 TextButton(onClick = onStop) { Text("Stop", color = Danger, fontSize = 12.sp) }
             }
-            TextButton(onClick = onModelImport) { Text("Model", color = Blue, fontWeight = FontWeight.Bold, fontSize = 12.sp) }
-            TextButton(onClick = onImport) { Text(if (mounted) "Switch" else "Import", color = Accent, fontWeight = FontWeight.Bold, fontSize = 12.sp) }
+            TextButton(onClick = onModelImport) { Text("Model", color = FluoroOrange, fontWeight = FontWeight.Bold, fontSize = 12.sp) }
+            TextButton(onClick = onImport) { Text(if (mounted) "Switch" else "Import", color = NeonGreen, fontWeight = FontWeight.Bold, fontSize = 12.sp) }
         }
         Spacer(Modifier.height(4.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -440,7 +458,7 @@ private fun CompactStatusBar(
             Spacer(Modifier.width(6.dp))
             Text(status.label, color = status.color, fontWeight = FontWeight.Bold, fontSize = 12.sp)
             Spacer(Modifier.width(6.dp))
-            Text(detail, color = Muted, fontSize = 11.sp, maxLines = 1)
+            Text(detail, color = SoftGreen, fontSize = 11.sp, maxLines = 1)
         }
         if (status == AgentStatus.RESEARCHING || status == AgentStatus.RUNNING || modelProgress?.phase == "downloading") {
             Spacer(Modifier.height(4.dp))
@@ -468,7 +486,6 @@ private fun ChatSurface(
     onApprove: () -> Unit
 ) {
     val listState = rememberLazyListState()
-    // Keep newest messages visible above the input
     LaunchedEffect(messages.size) {
         if (messages.isNotEmpty()) {
             listState.animateScrollToItem(messages.lastIndex)
@@ -486,7 +503,7 @@ private fun ChatSurface(
                 item {
                     Text(
                         "Type a request in plain English about your project.\nThe agent will look at your files and reply here.",
-                        color = Muted,
+                        color = SoftGreen,
                         fontSize = 14.sp,
                         modifier = Modifier.padding(vertical = 24.dp)
                     )
@@ -499,29 +516,31 @@ private fun ChatSurface(
         if (busy) {
             Text(
                 "Agent is working…",
-                color = Blue,
+                color = FluoroOrange,
                 fontSize = 12.sp,
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
             )
         }
 
-        // Large multi-line input that stays above the keyboard
+        // LARGE multi-line input — stays above keyboard, you can see the whole sentence
         Column(
             Modifier
                 .fillMaxWidth()
                 .background(Panel)
-                .padding(horizontal = 12.dp, vertical = 10.dp)
+                .border(1.dp, NeonGreen.copy(alpha = 0.4f))
+                .padding(horizontal = 12.dp, vertical = 12.dp)
         ) {
             OutlinedTextField(
                 value = input,
                 onValueChange = onInput,
                 modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text("Describe what you want fixed or added…", color = Muted) },
-                minLines = 3,
-                maxLines = 6,
+                placeholder = { Text("Describe what you want fixed or added…", color = SoftGreen) },
+                minLines = 4,
+                maxLines = 8,
+                textStyle = TextStyle(color = NeonGreen, fontSize = 16.sp, lineHeight = 22.sp),
                 colors = fieldColors()
             )
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(10.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (busy) {
                     TextButton(onClick = onStop) { Text("Stop", color = Danger) }
@@ -530,9 +549,9 @@ private fun ChatSurface(
                 Button(
                     onClick = onSend,
                     enabled = input.isNotBlank(),
-                    modifier = Modifier.weight(1f).height(48.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Accent, contentColor = Canvas)
-                ) { Text("Send", fontWeight = FontWeight.Bold) }
+                    modifier = Modifier.weight(1f).height(52.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = NeonGreen, contentColor = DarkPurple)
+                ) { Text("Send", fontWeight = FontWeight.Bold, fontSize = 16.sp) }
             }
         }
     }
@@ -542,18 +561,18 @@ private fun ChatSurface(
 private fun ApprovalCard(approvalCount: Int, reason: String, onApprove: () -> Unit) {
     Card(
         Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF3D2A5C)),
-        border = androidx.compose.foundation.BorderStroke(1.dp, Amber)
+        colors = CardDefaults.cardColors(containerColor = RaisedPurple),
+        border = androidx.compose.foundation.BorderStroke(1.dp, FluoroOrange)
     ) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("CODE CHANGE REVIEW", color = Amber, fontWeight = FontWeight.Bold)
-            Text(reason, color = Ink, fontSize = 13.sp)
-            Text("Two explicit approvals are required before a code transaction can proceed.", color = Muted, fontSize = 12.sp)
+            Text("CODE CHANGE REVIEW", color = FluoroOrange, fontWeight = FontWeight.Bold)
+            Text(reason, color = NeonGreen, fontSize = 13.sp)
+            Text("Two explicit approvals are required before a code transaction can proceed.", color = SoftGreen, fontSize = 12.sp)
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("${approvalCount}/2", color = Muted, modifier = Modifier.weight(1f))
+                Text("${approvalCount}/2", color = SoftGreen, modifier = Modifier.weight(1f))
                 Button(
                     onClick = onApprove,
-                    colors = ButtonDefaults.buttonColors(containerColor = Amber, contentColor = Canvas)
+                    colors = ButtonDefaults.buttonColors(containerColor = FluoroOrange, contentColor = DarkPurple)
                 ) { Text(if (approvalCount == 0) "Confirm" else "Confirm again") }
             }
         }
@@ -577,16 +596,16 @@ private fun FilesSurface(
     var showEditor by remember { mutableStateOf(false) }
     val filtered = files.filter { it.contains(query.trim(), ignoreCase = true) }
     Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text("PROJECT FILES", color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-        OutlinedTextField(query, onQuery, Modifier.fillMaxWidth(), placeholder = { Text("Filter files", color = Muted) }, singleLine = true, colors = fieldColors())
+        Text("PROJECT FILES", color = NeonGreen, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        OutlinedTextField(query, onQuery, Modifier.fillMaxWidth(), placeholder = { Text("Filter files", color = SoftGreen) }, singleLine = true, colors = fieldColors())
         if (showEditor) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(path, color = Blue, modifier = Modifier.weight(1f), fontFamily = FontFamily.Monospace)
-                TextButton(onClick = { showEditor = false }) { Text("Close", color = Muted) }
+                Text(path, color = FluoroOrange, modifier = Modifier.weight(1f), fontFamily = FontFamily.Monospace)
+                TextButton(onClick = { showEditor = false }) { Text("Close", color = SoftGreen) }
             }
             CodeEditor(content, onContent, path)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = { onContent(document?.content.orEmpty()) }, colors = ButtonDefaults.buttonColors(containerColor = PanelRaised)) { Text("Revert", color = Ink) }
+                Button(onClick = { onContent(document?.content.orEmpty()) }, colors = ButtonDefaults.buttonColors(containerColor = RaisedPurple)) { Text("Revert", color = NeonGreen) }
                 Button(
                     onClick = {
                         runCatching {
@@ -596,7 +615,7 @@ private fun FilesSurface(
                         }.onFailure { onStatus(AgentStatus.STOPPED to (it.message ?: "Save proposal failed")) }
                     },
                     enabled = document != null && document.content != content && mutationCoordinator != null,
-                    colors = ButtonDefaults.buttonColors(containerColor = Accent, contentColor = Canvas)
+                    colors = ButtonDefaults.buttonColors(containerColor = NeonGreen, contentColor = DarkPurple)
                 ) { Text("Propose save") }
             }
         } else {
@@ -607,6 +626,7 @@ private fun FilesSurface(
                         Modifier
                             .fillMaxWidth()
                             .background(Panel, RoundedCornerShape(12.dp))
+                            .border(1.dp, LinePurple, RoundedCornerShape(12.dp))
                             .clickable {
                                 runCatching {
                                     val loaded = tools?.read(file) ?: return@runCatching
@@ -619,9 +639,9 @@ private fun FilesSurface(
                             .padding(14.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("{ }", color = Blue, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                        Text("{ }", color = FluoroOrange, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
                         Spacer(Modifier.width(12.dp))
-                        Text(file, color = Ink, fontFamily = FontFamily.Monospace, fontSize = 13.sp)
+                        Text(file, color = NeonGreen, fontFamily = FontFamily.Monospace, fontSize = 13.sp)
                     }
                 }
             }
@@ -636,8 +656,8 @@ private fun CodeEditor(content: String, onContent: (String) -> Unit, path: Strin
         Modifier
             .fillMaxWidth()
             .height(360.dp)
-            .background(Color(0xFF12081F), RoundedCornerShape(12.dp))
-            .border(1.dp, Line, RoundedCornerShape(12.dp))
+            .background(DarkPurple, RoundedCornerShape(12.dp))
+            .border(1.dp, NeonGreen.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
             .padding(12.dp)
     ) {
         BasicTextField(
@@ -660,7 +680,7 @@ private fun highlightCode(content: String): AnnotatedString = buildAnnotatedStri
     var cursor = 0
     keywords.findAll(content).forEach { match ->
         append(content.substring(cursor, match.range.first))
-        withStyle(SpanStyle(color = Blue, fontWeight = FontWeight.Bold)) { append(match.value) }
+        withStyle(SpanStyle(color = FluoroOrange, fontWeight = FontWeight.Bold)) { append(match.value) }
         cursor = match.range.last + 1
     }
     append(content.substring(cursor))
@@ -669,18 +689,18 @@ private fun highlightCode(content: String): AnnotatedString = buildAnnotatedStri
 @Composable
 private fun ReviewSurface(pending: Boolean, approvals: Int, reason: String, onApprove: () -> Unit, onReject: () -> Unit) {
     Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("CHANGE REVIEW", color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        Text("CHANGE REVIEW", color = NeonGreen, fontSize = 18.sp, fontWeight = FontWeight.Bold)
         if (!pending) {
             EmptyState("No pending changes", "Agent proposals appear here before any file transaction.")
         } else {
-            Card(colors = CardDefaults.cardColors(containerColor = Panel), border = androidx.compose.foundation.BorderStroke(1.dp, Amber)) {
+            Card(colors = CardDefaults.cardColors(containerColor = Panel), border = androidx.compose.foundation.BorderStroke(1.dp, FluoroOrange)) {
                 Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Pending transactional proposal", color = Amber, fontWeight = FontWeight.Bold)
-                    Text(reason, color = Ink)
-                    Text("Review changed files before confirming. Transactional writes remain checksum-guarded.", color = Muted, fontSize = 12.sp)
+                    Text("Pending transactional proposal", color = FluoroOrange, fontWeight = FontWeight.Bold)
+                    Text(reason, color = NeonGreen)
+                    Text("Review changed files before confirming. Transactional writes remain checksum-guarded.", color = SoftGreen, fontSize = 12.sp)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = onReject, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4A2030))) { Text("Reject", color = Ink) }
-                        Button(onClick = onApprove, colors = ButtonDefaults.buttonColors(containerColor = Amber, contentColor = Canvas)) { Text("Confirm ${approvals + 1}/2") }
+                        Button(onClick = onReject, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4A2030))) { Text("Reject", color = NeonGreen) }
+                        Button(onClick = onApprove, colors = ButtonDefaults.buttonColors(containerColor = FluoroOrange, contentColor = DarkPurple)) { Text("Confirm ${approvals + 1}/2") }
                     }
                 }
             }
@@ -699,14 +719,14 @@ private fun TerminalSurface(
 ) {
     Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("TERMINAL", color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+            Text("TERMINAL", color = NeonGreen, fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
             TextButton(onClick = onStop) { Text("Stop", color = Danger) }
         }
         OutlinedTextField(
             command,
             onCommand,
             Modifier.fillMaxWidth(),
-            placeholder = { Text("./gradlew testDebugUnitTest", color = Muted) },
+            placeholder = { Text("./gradlew testDebugUnitTest", color = SoftGreen) },
             singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
             colors = fieldColors()
@@ -714,14 +734,14 @@ private fun TerminalSurface(
         Button(
             onClick = { onRun(command) },
             enabled = enabled && command.isNotBlank(),
-            colors = ButtonDefaults.buttonColors(containerColor = Accent, contentColor = Canvas)
+            colors = ButtonDefaults.buttonColors(containerColor = NeonGreen, contentColor = DarkPurple)
         ) { Text("Run") }
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(history, key = { "${it.command}-${it.stdout.hashCode()}" }) { entry ->
                 Text(
                     "$ ${entry.command}\n${entry.stdout}${entry.stderr}\nexit=${entry.exitCode}${if (entry.timedOut) " timeout" else ""}",
-                    Modifier.fillMaxWidth().background(Color(0xFF12081F), RoundedCornerShape(10.dp)).padding(12.dp),
-                    color = if (entry.exitCode == 0) Accent else Danger,
+                    Modifier.fillMaxWidth().background(DarkPurple, RoundedCornerShape(10.dp)).border(1.dp, LinePurple, RoundedCornerShape(10.dp)).padding(12.dp),
+                    color = if (entry.exitCode == 0) NeonGreen else Danger,
                     fontFamily = FontFamily.Monospace,
                     fontSize = 12.sp
                 )
@@ -743,11 +763,11 @@ private fun ResearchSurface(
     onSearch: (String) -> Unit
 ) {
     Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text("WEB RESEARCH", color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-        Text("Type a full sentence in plain English. You can see the whole text while typing.", color = Muted, fontSize = 13.sp)
+        Text("WEB RESEARCH", color = NeonGreen, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        Text("Type a full sentence in plain English. You can see the whole text while typing.", color = SoftGreen, fontSize = 13.sp)
         Text(
             "${state.phase.uppercase()}  ${state.completed}/${state.total} sources  •  full=${state.fullSources}  failed=${state.failedSources}",
-            color = if (state.phase == "blocked") Danger else Blue,
+            color = if (state.phase == "blocked") Danger else FluoroOrange,
             fontFamily = FontFamily.Monospace,
             fontSize = 12.sp
         )
@@ -756,26 +776,30 @@ private fun ResearchSurface(
             value = query,
             onValueChange = onQuery,
             modifier = Modifier.fillMaxWidth(),
-            placeholder = { Text("Describe what you want to research in plain English…", color = Muted) },
-            minLines = 4,
-            maxLines = 8,
+            placeholder = { Text("Describe what you want to research in plain English…", color = SoftGreen) },
+            minLines = 5,
+            maxLines = 10,
+            textStyle = TextStyle(color = NeonGreen, fontSize = 16.sp, lineHeight = 22.sp),
             colors = fieldColors()
         )
         Button(
             onClick = { onSearch(query) },
             enabled = query.isNotBlank(),
             modifier = Modifier.fillMaxWidth().height(52.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = Accent, contentColor = Canvas)
-        ) { Text("Search", fontWeight = FontWeight.Bold) }
+            colors = ButtonDefaults.buttonColors(containerColor = NeonGreen, contentColor = DarkPurple)
+        ) { Text("Search", fontWeight = FontWeight.Bold, fontSize = 16.sp) }
 
         error?.let { Text(it, color = Danger, fontSize = 12.sp) }
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(hits, key = { it.url }) { hit ->
-                Card(colors = CardDefaults.cardColors(containerColor = Panel)) {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = Panel),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, LinePurple)
+                ) {
                     Column(Modifier.padding(12.dp)) {
-                        Text(hit.title, color = Ink, fontWeight = FontWeight.Bold)
-                        Text(hit.excerpt, color = Muted, fontSize = 13.sp)
-                        Text(hit.url, color = Blue, fontSize = 11.sp, maxLines = 2)
+                        Text(hit.title, color = NeonGreen, fontWeight = FontWeight.Bold)
+                        Text(hit.excerpt, color = SoftGreen, fontSize = 13.sp)
+                        Text(hit.url, color = FluoroOrange, fontSize = 11.sp, maxLines = 2)
                     }
                 }
             }
@@ -793,17 +817,18 @@ private fun ChatBubble(message: ChatMessage) {
         Column(
             Modifier
                 .fillMaxWidth(0.92f)
-                .background(if (user) Color(0xFF1A3A20) else Panel, RoundedCornerShape(14.dp))
+                .background(if (user) Color(0xFF0F2A14) else Panel, RoundedCornerShape(14.dp))
+                .border(1.dp, if (user) NeonGreen.copy(alpha = 0.5f) else LinePurple, RoundedCornerShape(14.dp))
                 .padding(12.dp)
         ) {
             Text(
                 if (user) "YOU" else if (message.role == ChatRole.AGENT) "AGENT" else "SYSTEM",
-                color = if (user) Accent else Blue,
+                color = if (user) NeonGreen else FluoroOrange,
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Bold
             )
             Spacer(Modifier.height(4.dp))
-            Text(message.content, color = Ink, fontSize = 14.sp, lineHeight = 20.sp)
+            Text(message.content, color = NeonGreen, fontSize = 14.sp, lineHeight = 20.sp)
         }
     }
 }
@@ -814,19 +839,21 @@ private fun EmptyState(title: String, body: String) {
         Modifier.fillMaxWidth().padding(vertical = 28.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text(title, color = Ink, fontWeight = FontWeight.Bold, fontSize = 17.sp)
+        Text(title, color = NeonGreen, fontWeight = FontWeight.Bold, fontSize = 17.sp)
         Spacer(Modifier.height(6.dp))
-        Text(body, color = Muted, fontSize = 13.sp)
+        Text(body, color = SoftGreen, fontSize = 13.sp)
     }
 }
 
 @Composable
 private fun fieldColors() = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
-    focusedTextColor = Ink,
-    unfocusedTextColor = Ink,
-    focusedBorderColor = Accent,
-    unfocusedBorderColor = Line,
-    cursorColor = Accent
+    focusedTextColor = NeonGreen,
+    unfocusedTextColor = NeonGreen,
+    focusedBorderColor = NeonGreen,
+    unfocusedBorderColor = LinePurple,
+    cursorColor = NeonGreen,
+    focusedContainerColor = DarkPurple,
+    unfocusedContainerColor = DarkPurple
 )
 
 private fun importModelPackage(context: Context, privateDir: File, uri: Uri): String {
