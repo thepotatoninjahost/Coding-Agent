@@ -21,15 +21,20 @@ class GoalInterpreterTest {
         val contract = GoalInterpreter(root).interpret("create file src/New.kt with code, keep tests and make it complete without changing existing files")
         assertTrue(contract.constraints.contains("preserve existing behavior and tests"))
         assertTrue(contract.constraints.contains("do not modify project files"))
-        assertTrue(contract.acceptanceCriteria.any { it.contains("unfinished") })
+        // CREATE acceptance is "requested change is present or explained" (no hard "unfinished" gate)
+        assertTrue(contract.acceptanceCriteria.any { it.contains("present") || it.contains("explained") })
+        assertTrue(contract.ready)
     }
 
-    @Test fun ambiguousDebugGoalIsNotExecutionReady() {
+    @Test fun plainEnglishDebugGoalIsExecutionReady() {
         val root = Files.createTempDirectory("goal").toFile()
         val contract = GoalInterpreter(root).interpret("fix the login bug")
-        assertFalse(contract.ready)
-        assertTrue(contract.ambiguity.any { it.contains("target") })
+        // Soft ambiguity: missing exact file/target is non-blocking; model can inspect and propose.
+        assertEquals(TaskIntent.DEBUG, contract.intent)
+        assertTrue(contract.ready)
+        assertTrue(contract.ambiguity.isEmpty())
     }
+
     @Test fun naturalLanguageAuditRequestsAreActionableInspectTasks() {
         val root = Files.createTempDirectory("goal-audit").toFile()
         val intake = TaskIntakeParser(root).parse("run a full audit then give me your thoughts on it")
@@ -52,4 +57,3 @@ class GoalInterpreterTest {
     }
 
 }
-
