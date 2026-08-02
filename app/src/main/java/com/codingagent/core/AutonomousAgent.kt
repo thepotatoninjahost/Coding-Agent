@@ -67,7 +67,8 @@ class AutonomousAgent(
         val intake = runtime.intake(normalized)
         val plan = AgentPlanner(workspace).plan(intake)
         emit(AutonomousAgentEvent.Phase("PLAN", plan.steps.joinToString(" → ") { it.phase }))
-        if (!intake.executionReady && intake.intent !in setOf(TaskIntent.INSPECT, TaskIntent.EXPLAIN, TaskIntent.TEST, TaskIntent.CHANGE, TaskIntent.CREATE, TaskIntent.REFACTOR, TaskIntent.DEBUG)) {
+        // Trust soft plain-English intake. Hard-block only when the contract is not ready.
+        if (!intake.executionReady) {
             val task = AgentTask(taskId, normalized, "needs-input", plan, emptyList(), VerificationReport(false, emptyList()), emptyList(), intake.clarificationQuestion ?: "Clarify the requested operation")
             emit(AutonomousAgentEvent.Failed(task, task.summary))
             journal.record(task)
