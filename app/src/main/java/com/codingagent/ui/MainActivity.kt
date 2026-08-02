@@ -538,19 +538,37 @@ private fun DeepResearchProgress.toDisplayState() = ResearchDisplayState(stage, 
 private fun ResearchSurface(query: String, onQuery: (String) -> Unit, hits: List<ResearchHit>, error: String?, state: ResearchDisplayState, onSearch: (String) -> Unit) {
     Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text("WEB RESEARCH", color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-        Text("Research is not complete until distinct full sources are read and learned.", color = Muted, fontSize = 13.sp)
+        Text("Type a full sentence in plain English. You can see the whole text while typing.", color = Muted, fontSize = 13.sp)
         Text("${state.phase.uppercase()}  ${state.completed}/${state.total} sources  •  full=${state.fullSources}  failed=${state.failedSources}  lanes=${state.laneCount}  words=${state.wordCount}  code=${state.codeExamples}", color = if (state.phase == "blocked") Danger else Blue, fontFamily = FontFamily.Monospace, fontSize = 12.sp)
         Text(if (state.phase == "blocked") "No coding context was sent to the model. Fix the network/source problem and run research again." else "The model is not called until the full source target is reached.", color = Muted, fontSize = 11.sp)
-        Text("Sources are deduplicated by canonical URL; each successful source is fetched, extracted, chunked, and persisted before the model sees the brief.", color = Muted, fontSize = 11.sp)
-        Row(verticalAlignment = Alignment.Bottom) {
-            OutlinedTextField(query, onQuery, Modifier.weight(1f), placeholder = { Text("Kotlin, Android, RFC, GitHub…", color = Muted) }, singleLine = true, colors = fieldColors())
-            Spacer(Modifier.width(8.dp))
-            Button(onClick = { onSearch(query) }, enabled = query.isNotBlank(), colors = ButtonDefaults.buttonColors(containerColor = Accent, contentColor = Canvas)) { Text("Search") }
-        }
+
+        // Full-width multi-line input so the entire sentence is visible while typing on phone
+        OutlinedTextField(
+            value = query,
+            onValueChange = onQuery,
+            modifier = Modifier.fillMaxWidth(),
+            placeholder = { Text("Describe what you want to research in plain English…", color = Muted) },
+            minLines = 4,
+            maxLines = 8,
+            colors = fieldColors()
+        )
+        Button(
+            onClick = { onSearch(query) },
+            enabled = query.isNotBlank(),
+            modifier = Modifier.fillMaxWidth().height(52.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = Accent, contentColor = Canvas)
+        ) { Text("Search", fontWeight = FontWeight.Bold) }
+
         error?.let { Text(it, color = Danger, fontSize = 12.sp) }
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(hits, key = { it.url }) { hit ->
-                Card(colors = CardDefaults.cardColors(containerColor = Panel)) { Column(Modifier.padding(12.dp)) { Text(hit.title, color = Ink, fontWeight = FontWeight.Bold); Text(hit.excerpt, color = Muted, fontSize = 13.sp); Text(hit.url, color = Blue, fontSize = 11.sp, maxLines = 2) } }
+                Card(colors = CardDefaults.cardColors(containerColor = Panel)) {
+                    Column(Modifier.padding(12.dp)) {
+                        Text(hit.title, color = Ink, fontWeight = FontWeight.Bold)
+                        Text(hit.excerpt, color = Muted, fontSize = 13.sp)
+                        Text(hit.url, color = Blue, fontSize = 11.sp, maxLines = 2)
+                    }
+                }
             }
         }
     }
