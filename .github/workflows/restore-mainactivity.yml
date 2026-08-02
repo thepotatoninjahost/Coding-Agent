@@ -2,6 +2,9 @@ name: Restore MainActivity
 
 on:
   workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/restore-mainactivity.yml'
 
 permissions:
   contents: write
@@ -16,33 +19,53 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Restore MainActivity from last good commit and apply UI patches
+      - name: Restore full MainActivity and apply color palette
         run: |
           set -euo pipefail
-          git checkout b8589b08d9d86eea02228666e0b182e767ba8c9e -- app/src/main/java/com/codingagent/ui/MainActivity.kt
+          GOOD=ee8a643a24bb359b327a15a350e686f26bcbfad9
+          TARGET=app/src/main/java/com/codingagent/ui/MainActivity.kt
+          git show "$GOOD:$TARGET" > "$TARGET"
+
           python3 <<'PY'
           from pathlib import Path
           p = Path("app/src/main/java/com/codingagent/ui/MainActivity.kt")
           t = p.read_text()
-          t = t.replace(
-              'Text("Model: $modelStatus", color = Muted, fontSize = 11.sp, maxLines = 1)',
-              'Text("Model: $modelStatus", color = Muted, fontSize = 11.sp, maxLines = 4)',
-          )
-          t = t.replace(".take(300)", ".take(500)")
-          t = t.replace(
-              "modelLoadError = error.message.orEmpty().ifBlank { error.javaClass.simpleName }",
-              'modelLoadError = listOf(error.message, error.cause?.message, error.javaClass.name).mapNotNull { it?.takeIf(String::isNotBlank) }.joinToString(" | ").ifBlank { error.stackTraceToString().take(500) }',
-          )
-          t = t.replace(
-              "modelLoadError = it.message.orEmpty().ifBlank { it.javaClass.simpleName }",
-              'modelLoadError = listOf(it.message, it.cause?.message, it.javaClass.name).mapNotNull { m -> m?.takeIf(String::isNotBlank) }.joinToString(" | ").ifBlank { it.stackTraceToString().take(500) }',
-          )
-          if "CodingAgentApp" not in t:
+          old = """private val Ink = Color(0xFFE8EDF2)
+private val Muted = Color(0xFF94A0AE)
+private val Canvas = Color(0xFF0A0D11)
+private val Panel = Color(0xFF131922)
+private val PanelRaised = Color(0xFF1A2330)
+private val Line = Color(0xFF2B3848)
+private val Accent = Color(0xFF8FE36B)
+private val Blue = Color(0xFF8CB9FF)
+private val Amber = Color(0xFFFFC857)
+private val Danger = Color(0xFFFF756D)"""
+          new = """// Pip-Boy-inspired layout · palette: neon green, fluorescent orange, dark purple
+private val Ink = Color(0xFF39FF14)
+private val Muted = Color(0xFF7ACC7A)
+private val Canvas = Color(0xFF1A0A2E)
+private val Panel = Color(0xFF2D1B4E)
+private val PanelRaised = Color(0xFF3D2A5C)
+private val Line = Color(0xFF5A3D7A)
+private val Accent = Color(0xFF39FF14)
+private val Blue = Color(0xFFFF5F1F)
+private val Amber = Color(0xFFFF5F1F)
+private val Danger = Color(0xFFFF4500)"""
+          if old not in t:
+              raise SystemExit("color block not found")
+          t = t.replace(old, new)
+          t = t.replace("Color(0xFF322B19)", "Color(0xFF3D2A5C)")
+          t = t.replace("Color(0xFF442126)", "Color(0xFF4A2030)")
+          t = t.replace("Color(0xFF263B29)", "Color(0xFF1A3A20)")
+          t = t.replace("Color(0xFF0F1319)", "Color(0xFF12081F)")
+          if "CodingAgentApp" not in t or "fieldColors" not in t:
               raise SystemExit("Restored MainActivity is incomplete")
-          if "maxLines = 4" not in t:
-              raise SystemExit("maxLines patch missing")
+          if "0xFF39FF14" not in t or "0xFF1A0A2E" not in t or "0xFFFF5F1F" not in t:
+              raise SystemExit("color palette missing")
+          if "ROBCO" in t:
+              raise SystemExit("unexpected ROBCO header")
           p.write_text(t)
-          print("Restored and patched MainActivity, bytes=", len(t))
+          print("Restored full MainActivity, bytes=", len(t))
           PY
 
       - name: Commit and push if changed
@@ -55,5 +78,5 @@ jobs:
             echo "No changes to commit"
             exit 0
           fi
-          git commit -m "Restore full MainActivity from b8589b0 with error UI patches"
-          git push origin main
+          git commit -m "Restore full MainActivity: neon green, fluorescent orange, dark purple"
+          git push origin HEAD:main
