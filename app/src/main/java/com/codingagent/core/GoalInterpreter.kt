@@ -24,7 +24,9 @@ class GoalInterpreter(private val root: File) {
         val intent = intent(normalized, operation)
         val constraints = constraints(normalized)
         val acceptance = acceptance(normalized, intent)
-        val ambiguity = ambiguity(normalized, intent, operation, paths)
+        // Do not treat missing exact mutation syntax as blocking ambiguity.
+        // The model can inspect files and propose changes via tools.
+        val ambiguity = softAmbiguity(normalized, intent)
         val confidence = score(intent, operation, paths, symbols, ambiguity)
         return GoalContract(
             request = normalized,
@@ -36,7 +38,7 @@ class GoalInterpreter(private val root: File) {
             acceptanceCriteria = acceptance,
             ambiguity = ambiguity,
             confidence = confidence,
-            ready = ambiguity.isEmpty() && confidence >= 60
+            ready = ambiguity.isEmpty() && confidence >= 40
         )
     }
 
@@ -50,13 +52,15 @@ class GoalInterpreter(private val root: File) {
             }
         }
         return when {
-            matches(request, "create|add|new") -> TaskIntent.CREATE
+            matches(request, "create|add|new file|write a|generate") -> TaskIntent.CREATE
             matches(request, "test|tests|testing|verify|build") -> TaskIntent.TEST
-            matches(request, "fix|debug|broken|error|crash|bug") -> TaskIntent.DEBUG
+            matches(request, "fix|debug|broken|error|crash|bug|repair|patch") -> TaskIntent.DEBUG
+            matches(request, "refactor|restructure|rename|clean up|cleanup") -> TaskIntent.REFACTOR
+            matches(request, "change|edit|update|modify|implement|add|remove|delete|insert") -> TaskIntent.CHANGE
             matches(request, "explain|why|what does|understand") -> TaskIntent.EXPLAIN
             matches(request, "inspect|show|list|search|find|analy[sz]e|analysis|review|audit|assess|evaluate|thoughts|opinion|feedback|look over|report") -> TaskIntent.INSPECT
             matches(request, "research|learn|study|investigate|compare|explore") -> TaskIntent.EXPLAIN
-            else -> TaskIntent.EXPLAIN
+            else -> TaskIntent.CHANGE
         }
     }
 
@@ -71,36 +75,27 @@ class GoalInterpreter(private val root: File) {
         when (intent) {
             TaskIntent.TEST -> add("requested checks complete successfully")
             TaskIntent.EXPLAIN, TaskIntent.INSPECT -> add("requested repository evidence is collected")
-            TaskIntent.CHANGE, TaskIntent.CREATE, TaskIntent.REFACTOR, TaskIntent.DEBUG -> add("requested change is present")
+            TaskIntent.CHANGE, TaskIntent.CREATE, TaskIntent.REFACTOR, TaskIntent.DEBUG -> add("requested change is present or explained")
             TaskIntent.UNKNOWN -> add("goal is clarified before execution")
         }
-        if (root.resolve("gradlew").isFile) add("Gradle tests pass")
-        else if (root.resolve("package.json").isFile) add("project test command passes")
-        else if (root.resolve("pyproject.toml").isFile || root.resolve("pytest.ini").isFile) add("pytest passes")
-        else add("static verification passes")
-        if (matches(request, "no todo|complete|finished|100%")) add("no unfinished implementation markers remain")
+        if (root.resolve("gradlew").isFile) add("Gradle tests pass when verification is run")
+        else if (root.resolve("package.json").isFile) add("project test command passes when verification is run")
+        else if (root.resolve("pyproject.toml").isFile || root.resolve("pytest.ini").isFile) add("pytest passes when verification is run")
+        else add("static verification passes when verification is run")
     }
 
-    private fun ambiguity(request: String, intent: TaskIntent, operation: TaskOperation, paths: List<String>): List<String> = buildList {
+    /** Only hard-block on truly empty/too-short requests. File targets and exact ops are optional. */
+    private fun softAmbiguity(request: String, intent: TaskIntent): List<String> = buildList {
         if (intent == TaskIntent.UNKNOWN) add("intent is unclear")
-        if (intent == TaskIntent.CREATE && operation.kind == OperationKind.NONE && paths.isNotEmpty()) {
-            // A named target path is enough for synthesis to propose a new file.
-        }
-        if (intent in setOf(TaskIntent.CHANGE, TaskIntent.REFACTOR, TaskIntent.DEBUG) && operation.kind == OperationKind.NONE) {
-            add("the requested mutation is not specified")
-        }
-        if (intent in setOf(TaskIntent.CHANGE, TaskIntent.CREATE, TaskIntent.REFACTOR, TaskIntent.DEBUG) && paths.isEmpty()) {
-            add("no target file or directory was identified")
-        }
-        if (request.length < 8) add("request is too short to establish a goal")
+        if (request.length < 4) add("request is too short to establish a goal")
     }
 
     private fun score(intent: TaskIntent, operation: TaskOperation, paths: List<String>, symbols: List<String>, ambiguity: List<String>): Int {
-        var value = if (intent == TaskIntent.UNKNOWN) 25 else 60
-        if (operation.kind != OperationKind.NONE) value += 20
+        var value = if (intent == TaskIntent.UNKNOWN) 25 else 70
+        if (operation.kind != OperationKind.NONE) value += 15
         if (paths.isNotEmpty()) value += 10
         if (symbols.isNotEmpty()) value += 5
-        value -= ambiguity.size * 15
+        value -= ambiguity.size * 20
         return value.coerceIn(0, 99)
     }
 
