@@ -63,36 +63,55 @@ class AutonomousAgent(
             events += event
             onEvent(event)
         }
-        emit(AutonomousAgentEvent.Phase("INTAKE", "Inspecting the request and repository contract"))
+        emit(AutonomousAgentEvent.Phase("INTAKE", "Inspecting the request and repository"))
         val intake = runtime.intake(normalized)
         val plan = AgentPlanner(workspace).plan(intake)
         emit(AutonomousAgentEvent.Phase("PLAN", plan.steps.joinToString(" → ") { it.phase }))
-        if (!intake.executionReady && intake.intent !in setOf(TaskIntent.INSPECT, TaskIntent.EXPLAIN, TaskIntent.TEST)) {
+        if (!intake.executionReady && intake.intent !in setOf(TaskIntent.INSPECT, TaskIntent.EXPLAIN, TaskIntent.TEST, TaskIntent.CHANGE, TaskIntent.CREATE, TaskIntent.REFACTOR, TaskIntent.DEBUG)) {
             val task = AgentTask(taskId, normalized, "needs-input", plan, emptyList(), VerificationReport(false, emptyList()), emptyList(), intake.clarificationQuestion ?: "Clarify the requested operation")
             emit(AutonomousAgentEvent.Failed(task, task.summary))
             journal.record(task)
             return events
         }
 
-        emit(AutonomousAgentEvent.Phase("RESEARCH", "Reading 50 distinct sources before model decisions"))
-        val mode = ResearchModeDetector.detect(normalized)
-        val session = runCatching {
-            research.deepResearch(normalized, 50, mode) { progress ->
-                emit(AutonomousAgentEvent.Phase("RESEARCH", "${progress.stage}: ${progress.completed}/${progress.total}; learned ${progress.successful}, failed ${progress.failed}"))
+        // Research is optional. Only run when the user asked for research, or the request is clearly about external knowledge.
+        // Ordinary coding/fix/edit requests go straight to the model with the local project as evidence.
+        var researchEvidence = ""
+        if (shouldResearch(normalized, intake)) {
+            emit(AutonomousAgentEvent.Phase("RESEARCH", "Gathering a small set of sources (optional path)"))
+            val mode = ResearchModeDetector.detect(normalized)
+            val session = runCatching {
+                research.deepResearch(normalized, 6, mode) { progress ->
+                    emit(AutonomousAgentEvent.Phase("RESEARCH", "${progress.stage}: ${progress.completed}/${progress.total}; learned ${progress.successful}, failed ${progress.failed}"))
+                }
+            }.getOrNull()
+            if (session != null && session.sources.isNotEmpty()) {
+                val brief = ResearchBriefBuilder.build(session)
+                researchEvidence = "\n\nResearch brief:\n${brief.evidence}"
+                emit(AutonomousAgentEvent.Phase("RESEARCH", "Learned ${brief.sourceCount} sources (${brief.wordCount} words)"))
+            } else {
+                emit(AutonomousAgentEvent.Phase("RESEARCH", "Skipped or empty; continuing with local project only"))
             }
-        }.getOrElse { error ->
-            val task = failedTask(taskId, normalized, plan, "Mandatory research failed: ${error.message.orEmpty()}", changeSets.flatMap { it.changes })
-            emit(AutonomousAgentEvent.Failed(task, task.summary))
-            journal.record(task)
-            return events
+        } else {
+            emit(AutonomousAgentEvent.Phase("RESEARCH", "Skipped — local project is enough for this request"))
         }
-        val brief = ResearchBriefBuilder.build(session)
-        emit(AutonomousAgentEvent.Phase("RESEARCH", "Learned ${brief.sourceCount} full sources across ${brief.laneCount} lanes (${brief.wordCount} words, ${brief.codeExampleCount} code examples)"))
+
         val transcript = mutableListOf<ModelMessage>()
-        var lastEvidence = "Repository has ${workspace.summary().files.size} indexed files.\n\nResearch brief:\n${brief.evidence}"
+        var lastEvidence = "Repository has ${workspace.summary().files.size} indexed files.\n" +
+            workspace.summary().files.take(80).joinToString("\n") { it.path } +
+            researchEvidence
+
         for (turn in 0 until config.maxTurns) {
             emit(AutonomousAgentEvent.Phase("MODEL", "Decision turn ${turn + 1}/${config.maxTurns}"))
-            val response = gateway.stream(ModelRequest(AgentModelProtocol.SYSTEM, buildPrompt(normalized, intake, lastEvidence), AgentModelProtocol.tools(), transcript.toList(), researchRequired = true)) { delta -> emit(AutonomousAgentEvent.ModelDelta(delta)) }
+            val response = gateway.stream(
+                ModelRequest(
+                    AgentModelProtocol.SYSTEM,
+                    buildPrompt(normalized, intake, lastEvidence),
+                    AgentModelProtocol.tools(),
+                    transcript.toList(),
+                    researchRequired = false
+                )
+            ) { delta -> emit(AutonomousAgentEvent.ModelDelta(delta)) }
             when (response) {
                 is ModelResponse.Failure -> {
                     val task = failedTask(taskId, normalized, plan, response.message, changeSets.flatMap { it.changes })
@@ -138,14 +157,22 @@ class AutonomousAgent(
         return events
     }
 
+    /** Research only when the user clearly asked for it, or the request is about external/unknown APIs/docs. */
+    private fun shouldResearch(request: String, intake: TaskIntake): Boolean {
+        val lower = request.lowercase()
+        if (Regex("\\b(research|look up|search the web|google|documentation online|how does .+ work online)\\b").containsMatchIn(lower)) return true
+        if (intake.intent == TaskIntent.EXPLAIN && Regex("\\b(library|framework|api|sdk|package|crate|npm|pip)\\b").containsMatchIn(lower)) return true
+        return false
+    }
+
     private fun buildPrompt(request: String, intake: TaskIntake, evidence: String): String = buildString {
+        append("You are a local coding agent on the user's phone. Answer and act on the request using the project files.\n")
+        append("Prefer reading and searching the project. Propose file changes with tools; never claim a file was written until approval.\n")
+        append("Respond in plain English. Be direct.\n\n")
         append("User request:\n").append(request)
         append("\n\nTyped intake:\n").append(intake.summary)
         append("\nIntent: ").append(intake.intent)
-        append("\nTargets: ").append(intake.contract.targetPaths.joinToString().ifBlank { "none" })
-        append("\nAcceptance: ").append(intake.contract.acceptanceCriteria.joinToString("; "))
-        append("\n\nResearch requirements:\n")
-        append("Treat research as accumulated experience. For ordinary tasks, gather diverse primary and secondary sources. For experimental or theoretical tasks, include theory, prior art, competing approaches, experiments, benchmarks, counterexamples, failed attempts, and open questions. Separate established evidence from hypotheses.\n")
+        append("\nTargets: ").append(intake.contract.targetPaths.joinToString().ifBlank { "none yet — discover with tools" })
         append("\n\nLatest verified evidence:\n").append(evidence.take(config.maxOutputCharacters))
     }
 
@@ -163,7 +190,7 @@ class AutonomousAgent(
                 "research_web" -> {
                     val query = arguments.getString("query")
                     val mode = runCatching { ResearchMode.valueOf(arguments.optString("mode", "BROAD").uppercase()) }.getOrDefault(ResearchModeDetector.detect(query))
-                    val sources = arguments.optInt("sources", 50).coerceIn(1, 50)
+                    val sources = arguments.optInt("sources", 6).coerceIn(1, 12)
                     val session = research.deepResearch(query, sources, mode) { progress ->
                         lastResearchProgress = "${progress.stage}: ${progress.completed}/${progress.total}; learned ${progress.successful}, failed ${progress.failed}"
                     }
@@ -187,24 +214,6 @@ class AutonomousAgent(
         } catch (error: Exception) {
             "ERROR: ${error.message ?: error.javaClass.simpleName}"
         }
-    }
-
-    private fun proposeReplace(arguments: JSONObject): String {
-        val proposal = mutations.propose(
-            request = arguments.optString("reason", "Model-directed replacement"),
-            operations = listOf(TaskOperation(OperationKind.REPLACE, arguments.getString("path"), arguments.getString("oldText"), arguments.getString("newText"))),
-            reason = arguments.optString("reason", "Model-directed replacement")
-        )
-        return "PENDING_APPROVAL id=${proposal.id} approvals=${proposal.approvalCount} changes=${proposal.changeSet.changes.size} verification=${proposal.verification.passed}"
-    }
-
-    private fun proposeCreate(arguments: JSONObject): String {
-        val proposal = mutations.propose(
-            request = arguments.optString("reason", "Model-directed file creation"),
-            operations = listOf(TaskOperation(OperationKind.CREATE_FILE, arguments.getString("path"), text = arguments.getString("content"))),
-            reason = arguments.optString("reason", "Model-directed file creation")
-        )
-        return "PENDING_APPROVAL id=${proposal.id} approvals=${proposal.approvalCount} changes=${proposal.changeSet.changes.size} verification=${proposal.verification.passed}"
     }
 
     private fun approveChange(arguments: JSONObject): String {
