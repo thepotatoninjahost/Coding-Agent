@@ -3,7 +3,6 @@ package com.codingagent.ui
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
-import android.provider.Settings
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -13,20 +12,23 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.Button
@@ -34,6 +36,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -51,51 +54,49 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.documentfile.provider.DocumentFile
-import com.codingagent.core.AgentAction
-import com.codingagent.core.AgentActionCategory
-import com.codingagent.core.AgentConstitution
-import com.codingagent.core.AgentKnowledge
 import com.codingagent.core.AgentJournal
+import com.codingagent.core.AgentKnowledge
 import com.codingagent.core.AgentTools
+import com.codingagent.core.AutonomousAgent
 import com.codingagent.core.ChatMessage
 import com.codingagent.core.ChatRole
 import com.codingagent.core.ChatWorkspace
 import com.codingagent.core.CodingAgentRuntime
 import com.codingagent.core.CompositeWebResearchProvider
-import com.codingagent.core.DurableDeepResearchProvider
 import com.codingagent.core.DeepResearchProgress
-import com.codingagent.core.ResearchDisplayState
-import com.codingagent.core.ResearchModeDetector
+import com.codingagent.core.DurableDeepResearchProvider
 import com.codingagent.core.EditorDocument
 import com.codingagent.core.KnowledgeBase
 import com.codingagent.core.LocalStore
 import com.codingagent.core.ModelDownloadProgress
-import com.codingagent.core.NexaModelProvisioner
-import com.codingagent.core.NexaLocalModelGateway
-import com.codingagent.core.ProjectWorkspace
-import com.codingagent.core.ResearchHit
-import com.codingagent.core.TerminalEntry
 import com.codingagent.core.MutationApprovalResult
 import com.codingagent.core.MutationCoordinator
-import com.codingagent.core.AutonomousAgent
+import com.codingagent.core.NexaLocalModelGateway
+import com.codingagent.core.NexaModelProvisioner
+import com.codingagent.core.PendingChangeProposal
+import com.codingagent.core.ProjectWorkspace
+import com.codingagent.core.ResearchDisplayState
+import com.codingagent.core.ResearchHit
+import com.codingagent.core.ResearchModeDetector
+import com.codingagent.core.TerminalEntry
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
-import com.codingagent.core.PendingChangeProposal
 
 private val Ink = Color(0xFFE8EDF2)
 private val Muted = Color(0xFF94A0AE)
@@ -154,9 +155,11 @@ private fun CodingAgentApp(privateDir: File) {
     var localModel by remember { mutableStateOf<NexaLocalModelGateway?>(null) }
     var modelLoadError by remember { mutableStateOf<String?>(null) }
 
+    val density = LocalDensity.current
+    val imeVisible = WindowInsets.ime.getBottom(density) > 0
+
     LaunchedEffect(Unit) {
         withContext(Dispatchers.IO) {
-            // Remount last project so rotate/relaunch does not wipe the workspace.
             store.loadProjectPath()?.let { path ->
                 val dir = File(path)
                 if (dir.isDirectory) {
@@ -275,11 +278,10 @@ private fun CodingAgentApp(privateDir: File) {
         }
         activeJob = scope.launch {
             status = AgentStatus.RESEARCHING
-            detail = "Starting: research query → full-source reads → project context"
+            detail = "Working on your request…"
             val outcome = withContext(Dispatchers.IO) { runCatching { currentChat.send(request) } }
             outcome.onSuccess {
                 chatMessages = currentChat.history()
-                val needsInput = it.result is com.codingagent.core.AgentRuntimeResult.NeedsInput
                 val proposal = it.result?.let { result ->
                     when (result) {
                         is com.codingagent.core.AgentRuntimeResult.NeedsApproval -> agent?.pendingProposals()?.firstOrNull { pending -> pending.id == result.proposalId }
@@ -318,26 +320,51 @@ private fun CodingAgentApp(privateDir: File) {
     Surface(color = Canvas) {
         Scaffold(
             containerColor = Canvas,
-            topBar = { StatusBar(status, detail, workspace != null, modelStatus, modelProgress, onImport = { folderPicker.launch(null) }, onModelImport = { modelPicker.launch(null) }, onStop = ::stopAgent) },
+            topBar = {
+                // Compact status bar so conversation has room
+                CompactStatusBar(status, detail, workspace != null, modelStatus, modelProgress,
+                    onImport = { folderPicker.launch(null) },
+                    onModelImport = { modelPicker.launch(null) },
+                    onStop = ::stopAgent)
+            },
+            // Hide bottom nav when keyboard is open so it does not steal space / leave a blank band
             bottomBar = {
-                androidx.compose.material3.NavigationBar(containerColor = Panel, contentColor = Ink) {
-                    SurfaceTab.entries.forEach { item ->
-                        NavigationBarItem(selected = tab == item, onClick = { tab = item }, icon = { Text(item.label.take(1), fontWeight = FontWeight.Bold) }, label = { Text(item.label, fontSize = 10.sp) })
+                if (!imeVisible) {
+                    NavigationBar(containerColor = Panel, contentColor = Ink) {
+                        SurfaceTab.entries.forEach { item ->
+                            NavigationBarItem(
+                                selected = tab == item,
+                                onClick = { tab = item },
+                                icon = { Text(item.label.take(1), fontWeight = FontWeight.Bold) },
+                                label = { Text(item.label, fontSize = 10.sp) }
+                            )
+                        }
                     }
                 }
             }
         ) { padding ->
             Column(Modifier.fillMaxSize().padding(padding).imePadding()) {
                 when (tab) {
-                    SurfaceTab.CHAT -> ChatSurface(chatMessages, chatInput, { chatInput = it }, ::send, activeJob != null, ::stopAgent, pendingApproval, approvalCount, pendingReason, onApprove = {
-                        val id = pendingProposalId ?: return@ChatSurface
-                        val coordinator = mutationCoordinator ?: return@ChatSurface
-                        when (val result = coordinator.approve(id, ownerVerified = true, ownerLabel = "owner")) {
-                            is MutationApprovalResult.AwaitingSecond -> { approvalCount = result.proposal.approvalCount; detail = "Confirmation ${approvalCount}/2 recorded; transaction remains unapplied" }
-                            is MutationApprovalResult.Applied -> { approvalCount = result.proposal.approvalCount; pendingApproval = false; pendingProposal = null; pendingProposalId = null; status = AgentStatus.RUNNING; detail = "Approved transaction applied; verification required" }
-                            is MutationApprovalResult.Rejected -> { status = AgentStatus.STOPPED; detail = result.reason }
+                    SurfaceTab.CHAT -> ChatSurface(
+                        messages = chatMessages,
+                        input = chatInput,
+                        onInput = { chatInput = it },
+                        onSend = ::send,
+                        busy = activeJob != null,
+                        onStop = ::stopAgent,
+                        pendingApproval = pendingApproval,
+                        approvalCount = approvalCount,
+                        reason = pendingReason,
+                        onApprove = {
+                            val id = pendingProposalId ?: return@ChatSurface
+                            val coordinator = mutationCoordinator ?: return@ChatSurface
+                            when (val result = coordinator.approve(id, ownerVerified = true, ownerLabel = "owner")) {
+                                is MutationApprovalResult.AwaitingSecond -> { approvalCount = result.proposal.approvalCount; detail = "Confirmation ${approvalCount}/2 recorded; transaction remains unapplied" }
+                                is MutationApprovalResult.Applied -> { approvalCount = result.proposal.approvalCount; pendingApproval = false; pendingProposal = null; pendingProposalId = null; status = AgentStatus.RUNNING; detail = "Approved transaction applied; verification required" }
+                                is MutationApprovalResult.Rejected -> { status = AgentStatus.STOPPED; detail = result.reason }
+                            }
                         }
-                    })
+                    )
                     SurfaceTab.FILES -> FilesSurface(fileList, projectQuery, { projectQuery = it }, editorPath, { editorPath = it }, editorContent, { editorContent = it }, editorDocument, tools, mutationCoordinator, onStatus = { status = it.first; detail = it.second })
                     SurfaceTab.REVIEW -> ReviewSurface(pendingApproval, approvalCount, pendingReason, onApprove = {
                         val id = pendingProposalId ?: return@ReviewSurface
@@ -350,28 +377,28 @@ private fun CodingAgentApp(privateDir: File) {
                     }, onReject = { pendingProposalId?.let { mutationCoordinator?.reject(it) }; pendingProposal = null; pendingApproval = false; pendingProposalId = null; approvalCount = 0; status = AgentStatus.STOPPED; detail = "Proposed changes rejected" })
                     SurfaceTab.TERMINAL -> TerminalSurface(terminalCommand, { terminalCommand = it }, terminalHistory, tools != null, onRun = { command -> activeJob = scope.launch(Dispatchers.IO) { status = AgentStatus.RUNNING; tools?.terminal(command.trim().split(Regex("\\s+")).filter(String::isNotBlank))?.let { terminalHistory = (terminalHistory + it).takeLast(40) }; status = AgentStatus.READY; detail = "Terminal finished" } }, onStop = ::stopAgent)
                     SurfaceTab.RESEARCH -> ResearchSurface(researchQuery, { researchQuery = it }, researchHits, researchError, researchState, onSearch = { query ->
-                store.saveLastResearchQuery(query)
-                activeJob = scope.launch(Dispatchers.IO) {
-                    status = AgentStatus.RESEARCHING
-                    detail = "Reading distinct full sources"
-                    val researchRoot = workspace?.projectRoot()?.resolve(".coding-agent/research") ?: privateDir.resolve(".coding-agent/research")
-                    val provider = DurableDeepResearchProvider(researchRoot)
-                    val result = runCatching { provider.deepResearch(query, 12, ResearchModeDetector.detect(query)) { progress -> researchState = progress.toDisplayState() } }
-                    result.onSuccess { session ->
-                        researchHits = session.sources.map { source -> com.codingagent.core.ResearchHit(source.title, source.url, source.content.take(600)) }
-                        researchState = researchState.copy(phase = "learned", completed = session.sources.size, total = session.sources.size, fullSources = session.sources.size, laneCount = session.sources.map { it.lane }.distinct().size, wordCount = session.sources.sumOf { it.wordCount }, codeExamples = session.sources.sumOf { it.codeExamples.size }, canSend = true)
-                        status = AgentStatus.READY
-                        detail = "Learned ${session.sources.size} distinct full sources"
-                    }.onFailure { error ->
-                        val message = error.message.orEmpty().ifBlank { error.javaClass.simpleName }
-                        researchError = message
-                        researchState = researchState.copy(phase = "blocked", canSend = true)
-                        status = AgentStatus.STOPPED
-                        detail = "Research failed: ${message.take(140)}"
-                    }
-                    activeJob = null
-                }
-            })
+                        store.saveLastResearchQuery(query)
+                        activeJob = scope.launch(Dispatchers.IO) {
+                            status = AgentStatus.RESEARCHING
+                            detail = "Reading distinct full sources"
+                            val researchRoot = workspace?.projectRoot()?.resolve(".coding-agent/research") ?: privateDir.resolve(".coding-agent/research")
+                            val provider = DurableDeepResearchProvider(researchRoot)
+                            val result = runCatching { provider.deepResearch(query, 12, ResearchModeDetector.detect(query)) { progress -> researchState = progress.toDisplayState() } }
+                            result.onSuccess { session ->
+                                researchHits = session.sources.map { source -> ResearchHit(source.title, source.url, source.content.take(600)) }
+                                researchState = researchState.copy(phase = "learned", completed = session.sources.size, total = session.sources.size, fullSources = session.sources.size, laneCount = session.sources.map { it.lane }.distinct().size, wordCount = session.sources.sumOf { it.wordCount }, codeExamples = session.sources.sumOf { it.codeExamples.size }, canSend = true)
+                                status = AgentStatus.READY
+                                detail = "Learned ${session.sources.size} distinct full sources"
+                            }.onFailure { error ->
+                                val message = error.message.orEmpty().ifBlank { error.javaClass.simpleName }
+                                researchError = message
+                                researchState = researchState.copy(phase = "blocked", canSend = true)
+                                status = AgentStatus.STOPPED
+                                detail = "Research failed: ${message.take(140)}"
+                            }
+                            activeJob = null
+                        }
+                    })
                 }
             }
         }
@@ -379,89 +406,218 @@ private fun CodingAgentApp(privateDir: File) {
 }
 
 @Composable
-private fun StatusBar(status: AgentStatus, detail: String, mounted: Boolean, modelStatus: String, modelProgress: ModelDownloadProgress?, onImport: () -> Unit, onModelImport: () -> Unit, onStop: () -> Unit) {
-    Column(Modifier.fillMaxWidth().background(Panel).padding(horizontal = 16.dp, vertical = 12.dp)) {
+private fun CompactStatusBar(
+    status: AgentStatus,
+    detail: String,
+    mounted: Boolean,
+    modelStatus: String,
+    modelProgress: ModelDownloadProgress?,
+    onImport: () -> Unit,
+    onModelImport: () -> Unit,
+    onStop: () -> Unit
+) {
+    Column(Modifier.fillMaxWidth().background(Panel).padding(horizontal = 12.dp, vertical = 8.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text("CODING AGENT", color = Ink, fontSize = 20.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-                Text(if (mounted) "Galaxy S25 // project mounted" else "Galaxy S25 // no project", color = Muted, fontSize = 12.sp)
-                Text("Model: $modelStatus", color = Muted, fontSize = 11.sp, maxLines = 4)
+                Text("CODING AGENT", color = Ink, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                Text(
+                    if (mounted) "project mounted · $modelStatus" else "no project · $modelStatus",
+                    color = Muted,
+                    fontSize = 11.sp,
+                    maxLines = 2
+                )
             }
-            if (status != AgentStatus.READY && status != AgentStatus.STOPPED) TextButton(onClick = onStop) { Text("Stop", color = Danger) }
-            TextButton(onClick = onModelImport) { Text("Model", color = Blue, fontWeight = FontWeight.Bold) }
-            TextButton(onClick = onImport) { Text(if (mounted) "Switch" else "Import", color = Accent, fontWeight = FontWeight.Bold) }
+            if (status != AgentStatus.READY && status != AgentStatus.STOPPED) {
+                TextButton(onClick = onStop) { Text("Stop", color = Danger, fontSize = 12.sp) }
+            }
+            TextButton(onClick = onModelImport) { Text("Model", color = Blue, fontWeight = FontWeight.Bold, fontSize = 12.sp) }
+            TextButton(onClick = onImport) { Text(if (mounted) "Switch" else "Import", color = Accent, fontWeight = FontWeight.Bold, fontSize = 12.sp) }
         }
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(4.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(9.dp).background(status.color, RoundedCornerShape(50)))
-            Spacer(Modifier.width(8.dp))
-            Text(status.label, color = status.color, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-            Spacer(Modifier.width(8.dp))
-            Text(detail, color = Muted, fontSize = 12.sp, maxLines = 1)
+            Box(Modifier.size(8.dp).background(status.color, RoundedCornerShape(50)))
+            Spacer(Modifier.width(6.dp))
+            Text(status.label, color = status.color, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+            Spacer(Modifier.width(6.dp))
+            Text(detail, color = Muted, fontSize = 11.sp, maxLines = 1)
         }
         if (status == AgentStatus.RESEARCHING || status == AgentStatus.RUNNING || modelProgress?.phase == "downloading") {
-            Spacer(Modifier.height(8.dp))
-            LinearProgressIndicator(progress = { ((modelProgress?.percent ?: 0) / 100f).coerceIn(0f, 1f) }, Modifier.fillMaxWidth(), color = status.color, trackColor = Line)
+            Spacer(Modifier.height(4.dp))
+            LinearProgressIndicator(
+                progress = { ((modelProgress?.percent ?: 0) / 100f).coerceIn(0f, 1f) },
+                Modifier.fillMaxWidth(),
+                color = status.color,
+                trackColor = Line
+            )
         }
     }
 }
 
 @Composable
-private fun ChatSurface(messages: List<ChatMessage>, input: String, onInput: (String) -> Unit, onSend: () -> Unit, busy: Boolean, onStop: () -> Unit, pendingApproval: Boolean, approvalCount: Int, reason: String, onApprove: () -> Unit) {
+private fun ChatSurface(
+    messages: List<ChatMessage>,
+    input: String,
+    onInput: (String) -> Unit,
+    onSend: () -> Unit,
+    busy: Boolean,
+    onStop: () -> Unit,
+    pendingApproval: Boolean,
+    approvalCount: Int,
+    reason: String,
+    onApprove: () -> Unit
+) {
+    val listState = rememberLazyListState()
+    // Keep newest messages visible above the input
+    LaunchedEffect(messages.size) {
+        if (messages.isNotEmpty()) {
+            listState.animateScrollToItem(messages.lastIndex)
+        }
+    }
+
     Column(Modifier.fillMaxSize()) {
-        LazyColumn(Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            if (messages.isEmpty()) item { EmptyState("Start with a real request", "The agent researches first, inspects the project, then proposes safe changes.") }
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.weight(1f).fillMaxWidth(),
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            if (messages.isEmpty()) {
+                item {
+                    Text(
+                        "Type a request in plain English about your project.\nThe agent will look at your files and reply here.",
+                        color = Muted,
+                        fontSize = 14.sp,
+                        modifier = Modifier.padding(vertical = 24.dp)
+                    )
+                }
+            }
             items(messages, key = { it.id }) { ChatBubble(it) }
         }
+
         if (pendingApproval) ApprovalCard(approvalCount, reason, onApprove)
-        if (busy) Text("Agent is working. Send remains available; queued follow-ups: ${if (input.isBlank()) 0 else 1}.", color = Blue, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
-        Row(Modifier.fillMaxWidth().background(Panel).padding(12.dp), verticalAlignment = Alignment.Bottom) {
-            OutlinedTextField(input, onInput, Modifier.weight(1f), placeholder = { Text("Ask for a fix, feature, refactor, or experiment…", color = Muted) }, minLines = 2, maxLines = 5, colors = fieldColors())
-            Spacer(Modifier.width(8.dp))
-            Button(onClick = onSend, enabled = input.isNotBlank(), modifier = Modifier.height(56.dp), colors = ButtonDefaults.buttonColors(containerColor = Accent, contentColor = Canvas)) { Text("Send", fontWeight = FontWeight.Bold) }
-            if (busy) TextButton(onClick = onStop) { Text("Stop", color = Danger) }
+        if (busy) {
+            Text(
+                "Agent is working…",
+                color = Blue,
+                fontSize = 12.sp,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+            )
+        }
+
+        // Large multi-line input that stays above the keyboard
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .background(Panel)
+                .padding(horizontal = 12.dp, vertical = 10.dp)
+        ) {
+            OutlinedTextField(
+                value = input,
+                onValueChange = onInput,
+                modifier = Modifier.fillMaxWidth(),
+                placeholder = { Text("Describe what you want fixed or added…", color = Muted) },
+                minLines = 3,
+                maxLines = 6,
+                colors = fieldColors()
+            )
+            Spacer(Modifier.height(8.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (busy) {
+                    TextButton(onClick = onStop) { Text("Stop", color = Danger) }
+                    Spacer(Modifier.width(8.dp))
+                }
+                Button(
+                    onClick = onSend,
+                    enabled = input.isNotBlank(),
+                    modifier = Modifier.weight(1f).height(48.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Accent, contentColor = Canvas)
+                ) { Text("Send", fontWeight = FontWeight.Bold) }
+            }
         }
     }
 }
 
 @Composable
 private fun ApprovalCard(approvalCount: Int, reason: String, onApprove: () -> Unit) {
-    Card(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFF322B19)), border = androidx.compose.foundation.BorderStroke(1.dp, Amber)) {
+    Card(
+        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF322B19)),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Amber)
+    ) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("CODE CHANGE REVIEW", color = Amber, fontWeight = FontWeight.Bold)
             Text(reason, color = Ink, fontSize = 13.sp)
             Text("Two explicit approvals are required before a code transaction can proceed.", color = Muted, fontSize = 12.sp)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("${approvalCount}/2", color = Muted, modifier = Modifier.weight(1f))
-                Button(onClick = onApprove, colors = ButtonDefaults.buttonColors(containerColor = Amber, contentColor = Canvas)) { Text(if (approvalCount == 0) "Confirm" else "Confirm again") }
+                Button(
+                    onClick = onApprove,
+                    colors = ButtonDefaults.buttonColors(containerColor = Amber, contentColor = Canvas)
+                ) { Text(if (approvalCount == 0) "Confirm" else "Confirm again") }
             }
         }
     }
 }
 
 @Composable
-private fun FilesSurface(files: List<String>, query: String, onQuery: (String) -> Unit, path: String, onPath: (String) -> Unit, content: String, onContent: (String) -> Unit, document: EditorDocument?, tools: AgentTools?, mutationCoordinator: MutationCoordinator?, onStatus: (Pair<AgentStatus, String>) -> Unit) {
+private fun FilesSurface(
+    files: List<String>,
+    query: String,
+    onQuery: (String) -> Unit,
+    path: String,
+    onPath: (String) -> Unit,
+    content: String,
+    onContent: (String) -> Unit,
+    document: EditorDocument?,
+    tools: AgentTools?,
+    mutationCoordinator: MutationCoordinator?,
+    onStatus: (Pair<AgentStatus, String>) -> Unit
+) {
     var showEditor by remember { mutableStateOf(false) }
     val filtered = files.filter { it.contains(query.trim(), ignoreCase = true) }
     Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text("PROJECT FILES", color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold)
         OutlinedTextField(query, onQuery, Modifier.fillMaxWidth(), placeholder = { Text("Filter files", color = Muted) }, singleLine = true, colors = fieldColors())
         if (showEditor) {
-            Row(verticalAlignment = Alignment.CenterVertically) { Text(path, color = Blue, modifier = Modifier.weight(1f), fontFamily = FontFamily.Monospace); TextButton(onClick = { showEditor = false }) { Text("Close", color = Muted) } }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(path, color = Blue, modifier = Modifier.weight(1f), fontFamily = FontFamily.Monospace)
+                TextButton(onClick = { showEditor = false }) { Text("Close", color = Muted) }
+            }
             CodeEditor(content, onContent, path)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = { onContent(document?.content.orEmpty()) }, colors = ButtonDefaults.buttonColors(containerColor = PanelRaised)) { Text("Revert", color = Ink) }
-                Button(onClick = { runCatching {
-                    val coordinator = mutationCoordinator ?: error("Project mutation coordinator is unavailable")
-                    val proposal = tools?.proposeSave(path, content, coordinator) ?: error("Project tools are unavailable")
-                    onStatus(AgentStatus.APPROVAL to "Save proposed; confirm twice in Review (${proposal.id.take(8)})")
-                }.onFailure { onStatus(AgentStatus.STOPPED to (it.message ?: "Save proposal failed")) } }, enabled = document != null && document.content != content && mutationCoordinator != null, colors = ButtonDefaults.buttonColors(containerColor = Accent, contentColor = Canvas)) { Text("Propose save") }
+                Button(
+                    onClick = {
+                        runCatching {
+                            val coordinator = mutationCoordinator ?: error("Project mutation coordinator is unavailable")
+                            val proposal = tools?.proposeSave(path, content, coordinator) ?: error("Project tools are unavailable")
+                            onStatus(AgentStatus.APPROVAL to "Save proposed; confirm twice in Review (${proposal.id.take(8)})")
+                        }.onFailure { onStatus(AgentStatus.STOPPED to (it.message ?: "Save proposal failed")) }
+                    },
+                    enabled = document != null && document.content != content && mutationCoordinator != null,
+                    colors = ButtonDefaults.buttonColors(containerColor = Accent, contentColor = Canvas)
+                ) { Text("Propose save") }
             }
         } else {
             if (filtered.isEmpty()) EmptyState("No files", "Import a project or change the filter.")
             LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 items(filtered, key = { it }) { file ->
-                    Row(Modifier.fillMaxWidth().background(Panel, RoundedCornerShape(12.dp)).clickable { runCatching { val loaded = tools?.read(file) ?: return@runCatching; onPath(file); onContent(loaded.content); showEditor = true; onStatus(AgentStatus.READY to "Opened $file") }.onFailure { onStatus(AgentStatus.STOPPED to "Open failed") } }.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .background(Panel, RoundedCornerShape(12.dp))
+                            .clickable {
+                                runCatching {
+                                    val loaded = tools?.read(file) ?: return@runCatching
+                                    onPath(file)
+                                    onContent(loaded.content)
+                                    showEditor = true
+                                    onStatus(AgentStatus.READY to "Opened $file")
+                                }.onFailure { onStatus(AgentStatus.STOPPED to "Open failed") }
+                            }
+                            .padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         Text("{ }", color = Blue, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
                         Spacer(Modifier.width(12.dp))
                         Text(file, color = Ink, fontFamily = FontFamily.Monospace, fontSize = 13.sp)
@@ -475,13 +631,26 @@ private fun FilesSurface(files: List<String>, query: String, onQuery: (String) -
 @Composable
 private fun CodeEditor(content: String, onContent: (String) -> Unit, path: String) {
     val highlighted = remember(content, path) { highlightCode(content) }
-    Box(Modifier.fillMaxWidth().height(360.dp).background(Color(0xFF0F1319), RoundedCornerShape(12.dp)).border(1.dp, Line, RoundedCornerShape(12.dp)).padding(12.dp)) {
-        BasicTextField(value = content, onValueChange = onContent, modifier = Modifier.fillMaxSize(), textStyle = TextStyle(color = Color.Transparent, fontFamily = FontFamily.Monospace, fontSize = 13.sp, lineHeight = 19.sp), decorationBox = { inner ->
-            Box(Modifier.fillMaxSize()) {
-                Text(highlighted, fontFamily = FontFamily.Monospace, fontSize = 13.sp, lineHeight = 19.sp)
-                inner()
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .height(360.dp)
+            .background(Color(0xFF0F1319), RoundedCornerShape(12.dp))
+            .border(1.dp, Line, RoundedCornerShape(12.dp))
+            .padding(12.dp)
+    ) {
+        BasicTextField(
+            value = content,
+            onValueChange = onContent,
+            modifier = Modifier.fillMaxSize(),
+            textStyle = TextStyle(color = Color.Transparent, fontFamily = FontFamily.Monospace, fontSize = 13.sp, lineHeight = 19.sp),
+            decorationBox = { inner ->
+                Box(Modifier.fillMaxSize()) {
+                    Text(highlighted, fontFamily = FontFamily.Monospace, fontSize = 13.sp, lineHeight = 19.sp)
+                    inner()
+                }
             }
-        })
+        )
     }
 }
 
@@ -519,30 +688,69 @@ private fun ReviewSurface(pending: Boolean, approvals: Int, reason: String, onAp
 }
 
 @Composable
-private fun TerminalSurface(command: String, onCommand: (String) -> Unit, history: List<TerminalEntry>, enabled: Boolean, onRun: (String) -> Unit, onStop: () -> Unit) {
+private fun TerminalSurface(
+    command: String,
+    onCommand: (String) -> Unit,
+    history: List<TerminalEntry>,
+    enabled: Boolean,
+    onRun: (String) -> Unit,
+    onStop: () -> Unit
+) {
     Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) { Text("TERMINAL", color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f)); TextButton(onClick = onStop) { Text("Stop", color = Danger) } }
-        OutlinedTextField(command, onCommand, Modifier.fillMaxWidth(), placeholder = { Text("./gradlew testDebugUnitTest", color = Muted) }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii), colors = fieldColors())
-        Button(onClick = { onRun(command) }, enabled = enabled && command.isNotBlank(), colors = ButtonDefaults.buttonColors(containerColor = Accent, contentColor = Canvas)) { Text("Run") }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("TERMINAL", color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+            TextButton(onClick = onStop) { Text("Stop", color = Danger) }
+        }
+        OutlinedTextField(
+            command,
+            onCommand,
+            Modifier.fillMaxWidth(),
+            placeholder = { Text("./gradlew testDebugUnitTest", color = Muted) },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
+            colors = fieldColors()
+        )
+        Button(
+            onClick = { onRun(command) },
+            enabled = enabled && command.isNotBlank(),
+            colors = ButtonDefaults.buttonColors(containerColor = Accent, contentColor = Canvas)
+        ) { Text("Run") }
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(history, key = { "${it.command}-${it.stdout.hashCode()}" }) { entry ->
-                Text("$ ${entry.command}\n${entry.stdout}${entry.stderr}\nexit=${entry.exitCode}${if (entry.timedOut) " timeout" else ""}", Modifier.fillMaxWidth().background(Color(0xFF0F1319), RoundedCornerShape(10.dp)).padding(12.dp), color = if (entry.exitCode == 0) Accent else Danger, fontFamily = FontFamily.Monospace, fontSize = 12.sp)
+                Text(
+                    "$ ${entry.command}\n${entry.stdout}${entry.stderr}\nexit=${entry.exitCode}${if (entry.timedOut) " timeout" else ""}",
+                    Modifier.fillMaxWidth().background(Color(0xFF0F1319), RoundedCornerShape(10.dp)).padding(12.dp),
+                    color = if (entry.exitCode == 0) Accent else Danger,
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 12.sp
+                )
             }
         }
     }
 }
 
-private fun DeepResearchProgress.toDisplayState() = ResearchDisplayState(stage, completed, total, successful, failed, canSend = false)
+private fun DeepResearchProgress.toDisplayState() =
+    ResearchDisplayState(stage, completed, total, successful, failed, canSend = false)
 
 @Composable
-private fun ResearchSurface(query: String, onQuery: (String) -> Unit, hits: List<ResearchHit>, error: String?, state: ResearchDisplayState, onSearch: (String) -> Unit) {
+private fun ResearchSurface(
+    query: String,
+    onQuery: (String) -> Unit,
+    hits: List<ResearchHit>,
+    error: String?,
+    state: ResearchDisplayState,
+    onSearch: (String) -> Unit
+) {
     Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text("WEB RESEARCH", color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold)
         Text("Type a full sentence in plain English. You can see the whole text while typing.", color = Muted, fontSize = 13.sp)
-        Text("${state.phase.uppercase()}  ${state.completed}/${state.total} sources  •  full=${state.fullSources}  failed=${state.failedSources}  lanes=${state.laneCount}  words=${state.wordCount}  code=${state.codeExamples}", color = if (state.phase == "blocked") Danger else Blue, fontFamily = FontFamily.Monospace, fontSize = 12.sp)
-        Text(if (state.phase == "blocked") "No coding context was sent to the model. Fix the network/source problem and run research again." else "The model is not called until the full source target is reached.", color = Muted, fontSize = 11.sp)
+        Text(
+            "${state.phase.uppercase()}  ${state.completed}/${state.total} sources  •  full=${state.fullSources}  failed=${state.failedSources}",
+            color = if (state.phase == "blocked") Danger else Blue,
+            fontFamily = FontFamily.Monospace,
+            fontSize = 12.sp
+        )
 
-        // Full-width multi-line input so the entire sentence is visible while typing on phone
         OutlinedTextField(
             value = query,
             onValueChange = onQuery,
@@ -577,9 +785,22 @@ private fun ResearchSurface(query: String, onQuery: (String) -> Unit, hits: List
 @Composable
 private fun ChatBubble(message: ChatMessage) {
     val user = message.role == ChatRole.USER
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = if (user) Arrangement.End else Arrangement.Start) {
-        Column(Modifier.fillMaxWidth(0.88f).background(if (user) Color(0xFF263B29) else Panel, RoundedCornerShape(14.dp)).padding(12.dp)) {
-            Text(if (user) "YOU" else if (message.role == ChatRole.AGENT) "AGENT" else "SYSTEM", color = if (user) Accent else Blue, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+    Row(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = if (user) Arrangement.End else Arrangement.Start
+    ) {
+        Column(
+            Modifier
+                .fillMaxWidth(0.92f)
+                .background(if (user) Color(0xFF263B29) else Panel, RoundedCornerShape(14.dp))
+                .padding(12.dp)
+        ) {
+            Text(
+                if (user) "YOU" else if (message.role == ChatRole.AGENT) "AGENT" else "SYSTEM",
+                color = if (user) Accent else Blue,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold
+            )
             Spacer(Modifier.height(4.dp))
             Text(message.content, color = Ink, fontSize = 14.sp, lineHeight = 20.sp)
         }
@@ -588,11 +809,24 @@ private fun ChatBubble(message: ChatMessage) {
 
 @Composable
 private fun EmptyState(title: String, body: String) {
-    Column(Modifier.fillMaxWidth().padding(vertical = 28.dp), horizontalAlignment = Alignment.CenterHorizontally) { Text(title, color = Ink, fontWeight = FontWeight.Bold, fontSize = 17.sp); Spacer(Modifier.height(6.dp)); Text(body, color = Muted, fontSize = 13.sp) }
+    Column(
+        Modifier.fillMaxWidth().padding(vertical = 28.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(title, color = Ink, fontWeight = FontWeight.Bold, fontSize = 17.sp)
+        Spacer(Modifier.height(6.dp))
+        Text(body, color = Muted, fontSize = 13.sp)
+    }
 }
 
 @Composable
-private fun fieldColors() = androidx.compose.material3.OutlinedTextFieldDefaults.colors(focusedTextColor = Ink, unfocusedTextColor = Ink, focusedBorderColor = Accent, unfocusedBorderColor = Line, cursorColor = Accent)
+private fun fieldColors() = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+    focusedTextColor = Ink,
+    unfocusedTextColor = Ink,
+    focusedBorderColor = Accent,
+    unfocusedBorderColor = Line,
+    cursorColor = Accent
+)
 
 private fun importModelPackage(context: Context, privateDir: File, uri: Uri): String {
     val source = DocumentFile.fromTreeUri(context, uri) ?: error("Model folder is unavailable")
@@ -624,7 +858,9 @@ private fun copyDocumentTree(context: Context, source: DocumentFile, destination
             require(target.mkdirs()) { "Could not create ${target.path}" }
             copyDocumentTree(context, child, target)
         } else if (child.isFile) {
-            context.contentResolver.openInputStream(child.uri)?.use { input -> target.outputStream().use { output -> input.copyTo(output) } } ?: error("Could not read ${child.uri}")
+            context.contentResolver.openInputStream(child.uri)?.use { input ->
+                target.outputStream().use { output -> input.copyTo(output) }
+            } ?: error("Could not read ${child.uri}")
         }
     }
 }
