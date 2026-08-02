@@ -6,6 +6,14 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class OperationalAgentTest {
+    private val emptyKnowledge = object : AgentKnowledge {
+        override fun search(query: String, limit: Int): List<KnowledgeHit> = emptyList()
+    }
+
+    private val emptyResearch = object : WebResearchProvider {
+        override fun search(query: String, limit: Int): ResearchResult = ResearchResult(query, emptyList())
+    }
+
     @Test fun editorRoundTripUsesProjectRelativePathsAndTransactions() {
         val root = Files.createTempDirectory("agent-editor").toFile()
         root.resolve("src").mkdirs()
@@ -28,31 +36,71 @@ class OperationalAgentTest {
         val root = Files.createTempDirectory("agent-orchestrator").toFile()
         root.resolve("Main.kt").writeText("fun main() = 1\n")
         val workspace = ProjectWorkspace(root)
-        val runtime = CodingAgentRuntime(workspace, object : AgentKnowledge {
-            override fun search(query: String, limit: Int): List<KnowledgeHit> = emptyList()
-        }, AgentJournal(root))
-        val events = AgentOrchestrator(runtime, TerminalSession(root), object : WebResearchProvider {
-            override fun search(query: String, limit: Int): ResearchResult = ResearchResult(query, emptyList())
-        }).execute("inspect the project")
+        val runtime = CodingAgentRuntime(workspace, emptyKnowledge, AgentJournal(root))
+        val events = AgentOrchestrator(runtime, TerminalSession(root), emptyResearch).execute("inspect the project")
         assertTrue(events.any { it is AgentExecutionEvent.Phase && it.name == "INTAKE" })
         assertTrue(events.last() is AgentExecutionEvent.Completed)
     }
 
-    @Test fun plainEnglishDebugPassesOrchestratorIntakeGate() {
+    @Test fun plainEnglishDebugWithoutModelNeedsInputOrFailsClosed() {
         val root = Files.createTempDirectory("agent-plain").toFile()
         root.resolve("Main.kt").writeText("fun main() = 1\n")
         val workspace = ProjectWorkspace(root)
-        // No model gateway: execution will fail later, but intake must not block plain-English debug goals.
-        val runtime = CodingAgentRuntime(workspace, object : AgentKnowledge {
-            override fun search(query: String, limit: Int): List<KnowledgeHit> = emptyList()
-        }, AgentJournal(root))
-        val events = AgentOrchestrator(runtime, TerminalSession(root), object : WebResearchProvider {
-            override fun search(query: String, limit: Int): ResearchResult = ResearchResult(query, emptyList())
-        }).execute("fix the login bug")
-        assertTrue(events.none { it is AgentExecutionEvent.NeedsInput })
+        val runtime = CodingAgentRuntime(workspace, emptyKnowledge, AgentJournal(root))
+        val events = AgentOrchestrator(runtime, TerminalSession(root), emptyResearch).execute("fix the login bug")
+        assertTrue(events.none { it is AgentExecutionEvent.NeedsInput && events.indexOf(it) == 0 })
         assertTrue(events.any { it is AgentExecutionEvent.Phase && it.name == "EXECUTE" })
-        // Without a model gateway the runtime fails closed — that is expected, not an intake failure.
-        assertTrue(events.last() is AgentExecutionEvent.Failed)
+        // Vague offline edit: NeedsInput (ask for explicit op / model) or Failed — never silent write.
+        val terminal = events.last()
+        assertTrue(terminal is AgentExecutionEvent.NeedsInput || terminal is AgentExecutionEvent.Failed)
+        assertEquals("fun main() = 1\n", root.resolve("Main.kt").readText())
+    }
+
+    @Test fun offlineExplicitReplaceStagesProposalWithoutModel() {
+        val root = Files.createTempDirectory("agent-offline-replace").toFile()
+        root.resolve("src").mkdirs()
+        root.resolve("src/Main.kt").writeText("fun main() = 1\n")
+        val workspace = ProjectWorkspace(root)
+        val runtime = CodingAgentRuntime(workspace, emptyKnowledge, AgentJournal(root))
+        val result = runtime.execute("replace = 1 with = 2 in src/Main.kt")
+        assertTrue(result is AgentRuntimeResult.NeedsApproval)
+        result as AgentRuntimeResult.NeedsApproval
+        assertTrue(result.proposalId.isNotBlank())
+        assertEquals("fun main() = 1\n", root.resolve("src/Main.kt").readText())
+
+        assertTrue(runtime.approveProposal(result.proposalId, true, "owner") is MutationApprovalResult.AwaitingSecond)
+        assertTrue(runtime.approveProposal(result.proposalId, true, "owner") is MutationApprovalResult.Applied)
+        assertEquals("fun main() = 2\n", root.resolve("src/Main.kt").readText())
+    }
+
+    @Test fun offlineCreateSynthesisStagesProposalWithoutModel() {
+        val root = Files.createTempDirectory("agent-offline-create").toFile()
+        val workspace = ProjectWorkspace(root)
+        val runtime = CodingAgentRuntime(workspace, emptyKnowledge, AgentJournal(root))
+        val result = runtime.execute("create a Kotlin helper in src/Helper.kt")
+        assertTrue(result is AgentRuntimeResult.NeedsApproval)
+        result as AgentRuntimeResult.NeedsApproval
+        assertTrue(result.proposalId.isNotBlank())
+        assertTrue(!root.resolve("src/Helper.kt").exists())
+
+        assertTrue(runtime.approveProposal(result.proposalId, true, "owner") is MutationApprovalResult.AwaitingSecond)
+        assertTrue(runtime.approveProposal(result.proposalId, true, "owner") is MutationApprovalResult.Applied)
+        val written = root.resolve("src/Helper.kt").readText()
+        assertTrue(written.contains("class Helper"))
+        assertTrue(written.contains("fun run"))
+    }
+
+    @Test fun offlineExplicitCreateThroughOrchestratorIsApprovalRequired() {
+        val root = Files.createTempDirectory("agent-offline-orch").toFile()
+        val workspace = ProjectWorkspace(root)
+        val runtime = CodingAgentRuntime(workspace, emptyKnowledge, AgentJournal(root))
+        val events = AgentOrchestrator(runtime, TerminalSession(root), emptyResearch)
+            .execute("create file src/New.kt with fun answer() = 42")
+        val terminal = events.last()
+        assertTrue(terminal is AgentExecutionEvent.ApprovalRequired)
+        terminal as AgentExecutionEvent.ApprovalRequired
+        assertTrue(terminal.proposalId.isNotBlank())
+        assertTrue(!root.resolve("src/New.kt").exists())
     }
 
     @Test fun orchestratorSurfacesApprovalRequiredInsteadOfFailed() {
@@ -69,30 +117,26 @@ class OperationalAgentTest {
         }
         val runtime = CodingAgentRuntime(
             workspace,
-            object : AgentKnowledge {
-                override fun search(query: String, limit: Int): List<KnowledgeHit> = emptyList()
-            },
+            emptyKnowledge,
             AgentJournal(root),
             modelGateway = gateway
         )
-        val events = AgentOrchestrator(runtime, TerminalSession(root), object : WebResearchProvider {
-            override fun search(query: String, limit: Int): ResearchResult = ResearchResult(query, emptyList())
-        }).execute("replace = 1 with = 2 in src/Main.kt")
+        val events = AgentOrchestrator(runtime, TerminalSession(root), emptyResearch)
+            .execute("replace = 1 with = 2 in src/Main.kt")
         val approval = events.last()
         assertTrue(approval is AgentExecutionEvent.ApprovalRequired)
         approval as AgentExecutionEvent.ApprovalRequired
         assertTrue(approval.proposalId.isNotBlank())
         assertTrue(approval.question.contains("confirm", ignoreCase = true))
-        // File must remain unchanged until owner approvals.
         assertEquals("fun main() = 1\n", root.resolve("src/Main.kt").readText())
+        // Single proposal only (no double-stage).
+        assertEquals(1, runtime.pendingProposals().size)
     }
 
     @Test fun terminalOrchestratorSurfacesExitCode() {
         val root = Files.createTempDirectory("agent-terminal").toFile()
         val workspace = ProjectWorkspace(root)
-        val runtime = CodingAgentRuntime(workspace, object : AgentKnowledge {
-            override fun search(query: String, limit: Int): List<KnowledgeHit> = emptyList()
-        }, AgentJournal(root))
+        val runtime = CodingAgentRuntime(workspace, emptyKnowledge, AgentJournal(root))
         val output = AgentOrchestrator(runtime, TerminalSession(root), DuckDuckGoResearchProvider()).runTerminal("printf ready; exit 3")
         assertTrue(output.text.contains("exit=3"))
     }

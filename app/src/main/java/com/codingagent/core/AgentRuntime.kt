@@ -46,11 +46,18 @@ class CodingAgentRuntime(
         val plan = AgentPlanner(workspace).plan(intake)
         val planning = PlanningLoop(plan, config.maxPlanningIterations, config.maxReplans)
         val toolPlan = ToolSelector().select(intake)
-        val tools = ToolSelectionLoop(toolPlan, config.maxToolIterations)
         events += "planning initialized with ${plan.steps.size} modular steps"
         events += "tool plan initialized with ${toolPlan.tools.size} selected tools"
-        if (!intake.executionReady) return needsInput(taskId, request, plan, emptyList(), events, intake.clarificationQuestion ?: "Clarify the coding request before execution.")
-        val model = modelGateway ?: return failure(taskId, request, plan, emptyList(), "The coding model is not loaded; coding execution is blocked.", events)
+        if (!intake.executionReady) {
+            return needsInput(taskId, request, plan, emptyList(), events, intake.clarificationQuestion ?: "Clarify the coding request before execution.")
+        }
+
+        // Offline mutation staging: no model required when ops are explicit or synthesizable.
+        if (modelGateway == null) {
+            return executeOfflineMutation(taskId, request, intake, plan, events)
+        }
+
+        val model = modelGateway
 
         // Research is best-effort only. Local project evidence is enough to proceed.
         var researchEvidence = ""
@@ -90,8 +97,8 @@ class CodingAgentRuntime(
             events += "plan step complete: ${current.phase}"
         }
         var appliedChanges = emptyList<ChangeRecord>()
-        var pendingChangeSet: ChangeSet? = null
-        var pendingChangeReason: String? = null
+        var pendingProposalId: String? = null
+        var pendingChanges = emptyList<ChangeRecord>()
         for (turn in 0 until config.maxToolIterations) {
             val response = model.stream(
                 ModelRequest(
@@ -106,8 +113,7 @@ class CodingAgentRuntime(
                 is ModelResponse.Failure -> return failure(taskId, request, plan, appliedChanges, "Model failed: ${response.message}", events)
                 is ModelResponse.Text -> {
                     events += "model completed without further tools"
-                    if (requiresEdit(intake) && appliedChanges.isEmpty() && pendingChangeSet == null) {
-                        // Allow text-only answers for guidance; do not hard-fail if the model explained instead of editing.
+                    if (requiresEdit(intake) && appliedChanges.isEmpty() && pendingProposalId == null) {
                         events += "no staged edit; returning model answer"
                     }
                     break
@@ -119,9 +125,10 @@ class CodingAgentRuntime(
                     transcript += ModelMessage("assistant", response.thought.ifBlank { "Calling ${response.name}" }, response.callId, response.name, response.arguments)
                     transcript += ModelMessage("tool", toolResult.output, response.callId)
                     events += "tool result: ${toolResult.output.take(500)}"
-                    if (toolResult.changeSet != null) {
-                        pendingChangeSet = toolResult.changeSet
-                        pendingChangeReason = "Model proposal: $request"
+                    if (toolResult.proposalId != null) {
+                        // Already staged once inside stageOrExecute — do not propose again.
+                        pendingProposalId = toolResult.proposalId
+                        pendingChanges = toolResult.changeSet?.changes.orEmpty()
                         break
                     }
                     if (toolResult.terminalResult != null && toolResult.terminalResult.exitCode != 0) {
@@ -130,9 +137,8 @@ class CodingAgentRuntime(
                 }
             }
         }
-        if (pendingChangeSet != null) {
-            val proposal = mutationCoordinator.propose(request, pendingChangeSet!!.changes.map(::taskOperation), pendingChangeReason ?: request)
-            return needsApproval(taskId, request, plan, proposal.changeSet.changes, events, proposal.id)
+        if (pendingProposalId != null) {
+            return needsApproval(taskId, request, plan, pendingChanges, events, pendingProposalId!!)
         }
         val report = verify(plan)
         planning.complete("verification checked")
@@ -141,6 +147,80 @@ class CodingAgentRuntime(
         val task = task(taskId, request, "completed", plan, emptyList(), report, events)
         journal.record(task)
         return AgentRuntimeResult.Completed(task)
+    }
+
+    /**
+     * Stage mutations without a model when the request already carries concrete ops,
+     * or when [CodeSynthesisEngine] can deterministically produce them (e.g. single-path CREATE).
+     * Vague DEBUG/CHANGE without ops still requires a model (or more user input).
+     */
+    private fun executeOfflineMutation(
+        taskId: String,
+        request: String,
+        intake: TaskIntake,
+        plan: AgentPlan,
+        events: MutableList<String>
+    ): AgentRuntimeResult {
+        if (!config.allowEdits) {
+            return failure(taskId, request, plan, emptyList(), "Edits are disabled for this runtime.", events)
+        }
+
+        val operations: List<TaskOperation>
+        val reason: String
+
+        when {
+            intake.operation.kind != OperationKind.NONE -> {
+                operations = listOf(intake.operation)
+                reason = "Offline explicit ${intake.operation.kind.name.lowercase()} from request"
+                events += "offline staging: explicit operation ${intake.operation.kind} on ${intake.operation.path ?: "?"}"
+            }
+            else -> {
+                when (val synthesis = CodeSynthesisEngine(workspace.projectRoot(), knowledge).synthesize(intake)) {
+                    is SynthesisResult.Ready -> {
+                        operations = synthesis.proposal.operations
+                        reason = "Offline synthesis: ${synthesis.proposal.rationale}"
+                        events += "offline staging: synthesis produced ${operations.size} operation(s) — ${synthesis.proposal.rationale}"
+                    }
+                    is SynthesisResult.NeedsInput -> {
+                        events += "offline staging unavailable: ${synthesis.question}"
+                        return if (requiresEdit(intake)) {
+                            needsInput(
+                                taskId,
+                                request,
+                                plan,
+                                emptyList(),
+                                events,
+                                synthesis.question + " Load a coding model, or specify an exact replace/create/append/remove operation."
+                            )
+                        } else {
+                            failure(
+                                taskId,
+                                request,
+                                plan,
+                                emptyList(),
+                                "The coding model is not loaded; this request cannot be completed offline.",
+                                events
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        return try {
+            val proposal = mutationCoordinator.propose(request, operations, reason)
+            events += "offline proposal staged id=${proposal.id} changes=${proposal.changeSet.changes.size}"
+            needsApproval(taskId, request, plan, proposal.changeSet.changes, events, proposal.id)
+        } catch (error: Exception) {
+            failure(
+                taskId,
+                request,
+                plan,
+                emptyList(),
+                "Offline mutation staging failed: ${error.message.orEmpty().ifBlank { error.javaClass.simpleName }}",
+                events
+            )
+        }
     }
 
     private fun buildPrompt(request: String, intake: TaskIntake, evidence: String): String = buildString {
@@ -160,9 +240,22 @@ class CodingAgentRuntime(
                 "search_knowledge" -> ToolExecutionResult(knowledge.search(args.getString("query")).joinToString("\n") { "${it.document}/${it.section}: ${it.excerpt}" }.take(8_000), evidence)
                 "research_web" -> ToolExecutionResult("Call research only when the user asked for external docs; local project is preferred.", evidence)
                 "replace_text", "create_file" -> {
-                    val operation = if (response.name == "replace_text") TaskOperation(OperationKind.REPLACE, args.getString("path"), args.getString("oldText"), args.getString("newText")) else TaskOperation(OperationKind.CREATE_FILE, args.getString("path"), text = args.getString("content"))
-                    val proposal = coordinator.propose("Model proposed ${response.name}", listOf(operation), args.optString("reason", "Model-directed change"))
-                    ToolExecutionResult("PROPOSAL_READY id=${proposal.id} changes=${proposal.changeSet.changes.size} approval_required=2", evidence, proposal.changeSet)
+                    val operation = if (response.name == "replace_text") {
+                        TaskOperation(OperationKind.REPLACE, args.getString("path"), args.getString("oldText"), args.getString("newText"))
+                    } else {
+                        TaskOperation(OperationKind.CREATE_FILE, args.getString("path"), text = args.getString("content"))
+                    }
+                    val proposal = coordinator.propose(
+                        "Model proposed ${response.name}",
+                        listOf(operation),
+                        args.optString("reason", "Model-directed change")
+                    )
+                    ToolExecutionResult(
+                        output = "PROPOSAL_READY id=${proposal.id} changes=${proposal.changeSet.changes.size} approval_required=2",
+                        evidence = evidence,
+                        changeSet = proposal.changeSet,
+                        proposalId = proposal.id
+                    )
                 }
                 "run_command" -> {
                     val result = CommandRunner(workspace.projectRoot()).run(listOf("sh", "-c", args.getString("command")), config.commandTimeoutSeconds)
@@ -179,39 +272,92 @@ class CodingAgentRuntime(
         }
     }
 
-    private fun taskOperation(record: ChangeRecord): TaskOperation = when (record.operation) {
-        ChangeOperation.CREATE -> TaskOperation(OperationKind.CREATE_FILE, record.path, text = record.after.orEmpty())
-        ChangeOperation.REPLACE -> TaskOperation(OperationKind.REPLACE, record.path, record.before.orEmpty(), record.after.orEmpty())
-        ChangeOperation.APPEND -> TaskOperation(OperationKind.APPEND, record.path, text = record.after.orEmpty().removePrefix(record.before.orEmpty()))
-        ChangeOperation.REMOVE -> TaskOperation(OperationKind.REMOVE, record.path, oldText = record.before.orEmpty().removeSuffix(record.after.orEmpty()))
-    }
+    private fun verify(plan: AgentPlan): VerificationReport =
+        if (plan.checks.isEmpty()) workspace.verify() else workspace.runChecks(plan.checks, config.commandTimeoutSeconds)
 
-    private fun verify(plan: AgentPlan): VerificationReport = if (plan.checks.isEmpty()) workspace.verify() else workspace.runChecks(plan.checks, config.commandTimeoutSeconds)
+    private fun requiresEdit(intake: TaskIntake) =
+        intake.operation.kind != OperationKind.NONE ||
+            intake.intent in setOf(TaskIntent.CHANGE, TaskIntent.CREATE, TaskIntent.REFACTOR, TaskIntent.DEBUG)
 
-    private fun requiresEdit(intake: TaskIntake) = intake.operation.kind != OperationKind.NONE || intake.intent in setOf(TaskIntent.CHANGE, TaskIntent.CREATE, TaskIntent.REFACTOR, TaskIntent.DEBUG)
+    private fun task(
+        id: String,
+        request: String,
+        status: String,
+        plan: AgentPlan,
+        changes: List<ChangeRecord>,
+        report: VerificationReport,
+        events: List<String>
+    ) = AgentTask(
+        id,
+        request,
+        status,
+        plan,
+        changes,
+        report,
+        events,
+        if (status == "completed") "Task completed with verification evidence" else "Task did not complete"
+    )
 
-    private fun task(id: String, request: String, status: String, plan: AgentPlan, changes: List<ChangeRecord>, report: VerificationReport, events: List<String>) = AgentTask(id, request, status, plan, changes, report, events, if (status == "completed") "Task completed with verification evidence" else "Task did not complete")
-
-    private fun needsInput(id: String, request: String, plan: AgentPlan, changes: List<ChangeRecord>, events: MutableList<String>, question: String): AgentRuntimeResult.NeedsInput {
+    private fun needsInput(
+        id: String,
+        request: String,
+        plan: AgentPlan,
+        changes: List<ChangeRecord>,
+        events: MutableList<String>,
+        question: String
+    ): AgentRuntimeResult.NeedsInput {
         val task = task(id, request, "needs-input", plan, changes, VerificationReport(false, emptyList()), events)
         journal.record(task)
         return AgentRuntimeResult.NeedsInput(task, question)
     }
 
-    private fun needsApproval(id: String, request: String, plan: AgentPlan, changes: List<ChangeRecord>, events: MutableList<String>, proposalId: String): AgentRuntimeResult.NeedsApproval {
-        val task = task(id, request, "waiting-approval", plan, changes, VerificationReport(false, listOf(VerificationIssue("<approval>", 0, "Proposal $proposalId requires two owner approvals"))), events)
+    private fun needsApproval(
+        id: String,
+        request: String,
+        plan: AgentPlan,
+        changes: List<ChangeRecord>,
+        events: MutableList<String>,
+        proposalId: String
+    ): AgentRuntimeResult.NeedsApproval {
+        val task = task(
+            id,
+            request,
+            "waiting-approval",
+            plan,
+            changes,
+            VerificationReport(false, listOf(VerificationIssue("<approval>", 0, "Proposal $proposalId requires two owner approvals"))),
+            events
+        )
         journal.record(task)
-        return AgentRuntimeResult.NeedsApproval(task, "Review proposal $proposalId and confirm twice before applying any code change.", proposalId)
+        return AgentRuntimeResult.NeedsApproval(
+            task,
+            "Review proposal $proposalId and confirm twice before applying any code change.",
+            proposalId
+        )
     }
 
-    private fun failure(id: String, request: String, plan: AgentPlan, changes: List<ChangeRecord>, message: String, events: MutableList<String>, report: VerificationReport = VerificationReport(false, listOf(VerificationIssue("<agent>", 0, message)))): AgentRuntimeResult.Failed {
+    private fun failure(
+        id: String,
+        request: String,
+        plan: AgentPlan,
+        changes: List<ChangeRecord>,
+        message: String,
+        events: MutableList<String>,
+        report: VerificationReport = VerificationReport(false, listOf(VerificationIssue("<agent>", 0, message)))
+    ): AgentRuntimeResult.Failed {
         events += "failure: $message"
         val task = task(id, request, "failed", plan, changes, report, events)
         journal.record(task)
         return AgentRuntimeResult.Failed(task)
     }
 
-    private data class ToolExecutionResult(val output: String, val evidence: String, val changeSet: ChangeSet? = null, val terminalResult: CommandResult? = null)
+    private data class ToolExecutionResult(
+        val output: String,
+        val evidence: String,
+        val changeSet: ChangeSet? = null,
+        val proposalId: String? = null,
+        val terminalResult: CommandResult? = null
+    )
 
     private fun executeAuditedInspection(request: String, intake: TaskIntake): AgentRuntimeResult {
         val taskId = UUID.randomUUID().toString()
