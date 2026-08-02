@@ -26,12 +26,15 @@ class TaskIntakeTest {
         assertTrue(intake.executionReady)
     }
 
-    @Test fun vagueChangeRequestsNeedInput() {
+    @Test fun plainEnglishDebugGoalIsExecutionReady() {
+        // Plain English is enough. Missing exact file/target is non-blocking;
+        // the model inspects the project and proposes changes through tools.
         val root = Files.createTempDirectory("task-intake").toFile()
         val intake = TaskIntakeParser(root).parse("fix the login bug")
         assertEquals(TaskIntent.DEBUG, intake.intent)
-        assertFalse(intake.executionReady)
-        assertTrue(intake.clarificationQuestion!!.contains("file"))
+        assertTrue(intake.executionReady)
+        assertEquals(null, intake.clarificationQuestion)
+        assertTrue(intake.contract.ambiguity.isEmpty())
     }
 
     @Test fun detectsGradleVerification() {
