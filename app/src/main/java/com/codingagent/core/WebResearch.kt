@@ -15,15 +15,23 @@ interface WebResearchProvider {
 }
 
 /**
- * Aggregates free search backends. Order prefers code hosts over general web/Wikipedia.
- * Callers must still apply [SourceQuality] filters — this layer only fetches candidates.
+ * Free-only search stack. No paid APIs.
+ *
+ * Priority:
+ *  1. GitHub + Stack Overflow (primary technical sources for coding)
+ *  2. Searx public instances (meta-search across the open web, free)
+ *  3. MDN (web platform docs)
+ *  4. DuckDuckGo last resort only
+ *
+ * Wikipedia is intentionally excluded from the default list.
  */
 class CompositeWebResearchProvider(
     private val providers: List<WebResearchProvider> = listOf(
         GitHubResearchProvider(),
         StackOverflowResearchProvider(),
-        DuckDuckGoResearchProvider(),
-        WikipediaResearchProvider()
+        SearxResearchProvider(),
+        MdnResearchProvider(),
+        DuckDuckGoResearchProvider()
     )
 ) : WebResearchProvider {
     override fun search(query: String, limit: Int): ResearchResult {
@@ -40,16 +48,18 @@ class CompositeWebResearchProvider(
             }
             result.hits
                 .filter { SourceQuality.isAcceptable(it.url, it.title, it.excerpt) }
-                .filter { SourceQuality.hasQueryRelevance(terms, it.title, it.excerpt, it.url) }
+                .filter { terms.isEmpty() || SourceQuality.hasQueryRelevance(terms, it.title, it.excerpt, it.url) }
                 .forEach { hit ->
                     val key = hit.url.substringBefore('#').trim().lowercase()
                     if (key.isNotBlank()) merged.putIfAbsent(key, hit)
                 }
-            // Prefer filling from code hosts; only continue if still short.
-            if (merged.size >= limit && provider !is WikipediaResearchProvider) break
+            if (merged.size >= limit && provider !is DuckDuckGoResearchProvider) break
         }
         val hits = merged.values
-            .sortedByDescending { SourceQuality.relevanceScore(terms, it) + SourceQuality.rankBoost(it.url) }
+            .sortedByDescending {
+                val score = if (terms.isEmpty()) 0 else SourceQuality.relevanceScore(terms, it)
+                score + SourceQuality.rankBoost(it.url)
+            }
             .take(limit)
         val error = when {
             hits.isNotEmpty() -> null
@@ -57,6 +67,105 @@ class CompositeWebResearchProvider(
             else -> "No technical sources found"
         }
         return ResearchResult(query, hits, error)
+    }
+}
+
+/** Public Searx/SearxNG instances — free meta-search. No API key. */
+class SearxResearchProvider(
+    private val timeoutMillis: Int = 12_000,
+    private val connectionFactory: (String) -> HttpURLConnection = { URL(it).openConnection() as HttpURLConnection },
+    private val instances: List<String> = listOf(
+        "https://searx.be",
+        "https://search.sapti.me",
+        "https://searx.tiekoetter.com",
+        "https://searx.work"
+    )
+) : WebResearchProvider {
+    override fun search(query: String, limit: Int): ResearchResult {
+        val normalized = query.trim()
+        if (normalized.isBlank()) return ResearchResult(query, emptyList(), "A research query is required")
+        val encoded = URLEncoder.encode(normalized, StandardCharsets.UTF_8.toString())
+        val errors = mutableListOf<String>()
+        for (base in instances) {
+            val url = "$base/search?q=$encoded&format=json&categories=general,science,it"
+            val connection = connectionFactory(url)
+            try {
+                connection.connectTimeout = timeoutMillis
+                connection.readTimeout = timeoutMillis
+                connection.requestMethod = "GET"
+                connection.setRequestProperty("User-Agent", "CodingAgent/0.5 (free research; +https://github.com/codingagent)")
+                connection.setRequestProperty("Accept", "application/json")
+                if (connection.responseCode !in 200..299) {
+                    errors += "$base HTTP ${connection.responseCode}"
+                    continue
+                }
+                val body = connection.inputStream.bufferedReader().use { it.readText() }
+                val json = JSONObject(body)
+                val results = json.optJSONArray("results") ?: JSONArray()
+                val hits = mutableListOf<ResearchHit>()
+                for (i in 0 until results.length()) {
+                    if (hits.size >= limit) break
+                    val item = results.optJSONObject(i) ?: continue
+                    val title = item.optString("title").trim()
+                    val link = item.optString("url").trim()
+                    val content = item.optString("content").ifBlank { item.optString("snippet") }.trim()
+                    if (title.isBlank() || link.isBlank()) continue
+                    val low = link.lowercase()
+                    if (low.contains("wikipedia.org/wiki/talk:") || low.contains("wikipedia.org/wiki/user:")) continue
+                    hits += ResearchHit(title, link, content.ifBlank { title })
+                }
+                if (hits.isNotEmpty()) return ResearchResult(query, hits.take(limit))
+                errors += "$base empty"
+            } catch (error: Exception) {
+                errors += "$base ${error.message ?: error.javaClass.simpleName}"
+            } finally {
+                connection.disconnect()
+            }
+        }
+        return ResearchResult(query, emptyList(), errors.joinToString(" | ").ifBlank { "Searx returned no results" })
+    }
+}
+
+/** MDN Web Docs search — free, high-signal for web / UI platform questions. */
+class MdnResearchProvider(
+    private val timeoutMillis: Int = 12_000,
+    private val connectionFactory: (String) -> HttpURLConnection = { URL(it).openConnection() as HttpURLConnection }
+) : WebResearchProvider {
+    override fun search(query: String, limit: Int): ResearchResult {
+        val normalized = query.trim()
+        if (normalized.isBlank()) return ResearchResult(query, emptyList(), "A research query is required")
+        val encoded = URLEncoder.encode(normalized, StandardCharsets.UTF_8.toString())
+        val url = "https://developer.mozilla.org/api/v1/search?q=$encoded&locale=en-US"
+        val connection = connectionFactory(url)
+        return try {
+            connection.connectTimeout = timeoutMillis
+            connection.readTimeout = timeoutMillis
+            connection.requestMethod = "GET"
+            connection.setRequestProperty("User-Agent", "CodingAgent/0.5")
+            connection.setRequestProperty("Accept", "application/json")
+            if (connection.responseCode !in 200..299) {
+                return ResearchResult(query, emptyList(), "MDN HTTP ${connection.responseCode}")
+            }
+            val json = JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
+            val documents = json.optJSONArray("documents") ?: JSONArray()
+            val hits = mutableListOf<ResearchHit>()
+            for (i in 0 until documents.length()) {
+                if (hits.size >= limit) break
+                val item = documents.optJSONObject(i) ?: continue
+                val title = item.optString("title").ifBlank { item.optString("mdn_url") }
+                val path = item.optString("mdn_url").ifBlank { item.optString("slug") }
+                val summary = item.optString("summary").ifBlank { item.optString("excerpt") }
+                if (title.isBlank() || path.isBlank()) continue
+                val link = if (path.startsWith("http")) path else "https://developer.mozilla.org$path"
+                hits += ResearchHit(title, link, summary.ifBlank { "MDN: $title" })
+            }
+            if (hits.isEmpty()) ResearchResult(query, emptyList(), "MDN returned no results")
+            else ResearchResult(query, hits.take(limit))
+        } catch (error: Exception) {
+            ResearchResult(query, emptyList(), error.message ?: error.javaClass.simpleName)
+        } finally {
+            connection.disconnect()
+        }
     }
 }
 
@@ -138,58 +247,6 @@ class DuckDuckGoResearchProvider(
     }
 }
 
-class WikipediaResearchProvider(
-    private val timeoutMillis: Int = 12_000,
-    private val connectionFactory: (String) -> HttpURLConnection = { URL(it).openConnection() as HttpURLConnection }
-) : WebResearchProvider {
-    override fun search(query: String, limit: Int): ResearchResult {
-        val normalized = query.trim()
-        if (normalized.isBlank()) return ResearchResult(query, emptyList(), "A research query is required")
-        val encoded = URLEncoder.encode(normalized, StandardCharsets.UTF_8.toString())
-        val url = "https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=$encoded&utf8=&format=json&srlimit=${limit.coerceIn(1, 20)}"
-        val connection = connectionFactory(url)
-        return try {
-            configure(connection)
-            if (connection.responseCode !in 200..299) return ResearchResult(query, emptyList(), "Wikipedia HTTP ${connection.responseCode}")
-            val json = JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
-            val search = json.optJSONObject("query")?.optJSONArray("search") ?: JSONArray()
-            val hits = mutableListOf<ResearchHit>()
-            for (i in 0 until search.length()) {
-                val item = search.optJSONObject(i) ?: continue
-                val title = item.optString("title")
-                if (title.isBlank()) continue
-                if (title.contains("Talk:", ignoreCase = true) ||
-                    title.contains("Disambiguation", ignoreCase = true) ||
-                    title.startsWith("User:", ignoreCase = true) ||
-                    title.startsWith("Wikipedia:", ignoreCase = true) ||
-                    title.startsWith("Help:", ignoreCase = true) ||
-                    title.startsWith("Template:", ignoreCase = true)
-                ) continue
-                val pageUrl = "https://en.wikipedia.org/wiki/" + URLEncoder.encode(title.replace(' ', '_'), StandardCharsets.UTF_8.toString()).replace("+", "%20")
-                val snippet = item.optString("snippet").replace(Regex("<[^>]+>"), " ").replace(Regex("\\s+"), " ").trim()
-                if (snippet.contains("please help improve", ignoreCase = true) ||
-                    snippet.contains("this article needs", ignoreCase = true) ||
-                    snippet.contains("Article Talk", ignoreCase = true)
-                ) continue
-                hits += ResearchHit(title, pageUrl, snippet.ifBlank { "Wikipedia article: $title" })
-            }
-            if (hits.isEmpty()) ResearchResult(query, emptyList(), "Wikipedia returned no results") else ResearchResult(query, hits.take(limit))
-        } catch (error: Exception) {
-            ResearchResult(query, emptyList(), error.message ?: error.javaClass.simpleName)
-        } finally {
-            connection.disconnect()
-        }
-    }
-
-    private fun configure(connection: HttpURLConnection) {
-        connection.connectTimeout = timeoutMillis
-        connection.readTimeout = timeoutMillis
-        connection.requestMethod = "GET"
-        connection.setRequestProperty("User-Agent", "CodingAgent/0.4 (Android research; +https://github.com/codingagent)")
-        connection.setRequestProperty("Accept", "application/json")
-    }
-}
-
 class GitHubResearchProvider(
     private val timeoutMillis: Int = 12_000,
     private val connectionFactory: (String) -> HttpURLConnection = { URL(it).openConnection() as HttpURLConnection }
@@ -197,7 +254,6 @@ class GitHubResearchProvider(
     override fun search(query: String, limit: Int): ResearchResult {
         val normalized = query.trim()
         if (normalized.isBlank()) return ResearchResult(query, emptyList(), "A research query is required")
-        // Strip lane noise that confuses GitHub search; keep core terms.
         val githubQuery = normalized
             .replace(Regex("\\bsite:[\\w.]+"), " ")
             .replace(Regex("\\bOR\\b"), " ")
@@ -230,7 +286,7 @@ class GitHubResearchProvider(
             connection.connectTimeout = timeoutMillis
             connection.readTimeout = timeoutMillis
             connection.requestMethod = "GET"
-            connection.setRequestProperty("User-Agent", "CodingAgent/0.4")
+            connection.setRequestProperty("User-Agent", "CodingAgent/0.5")
             connection.setRequestProperty("Accept", "application/vnd.github+json")
             if (connection.responseCode !in 200..299) return null
             JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
@@ -262,7 +318,7 @@ class StackOverflowResearchProvider(
             connection.connectTimeout = timeoutMillis
             connection.readTimeout = timeoutMillis
             connection.requestMethod = "GET"
-            connection.setRequestProperty("User-Agent", "CodingAgent/0.4")
+            connection.setRequestProperty("User-Agent", "CodingAgent/0.5")
             connection.setRequestProperty("Accept", "application/json")
             connection.setRequestProperty("Accept-Encoding", "identity")
             if (connection.responseCode !in 200..299) return ResearchResult(query, emptyList(), "StackOverflow HTTP ${connection.responseCode}")
