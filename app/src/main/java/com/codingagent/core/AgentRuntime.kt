@@ -55,10 +55,11 @@ class CodingAgentRuntime(
         // Research is best-effort only. Local project evidence is enough to proceed.
         var researchEvidence = ""
         val wantsResearch = Regex("\\b(research|look up|search the web|documentation online)\\b", RegexOption.IGNORE_CASE).containsMatchIn(request)
-        if (wantsResearch && deepResearch != null) {
+        val researchProvider = deepResearch
+        if (wantsResearch && researchProvider != null) {
             val mode = ResearchModeDetector.detect(request)
             val learned = runCatching {
-                deepResearch.deepResearch(intake.goal, 6, mode) { progress ->
+                researchProvider.deepResearch(intake.goal, 6, mode) { progress ->
                     events += "research ${progress.stage}: ${progress.completed}/${progress.total}, learned=${progress.successful}, failed=${progress.failed}"
                 }
             }.getOrNull()
