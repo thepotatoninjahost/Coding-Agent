@@ -35,17 +35,14 @@ class TaskIntakeParser(private val root: File) {
         val operation = parseOperation(normalized)
         val contract = interpreter.interpret(normalized, operation)
         val verification = detectChecks()
-        val ready = contract.ready && when (contract.intent) {
-            TaskIntent.INSPECT, TaskIntent.EXPLAIN, TaskIntent.TEST -> true
-            TaskIntent.CHANGE, TaskIntent.REFACTOR, TaskIntent.DEBUG -> operation.kind != OperationKind.NONE
-            TaskIntent.CREATE -> operation.kind != OperationKind.NONE || contract.targetPaths.size == 1
-            TaskIntent.UNKNOWN -> false
-        }
+        // Plain English is enough. Exact replace/append syntax is optional;
+        // the model inspects the project and proposes changes through tools.
+        val ready = contract.ready && contract.intent != TaskIntent.UNKNOWN
         val question = if (ready) null else clarification(contract, operation)
         return TaskIntake(
             originalRequest = normalized,
             goal = contract.goal,
-            intent = if (operation.kind != OperationKind.NONE && contract.intent == TaskIntent.CHANGE && Regex("\bcreate\b", RegexOption.IGNORE_CASE).containsMatchIn(normalized).not()) contract.intent else contract.intent,
+            intent = contract.intent,
             operation = operation,
             verificationCommands = verification,
             confidence = contract.confidence,
@@ -58,7 +55,6 @@ class TaskIntakeParser(private val root: File) {
 
     private fun clarification(contract: GoalContract, operation: TaskOperation): String {
         if (contract.ambiguity.isNotEmpty()) return contract.ambiguity.joinToString("; ").replaceFirstChar { it.uppercase() } + "."
-        if (operation.kind == OperationKind.NONE) return "Specify the exact operation and target file."
         return "Clarify the intended outcome before execution."
     }
 
