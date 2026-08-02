@@ -15,9 +15,8 @@ interface WebResearchProvider {
 }
 
 /**
- * Aggregates multiple free search backends. DuckDuckGo alone is no longer reliable:
- * the JSON instant API is often empty for technical queries, and the HTML endpoint
- * frequently serves bot-challenge pages instead of results.
+ * Aggregates free search backends. Order prefers code hosts over general web/Wikipedia.
+ * Callers must still apply [SourceQuality] filters — this layer only fetches candidates.
  */
 class CompositeWebResearchProvider(
     private val providers: List<WebResearchProvider> = listOf(
@@ -30,21 +29,28 @@ class CompositeWebResearchProvider(
     override fun search(query: String, limit: Int): ResearchResult {
         val normalized = query.trim()
         if (normalized.isBlank()) return ResearchResult(query, emptyList(), "A research query is required")
+        val terms = SourceQuality.queryTerms(normalized)
         val merged = LinkedHashMap<String, ResearchHit>()
         val errors = mutableListOf<String>()
         for (provider in providers) {
-            val result = runCatching { provider.search(normalized, limit.coerceAtLeast(8)) }
+            val result = runCatching { provider.search(normalized, (limit * 2).coerceAtLeast(8)) }
                 .getOrElse { ResearchResult(normalized, emptyList(), it.message ?: it.javaClass.simpleName) }
             if (result.error != null && result.hits.isEmpty()) {
                 errors += "${provider.javaClass.simpleName}: ${result.error}"
             }
-            result.hits.forEach { hit ->
-                val key = hit.url.substringBefore('#').trim().lowercase()
-                if (key.isNotBlank()) merged.putIfAbsent(key, hit)
-            }
-            if (merged.size >= limit) break
+            result.hits
+                .filter { SourceQuality.isAcceptable(it.url, it.title, it.excerpt) }
+                .filter { SourceQuality.hasQueryRelevance(terms, it.title, it.excerpt, it.url) }
+                .forEach { hit ->
+                    val key = hit.url.substringBefore('#').trim().lowercase()
+                    if (key.isNotBlank()) merged.putIfAbsent(key, hit)
+                }
+            // Prefer filling from code hosts; only continue if still short.
+            if (merged.size >= limit && provider !is WikipediaResearchProvider) break
         }
-        val hits = merged.values.take(limit)
+        val hits = merged.values
+            .sortedByDescending { SourceQuality.relevanceScore(terms, it) + SourceQuality.rankBoost(it.url) }
+            .take(limit)
         val error = when {
             hits.isNotEmpty() -> null
             errors.isNotEmpty() -> errors.joinToString(" | ")
@@ -152,10 +158,19 @@ class WikipediaResearchProvider(
                 val item = search.optJSONObject(i) ?: continue
                 val title = item.optString("title")
                 if (title.isBlank()) continue
-                if (title.contains("Talk:", ignoreCase = true) || title.contains("Disambiguation", ignoreCase = true) || title.startsWith("User:", ignoreCase = true) || title.startsWith("Wikipedia:", ignoreCase = true)) continue
+                if (title.contains("Talk:", ignoreCase = true) ||
+                    title.contains("Disambiguation", ignoreCase = true) ||
+                    title.startsWith("User:", ignoreCase = true) ||
+                    title.startsWith("Wikipedia:", ignoreCase = true) ||
+                    title.startsWith("Help:", ignoreCase = true) ||
+                    title.startsWith("Template:", ignoreCase = true)
+                ) continue
                 val pageUrl = "https://en.wikipedia.org/wiki/" + URLEncoder.encode(title.replace(' ', '_'), StandardCharsets.UTF_8.toString()).replace("+", "%20")
                 val snippet = item.optString("snippet").replace(Regex("<[^>]+>"), " ").replace(Regex("\\s+"), " ").trim()
-                if (snippet.contains("please help improve", ignoreCase = true) || snippet.contains("this article needs", ignoreCase = true)) continue
+                if (snippet.contains("please help improve", ignoreCase = true) ||
+                    snippet.contains("this article needs", ignoreCase = true) ||
+                    snippet.contains("Article Talk", ignoreCase = true)
+                ) continue
                 hits += ResearchHit(title, pageUrl, snippet.ifBlank { "Wikipedia article: $title" })
             }
             if (hits.isEmpty()) ResearchResult(query, emptyList(), "Wikipedia returned no results") else ResearchResult(query, hits.take(limit))
@@ -170,7 +185,7 @@ class WikipediaResearchProvider(
         connection.connectTimeout = timeoutMillis
         connection.readTimeout = timeoutMillis
         connection.requestMethod = "GET"
-        connection.setRequestProperty("User-Agent", "CodingAgent/0.3 (Android research; +https://github.com/codingagent)")
+        connection.setRequestProperty("User-Agent", "CodingAgent/0.4 (Android research; +https://github.com/codingagent)")
         connection.setRequestProperty("Accept", "application/json")
     }
 }
@@ -182,9 +197,15 @@ class GitHubResearchProvider(
     override fun search(query: String, limit: Int): ResearchResult {
         val normalized = query.trim()
         if (normalized.isBlank()) return ResearchResult(query, emptyList(), "A research query is required")
-        val encoded = URLEncoder.encode(normalized, StandardCharsets.UTF_8.toString())
+        // Strip lane noise that confuses GitHub search; keep core terms.
+        val githubQuery = normalized
+            .replace(Regex("\\bsite:[\\w.]+"), " ")
+            .replace(Regex("\\bOR\\b"), " ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+            .ifBlank { normalized }
+        val encoded = URLEncoder.encode(githubQuery, StandardCharsets.UTF_8.toString())
         val repoUrl = "https://api.github.com/search/repositories?q=$encoded&per_page=${limit.coerceIn(1, 10)}&sort=stars"
-        val codeUrl = "https://api.github.com/search/code?q=$encoded+in:file&per_page=${limit.coerceIn(1, 5)}"
         val hits = mutableListOf<ResearchHit>()
         val errors = mutableListOf<String>()
         fetchJson(repoUrl)?.let { json ->
@@ -199,17 +220,6 @@ class GitHubResearchProvider(
                 }
             }
         } ?: errors.add("GitHub repo search failed")
-        runCatching {
-            fetchJson(codeUrl)?.optJSONArray("items")?.let { items ->
-                for (i in 0 until items.length()) {
-                    val item = items.optJSONObject(i) ?: continue
-                    val path = item.optString("path")
-                    val html = item.optString("html_url")
-                    val repo = item.optJSONObject("repository")?.optString("full_name").orEmpty()
-                    if (html.isNotBlank()) hits += ResearchHit("$repo/$path", html, "GitHub code match: $path")
-                }
-            }
-        }
         return if (hits.isEmpty()) ResearchResult(query, emptyList(), errors.joinToString(" | ").ifBlank { "GitHub returned no results" })
         else ResearchResult(query, hits.distinctBy { it.url }.take(limit))
     }
@@ -220,7 +230,7 @@ class GitHubResearchProvider(
             connection.connectTimeout = timeoutMillis
             connection.readTimeout = timeoutMillis
             connection.requestMethod = "GET"
-            connection.setRequestProperty("User-Agent", "CodingAgent/0.3")
+            connection.setRequestProperty("User-Agent", "CodingAgent/0.4")
             connection.setRequestProperty("Accept", "application/vnd.github+json")
             if (connection.responseCode !in 200..299) return null
             JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
@@ -239,14 +249,20 @@ class StackOverflowResearchProvider(
     override fun search(query: String, limit: Int): ResearchResult {
         val normalized = query.trim()
         if (normalized.isBlank()) return ResearchResult(query, emptyList(), "A research query is required")
-        val encoded = URLEncoder.encode(normalized, StandardCharsets.UTF_8.toString())
+        val soQuery = normalized
+            .replace(Regex("\\bsite:[\\w.]+"), " ")
+            .replace(Regex("\\bOR\\b"), " ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+            .ifBlank { normalized }
+        val encoded = URLEncoder.encode(soQuery, StandardCharsets.UTF_8.toString())
         val url = "https://api.stackexchange.com/2.3/search/advanced?order=desc&sort=relevance&q=$encoded&site=stackoverflow&pagesize=${limit.coerceIn(1, 10)}&filter=default"
         val connection = connectionFactory(url)
         return try {
             connection.connectTimeout = timeoutMillis
             connection.readTimeout = timeoutMillis
             connection.requestMethod = "GET"
-            connection.setRequestProperty("User-Agent", "CodingAgent/0.3")
+            connection.setRequestProperty("User-Agent", "CodingAgent/0.4")
             connection.setRequestProperty("Accept", "application/json")
             connection.setRequestProperty("Accept-Encoding", "identity")
             if (connection.responseCode !in 200..299) return ResearchResult(query, emptyList(), "StackOverflow HTTP ${connection.responseCode}")

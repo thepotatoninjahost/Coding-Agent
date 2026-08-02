@@ -32,8 +32,8 @@ interface DeepResearchProvider {
 
 /**
  * Durable deep research backed by CompositeWebResearchProvider.
- * Quality focus: short/truncated queries must not expand into tradeoffs/criticism/news.
- * Prefer GitHub, StackOverflow, official docs; require query-term overlap.
+ * Quality focus: results must overlap the user query; Wikipedia talk/cite noise is rejected;
+ * post-fetch content is scored again so weak search snippets cannot pollute the corpus.
  */
 class DurableDeepResearchProvider(
     private val researchRoot: File,
@@ -70,43 +70,44 @@ class DurableDeepResearchProvider(
             .sortedByDescending { SourceQuality.relevanceScore(queryTerms, it.hit) + SourceQuality.rankBoost(it.url) }
             .toMutableList()
 
-        if (candidates.size > effectiveTarget) {
-            val selected = mutableListOf<Candidate>()
-            selected += candidates.take((effectiveTarget / 2).coerceAtLeast(1))
-            candidates.filter { c -> selected.none { it.url == c.url } }.forEach { c ->
-                if (selected.size < effectiveTarget) selected += c
-            }
+        if (candidates.size > effectiveTarget * 2) {
+            // Keep a larger pool for diversity, but still relevance-ordered.
+            val trimmed = candidates.take(effectiveTarget * 3)
             candidates.clear()
-            candidates += selected
+            candidates += trimmed
         }
 
         if (candidates.size < effectiveTarget) {
-            val fallbackQueries = listOf(
-                "$normalized site:github.com",
-                "$normalized site:stackoverflow.com",
-                "$normalized experimental OR prototype site:github.com",
-                "$normalized android kotlin code"
-            )
-            val fallback = fallbackQueries.flatMap { fq ->
-                searchProvider.search(fq, 10).hits
+            val focused = QueryLanes.focusedFallbacks(normalized)
+            val fallback = focused.flatMap { fq ->
+                searchProvider.search(fq, 12).hits
                     .filter { hit -> SourceQuality.isAcceptable(hit.url, hit.title, hit.excerpt) }
                     .filter { hit -> SourceQuality.hasQueryRelevance(queryTerms, hit.title, hit.excerpt, hit.url) }
                     .filter { hit -> hit.url.substringBefore('#').lowercase() !in alreadyLearned }
                     .map { Candidate(it, "fallback") }
             }.dedupe()
             fallback.forEach { c ->
-                if (candidates.size < effectiveTarget && candidates.none { it.url == c.url }) candidates += c
+                if (candidates.none { it.url == c.url }) candidates += c
             }
+            candidates.sortByDescending { SourceQuality.relevanceScore(queryTerms, it.hit) + SourceQuality.rankBoost(it.url) }
         }
 
-        val diverse = selectDiverse(candidates, effectiveTarget).take(maxSourceFetches)
+        val diverse = selectDiverse(candidates, (effectiveTarget * 2).coerceAtMost(maxSourceFetches))
         onProgress(DeepResearchProgress("fetching", 0, diverse.size, 0, 0))
 
         val sources = mutableListOf<ResearchSource>()
         var failed = 0
         diverse.forEachIndexed { index, candidate ->
+            if (sources.size >= effectiveTarget) {
+                onProgress(DeepResearchProgress("fetching", index + 1, diverse.size, sources.size, failed))
+                return@forEachIndexed
+            }
             val fetched = runCatching { ArticleExtractor.fetch(candidate.url, connectionFactory, pageTimeoutMillis) }.getOrNull()
-            if (fetched != null && fetched.wordCount >= 40) {
+            if (fetched != null &&
+                fetched.wordCount >= 40 &&
+                SourceQuality.isAcceptable(candidate.url, fetched.title.ifBlank { candidate.title }, fetched.text.take(500)) &&
+                SourceQuality.contentRelevant(queryTerms, fetched.title, fetched.text)
+            ) {
                 sources += ResearchSource(
                     title = candidate.title.ifBlank { fetched.title },
                     url = candidate.url,
@@ -130,11 +131,14 @@ class DurableDeepResearchProvider(
             requestedSources = effectiveTarget,
             sources = sources,
             learnedChunks = sources.size,
-            errors = if (failed > 0) listOf("$failed source fetch(es) failed") else emptyList(),
+            errors = buildList {
+                if (failed > 0) add("$failed source fetch(es) failed or failed relevance")
+                if (sources.isEmpty()) add("No sources passed relevance filters for: $normalized")
+            },
             mode = mode.name.lowercase()
         )
         persist(session)
-        onProgress(DeepResearchProgress("learned", sources.size, sources.size, sources.size, failed))
+        onProgress(DeepResearchProgress("learned", sources.size, sources.size.coerceAtLeast(1), sources.size, failed))
         return session
     }
 
@@ -248,6 +252,7 @@ class DurableDeepResearchProvider(
         domain.contains("developer.android.com") || domain.contains("kotlinlang.org") || domain.contains("sqlite.org") -> 5
         domain.contains("rfc-editor.org") || domain.contains("github.com") -> 4
         domain.contains("stackoverflow.com") -> 3
+        domain.contains("wikipedia.org") -> 0
         else -> 1
     }
 
@@ -258,16 +263,33 @@ class DurableDeepResearchProvider(
 }
 
 object QueryLanes {
+    private val howTo = Regex(
+        "\\b(how|create|creating|build|building|implement|custom|ui|interface|layout|compose|widget|view)\\b",
+        RegexOption.IGNORE_CASE
+    )
+
     fun expand(query: String, mode: ResearchMode = ResearchMode.BROAD, salt: String = ""): List<ResearchLane> {
         val base = query.trim()
         val words = base.split(Regex("\\s+")).filter { it.isNotBlank() }
         val isShort = words.size <= 4 || base.length < 36
+        val isHowTo = howTo.containsMatchIn(base)
 
         val core = mutableListOf(
-            ResearchLane("primary documentation", "$base documentation OR guide OR reference OR official docs"),
+            ResearchLane("primary documentation", "$base documentation OR guide OR tutorial OR official docs"),
             ResearchLane("implementation examples", "$base code example OR snippet OR implementation OR sample"),
             ResearchLane("community solutions", "$base site:stackoverflow.com OR site:github.com")
         )
+
+        if (isHowTo) {
+            core.add(0, ResearchLane("howto coding", "$base android OR ios OR jetpack compose OR swiftui OR react native"))
+            core.add(1, ResearchLane("ui implementation", "$base custom view OR custom component OR UI toolkit"))
+            // How-to coding queries must stay focused — no theory/criticism dilution.
+            val rotated = if (salt.isBlank()) core else {
+                val shift = (salt.hashCode().and(0x7fffffff)) % core.size
+                core.drop(shift) + core.take(shift)
+            }
+            return rotated
+        }
 
         when (mode) {
             ResearchMode.EXPERIMENTAL -> {
@@ -304,17 +326,30 @@ object QueryLanes {
         }
         return rotated
     }
+
+    fun focusedFallbacks(query: String): List<String> = listOf(
+        "$query site:github.com",
+        "$query site:stackoverflow.com",
+        "$query site:developer.android.com",
+        "$query site:developer.apple.com",
+        "$query jetpack compose OR swiftui OR react native UI",
+        "$query custom view OR custom component code example"
+    )
 }
 
 data class ResearchLane(val name: String, val query: String)
 
 object SourceQuality {
     private val junkTitle = Pattern.compile(
-        """\\b(talk|disambiguation|user talk|wikiProject|sandbox|article talk)\\b""",
+        """\\b(talk|disambiguation|user talk|wikiProject|sandbox|article talk|wikipedia search)\\b""",
         Pattern.CASE_INSENSITIVE
     )
     private val junkExcerpt = Pattern.compile(
-        """(please help improve|this article needs|not a guidebook|learn how and when to remove|for other uses, see)""",
+        """(please help improve|this article needs|not a guidebook|learn how and when to remove|for other uses, see|\\{\\{cite|cite web\\||Article Talk|\\[\\[Category:)""",
+        Pattern.CASE_INSENSITIVE
+    )
+    private val wikiNoise = Pattern.compile(
+        """(\\{\\{cite|\\|access-date=|\\|archive-url=|\\|url-status=|Article Talk|\\[\\[Category:|Help improve this article)""",
         Pattern.CASE_INSENSITIVE
     )
     private val blockedDomains = listOf(
@@ -323,17 +358,20 @@ object SourceQuality {
         "reddit.com/r/chess", "espn.com", "cnn.com", "bbc.com",
         "nytimes.com", "forbes.com", "medium.com/tag", "quora.com",
         "fullframeinitiative.org", "thisvsthat.io", "geeksforgeeks.org/system-design",
-        "educative.io", "interview", "wellbeing", "self-improvement"
+        "educative.io", "wellbeing"
     )
     private val blockedTitleTokens = listOf(
         "tradeoffs in system design", "system design tradeoffs", "tradeoffs in professional",
         "criticism vs. critique", "u.s. takes", "rapid chess", "wellbeing",
-        "making change is hard", "investor relations"
+        "making change is hard", "investor relations", "mastodon (social", "k-meleon",
+        "windows installer", "microsoft copilot"
     )
     private val stopWords = setOf(
         "the", "a", "an", "and", "or", "of", "to", "in", "for", "on", "with",
         "is", "are", "be", "by", "at", "from", "as", "it", "this", "that",
-        "code", "experimental", "involving", "how", "what", "when", "where"
+        "code", "experimental", "involving", "how", "what", "when", "where",
+        "can", "do", "does", "using", "use", "used", "into", "about", "your",
+        "my", "me", "we", "our", "their", "them", "than", "then", "also"
     )
 
     fun queryTerms(query: String): Set<String> =
@@ -343,41 +381,72 @@ object SourceQuality {
             .toSet()
 
     fun hasQueryRelevance(terms: Set<String>, title: String, excerpt: String, url: String): Boolean {
-        if (terms.isEmpty()) return true
+        if (terms.isEmpty()) return false
         val hay = "$title $excerpt $url".lowercase()
         val hits = terms.count { hay.contains(it) }
-        return hits >= 1 && (terms.size <= 2 || hits.toDouble() / terms.size >= 0.25)
+        if (hits == 0) return false
+        // Multi-term queries need real overlap — one weak token ("user", "apps") is not enough.
+        return when {
+            terms.size <= 2 -> hits >= 1
+            terms.size <= 4 -> hits >= 2 || hits.toDouble() / terms.size >= 0.5
+            else -> hits >= 3 || hits.toDouble() / terms.size >= 0.4
+        }
+    }
+
+    fun contentRelevant(terms: Set<String>, title: String, content: String): Boolean {
+        if (terms.isEmpty()) return false
+        if (wikiNoise.matcher(content.take(800)).find()) return false
+        val hay = "$title ${content.take(4_000)}".lowercase()
+        val hits = terms.count { hay.contains(it) }
+        return when {
+            terms.size <= 2 -> hits >= 1
+            terms.size <= 4 -> hits >= 2
+            else -> hits >= 3
+        }
     }
 
     fun relevanceScore(terms: Set<String>, hit: ResearchHit): Int {
         if (terms.isEmpty()) return 0
         val hay = "${hit.title} ${hit.excerpt} ${hit.url}".lowercase()
-        return terms.count { hay.contains(it) } * 4
+        var score = terms.count { hay.contains(it) } * 5
+        // Phrase-ish bonus for adjacent technical terms
+        if (hay.contains("user interface") || hay.contains("custom view") || hay.contains("custom ui")) score += 8
+        if (hay.contains("jetpack compose") || hay.contains("swiftui") || hay.contains("react native")) score += 6
+        return score
     }
 
     fun isAcceptable(url: String, title: String, excerpt: String): Boolean {
         val u = url.lowercase()
         val t = title.lowercase()
-        if (u.contains("wikipedia.org") && (t.contains("talk") || u.contains("talk:") || u.contains("disambiguation"))) return false
+        val e = excerpt.lowercase()
+        if (u.contains("wikipedia.org")) {
+            // Wikipedia is allowed only for clean article hits; talk/meta/cite dumps are out.
+            if (t.contains("talk") || u.contains("talk:") || u.contains("disambiguation")) return false
+            if (u.contains("/wiki/talk:") || u.contains("/wiki/user:") || u.contains("/wiki/wikipedia:")) return false
+            if (wikiNoise.matcher(excerpt).find()) return false
+            if (t.contains("article talk") || e.contains("article talk")) return false
+        }
         if (junkTitle.matcher(title).find()) return false
         if (junkExcerpt.matcher(excerpt).find()) return false
-        if (u.contains("/wiki/Talk:") || u.contains("/wiki/User:") || u.contains("/wiki/Wikipedia:")) return false
+        if (wikiNoise.matcher(excerpt).find()) return false
         if (blockedDomains.any { u.contains(it) || t.contains(it) }) return false
         if (blockedTitleTokens.any { t.contains(it) }) return false
-        if (t.contains("chess") || t.contains("wellbeing") || t.contains("tradeoff") && t.contains("interview")) return false
+        if (t.contains("chess") || t.contains("wellbeing")) return false
+        if (t.contains("tradeoff") && (t.contains("interview") || t.contains("system design"))) return false
         return true
     }
 
     fun rankBoost(url: String): Int {
         val u = url.lowercase()
         return when {
-            u.contains("developer.android.com") || u.contains("kotlinlang.org") -> 12
-            u.contains("github.com") -> 10
-            u.contains("stackoverflow.com") -> 9
-            u.contains("android.com") || u.contains("developer.apple.com") -> 8
-            u.contains("docs.") || u.contains("developer.") -> 7
+            u.contains("developer.android.com") || u.contains("kotlinlang.org") -> 14
+            u.contains("developer.apple.com") -> 12
+            u.contains("github.com") -> 11
+            u.contains("stackoverflow.com") -> 10
+            u.contains("android.com") -> 9
+            u.contains("docs.") || u.contains("developer.") -> 8
             u.contains("medium.com") || u.contains("dev.to") -> 2
-            u.contains("wikipedia.org") -> 0
+            u.contains("wikipedia.org") -> -4
             else -> 3
         }
     }
@@ -421,12 +490,20 @@ object ArticleExtractor {
             .replace(Regex("<style[\\s\\S]*?</style>", RegexOption.IGNORE_CASE), " ")
             .replace(Regex("<nav[\\s\\S]*?</nav>", RegexOption.IGNORE_CASE), " ")
             .replace(Regex("<footer[\\s\\S]*?</footer>", RegexOption.IGNORE_CASE), " ")
+            .replace(Regex("<sup[^>]*class=\"reference\"[\\s\\S]*?</sup>", RegexOption.IGNORE_CASE), " ")
         val codeBlocks = Regex("<pre[^>]*>([\\s\\S]*?)</pre>", RegexOption.IGNORE_CASE).findAll(cleaned)
             .map { it.groupValues[1].replace(Regex("<[^>]+>"), "").trim() }
             .filter { it.length in 8..4000 }
             .take(8)
             .toList()
-        val text = cleaned.replace(Regex("<[^>]+>"), " ").replace(Regex("\\s+"), " ").trim()
+        var text = cleaned.replace(Regex("<[^>]+>"), " ").replace(Regex("\\s+"), " ").trim()
+        // Strip MediaWiki citation / template residue that otherwise floods the research pane.
+        text = text
+            .replace(Regex("\\{\\{[^}]{0,400}\\}\\}"), " ")
+            .replace(Regex("\\[\\[(?:File|Image|Category|Help|Wikipedia|Talk|User):[^\\]]+\\]\\]", RegexOption.IGNORE_CASE), " ")
+            .replace(Regex("\\|\\s*(access-date|archive-url|archive-date|url-status|website|publisher|date|title|url|last|first|ref)\\s*="), " ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
         val words = text.split(Regex("\\s+")).filter { it.isNotBlank() }
         return Extracted(title, text.take(20_000), words.size, codeBlocks)
     }
@@ -445,8 +522,10 @@ data class ResearchBrief(
 object ResearchBriefBuilder {
     fun build(session: ResearchSession, maxCharacters: Int = 48_000): ResearchBrief {
         val usable = session.sources.filter { it.content.isNotBlank() }
+        val queryTerms = SourceQuality.queryTerms(session.query)
         val ranked = usable.sortedWith(
-            compareByDescending<ResearchSource> { authority(it.domain) }
+            compareByDescending<ResearchSource> { SourceQuality.contentRelevant(queryTerms, it.title, it.content) }
+                .thenByDescending { authority(it.domain) }
                 .thenByDescending { it.wordCount }
         )
         val evidence = buildString {
@@ -478,6 +557,7 @@ object ResearchBriefBuilder {
         domain.contains("developer.android.com") || domain.contains("kotlinlang.org") || domain.contains("sqlite.org") -> 5
         domain.contains("rfc-editor.org") || domain.contains("github.com") -> 4
         domain.contains("stackoverflow.com") -> 3
+        domain.contains("wikipedia.org") -> 0
         else -> 1
     }
 }

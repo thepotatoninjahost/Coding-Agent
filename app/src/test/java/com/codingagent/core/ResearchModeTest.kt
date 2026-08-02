@@ -10,7 +10,6 @@ class ResearchModeTest {
         assertTrue(lanes.contains("theory focus") || lanes.contains("theoretical foundations") || lanes.any { it.contains("theory") })
         assertTrue(lanes.any { it.contains("experimental") })
         assertTrue(lanes.any { it.contains("empirical") || it.contains("failure") || it.contains("standards") })
-        // Long queries may still receive alternatives/criticism
         assertTrue(lanes.any { it.contains("alternatives") || it.contains("criticism") || it.contains("failure") })
     }
 
@@ -26,6 +25,14 @@ class ResearchModeTest {
         assertTrue("experimental mode should prioritize experimental + github lanes",
             names.any { it.contains("experimental") } && names.any { it.contains("github") || it.contains("community") })
         assertTrue(lanes.size >= 3)
+    }
+
+    @Test fun howToUiQueryStaysFocusedOnCodingLanes() {
+        val lanes = QueryLanes.expand("how creating custom user interface for apps")
+        val names = lanes.map { it.name.lowercase() }
+        assertTrue(names.any { it.contains("howto") || it.contains("ui") || it.contains("implementation") })
+        assertFalse(names.any { it.contains("criticism") || it.contains("theoretical foundations") })
+        assertFalse(lanes.any { it.query.contains("tradeoffs") })
     }
 
     @Test fun experimentalModePrefersGithubAndCodeHosts() {
@@ -58,6 +65,49 @@ class ResearchModeTest {
             "In System Design, a tradeoff is a deliberate decision",
             "https://example.com/tradeoffs"
         ))
+    }
+
+    @Test fun sourceQualityRejectsUnrelatedWikipediaNoiseForUiQuery() {
+        val terms = SourceQuality.queryTerms("how creating custom user interface for apps")
+        assertFalse(SourceQuality.hasQueryRelevance(
+            terms,
+            "Microsoft Copilot",
+            "Microsoft Copilot is a generative artificial intelligence chatbot",
+            "https://en.wikipedia.org/wiki/Microsoft_Copilot"
+        ))
+        assertFalse(SourceQuality.hasQueryRelevance(
+            terms,
+            "Mastodon (social network)",
+            "Mastodon is free and open-source software for running self-hosted social networking services",
+            "https://en.wikipedia.org/wiki/Mastodon_(social_network)"
+        ))
+        assertFalse(SourceQuality.isAcceptable(
+            "https://en.wikipedia.org/wiki/Talk:IOS_11",
+            "Article Talk iOS 11",
+            "{{cite web|url=https://example.com}}"
+        ))
+        assertFalse(SourceQuality.contentRelevant(
+            terms,
+            "K-Meleon",
+            "{{cite web|last=Lekach|title=The coder who built Mastodon}} K-Meleon is a web browser"
+        ))
+    }
+
+    @Test fun sourceQualityAcceptsRelevantUiSources() {
+        val terms = SourceQuality.queryTerms("how creating custom user interface for apps")
+        assertTrue(SourceQuality.hasQueryRelevance(
+            terms,
+            "Build a custom UI with Jetpack Compose",
+            "Create custom user interface components for Android apps",
+            "https://developer.android.com/jetpack/compose"
+        ))
+        assertTrue(SourceQuality.contentRelevant(
+            terms,
+            "Custom Views and ViewGroups",
+            "Learn how to create custom user interface widgets for Android apps by extending View."
+        ))
+        assertTrue(SourceQuality.rankBoost("https://developer.android.com/develop/ui") >= 10)
+        assertTrue(SourceQuality.rankBoost("https://en.wikipedia.org/wiki/Microsoft_Copilot") < 0)
     }
 
     @Test fun sourceQualityAcceptsRelevantCodeHosts() {
