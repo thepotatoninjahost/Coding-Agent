@@ -72,7 +72,7 @@ class ChatWorkspace(
                                 id = UUID.randomUUID().toString(),
                                 request = trimmed,
                                 status = "failed",
-                                plan = AgentPlan(emptyList(), emptyList()),
+                                plan = AgentPlan(trimmed, emptyList(), emptyList()),
                                 changes = emptyList(),
                                 verification = VerificationReport(false, emptyList()),
                                 events = emptyList(),
