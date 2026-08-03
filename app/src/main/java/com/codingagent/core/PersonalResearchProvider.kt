@@ -10,11 +10,9 @@ import java.util.UUID
 /**
  * Personal Research tab provider.
  *
- * Searches the user's query as typed (plus a few tight topical variants).
- * Does not expand into theory/criticism lanes. Does not pad the result list
- * with off-topic pages just to hit a source count.
- *
- * Agent coding research continues to use [DurableDeepResearchProvider].
+ * Short / truncated / low-signal queries are forced onto code hosts
+ * (GitHub, StackOverflow, official docs). Generic terms alone are not
+ * enough to accept a hit. No padding with off-topic pages.
  */
 class PersonalResearchProvider(
     private val researchRoot: File,
@@ -37,22 +35,36 @@ class PersonalResearchProvider(
         val terms = SourceQuality.queryTerms(normalized)
         require(terms.isNotEmpty()) { "Query has no searchable terms" }
 
+        val words = normalized.split(Regex("\\s+")).filter { it.isNotBlank() }
+        val isShort = words.size <= 4 || normalized.length < 40
+        val isLowSignal = terms.size <= 2 || terms.all { it in SourceQuality.genericResearchTerms }
+
         onProgress(DeepResearchProgress("searching", 0, target, 0, 0))
 
-        val searchQueries = linkedSetOf(
-            normalized,
-            "$normalized guide OR tutorial OR documentation",
-            "$normalized site:stackoverflow.com",
-            "$normalized site:github.com",
-            terms.joinToString(" ")
-        ).filter { it.isNotBlank() }
+        val searchQueries = linkedSetOf<String>()
+        if (isShort || isLowSignal) {
+            searchQueries += "$normalized site:github.com"
+            searchQueries += "$normalized site:stackoverflow.com"
+            searchQueries += "$normalized site:developer.android.com OR site:kotlinlang.org OR site:docs.oracle.com"
+            searchQueries += terms.joinToString(" ") + " site:github.com"
+            searchQueries += "$normalized code OR library OR api OR implementation site:github.com"
+        } else {
+            searchQueries += normalized
+            searchQueries += "$normalized guide OR tutorial OR documentation"
+            searchQueries += "$normalized site:stackoverflow.com"
+            searchQueries += "$normalized site:github.com"
+            searchQueries += terms.joinToString(" ")
+        }
 
         val hits = linkedMapOf<String, ResearchHit>()
         for (q in searchQueries) {
-            val result = searchProvider.search(q, 12)
+            val result = searchProvider.search(q, 14)
             result.hits.forEach { hit ->
                 if (!SourceQuality.isAcceptable(hit.url, hit.title, hit.excerpt)) return@forEach
                 if (!SourceQuality.hasQueryRelevance(terms, hit.title, hit.excerpt, hit.url)) return@forEach
+                if ((isShort || isLowSignal) && !SourceQuality.isCodeHost(hit.url) &&
+                    SourceQuality.rankBoost(hit.url) < 8
+                ) return@forEach
                 val key = hit.url.substringBefore('#').lowercase()
                 if (key.isNotBlank()) hits.putIfAbsent(key, hit)
             }
@@ -76,7 +88,8 @@ class PersonalResearchProvider(
             val ok = fetched != null &&
                 fetched.wordCount >= 40 &&
                 SourceQuality.isAcceptable(hit.url, title, body.take(500)) &&
-                SourceQuality.contentRelevant(terms, title, body)
+                SourceQuality.contentRelevant(terms, title, body) &&
+                !(hit.url.lowercase().contains("wikipedia.org") && !normalized.lowercase().contains("wiki"))
             if (ok) {
                 sources += ResearchSource(
                     title = title,
