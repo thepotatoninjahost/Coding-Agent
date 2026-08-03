@@ -29,8 +29,8 @@ fun interface AgentProgressListener {
 class ChatWorkspace(
     private val store: ChatMessageStore,
     private val unavailableMessageProvider: () -> String = { "Model unavailable. Finish model setup before sending coding requests." },
-    private val runtimeProvider: () -> CodingAgentExecutor?,
-    private val progressListener: AgentProgressListener? = null
+    private val progressListener: AgentProgressListener? = null,
+    private val runtimeProvider: () -> CodingAgentExecutor?
 ) {
     fun history(limit: Int = 100): List<ChatMessage> = store.recentChatMessages(limit).asReversed()
 
