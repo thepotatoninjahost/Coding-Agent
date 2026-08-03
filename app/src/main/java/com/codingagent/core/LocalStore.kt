@@ -12,7 +12,6 @@ class LocalStore(context: Context) : ChatMessageStore {
     private val chatFile = File(root, "chat.jsonl")
     private val prefs = context.getSharedPreferences("coding_agent_session", Context.MODE_PRIVATE)
 
-    /** Persist the on-device project directory path so rotate/relaunch can remount it. */
     fun saveProjectPath(path: String?) {
         prefs.edit().putString(KEY_PROJECT_PATH, path).apply()
     }
@@ -25,10 +24,6 @@ class LocalStore(context: Context) : ChatMessageStore {
 
     fun loadLastResearchQuery(): String? = prefs.getString(KEY_LAST_RESEARCH, null)?.takeIf { it.isNotBlank() }
 
-    /**
-     * Persist model gateway settings (including API key) in app-private prefs.
-     * Keys are never written to project JSONL or chat history.
-     */
     fun saveModelSettings(settings: ModelSettings) {
         prefs.edit().putString(KEY_MODEL_SETTINGS, ModelSettings.toJson(settings.normalized().copy(onboarded = true))).apply()
     }
@@ -118,9 +113,9 @@ class LocalStore(context: Context) : ChatMessageStore {
     }
 
     private fun read(file: File, limit: Int): List<JSONObject> {
-        if (!file.isFile) return emptyList()
-        return file.readLines().asReversed().take(limit).mapNotNull { line ->
-            runCatching { JSONObject(line) }.getOrNull()
+        if (!file.exists()) return emptyList()
+        return file.useLines { lines ->
+            lines.toList().asReversed().take(limit).mapNotNull { line -> runCatching { JSONObject(line) }.getOrNull() }
         }
     }
 }
