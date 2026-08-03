@@ -3,7 +3,7 @@ package com.codingagent.core
 import java.io.File
 
 interface AgentKnowledge {
-    fun search(query: String, limit: Int = 6): List<KnowledgeHit>
+    fun search(query: String, limit: Int = 8): List<KnowledgeHit>
 }
 
 data class AgentStep(val phase: String, val detail: String)
