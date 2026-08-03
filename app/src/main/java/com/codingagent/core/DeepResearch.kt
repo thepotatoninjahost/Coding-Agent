@@ -8,5 +8,4 @@ import java.net.URL
 import java.util.UUID
 import java.util.regex.Pattern
 
-// File restored - full content follows in next push if truncated
-object DeepResearchPlaceholder
+// PLACEHOLDER_WILL_REPLACE - if you see this the push truncated
