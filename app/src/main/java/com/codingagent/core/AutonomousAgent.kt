@@ -67,7 +67,6 @@ class AutonomousAgent(
         val intake = runtime.intake(normalized)
         val plan = AgentPlanner(workspace).plan(intake)
         emit(AutonomousAgentEvent.Phase("PLAN", plan.steps.joinToString(" → ") { it.phase }))
-        // Trust soft plain-English intake. Hard-block only when the contract is not ready.
         if (!intake.executionReady) {
             val task = AgentTask(taskId, normalized, "needs-input", plan, emptyList(), VerificationReport(false, emptyList()), emptyList(), intake.clarificationQuestion ?: "Clarify the requested operation")
             emit(AutonomousAgentEvent.Failed(task, task.summary))
@@ -75,8 +74,6 @@ class AutonomousAgent(
             return events
         }
 
-        // Research is optional. Only run when the user asked for research, or the request is clearly about external knowledge.
-        // Ordinary coding/fix/edit requests go straight to the model with the local project as evidence.
         var researchEvidence = ""
         if (shouldResearch(normalized, intake)) {
             emit(AutonomousAgentEvent.Phase("RESEARCH", "Gathering a small set of sources (optional path)"))
@@ -122,7 +119,15 @@ class AutonomousAgent(
                 }
                 is ModelResponse.Text -> {
                     emit(AutonomousAgentEvent.ModelMessage(response.content))
-                    val task = completedTask(taskId, normalized, plan, response.content, changeSets.flatMap { it.changes }, workspace.verify())
+                    val report = workspace.verify()
+                    val summary = sanitizeModelText(response.content, report)
+                    val status = if (isDegenerate(response.content)) "completed-with-warning" else "completed"
+                    val task = AgentTask(
+                        taskId, normalized, status, plan,
+                        changeSets.flatMap { it.changes }, report,
+                        listOf("${Instant.now()}: model reply (${response.content.length} chars)"),
+                        summary
+                    )
                     journal.record(task)
                     emit(AutonomousAgentEvent.Completed(task))
                     return events
@@ -158,7 +163,6 @@ class AutonomousAgent(
         return events
     }
 
-    /** Research only when the user clearly asked for it, or the request is about external/unknown APIs/docs. */
     private fun shouldResearch(request: String, intake: TaskIntake): Boolean {
         val lower = request.lowercase()
         if (Regex("\\b(research|look up|search the web|google|documentation online|how does .+ work online)\\b").containsMatchIn(lower)) return true
@@ -231,6 +235,36 @@ class AutonomousAgent(
     private fun rejectChange(arguments: JSONObject): String = if (mutations.reject(arguments.getString("id"))) "REJECTED id=${arguments.getString("id")}" else "ERROR: Change proposal does not exist"
 
     private fun String.limitOutput(): String = take(config.maxOutputCharacters)
+
+    private fun isDegenerate(text: String): Boolean {
+        val lines = text.lineSequence().map { it.trim() }.filter { it.isNotEmpty() }.toList()
+        if (lines.size < 5) return false
+        val top = lines.groupingBy { it }.eachCount().values.maxOrNull() ?: 0
+        return top >= 5 && top * 2 >= lines.size
+    }
+
+    private fun sanitizeModelText(text: String, report: VerificationReport): String {
+        if (!isDegenerate(text)) return text.take(4_000)
+        return buildString {
+            append("The model produced repetitive garbage instead of a coherent report. ")
+            append("Static verification found ")
+            append(report.issues.size)
+            append(" issue(s)")
+            if (report.issues.isEmpty()) {
+                append(" (none).")
+            } else {
+                append(":")
+                report.issues.take(20).forEach { issue ->
+                    append("\n- ")
+                    append(issue.path)
+                    append(":")
+                    append(issue.line)
+                    append(" — ")
+                    append(issue.message)
+                }
+            }
+        }
+    }
 
     private fun completedTask(id: String, request: String, plan: AgentPlan, message: String, changes: List<ChangeRecord>, report: VerificationReport) =
         AgentTask(id, request, "completed", plan, changes, report, listOf("${Instant.now()}: model completed: $message"), message)
