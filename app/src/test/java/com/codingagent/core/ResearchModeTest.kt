@@ -35,6 +35,17 @@ class ResearchModeTest {
         assertFalse(lanes.any { it.query.contains("tradeoffs") })
     }
 
+    @Test fun codingCustomUiQueryGetsUiBiasedLanes() {
+        val lanes = QueryLanes.expand("coding custom ui for apps")
+        val joined = lanes.joinToString(" ") { it.query.lowercase() }
+        assertTrue(
+            "UI how-to query should bias toward compose/swiftui/custom view",
+            joined.contains("compose") || joined.contains("swiftui") || joined.contains("custom view") ||
+                joined.contains("android") || joined.contains("ui toolkit")
+        )
+        assertFalse(lanes.any { it.query.contains("tradeoffs") })
+    }
+
     @Test fun experimentalModePrefersGithubAndCodeHosts() {
         val lanes = QueryLanes.expand("experimental kotlin coroutines scheduler", ResearchMode.EXPERIMENTAL)
         val joined = lanes.joinToString(" ") { it.query.lowercase() }
@@ -120,5 +131,50 @@ class ResearchModeTest {
         ))
         assertTrue(SourceQuality.rankBoost("https://github.com/Kotlin/kotlinx.coroutines") >= 8)
         assertTrue(SourceQuality.rankBoost("https://developer.android.com/kotlin/coroutines") >= 10)
+    }
+
+    @Test fun codingCustomUiKeepsShortUiTermAndRejectsJunk() {
+        val terms = SourceQuality.queryTerms("coding custom ui for apps")
+        assertTrue("queryTerms must keep short UI term", terms.contains("ui"))
+        assertTrue(SourceQuality.isUiQuery(terms))
+
+        // Accept real UI docs
+        assertTrue(SourceQuality.hasQueryRelevance(
+            terms,
+            "Build a custom UI with Jetpack Compose",
+            "Create custom user interface components for Android apps",
+            "https://developer.android.com/jetpack/compose"
+        ))
+
+        // Reject FTC robot SDK noise
+        assertFalse(SourceQuality.isAcceptable(
+            "https://github.com/chrisneagu/FTC-Skystone-Dark-Angels-Romania-2020",
+            "FTC SDK software FtcRobotController",
+            "Android app to control a FIRST Tech Challenge competition robot"
+        ))
+        assertFalse(SourceQuality.hasQueryRelevance(
+            terms,
+            "FTC SDK FtcRobotController",
+            "Android app to control a FIRST Tech Challenge competition robot",
+            "https://github.com/ftctechnh/ftcrobotcontroller"
+        ))
+
+        // Reject no-code / Power Apps / Adalo style builders
+        assertFalse(SourceQuality.isAcceptable(
+            "https://www.adalo.com/",
+            "Adalo App Builder",
+            "No-code app builder for mobile apps"
+        ))
+        assertFalse(SourceQuality.isAcceptable(
+            "https://learn.microsoft.com/en-us/power-apps/developer/code-apps/overview",
+            "Power Apps code apps overview",
+            "Power Apps low-code platform"
+        ))
+        assertFalse(SourceQuality.hasQueryRelevance(
+            terms,
+            "How to Code an App in 2026 (Free and Easy Guide) - Knack",
+            "No-code platform for building apps without programming",
+            "https://www.knack.com/blog/how-to-code-an-app"
+        ))
     }
 }

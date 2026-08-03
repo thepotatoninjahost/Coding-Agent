@@ -8,10 +8,11 @@ import java.net.URL
 import java.util.UUID
 
 /**
- * Personal Research tab provider.
+ * Personal Research tab provider (BROAD mode).
  *
- * Prefers code hosts. Rejects generic-term-only hits and common junk
- * (metaverse intros, career READMEs, study-limitations blogs, Wikipedia noise).
+ * Uses QueryLanes for how-to / UI queries so results bias toward Jetpack Compose,
+ * SwiftUI, custom views, and code hosts. Rejects generic-term-only hits and common
+ * junk (metaverse intros, career READMEs, FTC robots, no-code builders, Wikipedia noise).
  */
 class PersonalResearchProvider(
     private val researchRoot: File,
@@ -36,13 +37,23 @@ class PersonalResearchProvider(
 
         onProgress(DeepResearchProgress("searching", 0, target, 0, 0))
 
-        val searchQueries = linkedSetOf(
-            normalized,
-            "$normalized site:github.com",
-            "$normalized site:stackoverflow.com",
-            "$normalized documentation OR guide OR tutorial OR paper OR specification",
-            terms.joinToString(" ") + " site:github.com OR site:stackoverflow.com"
-        ).filter { it.isNotBlank() }
+        // Prefer QueryLanes expansion for how-to / UI queries so search is biased
+        // toward coding UI docs instead of loose "coding + apps" web noise.
+        val laneQueries = QueryLanes.expand(normalized, ResearchMode.BROAD)
+            .map { it.query }
+            .filter { it.isNotBlank() }
+        val searchQueries = linkedSetOf<String>().apply {
+            add(normalized)
+            addAll(laneQueries)
+            add("$normalized site:github.com")
+            add("$normalized site:stackoverflow.com")
+            add("$normalized site:developer.android.com OR site:developer.apple.com")
+            add(terms.joinToString(" ") + " site:github.com OR site:stackoverflow.com")
+            if (SourceQuality.isUiQuery(terms)) {
+                add("$normalized jetpack compose OR swiftui OR custom view OR custom component")
+                add("$normalized android UI OR iOS UI documentation")
+            }
+        }.filter { it.isNotBlank() }
 
         val hits = linkedMapOf<String, ResearchHit>()
         for (q in searchQueries) {

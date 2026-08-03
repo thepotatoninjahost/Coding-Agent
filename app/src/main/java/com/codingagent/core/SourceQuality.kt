@@ -23,7 +23,11 @@ object SourceQuality {
         "reddit.com/r/chess", "espn.com", "cnn.com", "bbc.com",
         "nytimes.com", "forbes.com", "medium.com/tag", "quora.com",
         "fullframeinitiative.org", "thisvsthat.io", "geeksforgeeks.org/system-design",
-        "educative.io", "wellbeing", "wordvice.com", "aje.com"
+        "educative.io", "wellbeing", "wordvice.com", "aje.com",
+        // no-code / low-code app builders and marketing sites that drown UI coding queries
+        "adalo.com", "knack.com", "zoho.com/creator", "bubble.io", "glideapps.com",
+        "thunkable.com", "appgyver.com", "mendix.com", "outsystems.com",
+        "powerapps.microsoft.com", "make.com", "zapier.com"
     )
     private val blockedTitleTokens = listOf(
         "tradeoffs in system design", "system design tradeoffs", "tradeoffs in professional",
@@ -31,7 +35,11 @@ object SourceQuality {
         "making change is hard", "investor relations", "mastodon (social", "k-meleon",
         "windows installer", "microsoft copilot", "career opportunities",
         "elements of a metaverse", "learning through play", "limitations of the study",
-        "how to write limitations", "mbti-in-thoughts", "leaky thoughts"
+        "how to write limitations", "mbti-in-thoughts", "leaky thoughts",
+        // robotics / FTC / sensor kits and no-code builders that match loose "coding + apps"
+        "ftc sdk", "ftc robot", "first tech challenge", "ftcrobotcontroller",
+        "no-code", "no code", "low-code", "low code", "app builder",
+        "power apps", "powerapps", "adalo", "knack", "bubble.io"
     )
     private val stopWords = setOf(
         "the", "a", "an", "and", "or", "of", "to", "in", "for", "on", "with",
@@ -41,9 +49,20 @@ object SourceQuality {
         "my", "me", "we", "our", "their", "them", "than", "then", "also"
     )
 
+    // Short but high-signal terms kept even when length < 3
+    private val keepShortTerms = setOf("ui", "ux", "api", "ios", "js", "ts", "c#", "c++")
+
     val genericResearchTerms = setOf(
         "research", "study", "paper", "article", "review", "analysis",
         "independent", "thought", "thinking", "idea", "theory", "concept"
+    )
+
+    // Strong UI / coding-UI signals used to bias relevance for how-to UI queries
+    private val uiSignals = listOf(
+        "user interface", "custom ui", "custom view", "custom component",
+        "jetpack compose", "swiftui", "react native", "compose ui",
+        "android ui", "ios ui", "layout", "widget", "viewgroup",
+        "uikit", "swift ui", "xml layout", "constraint layout"
     )
 
     fun isCodeHost(url: String): Boolean {
@@ -59,9 +78,21 @@ object SourceQuality {
 
     fun queryTerms(query: String): Set<String> =
         query.lowercase()
-            .split(Regex("[^a-z0-9]+"))
-            .filter { it.length >= 3 && it !in stopWords }
+            .split(Regex("[^a-z0-9+#]+"))
+            .filter { token ->
+                token.isNotBlank() &&
+                    token !in stopWords &&
+                    (token.length >= 3 || token in keepShortTerms)
+            }
             .toSet()
+
+    fun isUiQuery(terms: Set<String>): Boolean {
+        val t = terms.map { it.lowercase() }.toSet()
+        return t.contains("ui") || t.contains("ux") ||
+            t.contains("interface") || t.contains("compose") ||
+            t.contains("layout") || t.contains("widget") ||
+            t.contains("view") || t.contains("swiftui")
+    }
 
     fun hasQueryRelevance(terms: Set<String>, title: String, excerpt: String, url: String): Boolean {
         if (terms.isEmpty()) return false
@@ -70,6 +101,19 @@ object SourceQuality {
         if (hits == 0) return false
         val nonGeneric = terms.filter { it !in genericResearchTerms }
         if (nonGeneric.isEmpty() && !isCodeHost(url)) return false
+
+        // For UI / custom-interface queries, require a real UI signal or a code host
+        // so loose matches on "coding" + "apps" (FTC robots, no-code builders) fail.
+        if (isUiQuery(terms)) {
+            val hasUiSignal = uiSignals.any { hay.contains(it) } ||
+                hay.contains(" compose") || hay.contains("custom view") ||
+                hay.contains("user interface") || hay.contains("swiftui") ||
+                hay.contains("jetpack")
+            if (!hasUiSignal && !isCodeHost(url)) return false
+            // Even on code hosts, require at least one non-generic term hit beyond pure noise
+            if (hits < 2 && !hasUiSignal) return false
+        }
+
         return when {
             terms.size <= 2 -> hits >= 1 && (isCodeHost(url) || nonGeneric.isNotEmpty())
             terms.size <= 4 -> hits >= 2 || (hits.toDouble() / terms.size >= 0.5 && isCodeHost(url))
@@ -82,6 +126,14 @@ object SourceQuality {
         if (wikiNoise.matcher(content.take(800)).find()) return false
         val hay = "$title ${content.take(4_000)}".lowercase()
         val hits = terms.count { hay.contains(it) }
+
+        if (isUiQuery(terms)) {
+            val hasUiSignal = uiSignals.any { hay.contains(it) } ||
+                hay.contains("custom view") || hay.contains("user interface") ||
+                hay.contains("jetpack compose") || hay.contains("swiftui")
+            if (!hasUiSignal && hits < 3) return false
+        }
+
         return when {
             terms.size <= 2 -> hits >= 1
             terms.size <= 4 -> hits >= 2
@@ -96,6 +148,11 @@ object SourceQuality {
         if (hay.contains("user interface") || hay.contains("custom view") || hay.contains("custom ui")) score += 8
         if (hay.contains("jetpack compose") || hay.contains("swiftui") || hay.contains("react native")) score += 6
         if (isCodeHost(hit.url)) score += 4
+        // Penalize common off-topic matches for UI queries
+        if (hay.contains("ftc") || hay.contains("robot controller") || hay.contains("first tech")) score -= 12
+        if (hay.contains("no-code") || hay.contains("no code") || hay.contains("app builder") ||
+            hay.contains("power apps") || hay.contains("adalo") || hay.contains("knack")
+        ) score -= 12
         return score
     }
 
@@ -118,6 +175,10 @@ object SourceQuality {
         if (t.contains("tradeoff") && (t.contains("interview") || t.contains("system design"))) return false
         if (t.contains("metaverse") || t.contains("career opportunit") || t.contains("mbti")) return false
         if (t.contains("limitations of") && t.contains("study")) return false
+        // Hard reject robotics competition SDKs and pure no-code builders for general coding/UI research
+        if (t.contains("ftc") || t.contains("first tech challenge") || u.contains("ftcrobot")) return false
+        if (t.contains("no-code") || t.contains("no code") || t.contains("low-code") || t.contains("app builder")) return false
+        if (t.contains("power apps") || t.contains("powerapps") || u.contains("power-apps") || u.contains("powerapps")) return false
         return true
     }
 
