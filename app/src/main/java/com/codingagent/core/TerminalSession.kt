@@ -32,7 +32,7 @@ class TerminalSession(
         runner.cancel(reason)
     }
 
-    fun isBusy(): Boolean = runner.isCancelled().not() && entries.isNotEmpty()
+    fun isBusy(): Boolean = runner.isCancelled().not() && entries.isNotEmpty() // soft signal; process tracking is on runner
 
     fun history(limit: Int = 50): List<TerminalEntry> = entries.takeLast(limit)
 }
