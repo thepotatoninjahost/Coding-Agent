@@ -10,9 +10,8 @@ import java.util.UUID
 /**
  * Personal Research tab provider.
  *
- * Short / truncated / low-signal queries are forced onto code hosts
- * (GitHub, StackOverflow, official docs). Generic terms alone are not
- * enough to accept a hit. No padding with off-topic pages.
+ * Prefers code hosts. Rejects generic-term-only hits and common junk
+ * (metaverse intros, career READMEs, study-limitations blogs, Wikipedia noise).
  */
 class PersonalResearchProvider(
     private val researchRoot: File,
@@ -35,26 +34,15 @@ class PersonalResearchProvider(
         val terms = SourceQuality.queryTerms(normalized)
         require(terms.isNotEmpty()) { "Query has no searchable terms" }
 
-        val words = normalized.split(Regex("\\s+")).filter { it.isNotBlank() }
-        val isShort = words.size <= 4 || normalized.length < 40
-        val isLowSignal = terms.size <= 2 || terms.all { it in SourceQuality.genericResearchTerms }
-
         onProgress(DeepResearchProgress("searching", 0, target, 0, 0))
 
-        val searchQueries = linkedSetOf<String>()
-        if (isShort || isLowSignal) {
-            searchQueries += "$normalized site:github.com"
-            searchQueries += "$normalized site:stackoverflow.com"
-            searchQueries += "$normalized site:developer.android.com OR site:kotlinlang.org OR site:docs.oracle.com"
-            searchQueries += terms.joinToString(" ") + " site:github.com"
-            searchQueries += "$normalized code OR library OR api OR implementation site:github.com"
-        } else {
-            searchQueries += normalized
-            searchQueries += "$normalized guide OR tutorial OR documentation"
-            searchQueries += "$normalized site:stackoverflow.com"
-            searchQueries += "$normalized site:github.com"
-            searchQueries += terms.joinToString(" ")
-        }
+        val searchQueries = linkedSetOf(
+            normalized,
+            "$normalized site:github.com",
+            "$normalized site:stackoverflow.com",
+            "$normalized documentation OR guide OR tutorial OR paper OR specification",
+            terms.joinToString(" ") + " site:github.com OR site:stackoverflow.com"
+        ).filter { it.isNotBlank() }
 
         val hits = linkedMapOf<String, ResearchHit>()
         for (q in searchQueries) {
@@ -62,9 +50,6 @@ class PersonalResearchProvider(
             result.hits.forEach { hit ->
                 if (!SourceQuality.isAcceptable(hit.url, hit.title, hit.excerpt)) return@forEach
                 if (!SourceQuality.hasQueryRelevance(terms, hit.title, hit.excerpt, hit.url)) return@forEach
-                if ((isShort || isLowSignal) && !SourceQuality.isCodeHost(hit.url) &&
-                    SourceQuality.rankBoost(hit.url) < 8
-                ) return@forEach
                 val key = hit.url.substringBefore('#').lowercase()
                 if (key.isNotBlank()) hits.putIfAbsent(key, hit)
             }
