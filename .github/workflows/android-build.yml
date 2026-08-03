@@ -44,6 +44,9 @@ jobs:
       - name: Run unit tests
         run: ./gradlew :app:testDebugUnitTest --no-daemon --stacktrace
 
+      - name: Acceptance path tests (explicit)
+        run: ./gradlew :app:testDebugUnitTest --tests "com.codingagent.core.AcceptancePathTest" --tests "com.codingagent.core.StorageGuardTest" --tests "com.codingagent.core.AutonomousLoopTest" --no-daemon --stacktrace
+
       - name: Run Android lint
         run: ./gradlew :app:lintDebug --no-daemon --stacktrace
 
