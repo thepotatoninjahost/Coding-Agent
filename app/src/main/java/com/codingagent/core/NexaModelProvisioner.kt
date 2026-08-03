@@ -50,6 +50,27 @@ class NexaModelProvisioner(
     fun ensure(onProgress: (ModelDownloadProgress) -> Unit = {}): ProvisionedModel {
         val directory = root.resolve(Qwen3NpuPackage.packageName).apply { mkdirs() }
         copyBundledFiles(directory)
+        val remaining = remainingDownloadBytes(directory)
+        if (remaining > 0L) {
+            onProgress(
+                ModelDownloadProgress(
+                    currentFile = "storage-check",
+                    completedBytes = Qwen3NpuPackage.totalBytes - remaining,
+                    totalBytes = Qwen3NpuPackage.totalBytes,
+                    phase = "checking-storage"
+                )
+            )
+            val space = StorageGuard.requireSpace(directory, remaining)
+            onProgress(
+                ModelDownloadProgress(
+                    currentFile = "storage-check",
+                    completedBytes = Qwen3NpuPackage.totalBytes - remaining,
+                    totalBytes = Qwen3NpuPackage.totalBytes,
+                    phase = "storage-ok",
+                    error = space.humanMessage()
+                )
+            )
+        }
         var completed = Qwen3NpuPackage.files.sumOf { existingCompletedBytes(directory, it) }
         Qwen3NpuPackage.files.forEach { shard ->
             val destination = directory.resolve(shard.name)
@@ -59,6 +80,22 @@ class NexaModelProvisioner(
                 return@forEach
             }
             if (destination.length() > shard.sizeBytes || (destination.length() == shard.sizeBytes && sha256(destination) != shard.sha256)) destination.delete()
+            val stillNeeded = remainingDownloadBytes(directory)
+            if (stillNeeded > 0L) {
+                runCatching { StorageGuard.requireSpace(directory, stillNeeded) }
+                    .onFailure { error ->
+                        onProgress(
+                            ModelDownloadProgress(
+                                shard.name,
+                                completed,
+                                Qwen3NpuPackage.totalBytes,
+                                "blocked",
+                                error.message
+                            )
+                        )
+                        throw error
+                    }
+            }
             download(shard, destination, completed, onProgress)
             completed += shard.sizeBytes
         }
@@ -68,6 +105,18 @@ class NexaModelProvisioner(
         }
         require(invalid.isEmpty()) { "Model verification failed for ${invalid.joinToString { it.name }}" }
         return ProvisionedModel(directory, Qwen3NpuPackage.totalBytes)
+    }
+
+    fun remainingDownloadBytes(directory: File = root.resolve(Qwen3NpuPackage.packageName)): Long {
+        return Qwen3NpuPackage.files.sumOf { shard ->
+            val file = directory.resolve(shard.name)
+            when {
+                !file.isFile -> shard.sizeBytes
+                file.length() == shard.sizeBytes -> 0L
+                file.length() < shard.sizeBytes -> shard.sizeBytes - file.length()
+                else -> shard.sizeBytes
+            }
+        }
     }
 
     private fun copyBundledFiles(directory: File) {
