@@ -96,7 +96,7 @@ class AutonomousAgent(
 
         var researchEvidence = ""
         if (shouldResearch(normalized, intake)) {
-            if (cancelled.get()) return stopNow(taskId, normalized, plan, events, emit)
+            if (cancelled.get()) return stopNow(taskId, normalized, plan, events) { emit(it) }
             emit(AutonomousAgentEvent.Phase("RESEARCH", "Gathering a small set of sources (optional path)"))
             val mode = ResearchModeDetector.detect(normalized)
             val session = runCatching {
@@ -105,7 +105,7 @@ class AutonomousAgent(
                     emit(AutonomousAgentEvent.Phase("RESEARCH", "${progress.stage}: ${progress.completed}/${progress.total}; learned ${progress.successful}, failed ${progress.failed}"))
                 }
             }.getOrNull()
-            if (cancelled.get()) return stopNow(taskId, normalized, plan, events, emit)
+            if (cancelled.get()) return stopNow(taskId, normalized, plan, events) { emit(it) }
             if (session != null && session.sources.isNotEmpty()) {
                 val brief = ResearchBriefBuilder.build(session)
                 researchEvidence = "\n\nResearch brief:\n${brief.evidence}"
@@ -126,7 +126,7 @@ class AutonomousAgent(
         var identicalRepeats = 0
 
         for (turn in 0 until config.maxTurns) {
-            if (cancelled.get()) return stopNow(taskId, normalized, plan, events, emit)
+            if (cancelled.get()) return stopNow(taskId, normalized, plan, events) { emit(it) }
             emit(AutonomousAgentEvent.Phase("MODEL", "Decision turn ${turn + 1}/${config.maxTurns}"))
             val response = gateway.stream(
                 ModelRequest(
@@ -139,7 +139,7 @@ class AutonomousAgent(
             ) { delta ->
                 if (!cancelled.get()) emit(AutonomousAgentEvent.ModelDelta(delta))
             }
-            if (cancelled.get()) return stopNow(taskId, normalized, plan, events, emit)
+            if (cancelled.get()) return stopNow(taskId, normalized, plan, events) { emit(it) }
             when (response) {
                 is ModelResponse.Failure -> {
                     val task = failedTask(taskId, normalized, plan, response.message, changeSets.flatMap { it.changes })
@@ -178,7 +178,7 @@ class AutonomousAgent(
                         identicalRepeats = 1
                     }
                     emit(AutonomousAgentEvent.ToolStarted(response.name, response.arguments))
-                    if (cancelled.get()) return stopNow(taskId, normalized, plan, events, emit)
+                    if (cancelled.get()) return stopNow(taskId, normalized, plan, events) { emit(it) }
                     val toolResult = executeTool(response.name, response.arguments)
                     lastEvidence = toolResult
                     transcript += ModelMessage("assistant", response.thought.ifBlank { "Calling ${response.name}" }, response.callId, response.name, response.arguments)
