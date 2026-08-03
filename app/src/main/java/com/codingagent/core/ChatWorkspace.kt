@@ -42,7 +42,6 @@ class ChatWorkspace(
         progressListener?.onProgress("PLANNING", "Starting request")
         val result = when (runtime) {
             is AutonomousAgent -> {
-                // Prefer event stream so the UI can show INTAKE / PLAN / RESEARCH / MODEL / tools live.
                 val events = runtime.run(withConversationContext(trimmed)) { event ->
                     when (event) {
                         is AutonomousAgentEvent.Phase -> progressListener?.onProgress(event.name, event.detail)
@@ -51,11 +50,12 @@ class ChatWorkspace(
                             "TOOL",
                             if (event.success) "${event.name} ok" else "${event.name} failed"
                         )
-                        is AutonomousAgentEvent.ModelDelta -> { /* stream noise; keep last phase */ }
+                        is AutonomousAgentEvent.ModelDelta -> progressListener?.onProgress("MODEL", "Streaming… ${event.text.take(40)}")
                         is AutonomousAgentEvent.ModelMessage -> progressListener?.onProgress("MODEL", "Writing reply")
                         is AutonomousAgentEvent.Started -> progressListener?.onProgress("STARTED", event.request.take(60))
                         is AutonomousAgentEvent.Completed -> progressListener?.onProgress("DONE", "Completed")
                         is AutonomousAgentEvent.Failed -> progressListener?.onProgress("FAILED", event.message.take(120))
+                        is AutonomousAgentEvent.Stopped -> progressListener?.onProgress("STOPPED", event.message.take(120))
                         is AutonomousAgentEvent.ApprovalRequired -> progressListener?.onProgress("APPROVAL", "Waiting for owner approval")
                     }
                 }
@@ -66,6 +66,7 @@ class ChatWorkspace(
                         terminal.proposal.id
                     )
                     is AutonomousAgentEvent.Completed -> AgentRuntimeResult.Completed(terminal.task)
+                    is AutonomousAgentEvent.Stopped -> AgentRuntimeResult.Failed(terminal.task)
                     is AutonomousAgentEvent.Failed -> terminal.task?.let { AgentRuntimeResult.Failed(it) }
                         ?: AgentRuntimeResult.Failed(
                             AgentTask(
@@ -129,16 +130,12 @@ class ChatWorkspace(
         }
     }
 
-    /** Collapse highly repetitive model output into a short readable note. */
     private fun sanitizeSummary(text: String): String {
-        val lines = text.lineSequence().map { it.trim() }.filter { it.isNotEmpty() }.toList()
-        if (lines.isEmpty()) return "(empty)"
-        val counts = lines.groupingBy { it }.eachCount()
-        val (topLine, topCount) = counts.maxByOrNull { it.value } ?: return text.take(1_200)
-        if (topCount >= 5 && topCount * 2 >= lines.size) {
-            return "Model output was degenerate (repeated \"${topLine.take(80)}\" ×$topCount). " +
-                "Rely on the verification section above for the real findings."
+        if (text.isBlank()) return "(empty)"
+        if (DegenerateOutput.isDegenerate(text)) {
+            return DegenerateOutput.sanitize(text) + " Rely on the verification section above for the real findings."
         }
+        val lines = text.lineSequence().map { it.trim() }.filter { it.isNotEmpty() }.toList()
         val deduped = mutableListOf<String>()
         var prev: String? = null
         var streak = 0
