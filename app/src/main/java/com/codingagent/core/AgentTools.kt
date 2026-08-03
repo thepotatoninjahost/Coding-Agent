@@ -3,6 +3,8 @@ package com.codingagent.core
 import java.security.MessageDigest
 
 class AgentTools(private val workspace: ProjectWorkspace) {
+    private val terminalSession = TerminalSession(workspace.projectRoot())
+
     fun read(path: String): EditorDocument {
         val file = workspace.projectRoot().resolve(path)
         require(file.canonicalFile.toPath().startsWith(workspace.projectRoot().canonicalFile.toPath())) { "Unsafe project path" }
@@ -17,11 +19,29 @@ class AgentTools(private val workspace: ProjectWorkspace) {
         return coordinator.propose("Editor save: $path", listOf(TaskOperation(OperationKind.REPLACE, path, current.content, content)), "Editor save")
     }
 
-    fun terminal(command: List<String>, timeoutSeconds: Long = 90): TerminalEntry {
+    /** Preferred entry — runs through the shared session so cancel works. */
+    fun terminal(
+        command: List<String>,
+        timeoutSeconds: Long = 90,
+        onStdout: ((String) -> Unit)? = null,
+        onStderr: ((String) -> Unit)? = null
+    ): TerminalEntry {
         require(command.isNotEmpty()) { "Command cannot be empty" }
-        val result = CommandRunner(workspace.projectRoot()).run(command, timeoutSeconds)
-        return TerminalEntry(result.command, result.stdout, result.stderr, result.exitCode, result.timedOut)
+        val joined = command.joinToString(" ")
+        return terminalSession.execute(joined, onStdout, onStderr)
     }
+
+    fun runTerminal(
+        command: String,
+        onStdout: ((String) -> Unit)? = null,
+        onStderr: ((String) -> Unit)? = null
+    ): TerminalEntry = terminalSession.execute(command, onStdout, onStderr)
+
+    fun cancelTerminal(reason: String = "cancelled by owner") {
+        terminalSession.cancel(reason)
+    }
+
+    fun terminalHistory(limit: Int = 50): List<TerminalEntry> = terminalSession.history(limit)
 
     private fun checksum(content: String): String = MessageDigest.getInstance("SHA-256")
         .digest(content.toByteArray(Charsets.UTF_8))
