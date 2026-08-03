@@ -1,3 +1,1 @@
-package com.codingagent.ui
-
-// TEMP - will be replaced
+SEE_LOCAL_FILE
