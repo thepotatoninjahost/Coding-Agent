@@ -25,9 +25,20 @@ class LocalStore(context: Context) : ChatMessageStore {
 
     fun loadLastResearchQuery(): String? = prefs.getString(KEY_LAST_RESEARCH, null)?.takeIf { it.isNotBlank() }
 
+    /**
+     * Persist model gateway settings (including API key) in app-private prefs.
+     * Keys are never written to project JSONL or chat history.
+     */
+    fun saveModelSettings(settings: ModelSettings) {
+        prefs.edit().putString(KEY_MODEL_SETTINGS, ModelSettings.toJson(settings.normalized().copy(onboarded = true))).apply()
+    }
+
+    fun loadModelSettings(): ModelSettings = ModelSettings.fromJson(prefs.getString(KEY_MODEL_SETTINGS, null))
+
     companion object {
         private const val KEY_PROJECT_PATH = "project_path"
         private const val KEY_LAST_RESEARCH = "last_research_query"
+        private const val KEY_MODEL_SETTINGS = "model_settings_v1"
     }
 
     @Synchronized
@@ -107,9 +118,9 @@ class LocalStore(context: Context) : ChatMessageStore {
     }
 
     private fun read(file: File, limit: Int): List<JSONObject> {
-        if (!file.exists()) return emptyList()
-        return file.useLines { lines ->
-            lines.toList().asReversed().take(limit).mapNotNull { line -> runCatching { JSONObject(line) }.getOrNull() }
+        if (!file.isFile) return emptyList()
+        return file.readLines().asReversed().take(limit).mapNotNull { line ->
+            runCatching { JSONObject(line) }.getOrNull()
         }
     }
 }
