@@ -24,8 +24,6 @@ class GoalInterpreter(private val root: File) {
         val intent = intent(normalized, operation)
         val constraints = constraints(normalized)
         val acceptance = acceptance(normalized, intent)
-        // Do not treat missing exact mutation syntax as blocking ambiguity.
-        // The model can inspect files and propose changes via tools.
         val ambiguity = softAmbiguity(normalized, intent)
         val confidence = score(intent, operation, paths, symbols, ambiguity)
         return GoalContract(
@@ -53,9 +51,9 @@ class GoalInterpreter(private val root: File) {
         }
         return when {
             matches(request, "create|add|new file|write a|generate") -> TaskIntent.CREATE
-            matches(request, "test|tests|testing|verify|build") -> TaskIntent.TEST
-            matches(request, "fix|debug|broken|error|crash|bug|repair|patch") -> TaskIntent.DEBUG
-            matches(request, "refactor|restructure|rename|clean up|cleanup") -> TaskIntent.REFACTOR
+            matches(request, "test|unit test|coverage") -> TaskIntent.TEST
+            matches(request, "refactor|restructure|rename|clean up") -> TaskIntent.REFACTOR
+            matches(request, "fix|debug|broken|error|crash|bug") -> TaskIntent.DEBUG
             matches(request, "change|edit|update|modify|implement|add|remove|delete|insert") -> TaskIntent.CHANGE
             matches(request, "explain|why|what does|understand") -> TaskIntent.EXPLAIN
             matches(request, "inspect|show|list|search|find|analy[sz]e|analysis|review|audit|assess|evaluate|thoughts|opinion|feedback|look over|report") -> TaskIntent.INSPECT
@@ -66,8 +64,7 @@ class GoalInterpreter(private val root: File) {
 
     private fun constraints(request: String): List<String> = buildList {
         if (matches(request, "without changing|do not change|don't change|read only|readonly")) add("do not modify project files")
-        if (matches(request, "keep tests|preserve tests|backward compatible|no breaking")) add("preserve existing behavior and tests")
-        if (matches(request, "minimal|smallest change")) add("prefer the smallest change")
+        if (matches(request, "minimal|smallest|least change")) add("prefer the smallest change")
         if (matches(request, "offline|no internet|local only")) add("do not use network resources")
     }
 
@@ -84,7 +81,6 @@ class GoalInterpreter(private val root: File) {
         else add("static verification passes when verification is run")
     }
 
-    /** Only hard-block on truly empty/too-short requests. File targets and exact ops are optional. */
     private fun softAmbiguity(request: String, intent: TaskIntent): List<String> = buildList {
         if (intent == TaskIntent.UNKNOWN) add("intent is unclear")
         if (request.length < 4) add("request is too short to establish a goal")
@@ -99,8 +95,10 @@ class GoalInterpreter(private val root: File) {
         return value.coerceIn(0, 99)
     }
 
-    private fun pathTokens(request: String): List<String> = Regex("(?:[A-Za-z0-9_.-]+/)+[A-Za-z0-9_.-]+|[A-Za-z0-9_.-]+\\.(?:kt|kts|java|py|js|ts|tsx|jsx|json|xml|md|toml|yaml|yml)")
-        .findAll(request).map { it.value }.filter { it != "100%" }.toList()
+    private fun pathTokens(request: String): List<String> = Regex(
+        "(?:[A-Za-z0-9_.-]+/)+[A-Za-z0-9_.-]+|[A-Za-z0-9_.-]+\\.(?:kt|kts|java|py|js|ts|tsx|jsx|json|xml|md|toml|yaml|yml)",
+        RegexOption.IGNORE_CASE
+    ).findAll(request).map { it.value }.filter { it != "100%" }.toList()
 
     private fun symbolTokens(request: String): List<String> = Regex("(?:symbol|class|function|method|fun|def)\\s+[`]?([A-Za-z_][A-Za-z0-9_]*)[`]?", RegexOption.IGNORE_CASE)
         .findAll(request).map { it.groupValues[1] }.toList()
