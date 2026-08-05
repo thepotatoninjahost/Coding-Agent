@@ -10,8 +10,6 @@ import com.nexa.sdk.bean.LlmStreamResult
 import com.nexa.sdk.bean.ModelConfig
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.runBlocking
-import org.json.JSONArray
-import org.json.JSONObject
 import java.io.File
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -37,7 +35,7 @@ class NexaLocalModelGateway(
             model_path = entry.absolutePath,
             config = ModelConfig(
                 nCtx = 4096,
-                max_tokens = 2048
+                max_tokens = 1024
             ),
             plugin_id = "npu"
         )
@@ -58,36 +56,52 @@ class NexaLocalModelGateway(
 
     override fun complete(request: ModelRequest): ModelResponse = stream(request) {}
 
-    override fun stream(request: ModelRequest, onDelta: (String) -> Unit): ModelResponse = try {
-        val prompt = formatWithChatTemplate(request)
-        val output = StringBuilder()
-        runBlocking {
-            wrapper.generateStreamFlow(prompt, GenerationConfig().apply { maxTokens = 2048 }).collect { result ->
-                when (result) {
-                    is LlmStreamResult.Token -> {
-                        output.append(result.text)
-                        onDelta(result.text)
+    override fun stream(request: ModelRequest, onDelta: (String) -> Unit): ModelResponse {
+        val prompt: String
+        try {
+            prompt = formatWithChatTemplate(request)
+        } catch (error: Exception) {
+            return ModelResponse.Failure(
+                "Nexa applyChatTemplate failed: ${error.message.orEmpty()}"
+            )
+        }
+        return try {
+            val output = StringBuilder()
+            runBlocking {
+                wrapper.generateStreamFlow(
+                    prompt,
+                    GenerationConfig().apply { maxTokens = 1024 }
+                ).collect { result ->
+                    when (result) {
+                        is LlmStreamResult.Token -> {
+                            output.append(result.text)
+                            onDelta(result.text)
+                        }
+                        is LlmStreamResult.Error -> {
+                            val t = result.throwable
+                            error(
+                                buildString {
+                                    append("generate:")
+                                    append(t.message.orEmpty().ifBlank { t.javaClass.simpleName })
+                                    t.cause?.message?.let { append(" | cause=").append(it) }
+                                    append(" | promptChars=").append(prompt.length)
+                                }
+                            )
+                        }
+                        is LlmStreamResult.Completed -> Unit
                     }
-                    is LlmStreamResult.Error -> {
-                        val t = result.throwable
-                        error(
-                            buildString {
-                                append(t.message.orEmpty().ifBlank { t.javaClass.simpleName })
-                                t.cause?.message?.let { append(" | cause=").append(it) }
-                            }
-                        )
-                    }
-                    is LlmStreamResult.Completed -> Unit
                 }
             }
+            if (output.isBlank()) {
+                ModelResponse.Failure("Nexa returned no output | promptChars=${prompt.length}")
+            } else {
+                JsonModelResponseParser().parse(output.toString())
+            }
+        } catch (error: Exception) {
+            ModelResponse.Failure(
+                "Nexa local inference failed: ${error.message.orEmpty()} | promptChars=${prompt.length}"
+            )
         }
-        if (output.isBlank()) {
-            ModelResponse.Failure("Nexa returned no output")
-        } else {
-            JsonModelResponseParser().parse(output.toString())
-        }
-    } catch (error: Exception) {
-        ModelResponse.Failure("Nexa local inference failed: ${error.message.orEmpty()}")
     }
 
     fun close() {
@@ -112,70 +126,49 @@ class NexaLocalModelGateway(
     }
 
     /**
-     * NPU requires model chat template before generateStreamFlow.
-     * ai.nexa:core 0.0.24: applyChatTemplate is a suspend fun returning Result<LlmApplyChatTemplateOutput>
-     * with signature (messages, tools, enableThinking, addGenerationPrompt).
+     * NPU requires applyChatTemplate before generateStreamFlow.
+     * Official Android samples pass tools=null — large tool JSON on NPU is unsupported / unstable.
+     * Tool instructions stay in the system text; model still returns JSON tool calls from the prompt.
      */
     private fun formatWithChatTemplate(request: ModelRequest): String = runBlocking {
         val messages = ArrayList<ChatMessage>()
         val systemBody = buildString {
-            append(request.system)
+            append(request.system.take(2_500))
             if (request.researchRequired) {
-                append("\n\nRESEARCH_GATE: satisfied by the attached multi-source research brief; ")
-                append("do not skip research or claim knowledge without evidence.")
+                append("\n\nRESEARCH_GATE: use the attached research brief; do not invent sources.")
             }
         }
         if (systemBody.isNotBlank()) {
             messages += ChatMessage("system", systemBody)
         }
-        request.transcript.forEach { msg ->
+        request.transcript.takeLast(6).forEach { msg ->
             val role = when (msg.role.lowercase()) {
                 "assistant", "model" -> "assistant"
                 "tool" -> "user"
                 else -> msg.role.lowercase().ifBlank { "user" }
             }
             val content = if (msg.role.equals("tool", ignoreCase = true)) {
-                "tool ${msg.toolName.orEmpty()}: ${msg.content}"
+                "tool ${msg.toolName.orEmpty()}: ${msg.content}".take(1_500)
             } else {
-                msg.content
+                msg.content.take(1_500)
             }
             if (content.isNotBlank()) messages += ChatMessage(role, content)
         }
-        messages += ChatMessage("user", request.user)
+        messages += ChatMessage("user", request.user.take(4_000))
 
-        val toolsJson = toolsJsonOrNull(request)
         val templateResult = wrapper.applyChatTemplate(
             messages.toTypedArray(),
-            toolsJson,
+            /* tools = */ null,
             /* enableThinking = */ false,
             /* addGenerationPrompt = */ true
         )
         val formatted = templateResult.getOrElse { err ->
             error(
-                "Nexa applyChatTemplate failed: ${err.message.orEmpty()} | cause=${err.cause?.message.orEmpty()}"
+                "${err.message.orEmpty()} | cause=${err.cause?.message.orEmpty()}"
             )
         }
         val text = formatted.formattedText
-        check(text.isNotBlank()) { "Nexa applyChatTemplate returned empty formattedText" }
+        check(text.isNotBlank()) { "empty formattedText" }
         text
-    }
-
-    private fun toolsJsonOrNull(request: ModelRequest): String? {
-        if (request.tools.isEmpty()) return null
-        val arr = JSONArray()
-        request.tools.forEach { tool ->
-            arr.put(
-                JSONObject()
-                    .put("type", "function")
-                    .put(
-                        "function",
-                        JSONObject()
-                            .put("name", tool.name)
-                            .put("description", tool.description)
-                            .put("parameters", JSONObject(tool.inputSchema.ifBlank { "{}" }))
-                    )
-            )
-        }
-        return arr.toString()
     }
 }
