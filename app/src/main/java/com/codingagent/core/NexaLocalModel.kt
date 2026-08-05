@@ -112,11 +112,11 @@ class NexaLocalModelGateway(
     }
 
     /**
-     * NPU (and official Nexa Android) requires the model chat template before generateStreamFlow.
-     * Raw concatenated prompts cause native generate failures (opaque codes like -221315576).
-     * See Nexa Android NPU API: applyChatTemplate → generateStreamFlow(template.formattedText).
+     * NPU requires model chat template before generateStreamFlow.
+     * ai.nexa:core 0.0.24: applyChatTemplate is a suspend fun returning Result<LlmApplyChatTemplateOutput>
+     * with signature (messages, tools, enableThinking, addGenerationPrompt).
      */
-    private fun formatWithChatTemplate(request: ModelRequest): String {
+    private fun formatWithChatTemplate(request: ModelRequest): String = runBlocking {
         val messages = ArrayList<ChatMessage>()
         val systemBody = buildString {
             append(request.system)
@@ -131,7 +131,7 @@ class NexaLocalModelGateway(
         request.transcript.forEach { msg ->
             val role = when (msg.role.lowercase()) {
                 "assistant", "model" -> "assistant"
-                "tool" -> "user" // NPU chat templates often lack tool role; fold into user
+                "tool" -> "user"
                 else -> msg.role.lowercase().ifBlank { "user" }
             }
             val content = if (msg.role.equals("tool", ignoreCase = true)) {
@@ -147,7 +147,8 @@ class NexaLocalModelGateway(
         val templateResult = wrapper.applyChatTemplate(
             messages.toTypedArray(),
             toolsJson,
-            /* enableThinking = */ false
+            /* enableThinking = */ false,
+            /* addGenerationPrompt = */ true
         )
         val formatted = templateResult.getOrElse { err ->
             error(
@@ -156,7 +157,7 @@ class NexaLocalModelGateway(
         }
         val text = formatted.formattedText
         check(text.isNotBlank()) { "Nexa applyChatTemplate returned empty formattedText" }
-        return text
+        text
     }
 
     private fun toolsJsonOrNull(request: ModelRequest): String? {
