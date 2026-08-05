@@ -41,11 +41,27 @@ jobs:
       - name: Make Gradle executable
         run: chmod +x ./gradlew
 
+      # Compile first so Kotlin errors surface before the longer test run.
+      - name: Compile unit test sources
+        run: ./gradlew :app:compileDebugUnitTestKotlin --no-daemon --stacktrace
+
       - name: Run unit tests
         run: ./gradlew :app:testDebugUnitTest --no-daemon --stacktrace
 
       - name: Acceptance path tests (explicit)
         run: ./gradlew :app:testDebugUnitTest --tests "com.codingagent.core.AcceptancePathTest" --tests "com.codingagent.core.StorageGuardTest" --tests "com.codingagent.core.AutonomousLoopTest" --no-daemon --stacktrace
+
+      # Always upload reports when tests fail so HTML/XML are downloadable from the run.
+      - name: Upload unit test reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-reports
+          path: |
+            app/build/reports/tests/testDebugUnitTest/
+            app/build/test-results/testDebugUnitTest/
+          if-no-files-found: ignore
+          retention-days: 5
 
       - name: Run Android lint
         run: ./gradlew :app:lintDebug --no-daemon --stacktrace
