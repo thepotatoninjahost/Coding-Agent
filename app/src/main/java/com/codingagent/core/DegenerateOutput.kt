@@ -22,6 +22,9 @@ object DegenerateOutput {
             val topToken = tokens.groupingBy { it }.eachCount().values.maxOrNull() ?: 0
             if (topToken >= 10 && topToken * 2 >= tokens.size) return true
         }
+        // import-cycle / package-line enumeration spam (many near-duplicate import lines)
+        val importLike = lines.filter { it.startsWith("import ") || it.contains("com.codingagent") }
+        if (importLike.size >= 12 && importLike.size * 2 >= lines.size) return true
         return false
     }
 
