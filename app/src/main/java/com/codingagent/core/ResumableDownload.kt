@@ -19,18 +19,18 @@ class ResumableFileDownloader(
     ) {
         destination.parentFile?.mkdirs()
         var attempts = 0
-        while (attempts < 8) {
+        while (attempts < 12) {
             try {
                 transfer(url, destination, expectedBytes, onProgress)
                 val actual = sha256(destination)
                 if (destination.length() == expectedBytes && actual == expectedSha256) return
                 throw DownloadBlockedException("Verification failed: ${destination.name} has ${destination.length()}/$expectedBytes bytes")
             } catch (error: DownloadBlockedException) {
-                if (++attempts >= 8) throw error
-                Thread.sleep((attempts * 1_000L).coerceAtMost(8_000L))
+                if (++attempts >= 12) throw error
+                Thread.sleep((attempts * 2_000L).coerceAtMost(30_000L))
             } catch (error: Exception) {
-                if (++attempts >= 8) throw DownloadBlockedException("Download blocked for ${destination.name} after $attempts attempts; partial data was kept for resume", error)
-                Thread.sleep((attempts * 1_000L).coerceAtMost(8_000L))
+                if (++attempts >= 12) throw DownloadBlockedException("Download blocked for ${destination.name} after $attempts attempts; partial data was kept for resume", error)
+                Thread.sleep((attempts * 2_000L).coerceAtMost(30_000L))
             }
         }
     }
@@ -53,28 +53,27 @@ class ResumableFileDownloader(
                 response = connection.responseCode
             }
             if (response != HttpURLConnection.HTTP_OK && response != HttpURLConnection.HTTP_PARTIAL) {
-                val message = connection.responseMessage.orEmpty().ifBlank { "Unknown response" }
-                throw DownloadBlockedException("HTTP $response $message")
-            }
-            if (resumed && response == HttpURLConnection.HTTP_OK) {
-                destination.delete()
-                resumed = false
-                val retryUrl = connection.url.toString()
-                connection.disconnect()
-                connection = connectionFactory(retryUrl)
-                configure(connection, false, 0L)
-                connection.connect()
-                response = connection.responseCode
-                if (response == 301 || response == 302 || response == 303 || response == 307) {
-                    val location = connection.getHeaderField("Location")
-                        ?: throw DownloadBlockedException("HTTP $response ${connection.responseMessage ?: "Redirect without Location"}")
+                if (resumed && response == HttpURLConnection.HTTP_OK) {
+                    resumed = false
+                } else if (resumed) {
                     connection.disconnect()
-                    connection = connectionFactory(location)
+                    destination.delete()
+                    resumed = false
+                    connection = connectionFactory(url)
                     configure(connection, false, 0L)
                     connection.connect()
                     response = connection.responseCode
+                    if (response == 301 || response == 302 || response == 303 || response == 307) {
+                        val location = connection.getHeaderField("Location")
+                            ?: throw DownloadBlockedException("HTTP $response ${connection.responseMessage ?: "Redirect without Location"}")
+                        connection.disconnect()
+                        connection = connectionFactory(location)
+                        configure(connection, false, 0L)
+                        connection.connect()
+                        response = connection.responseCode
+                    }
                 }
-                if (response != HttpURLConnection.HTTP_OK) {
+                if (response != HttpURLConnection.HTTP_OK && response != HttpURLConnection.HTTP_PARTIAL) {
                     val message = connection.responseMessage.orEmpty().ifBlank { "Unknown response" }
                     throw DownloadBlockedException("HTTP $response $message")
                 }
@@ -103,9 +102,9 @@ class ResumableFileDownloader(
 
     private fun configure(connection: HttpURLConnection, resume: Boolean, existing: Long) {
         connection.instanceFollowRedirects = true
-        connection.connectTimeout = 30_000
-        connection.readTimeout = 120_000
-        connection.setRequestProperty("User-Agent", "CodingAgent/1.0 (Android)")
+        connection.connectTimeout = 60_000
+        connection.readTimeout = 600_000  // 10 min — weight shards are ~1–1.5GB
+        connection.setRequestProperty("User-Agent", "CodingAgent/1.0 (Android; resumable-model-fetch)")
         connection.setRequestProperty("Accept", "*/*")
         connection.setRequestProperty("Accept-Encoding", "identity")
         if (resume && existing > 0L) connection.setRequestProperty("Range", "bytes=$existing-")
