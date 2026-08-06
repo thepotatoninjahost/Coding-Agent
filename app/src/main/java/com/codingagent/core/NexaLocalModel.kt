@@ -1,6 +1,7 @@
 package com.codingagent.core
 
 import android.content.Context
+import android.util.Log
 import com.nexa.sdk.LlmWrapper
 import com.nexa.sdk.NexaSdk
 import com.nexa.sdk.bean.ChatMessage
@@ -14,6 +15,16 @@ import java.io.File
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
+/**
+ * On-device Nexa NPU gateway (Qwen3-4B mobile package).
+ *
+ * Session notes (ai.nexa:core 0.0.24):
+ * - Official samples: applyChatTemplate → generateStreamFlow. No reset every turn.
+ * - reset() is suspend and returns Int (native session clear / KV wipe).
+ * - stopStream() cancels an in-flight stream before reset/generate.
+ * - We stopStream + reset only when the previous call left a dirty session
+ *   (error, cancel, or non-completed stream), not on every successful turn.
+ */
 class NexaLocalModelGateway(
     context: Context,
     private val modelDirectory: File,
@@ -21,6 +32,10 @@ class NexaLocalModelGateway(
 ) : ModelGateway {
     private val wrapper: LlmWrapper
     private val lock = Any()
+
+    /** True after a failed/cancelled stream until a successful reset or clean generate completes. */
+    @Volatile
+    private var sessionDirty: Boolean = false
 
     init {
         awaitSdkInitialization(context)
@@ -57,7 +72,10 @@ class NexaLocalModelGateway(
     override fun stream(request: ModelRequest, onDelta: (String) -> Unit): ModelResponse = synchronized(lock) {
         try {
             runBlocking {
-                runCatching { wrapper.reset() }
+                val prep = prepareSession()
+                if (prep != null) {
+                    Log.w(TAG, "NPU session prepare: $prep")
+                }
 
                 val messages = buildMessages(request)
                 val templateResult = wrapper.applyChatTemplate(
@@ -67,19 +85,24 @@ class NexaLocalModelGateway(
                     /* addGenerationPrompt = */ true
                 )
                 val formatted = templateResult.getOrElse { err ->
+                    sessionDirty = true
                     return@runBlocking ModelResponse.Failure(
-                        "Nexa applyChatTemplate failed: ${err.message.orEmpty()} | cause=${err.cause?.message.orEmpty()}"
+                        "Nexa applyChatTemplate failed: ${err.message.orEmpty()} | cause=${err.cause?.message.orEmpty()}" +
+                            (prep?.let { " | session=$it" } ?: "")
                     )
                 }
                 val prompt = formatted.formattedText
                 if (prompt.isBlank()) {
+                    sessionDirty = true
                     return@runBlocking ModelResponse.Failure("Nexa applyChatTemplate returned empty formattedText")
                 }
 
                 val output = StringBuilder()
                 val config = GenerationConfig().apply {
                     maxTokens = 512
+                    nPast = 0
                 }
+                var streamError: String? = null
                 wrapper.generateStreamFlow(prompt, config).collect { result ->
                     when (result) {
                         is LlmStreamResult.Token -> {
@@ -88,29 +111,63 @@ class NexaLocalModelGateway(
                         }
                         is LlmStreamResult.Error -> {
                             val t = result.throwable
-                            error(
-                                "generate:${t.message.orEmpty().ifBlank { t.javaClass.simpleName }}" +
-                                    " | promptChars=${prompt.length}"
-                            )
+                            streamError = "generate:${t.message.orEmpty().ifBlank { t.javaClass.simpleName }}" +
+                                " | promptChars=${prompt.length}" +
+                                (prep?.let { " | session=$it" } ?: "")
+                            sessionDirty = true
                         }
-                        is LlmStreamResult.Completed -> Unit
+                        is LlmStreamResult.Completed -> {
+                            if (streamError == null) sessionDirty = false
+                        }
                     }
                 }
+                if (streamError != null) {
+                    return@runBlocking ModelResponse.Failure("Nexa local inference failed: $streamError")
+                }
                 if (output.isBlank()) {
-                    ModelResponse.Failure("Nexa returned no output | promptChars=${prompt.length}")
+                    sessionDirty = true
+                    ModelResponse.Failure(
+                        "Nexa returned no output | promptChars=${prompt.length}" +
+                            (prep?.let { " | session=$it" } ?: "")
+                    )
                 } else {
                     JsonModelResponseParser().parse(output.toString())
                 }
             }
         } catch (error: Exception) {
+            sessionDirty = true
             ModelResponse.Failure(
                 "Nexa local inference failed: ${error.message.orEmpty()}"
             )
         }
     }
 
+    private suspend fun prepareSession(): String? {
+        val stopMsg = runCatching { wrapper.stopStream() }.fold(
+            onSuccess = { "stop=ok" },
+            onFailure = { e -> "stopFail=${e.message.orEmpty().ifBlank { e.javaClass.simpleName }}" }
+        )
+        if (!sessionDirty) return null
+        val resetMsg = runCatching { wrapper.reset() }.fold(
+            onSuccess = { code ->
+                sessionDirty = false
+                "reset=$code"
+            },
+            onFailure = { e ->
+                "resetFail=${e.message.orEmpty().ifBlank { e.javaClass.simpleName }}"
+            }
+        )
+        return "$stopMsg;$resetMsg"
+    }
+
     fun close() {
         synchronized(lock) {
+            runCatching {
+                runBlocking {
+                    runCatching { wrapper.stopStream() }
+                    runCatching { wrapper.reset() }
+                }
+            }
             runCatching { wrapper.close() }
         }
     }
@@ -149,5 +206,9 @@ class NexaLocalModelGateway(
         })
         check(completed.await(60, TimeUnit.SECONDS)) { "Nexa SDK initialization timed out" }
         check(failure == null) { "Nexa SDK initialization failed: $failure" }
+    }
+
+    companion object {
+        private const val TAG = "NexaLocalModel"
     }
 }
