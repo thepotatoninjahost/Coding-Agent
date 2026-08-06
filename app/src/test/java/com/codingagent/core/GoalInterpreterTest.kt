@@ -21,7 +21,6 @@ class GoalInterpreterTest {
         val contract = GoalInterpreter(root).interpret("create file src/New.kt with code, keep tests and make it complete without changing existing files")
         assertTrue(contract.constraints.contains("preserve existing behavior and tests"))
         assertTrue(contract.constraints.contains("do not modify project files"))
-        // CREATE acceptance is "requested change is present or explained" (no hard "unfinished" gate)
         assertTrue(contract.acceptanceCriteria.any { it.contains("present") || it.contains("explained") })
         assertTrue(contract.ready)
     }
@@ -29,7 +28,6 @@ class GoalInterpreterTest {
     @Test fun plainEnglishDebugGoalIsExecutionReady() {
         val root = Files.createTempDirectory("goal").toFile()
         val contract = GoalInterpreter(root).interpret("fix the login bug")
-        // Soft ambiguity: missing exact file/target is non-blocking; model can inspect and propose.
         assertEquals(TaskIntent.DEBUG, contract.intent)
         assertTrue(contract.ready)
         assertTrue(contract.ambiguity.isEmpty())
@@ -56,4 +54,25 @@ class GoalInterpreterTest {
         assertTrue(intake.executionReady)
     }
 
+    @Test fun greetingIsUnknownNotInspect() {
+        val root = Files.createTempDirectory("goal-hi").toFile()
+        val intake = TaskIntakeParser(root).parse("hi")
+        assertEquals(TaskIntent.UNKNOWN, intake.intent)
+        assertTrue(intake.executionReady)
+    }
+
+    @Test fun conversationContextWithShowDoesNotForceInspect() {
+        val root = Files.createTempDirectory("goal-ctx").toFile()
+        val wrapped = """
+            Conversation context:
+            user: hi
+            system: Model is still loading. Wait for the model status to show active before sending coding requests.
+
+            Current request:
+            ho
+        """.trimIndent()
+        val contract = GoalInterpreter(root).interpret(wrapped)
+        assertEquals(TaskIntent.UNKNOWN, contract.intent)
+        assertTrue(contract.ready)
+    }
 }

@@ -37,7 +37,8 @@ class TaskIntakeParser(private val root: File) {
         val verification = detectChecks()
         // Plain English is enough. Exact replace/append syntax is optional;
         // the model inspects the project and proposes changes through tools.
-        val ready = contract.ready && contract.intent != TaskIntent.UNKNOWN
+        // UNKNOWN = greeting/chat: still execution-ready so the model can reply without tools.
+        val ready = contract.ready
         val question = if (ready) null else clarification(contract, operation)
         return TaskIntake(
             originalRequest = normalized,
