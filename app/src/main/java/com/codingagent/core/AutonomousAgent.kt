@@ -1,1 +1,1 @@
-USE_FILE:/tmp/aa_good.kt
+USE_FILE_CONTENT_FROM_/tmp/aa_good.kt
