@@ -27,6 +27,10 @@ data class AutonomousAgentConfig(
     val maxEvidenceRefusals: Int = 3
 )
 
+/**
+ * Evidence-gated autonomous coding agent for local NPU inference.
+ * Inspects the repo (list/read/search) before claiming file facts or finishing code-change intents.
+ */
 class AutonomousAgent(
     private val root: java.io.File,
     private val runtime: CodingAgentRuntime,
@@ -44,6 +48,9 @@ class AutonomousAgent(
     private var lastResearchProgress: String = "not started"
     private val cancelled = AtomicBoolean(false)
 
+    @Volatile
+    private var lastCancelReason: String = "Stopped by owner"
+
     fun cancel(reason: String = "Stopped by owner") {
         cancelled.set(true)
         lastCancelReason = reason
@@ -51,22 +58,25 @@ class AutonomousAgent(
 
     fun isCancelled(): Boolean = cancelled.get()
 
-    @Volatile
-    private var lastCancelReason: String = "Stopped by owner"
-
     override fun execute(request: String): AgentRuntimeResult {
         val events = run(request)
         return when (val terminalEvent = events.lastOrNull()) {
-            is AutonomousAgentEvent.ApprovalRequired -> AgentRuntimeResult.NeedsApproval(terminalEvent.task, "Review proposal ${terminalEvent.proposal.id} and confirm twice before applying any code change.", terminalEvent.proposal.id)
+            is AutonomousAgentEvent.ApprovalRequired -> AgentRuntimeResult.NeedsApproval(
+                terminalEvent.task,
+                "Review proposal ${terminalEvent.proposal.id} and confirm twice before applying any code change.",
+                terminalEvent.proposal.id
+            )
             is AutonomousAgentEvent.Completed -> AgentRuntimeResult.Completed(terminalEvent.task)
-            is AutonomousAgentEvent.Failed -> terminalEvent.task?.let { AgentRuntimeResult.Failed(it) } ?: error(terminalEvent.message)
+            is AutonomousAgentEvent.Failed -> terminalEvent.task?.let { AgentRuntimeResult.Failed(it) }
+                ?: error(terminalEvent.message)
             is AutonomousAgentEvent.Stopped -> AgentRuntimeResult.Failed(terminalEvent.task)
             else -> error("Autonomous agent ended without a terminal result")
         }
     }
 
     fun pendingProposals(): List<PendingChangeProposal> = mutations.pending()
-    fun approveProposal(id: String, ownerVerified: Boolean, ownerLabel: String): MutationApprovalResult = mutations.approve(id, ownerVerified, ownerLabel)
+    fun approveProposal(id: String, ownerVerified: Boolean, ownerLabel: String): MutationApprovalResult =
+        mutations.approve(id, ownerVerified, ownerLabel)
     fun rejectProposal(id: String): Boolean = mutations.reject(id)
 
     fun run(request: String, onEvent: (AutonomousAgentEvent) -> Unit = {}): List<AutonomousAgentEvent> {
@@ -80,22 +90,22 @@ class AutonomousAgent(
             onEvent(event)
         }
 
-        val intake = TaskIntake.interpret(normalized)
-        emit(AutonomousAgentEvent.Phase("INTAKE", "intent=${intake.intent} files=${intake.referencedFiles.joinToString()}"))
+        val intake = TaskIntakeParser(root).parse(normalized)
+        emit(AutonomousAgentEvent.Phase("INTAKE", "intent=${intake.intent} targets=${intake.contract.targetPaths.joinToString()}"))
 
-        val plan = GoalInterpreter.plan(normalized, intake)
-        emit(AutonomousAgentEvent.Phase("PLAN", plan.summary))
+        val plan = AgentPlanner(workspace).plan(intake)
+        emit(AutonomousAgentEvent.Phase("PLAN", plan.steps.joinToString(" → ") { it.phase }))
 
         var researchEvidence = ""
         if (shouldResearch(normalized, intake)) {
             emit(AutonomousAgentEvent.Phase("RESEARCH", "Starting deep research"))
             runCatching {
                 val mode = ResearchModeDetector.detect(normalized)
-                val session = research.deepResearch(normalized, limit = 8, mode = mode) { progress ->
+                val session = research.deepResearch(normalized, targetSources = 8, mode = mode) { progress ->
                     lastResearchProgress = "${progress.stage} ${progress.completed}/${progress.total}"
                     emit(AutonomousAgentEvent.Phase("RESEARCH", lastResearchProgress))
                 }
-                val brief = ResearchBrief.from(session)
+                val brief = ResearchBriefBuilder.build(session)
                 researchEvidence = "\n\nResearch brief:\n${brief.evidence}"
                 emit(AutonomousAgentEvent.Phase("RESEARCH", "Learned ${brief.sourceCount} sources"))
             }.onFailure {
@@ -117,14 +127,14 @@ class AutonomousAgent(
             }
 
             emit(AutonomousAgentEvent.Phase("MODEL", "Turn $turn/${config.maxTurns}"))
-            val system = AgentModelProtocol.systemPrompt()
+            val system = AgentModelProtocol.SYSTEM
             val tools = AgentModelProtocol.toolsForIntent(intake.intent)
             val userPrompt = buildPrompt(normalized, intake, researchEvidence)
             val modelRequest = ModelRequest(
                 system = system,
                 user = userPrompt,
-                transcript = transcript.toList(),
-                tools = tools
+                tools = tools,
+                transcript = transcript.toList()
             )
 
             val response = try {
@@ -150,7 +160,7 @@ class AutonomousAgent(
                     continue
                 }
                 is ModelResponse.Text -> {
-                    val content = DegenerateOutput.sanitizeModelText(response.content)
+                    val content = DegenerateOutput.sanitize(response.content)
                     if (DegenerateOutput.isDegenerate(content)) {
                         evidenceRefusals++
                         emit(AutonomousAgentEvent.ModelMessage("[degenerate output suppressed]"))
@@ -177,7 +187,11 @@ class AutonomousAgent(
                         continue
                     }
                     val task = AgentTask(
-                        taskId, normalized, "completed", plan, changeSets.flatMap { it.changes },
+                        taskId,
+                        normalized,
+                        "completed",
+                        plan,
+                        changeSets.flatMap { it.changes },
                         VerificationReport(true, emptyList()),
                         listOf("${Instant.now()}: model reply (${response.content.length} chars); evidence files=${readPaths.joinToString().ifBlank { "none-required" }}"),
                         content.take(500)
@@ -186,60 +200,65 @@ class AutonomousAgent(
                     emit(AutonomousAgentEvent.Completed(task))
                     return events
                 }
-                is ModelResponse.ToolCalls -> {
-                    transcript += ModelMessage("assistant", response.raw.orEmpty().ifBlank { response.calls.joinToString { it.name } })
-                    for (call in response.calls) {
-                        if (cancelled.get()) {
-                            return stopNow(taskId, normalized, plan, events, emit)
-                        }
-                        val argsJson = call.arguments
-                        val signature = "${call.name}|$argsJson"
-                        if (signature == lastToolSignature) {
-                            identicalRepeats++
-                            if (identicalRepeats >= config.maxIdenticalToolRepeats) {
-                                val task = failedTask(taskId, normalized, plan, "Repeated identical tool call: ${call.name}", emptyList())
-                                emit(AutonomousAgentEvent.Failed(task, task.summary))
-                                return events
-                            }
-                        } else {
-                            lastToolSignature = signature
-                            identicalRepeats = 0
-                        }
-
-                        emit(AutonomousAgentEvent.ToolStarted(call.name, argsJson))
-                        val toolResult = executeTool(call.name, argsJson)
-                        val success = !toolResult.startsWith("ERROR:")
-                        if (success) consecutiveFailures = 0 else consecutiveFailures++
-                        emit(AutonomousAgentEvent.ToolFinished(call.name, toolResult.take(config.maxOutputCharacters), success))
-
-                        when (call.name) {
-                            "read_file" -> {
-                                val path = runCatching { JSONObject(argsJson).optString("path") }.getOrDefault("")
-                                if (path.isNotBlank() && success) readPaths += path
-                            }
-                            "search_project", "list_files" -> searchedProject = true
-                        }
-
-                        if (call.name == "approve_change" || call.name == "propose_change" || call.name == "replace_text" || call.name == "create_file") {
-                            val proposal = mutations.pending().lastOrNull()
-                            if (proposal != null && (call.name == "approve_change" || call.name == "propose_change")) {
-                                val task = approvalTask(taskId, normalized, plan, proposal)
-                                emit(AutonomousAgentEvent.ApprovalRequired(task, proposal))
-                                return events
-                            }
-                        }
-
-                        transcript += ModelMessage(
-                            role = "tool",
-                            content = toolResult.take(config.maxOutputCharacters),
-                            toolName = call.name
-                        )
-
-                        if (consecutiveFailures >= config.maxConsecutiveToolFailures) {
-                            val task = failedTask(taskId, normalized, plan, "Too many consecutive tool failures", emptyList())
+                is ModelResponse.ToolCall -> {
+                    transcript += ModelMessage(
+                        role = "assistant",
+                        content = response.thought.ifBlank { "Calling ${response.name}" },
+                        toolCallId = response.callId,
+                        toolName = response.name,
+                        toolArguments = response.arguments
+                    )
+                    if (cancelled.get()) {
+                        return stopNow(taskId, normalized, plan, events, emit)
+                    }
+                    val argsJson = response.arguments
+                    val signature = "${response.name}|$argsJson"
+                    if (signature == lastToolSignature) {
+                        identicalRepeats++
+                        if (identicalRepeats >= config.maxIdenticalToolRepeats) {
+                            val task = failedTask(taskId, normalized, plan, "Repeated identical tool call: ${response.name}", emptyList())
                             emit(AutonomousAgentEvent.Failed(task, task.summary))
                             return events
                         }
+                    } else {
+                        lastToolSignature = signature
+                        identicalRepeats = 0
+                    }
+
+                    emit(AutonomousAgentEvent.ToolStarted(response.name, argsJson))
+                    val toolResult = executeTool(response.name, argsJson)
+                    val success = !toolResult.startsWith("ERROR:")
+                    if (success) consecutiveFailures = 0 else consecutiveFailures++
+                    emit(AutonomousAgentEvent.ToolFinished(response.name, toolResult.take(config.maxOutputCharacters), success))
+
+                    when (response.name) {
+                        "read_file" -> {
+                            val path = runCatching { JSONObject(argsJson).optString("path") }.getOrDefault("")
+                            if (path.isNotBlank() && success) readPaths += path
+                        }
+                        "search_project", "list_files" -> searchedProject = true
+                    }
+
+                    if (response.name == "approve_change" || response.name == "propose_change") {
+                        val proposal = mutations.pending().lastOrNull()
+                        if (proposal != null) {
+                            val task = approvalTask(taskId, normalized, plan, proposal)
+                            emit(AutonomousAgentEvent.ApprovalRequired(task, proposal))
+                            return events
+                        }
+                    }
+
+                    transcript += ModelMessage(
+                        role = "tool",
+                        content = toolResult.take(config.maxOutputCharacters),
+                        toolCallId = response.callId,
+                        toolName = response.name
+                    )
+
+                    if (consecutiveFailures >= config.maxConsecutiveToolFailures) {
+                        val task = failedTask(taskId, normalized, plan, "Too many consecutive tool failures", emptyList())
+                        emit(AutonomousAgentEvent.Failed(task, task.summary))
+                        return events
                     }
                 }
             }
@@ -259,8 +278,14 @@ class AutonomousAgent(
     ): List<AutonomousAgentEvent> {
         val message = lastCancelReason
         val task = AgentTask(
-            taskId, request, "stopped", plan, changeSets.flatMap { it.changes },
-            VerificationReport(false, emptyList()), listOf("${Instant.now()}: $message"), message
+            taskId,
+            request,
+            "stopped",
+            plan,
+            changeSets.flatMap { it.changes },
+            VerificationReport(false, emptyList()),
+            listOf("${Instant.now()}: $message"),
+            message
         )
         journal.record(task)
         emit(AutonomousAgentEvent.Stopped(task, message))
@@ -288,7 +313,6 @@ class AutonomousAgent(
             }
             return null
         }
-        // Classify from Current request only when ChatWorkspace prefixes conversation history.
         val focus = intake.originalRequest
             .substringAfter("Current request:", intake.originalRequest)
             .trim()
@@ -318,11 +342,11 @@ class AutonomousAgent(
         append("User request:\n").append(request)
         append("\n\nTyped intake:\n").append(intake.summary)
         append("\nIntent: ").append(intake.intent)
-        if (intake.referencedFiles.isNotEmpty()) {
-            append("\nReferenced files: ").append(intake.referencedFiles.joinToString())
+        if (intake.contract.targetPaths.isNotEmpty()) {
+            append("\nReferenced files: ").append(intake.contract.targetPaths.joinToString())
         }
-        if (intake.constraints.isNotEmpty()) {
-            append("\nConstraints: ").append(intake.constraints.joinToString())
+        if (intake.contract.constraints.isNotEmpty()) {
+            append("\nConstraints: ").append(intake.contract.constraints.joinToString())
         }
         append("\n\nLatest verified evidence:\n").append(evidence.take(config.maxOutputCharacters))
         append("\n\nUse tools when you need repository facts. Do not invent file contents.")
@@ -334,28 +358,37 @@ class AutonomousAgent(
             when (name) {
                 "list_files" -> files.list(arguments.optString("path")).joinToString("\n").limitOutput()
                 "read_file" -> files.read(arguments.getString("path")).let { "path=${it.path}\n${it.content}" }.limitOutput()
-                "search_project" -> files.search(arguments.getString("query"), arguments.optInt("limit", 20))
-                    .joinToString("\n") { "${it.path}:${it.line}: ${it.snippet}" }.limitOutput()
+                "search_project" -> workspace.search(arguments.getString("query"))
+                    .take(arguments.optInt("limit", 20))
+                    .joinToString("\n") { "${it.path}:${it.line}: ${it.text}" }.limitOutput()
+                "search_knowledge" -> knowledge.search(arguments.getString("query"))
+                    .joinToString("\n") { "${it.document}/${it.section}: ${it.excerpt}" }.limitOutput()
                 "replace_text" -> {
-                    val proposal = mutations.proposeReplace(
-                        path = arguments.getString("path"),
-                        oldText = arguments.getString("old_text"),
-                        newText = arguments.getString("new_text"),
-                        reason = arguments.optString("reason", "replace_text")
+                    val path = arguments.getString("path")
+                    val oldText = arguments.optString("old_text", arguments.optString("oldText"))
+                    val newText = arguments.optString("new_text", arguments.optString("newText"))
+                    val reason = arguments.optString("reason", "replace_text")
+                    val proposal = mutations.propose(
+                        request = reason,
+                        operations = listOf(TaskOperation(OperationKind.REPLACE, path, oldText, newText)),
+                        reason = reason
                     )
-                    "PROPOSED ${proposal.id} approvals=0/2 path=${arguments.getString("path")}"
+                    "PROPOSED ${proposal.id} approvals=0/2 path=$path"
                 }
                 "create_file" -> {
-                    val proposal = mutations.proposeCreate(
-                        path = arguments.getString("path"),
-                        content = arguments.getString("content"),
-                        reason = arguments.optString("reason", "create_file")
+                    val path = arguments.getString("path")
+                    val content = arguments.getString("content")
+                    val reason = arguments.optString("reason", "create_file")
+                    val proposal = mutations.propose(
+                        request = reason,
+                        operations = listOf(TaskOperation(OperationKind.CREATE_FILE, path, text = content)),
+                        reason = reason
                     )
-                    "PROPOSED ${proposal.id} approvals=0/2 path=${arguments.getString("path")}"
+                    "PROPOSED ${proposal.id} approvals=0/2 path=$path"
                 }
                 "run_command" -> {
                     val cmd = arguments.getString("command")
-                    val result = terminal.run(cmd)
+                    val result = terminal.execute(cmd)
                     buildString {
                         append("exit=${result.exitCode}")
                         if (result.timedOut) append(" timedOut=true")
@@ -366,7 +399,7 @@ class AutonomousAgent(
                 "verify" -> {
                     val report = workspace.verify()
                     buildString {
-                        append("ok=${report.ok}\n")
+                        append("ok=${report.passed}\n")
                         report.issues.take(30).forEach { issue ->
                             append(issue.path).append(':').append(issue.line).append(" — ").append(issue.message).append('\n')
                         }
@@ -375,17 +408,20 @@ class AutonomousAgent(
                 "approve_change" -> {
                     val id = arguments.getString("proposal_id")
                     when (val result = mutations.approve(id, ownerVerified = false, ownerLabel = "model")) {
-                        is MutationApprovalResult.AwaitingSecond -> "Awaiting second owner approval (${result.proposal.approvalCount}/2)"
+                        is MutationApprovalResult.AwaitingSecond ->
+                            "Awaiting second owner approval (${result.proposal.approvalCount}/2)"
                         is MutationApprovalResult.Applied -> "Applied ${result.proposal.id}"
                         is MutationApprovalResult.Rejected -> "Rejected: ${result.reason}"
                     }
                 }
-                "web_research" -> {
+                "research_web", "web_research" -> {
                     val query = arguments.getString("query")
                     val mode = ResearchModeDetector.detect(query)
-                    val session = research.deepResearch(query, limit = arguments.optInt("limit", 6), mode = mode) {}
-                    val brief = ResearchBrief.from(session)
-                    "Learned ${brief.sourceCount} distinct full sources across ${brief.laneCount} lanes, ${brief.wordCount} words, ${brief.codeExampleCount} code examples.\nProgress: $lastResearchProgress\n${brief.evidence}".limitOutput()
+                    val session = research.deepResearch(query, targetSources = arguments.optInt("limit", 6), mode = mode) {}
+                    val brief = ResearchBriefBuilder.build(session)
+                    ("Learned ${brief.sourceCount} distinct full sources across ${brief.laneCount} lanes, " +
+                        "${brief.wordCount} words, ${brief.codeExampleCount} code examples.\n" +
+                        "Progress: $lastResearchProgress\n${brief.evidence}").limitOutput()
                 }
                 else -> "ERROR: unknown tool $name"
             }
@@ -395,9 +431,36 @@ class AutonomousAgent(
     private fun String.limitOutput(): String =
         if (length <= config.maxOutputCharacters) this else take(config.maxOutputCharacters) + "\n…[truncated]"
 
-    private fun failedTask(id: String, request: String, plan: AgentPlan, message: String, changes: List<ChangeRecord>) =
-        AgentTask(id, request, "failed", plan, changes, VerificationReport(false, listOf(VerificationIssue("<agent>", 0, message))), listOf("${Instant.now()}: $message"), message)
+    private fun failedTask(
+        id: String,
+        request: String,
+        plan: AgentPlan,
+        message: String,
+        changes: List<ChangeRecord>
+    ) = AgentTask(
+        id,
+        request,
+        "failed",
+        plan,
+        changes,
+        VerificationReport(false, listOf(VerificationIssue("<agent>", 0, message))),
+        listOf("${Instant.now()}: $message"),
+        message
+    )
 
-    private fun approvalTask(id: String, request: String, plan: AgentPlan, proposal: PendingChangeProposal) =
-        AgentTask(id, request, "waiting-approval", plan, proposal.changeSet.changes, proposal.verification, listOf("${Instant.now()}: proposal ${proposal.id} staged; awaiting two owner approvals"), "Review proposal ${proposal.id} and confirm twice before applying any code change")
+    private fun approvalTask(
+        id: String,
+        request: String,
+        plan: AgentPlan,
+        proposal: PendingChangeProposal
+    ) = AgentTask(
+        id,
+        request,
+        "waiting-approval",
+        plan,
+        proposal.changeSet.changes,
+        proposal.verification,
+        listOf("${Instant.now()}: proposal ${proposal.id} staged; awaiting two owner approvals"),
+        "Review proposal ${proposal.id} and confirm twice before applying any code change"
+    )
 }
