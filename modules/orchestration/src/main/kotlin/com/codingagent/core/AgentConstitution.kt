@@ -1,0 +1,17 @@
+package com.codingagent.core
+
+import com.codingagent.policy.AgentAction as PolicyAgentAction
+import com.codingagent.policy.AgentActionCategory as PolicyAgentActionCategory
+import com.codingagent.policy.AgentConstitution as PolicyAgentConstitution
+import com.codingagent.policy.ApprovalLedger as PolicyApprovalLedger
+import com.codingagent.policy.ConstitutionRule as PolicyConstitutionRule
+import com.codingagent.policy.ConstitutionViolation as PolicyConstitutionViolation
+import com.codingagent.policy.ApprovalRecord as PolicyApprovalRecord
+
+typealias AgentAction = PolicyAgentAction
+typealias AgentActionCategory = PolicyAgentActionCategory
+typealias AgentConstitution = PolicyAgentConstitution
+typealias ApprovalLedger = PolicyApprovalLedger
+typealias ConstitutionRule = PolicyConstitutionRule
+typealias ConstitutionViolation = PolicyConstitutionViolation
+typealias ApprovalRecord = PolicyApprovalRecord

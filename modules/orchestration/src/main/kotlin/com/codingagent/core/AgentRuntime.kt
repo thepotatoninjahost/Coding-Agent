@@ -1,0 +1,394 @@
+package com.codingagent.core
+
+
+import com.codingagent.orchestration.PlanStepStatus
+
+import com.codingagent.domain.*
+import com.codingagent.intake.GoalContract
+import com.codingagent.intake.TaskIntake
+import com.codingagent.intake.TaskIntakeParser
+import com.codingagent.intake.TaskIntent
+
+import com.codingagent.research.DeepResearchProvider
+import com.codingagent.research.ResearchSession
+import com.codingagent.research.ResearchBriefBuilder
+import com.codingagent.research.ResearchModeDetector
+import com.codingagent.research.ResearchMode
+import com.codingagent.research.WebResearchProvider
+import java.time.Instant
+import java.util.UUID
+import com.codingagent.terminal.CommandExecutor
+import com.codingagent.domain.CommandResult
+
+sealed class AgentRuntimeResult {
+    data class Completed(val task: AgentTask) : AgentRuntimeResult()
+    data class NeedsInput(val task: AgentTask, val question: String) : AgentRuntimeResult()
+    data class NeedsApproval(val task: AgentTask, val question: String, val proposalId: String) : AgentRuntimeResult()
+    data class Failed(val task: AgentTask) : AgentRuntimeResult()
+}
+
+data class AgentRuntimeConfig(
+    val maxRepairAttempts: Int = 3,
+    val commandTimeoutSeconds: Long = 180,
+    val allowEdits: Boolean = true,
+    val maxPlanningIterations: Int = 32,
+    val maxReplans: Int = 3,
+    val maxToolIterations: Int = 32
+)
+
+class CodingAgentRuntime(
+    private val workspace: ProjectWorkspace,
+    private val knowledge: AgentKnowledge,
+    private val journal: AgentJournal,
+    private val config: AgentRuntimeConfig = AgentRuntimeConfig(),
+    private val research: WebResearchProvider? = null,
+    private val deepResearch: DeepResearchProvider? = null,
+    private val modelGateway: ModelGateway? = null,
+    private val mutationCoordinator: MutationCoordinator = MutationCoordinator(workspace)
+) : CodingAgentExecutor {
+    fun pendingProposals(): List<PendingChangeProposal> = mutationCoordinator.pending()
+
+    fun approveProposal(id: String, ownerVerified: Boolean, ownerLabel: String): MutationApprovalResult = mutationCoordinator.approve(id, ownerVerified, ownerLabel)
+
+    fun rejectProposal(id: String): Boolean = mutationCoordinator.reject(id)
+
+    fun intake(request: String): TaskIntake = TaskIntakeParser(workspace.projectRoot()).parse(request)
+
+    override fun execute(request: String): AgentRuntimeResult {
+        require(request.isNotBlank()) { "A coding request is required" }
+        val intake = intake(request)
+        if (intake.intent == TaskIntent.EXPLAIN || intake.intent == TaskIntent.INSPECT) return executeAuditedInspection(request, intake)
+        val taskId = UUID.randomUUID().toString()
+        val events = mutableListOf("${Instant.now()}: received request", "intake: ${intake.summary}", "goal: ${intake.contract.goal}", "intent: ${intake.contract.intent}", "targets: ${intake.contract.targetPaths.joinToString().ifBlank { "none" }}", "constraints: ${intake.contract.constraints.joinToString().ifBlank { "none" }}", "acceptance: ${intake.contract.acceptanceCriteria.joinToString()}", "confidence: ${intake.confidence}%")
+        val plan = AgentPlanner(workspace).plan(intake)
+        val planning = PlanningLoop(plan, config.maxPlanningIterations, config.maxReplans)
+        val toolPlan = ToolSelector().select(intake)
+        events += "planning initialized with ${plan.steps.size} modular steps"
+        events += "tool plan initialized with ${toolPlan.tools.size} selected tools"
+        if (!intake.executionReady) {
+            return needsInput(taskId, request, plan, emptyList(), events, intake.clarificationQuestion ?: "Clarify the coding request before execution.")
+        }
+
+        // Non-trivial coding always requires external research and a configured real model.
+        if (modelGateway == null) {
+            return executeOfflineMutation(taskId, request, intake, plan, events)
+        }
+
+        val model = modelGateway
+
+        var researchEvidence = ""
+        val researchProvider = deepResearch
+        if (researchProvider == null) {
+            return failure(taskId, request, plan, emptyList(), "Mandatory research provider is not configured; coding is blocked.", events)
+        }
+        val mode = ResearchModeDetector.detect(request)
+        val learned = try {
+            deepResearch.deepResearch(intake.goal, 6, mode, onProgress = { progress ->
+                events += "research ${progress.stage}: ${progress.completed}/${progress.total}, learned=${progress.successful}, failed=${progress.failed}"
+            })
+        } catch (error: Exception) {
+            return failure(taskId, request, plan, emptyList(), "Mandatory research failed: ${error.message.orEmpty().ifBlank { error.javaClass.simpleName }}", events)
+        }
+        if (learned.sources.isEmpty() || learned.errors.any { it.startsWith("No sources") }) {
+            return failure(taskId, request, plan, emptyList(), "Mandatory research produced no usable sources; coding is blocked.", events)
+        }
+        val brief = ResearchBriefBuilder.build(learned)
+        researchEvidence = "\n\nMandatory research brief (untrusted evidence):\n${brief.evidence}"
+        events += "learned ${brief.sourceCount} sources, ${brief.wordCount} words"
+
+        val before = workspace.summary()
+        val transcript = mutableListOf<ModelMessage>()
+        var evidence = buildString {
+            append("Repository files:\n")
+            append(before.files.joinToString("\n") { it.path })
+            append(researchEvidence)
+        }
+        completeNext(planning, "intake", "request interpreted", events)
+        completeNext(planning, "understand", "repository indexed", events)
+        completeNext(planning, "research", "mandatory sources learned", events)
+        while (planning.next()?.phase in setOf("target", "scope", "constraints")) {
+            val current = planning.currentSteps().firstOrNull { it.status == PlanStepStatus.ACTIVE } ?: break
+            planning.complete("goal contract resolved")
+            events += "plan step complete: ${current.phase}"
+        }
+        var appliedChanges = emptyList<ChangeRecord>()
+        var pendingProposalId: String? = null
+        var pendingChanges = emptyList<ChangeRecord>()
+        for (turn in 0 until config.maxToolIterations) {
+            val response = model.stream(
+                ModelRequest(
+                    AgentModelProtocol.SYSTEM,
+                    buildPrompt(request, intake, evidence),
+                    AgentModelProtocol.tools(),
+                    transcript.toList(),
+                    researchRequired = true
+                )
+            ) { delta -> events += "model: ${delta.take(240)}" }
+            when (response) {
+                is ModelFailure -> return failure(taskId, request, plan, appliedChanges, "Model failed: ${response.message}", events)
+                is ModelText -> {
+                    events += "model completed without further tools"
+                    if (requiresEdit(intake) && appliedChanges.isEmpty() && pendingProposalId == null) {
+                        events += "no staged edit; returning model answer"
+                    }
+                    break
+                }
+                is ModelToolCall -> {
+                    events += "tool proposed: ${response.name}"
+                    val toolResult = stageOrExecute(response, mutationCoordinator, evidence)
+                    evidence = toolResult.evidence
+                    transcript += ModelMessage("assistant", response.thought.ifBlank { "Calling ${response.name}" }, response.callId, response.name, response.arguments)
+                    transcript += ModelMessage("tool", toolResult.output, response.callId)
+                    events += "tool result: ${toolResult.output.take(500)}"
+                    if (toolResult.proposalId != null) {
+                        // Already staged once inside stageOrExecute — do not propose again.
+                        pendingProposalId = toolResult.proposalId
+                        pendingChanges = toolResult.changeSet?.changes.orEmpty()
+                        break
+                    }
+                    if (toolResult.terminalResult != null && toolResult.terminalResult.exitCode != 0) {
+                        events += "verification command failed; model must repair from actual output"
+                    }
+                }
+            }
+        }
+        if (pendingProposalId != null) {
+            return needsApproval(taskId, request, plan, pendingChanges, events, pendingProposalId!!)
+        }
+        val report = verify(plan)
+        planning.complete("verification checked")
+        completeNext(planning, "learn", "outcome persisted", events)
+        runCatching { planning.finishIfReady() }
+        val task = task(taskId, request, "completed", plan, emptyList(), report, events)
+        journal.record(task)
+        return AgentRuntimeResult.Completed(task)
+    }
+
+    /**
+     * Stage mutations without a model when the request already carries concrete ops,
+     * or when [CodeSynthesisEngine] can deterministically produce them (e.g. single-path CREATE).
+     * Vague DEBUG/CHANGE without ops still requires a model (or more user input).
+     */
+    private fun executeOfflineMutation(
+        taskId: String,
+        request: String,
+        intake: TaskIntake,
+        plan: AgentPlan,
+        events: MutableList<String>
+    ): AgentRuntimeResult {
+        if (!config.allowEdits) {
+            return failure(taskId, request, plan, emptyList(), "Edits are disabled for this runtime.", events)
+        }
+
+        val operations: List<TaskOperation>
+        val reason: String
+
+        when {
+            intake.operation.kind != OperationKind.NONE -> {
+                operations = listOf(intake.operation)
+                reason = "Offline explicit ${intake.operation.kind.name.lowercase()} from request"
+                events += "offline staging: explicit operation ${intake.operation.kind} on ${intake.operation.path ?: "?"}"
+            }
+            else -> {
+                when (val synthesis = CodeSynthesisEngine(workspace.projectRoot(), knowledge).synthesize(intake)) {
+                    is SynthesisResult.Ready -> {
+                        operations = synthesis.proposal.operations
+                        reason = "Offline synthesis: ${synthesis.proposal.rationale}"
+                        events += "offline staging: synthesis produced ${operations.size} operation(s) — ${synthesis.proposal.rationale}"
+                    }
+                    is SynthesisResult.NeedsInput -> {
+                        events += "offline staging unavailable: ${synthesis.question}"
+                        return if (requiresEdit(intake)) {
+                            needsInput(
+                                taskId,
+                                request,
+                                plan,
+                                emptyList(),
+                                events,
+                                synthesis.question + " Load a coding model, or specify an exact replace/create/append/remove operation."
+                            )
+                        } else {
+                            failure(
+                                taskId,
+                                request,
+                                plan,
+                                emptyList(),
+                                "The coding model is not loaded; this request cannot be completed offline.",
+                                events
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        return try {
+            val proposal = mutationCoordinator.propose(request, operations, reason)
+            events += "offline proposal staged id=${proposal.id} changes=${proposal.changeSet.changes.size}"
+            needsApproval(taskId, request, plan, proposal.changeSet.changes, events, proposal.id)
+        } catch (error: Exception) {
+            failure(
+                taskId,
+                request,
+                plan,
+                emptyList(),
+                "Offline mutation staging failed: ${error.message.orEmpty().ifBlank { error.javaClass.simpleName }}",
+                events
+            )
+        }
+    }
+
+    private fun buildPrompt(request: String, intake: TaskIntake, evidence: String): String = buildString {
+        append("Coding request:\n").append(request)
+        append("\n\nTyped intake:\n").append(intake.summary)
+        append("\n\nUse the project files below. Inspect before edits. Propose changes through the transaction tool and wait for owner approval. Do not invent file writes.\n")
+        append("\n\nEvidence:\n").append(evidence.take(12_000))
+    }
+
+    private fun stageOrExecute(response: ModelToolCall, coordinator: MutationCoordinator, evidence: String): ToolExecutionResult {
+        return try {
+            val args = org.json.JSONObject(response.arguments)
+            when (response.name) {
+                "list_files" -> ToolExecutionResult("${workspace.summary().files.joinToString("\n") { it.path }}", evidence)
+                "read_file" -> ToolExecutionResult(AgentTools(workspace).read(args.getString("path")).content.take(8_000), evidence)
+                "search_project" -> ToolExecutionResult(workspace.search(args.getString("query")).joinToString("\n") { "${it.path}:${it.line}: ${it.text}" }.take(8_000), evidence)
+                "search_knowledge" -> ToolExecutionResult(knowledge.search(args.getString("query"), 8).joinToString("\n") { "${it.document}/${it.section}: ${it.excerpt}" }.take(8_000), evidence)
+                "research_web" -> ToolExecutionResult("Research already completed at the mandatory gate; use the provided research brief.", evidence)
+                "propose_changes" -> {
+                    val operations = parseProposalOperations(args)
+                    val proposal = coordinator.propose(args.optString("reason", "Model-directed multi-file change"), operations, args.optString("reason", "Model-directed multi-file change"))
+                    ToolExecutionResult("PROPOSAL_READY id=${proposal.id} changes=${proposal.changeSet.changes.size} approval_required=2", evidence, proposal.changeSet, proposal.id)
+                }
+                "replace_text", "create_file", "run_command", "approve_change", "reject_change" -> ToolExecutionResult("ERROR: This model tool is disabled; use the typed proposal and owner UI.", evidence)
+                else -> ToolExecutionResult("ERROR: Unknown tool ${response.name}", evidence)
+            }
+        } catch (error: Exception) {
+            ToolExecutionResult("ERROR: ${error.message.orEmpty()}", evidence)
+        }
+    }
+
+    private fun parseProposalOperations(args: org.json.JSONObject): List<TaskOperation> {
+        val raw = args.optJSONArray("operations") ?: error("propose_changes.operations must be an array")
+        require(raw.length() in 1..32) { "propose_changes requires between 1 and 32 operations" }
+        return (0 until raw.length()).map { index ->
+            val operation = raw.optJSONObject(index) ?: error("Operation $index is not an object")
+            val path = operation.optString("path").trim()
+            require(path.isNotBlank() && path.length <= 512 && !path.startsWith('/') && !path.contains("..") && !path.contains('\\')) { "Operation $index has an unsafe path" }
+            when (operation.optString("kind").lowercase()) {
+                "replace" -> TaskOperation(OperationKind.REPLACE, path, operation.optString("oldText"), operation.optString("newText"))
+                "append" -> TaskOperation(OperationKind.APPEND, path, text = operation.optString("text"))
+                "remove" -> TaskOperation(OperationKind.REMOVE, path, oldText = operation.optString("oldText"))
+                "create_file" -> TaskOperation(OperationKind.CREATE_FILE, path, text = operation.optString("content"))
+                else -> error("Operation $index has unsupported kind")
+            }
+        }
+    }
+
+    private fun verify(plan: AgentPlan): VerificationReport =
+        if (plan.checks.isEmpty()) workspace.verify() else workspace.runChecks(plan.checks, config.commandTimeoutSeconds)
+
+    private fun requiresEdit(intake: TaskIntake) =
+        intake.operation.kind != OperationKind.NONE ||
+            intake.intent in setOf(TaskIntent.CHANGE, TaskIntent.CREATE, TaskIntent.REFACTOR, TaskIntent.DEBUG)
+
+    private fun task(
+        id: String,
+        request: String,
+        status: String,
+        plan: AgentPlan,
+        changes: List<ChangeRecord>,
+        report: VerificationReport,
+        events: List<String>
+    ) = AgentTask(
+        id,
+        request,
+        status,
+        plan,
+        changes,
+        report,
+        events,
+        if (status == "completed") "Task completed with verification evidence" else "Task did not complete"
+    )
+
+    private fun needsInput(
+        id: String,
+        request: String,
+        plan: AgentPlan,
+        changes: List<ChangeRecord>,
+        events: MutableList<String>,
+        question: String
+    ): AgentRuntimeResult.NeedsInput {
+        val task = task(id, request, "needs-input", plan, changes, VerificationReport(false, emptyList()), events)
+        journal.record(task)
+        return AgentRuntimeResult.NeedsInput(task, question)
+    }
+
+    private fun needsApproval(
+        id: String,
+        request: String,
+        plan: AgentPlan,
+        changes: List<ChangeRecord>,
+        events: MutableList<String>,
+        proposalId: String
+    ): AgentRuntimeResult.NeedsApproval {
+        val task = task(
+            id,
+            request,
+            "waiting-approval",
+            plan,
+            changes,
+            VerificationReport(false, listOf(VerificationIssue("<approval>", 0, "Proposal $proposalId requires two owner approvals"))),
+            events
+        )
+        journal.record(task)
+        return AgentRuntimeResult.NeedsApproval(
+            task,
+            "Review proposal $proposalId and confirm twice before applying any code change.",
+            proposalId
+        )
+    }
+
+    private fun failure(
+        id: String,
+        request: String,
+        plan: AgentPlan,
+        changes: List<ChangeRecord>,
+        message: String,
+        events: MutableList<String>,
+        report: VerificationReport = VerificationReport(false, listOf(VerificationIssue("<agent>", 0, message)))
+    ): AgentRuntimeResult.Failed {
+        events += "failure: $message"
+        val task = task(id, request, "failed", plan, changes, report, events)
+        journal.record(task)
+        return AgentRuntimeResult.Failed(task)
+    }
+
+    private data class ToolExecutionResult(
+        val output: String,
+        val evidence: String,
+        val changeSet: ChangeSet? = null,
+        val proposalId: String? = null,
+        val terminalResult: CommandResult? = null
+    )
+
+    private fun executeAuditedInspection(request: String, intake: TaskIntake): AgentRuntimeResult {
+        val taskId = UUID.randomUUID().toString()
+        val plan = AgentPlanner(workspace).plan(intake)
+        val events = mutableListOf("${Instant.now()}: received request", "intake: ${intake.summary}")
+        events += "retrieved ${knowledge.search(intake.goal, 8).size} local knowledge matches"
+        val report = workspace.verify()
+        val task = task(taskId, request, "completed", plan, emptyList(), report, events + "inspection evidence collected from the indexed project")
+        journal.record(task)
+        return AgentRuntimeResult.Completed(task)
+    }
+
+    private fun completeNext(planning: PlanningLoop, phase: String, evidence: String, events: MutableList<String>) {
+        val step = planning.next() ?: return
+        if (step.phase != phase) {
+            events += "plan phase skip: expected $phase got ${step.phase}"
+            return
+        }
+        events += "plan step active: $phase"
+        planning.complete(evidence)
+    }
+}

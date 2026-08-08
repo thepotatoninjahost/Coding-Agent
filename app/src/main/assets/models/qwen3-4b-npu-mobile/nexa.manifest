@@ -1,0 +1,5 @@
+{
+    "ModelName": "qwen3-4b",
+    "ModelType": "llm",
+    "PluginId": "npu"
+}

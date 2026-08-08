@@ -1,0 +1,171 @@
+package com.codingagent.core
+
+import java.nio.file.Files
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class AutonomousLoopTest {
+    @Test
+    fun toolCatalogMatchesExecutor() {
+        val names = AgentModelProtocol.tools().map { it.name }.toSet()
+        val required = setOf(
+            "list_files", "read_file", "search_project", "search_knowledge", "research_web",
+            "propose_changes", "verify"
+        )
+        assertTrue(names.containsAll(required))
+        assertTrue("approve_change" !in names)
+        assertTrue("run_command" !in names)
+    }
+
+    @Test
+    fun degenerateDetectorCatchesLineAndCharSpam() {
+        val repeated = (1..12).joinToString("\n") { "same line forever" }
+        assertTrue(DegenerateOutput.isDegenerate(repeated))
+        assertTrue(DegenerateOutput.isDegenerate("a".repeat(120)))
+        assertTrue(!DegenerateOutput.isDegenerate("Short normal reply about the project."))
+    }
+
+    @Test
+    fun mockGatewayCompletesAfterTools() {
+        val root = Files.createTempDirectory("agent-loop").toFile()
+        root.resolve("src").mkdirs()
+        root.resolve("src/Hello.kt").writeText("fun hello() = 1\n")
+        val gateway = ScriptedGateway(
+            listOf(
+                com.codingagent.model.ModelResponse.ToolCall("list_files", """{"path":"src"}"""),
+                com.codingagent.model.ModelResponse.Text("Found the source tree under src/.")
+            )
+        )
+        val workspace = ProjectWorkspace(root)
+        val knowledge = object : AgentKnowledge {
+            override fun search(query: String, limit: Int) = emptyList<KnowledgeHit>()
+        }
+        val runtime = CodingAgentRuntime(
+            workspace,
+            knowledge,
+            AgentJournal(root),
+            modelGateway = gateway
+        )
+        val agent = AutonomousAgent(root, runtime, knowledge, gateway, AutonomousAgentConfig(maxTurns = 6))
+        val events = agent.run("List the source files and summarize")
+        assertTrue(events.any { it is AutonomousAgentEvent.ToolFinished })
+        assertTrue(events.last() is AutonomousAgentEvent.Completed)
+    }
+
+    @Test
+    fun cancelBetweenTurnsEmitsStopped() {
+        val root = Files.createTempDirectory("agent-cancel").toFile()
+        root.resolve("README.md").writeText("# demo\n")
+        val gateway = object : ModelGateway {
+            override fun complete(request: ModelRequest): ModelResponse =
+                com.codingagent.model.ModelResponse.ToolCall("list_files", "{}")
+
+            override fun stream(request: ModelRequest, onDelta: (String) -> Unit): ModelResponse =
+                complete(request)
+        }
+        val workspace = ProjectWorkspace(root)
+        val knowledge = object : AgentKnowledge {
+            override fun search(query: String, limit: Int) = emptyList<KnowledgeHit>()
+        }
+        val runtime = CodingAgentRuntime(workspace, knowledge, AgentJournal(root), modelGateway = gateway)
+        val agent = AutonomousAgent(
+            root, runtime, knowledge, gateway,
+            AutonomousAgentConfig(maxTurns = 8, maxIdenticalToolRepeats = 99)
+        )
+        var turns = 0
+        val events = agent.run("Keep listing files") { event ->
+            if (event is AutonomousAgentEvent.ToolFinished) {
+                turns++
+                if (turns >= 1) agent.cancel("test-stop")
+            }
+        }
+        assertTrue(events.any { it is AutonomousAgentEvent.Stopped })
+        assertEquals("stopped", (events.last() as AutonomousAgentEvent.Stopped).task.status)
+    }
+
+    @Test
+    fun refusesToCompleteWithoutReadingNamedFile() {
+        val root = Files.createTempDirectory("agent-evidence").toFile()
+        val file = root.resolve("SelfEvolution.kt")
+        file.writeText("class SelfEvolution\n")
+        val gateway = ScriptedGateway(
+            listOf(
+                com.codingagent.model.ModelResponse.Text("SelfEvolution is a great file about evolution and imports."),
+                com.codingagent.model.ModelResponse.ToolCall("read_file", """{"path":"SelfEvolution.kt"}"""),
+                com.codingagent.model.ModelResponse.Text("SelfEvolution stages sources under .coding-agent/evolution and promotes after checks.")
+            )
+        )
+        val workspace = ProjectWorkspace(root)
+        val knowledge = object : AgentKnowledge {
+            override fun search(query: String, limit: Int) = emptyList<KnowledgeHit>()
+        }
+        val runtime = CodingAgentRuntime(workspace, knowledge, AgentJournal(root), modelGateway = gateway)
+        val agent = AutonomousAgent(root, runtime, knowledge, gateway, AutonomousAgentConfig(maxTurns = 8))
+        val events = agent.run("Analyze the file SelfEvolution.kt then write a report about the file")
+        assertTrue(
+            "expected an EVIDENCE phase before completion",
+            events.any { it is AutonomousAgentEvent.Phase && it.name == "EVIDENCE" }
+        )
+        assertTrue(events.any { it is AutonomousAgentEvent.ToolFinished && it.name == "read_file" && it.success })
+        assertTrue(events.last() is AutonomousAgentEvent.Completed)
+    }
+
+    @Test
+    fun failsAfterRepeatedUngroundedCompletions() {
+        val root = Files.createTempDirectory("agent-evidence-fail").toFile()
+        root.resolve("Report.kt").writeText("class Report\n")
+        val gateway = ScriptedGateway(
+            List(6) { com.codingagent.model.ModelResponse.Text("Here is my report without opening anything.") }
+        )
+        val workspace = ProjectWorkspace(root)
+        val knowledge = object : AgentKnowledge {
+            override fun search(query: String, limit: Int) = emptyList<KnowledgeHit>()
+        }
+        val runtime = CodingAgentRuntime(workspace, knowledge, AgentJournal(root), modelGateway = gateway)
+        val agent = AutonomousAgent(
+            root, runtime, knowledge, gateway,
+            AutonomousAgentConfig(maxTurns = 10, maxEvidenceRefusals = 2)
+        )
+        val events = agent.run("Analyze Report.kt and give me a report")
+        assertTrue(events.last() is AutonomousAgentEvent.Failed)
+        assertTrue((events.last() as AutonomousAgentEvent.Failed).message.contains("without reading"))
+    }
+
+    @Test
+    fun identicalToolLoopAborts() {
+        val root = Files.createTempDirectory("agent-loop-repeat").toFile()
+        root.resolve("a.txt").writeText("hello world content enough\n")
+        val gateway = ScriptedGateway(
+            List(6) { com.codingagent.model.ModelResponse.ToolCall("list_files", "{}") }
+        )
+        val workspace = ProjectWorkspace(root)
+        val knowledge = object : AgentKnowledge {
+            override fun search(query: String, limit: Int) = emptyList<KnowledgeHit>()
+        }
+        val runtime = CodingAgentRuntime(workspace, knowledge, AgentJournal(root), modelGateway = gateway)
+        val agent = AutonomousAgent(
+            root, runtime, knowledge, gateway,
+            AutonomousAgentConfig(maxTurns = 10, maxIdenticalToolRepeats = 3)
+        )
+        val events = agent.run("List files repeatedly")
+        assertTrue(events.last() is AutonomousAgentEvent.Failed)
+        assertTrue((events.last() as AutonomousAgentEvent.Failed).message.contains("repeated"))
+    }
+}
+
+/** Deterministic gateway that returns scripted responses in order. */
+private class ScriptedGateway(private val script: List<ModelResponse>) : ModelGateway {
+    private var index = 0
+    override fun complete(request: ModelRequest): ModelResponse {
+        val response = script.getOrElse(index) { com.codingagent.model.ModelResponse.Text("done") }
+        index++
+        return response
+    }
+
+    override fun stream(request: ModelRequest, onDelta: (String) -> Unit): ModelResponse {
+        val response = complete(request)
+        if (response is com.codingagent.model.ModelResponse.Text) onDelta(response.content)
+        return response
+    }
+}
