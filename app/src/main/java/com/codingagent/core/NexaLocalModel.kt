@@ -36,8 +36,8 @@ class NexaLocalModelGateway(
     private val wrapper: LlmWrapper
     private val lock = Any()
 
-    /** Soft budget for formatted prompt before generate. Measured failure band was ~3069. */
-    private val maxFormattedChars = 2000
+    /** Soft budget for the compact local prompt. The model context is measured in tokens, not raw characters. */
+    private val maxPromptTokens = 1536
 
     /** True after a failed/cancelled stream until a successful reset or clean generate completes. */
     @Volatile
@@ -103,10 +103,11 @@ class NexaLocalModelGateway(
                     sessionDirty = true
                     return@runBlocking ModelFailure("Nexa applyChatTemplate returned empty formattedText")
                 }
-                if (prompt.length > maxFormattedChars) {
+                val estimatedPromptTokens = estimateTokens(prompt)
+                if (estimatedPromptTokens > maxPromptTokens) {
                     sessionDirty = true
                     return@runBlocking ModelFailure(
-                        "Nexa prompt over budget (promptChars=${prompt.length} max=$maxFormattedChars). Shorten the user request." +
+                        "Nexa prompt over budget (estimatedTokens=$estimatedPromptTokens max=$maxPromptTokens, promptChars=${prompt.length})." +
                             (prep?.let { " | session=$it" } ?: "")
                     )
                 }
@@ -141,7 +142,7 @@ class NexaLocalModelGateway(
                 if (output.isBlank()) {
                     sessionDirty = true
                     ModelFailure(
-                        "Nexa returned no output | promptChars=${prompt.length}" +
+                        "Nexa returned no output | promptTokens=${estimateTokens(prompt)} promptChars=${prompt.length}" +
                             (prep?.let { " | session=$it" } ?: "")
                     )
                 } else {
@@ -215,6 +216,8 @@ class NexaLocalModelGateway(
         messages += ChatMessage("user", request.user.take(1500))
         return messages
     }
+
+    private fun estimateTokens(prompt: String): Int = ((prompt.codePointCount(0, prompt.length) + 3) / 4).coerceAtLeast(1)
 
     private fun awaitSdkInitialization(context: Context) {
         val completed = CountDownLatch(1)
