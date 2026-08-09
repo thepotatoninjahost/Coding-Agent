@@ -114,7 +114,7 @@ class ChatWorkspace(
         append(task.verification.issues.size)
         append(" issue(s)")
         if (task.verification.issues.isEmpty()) {
-            append("\n- No unfinished markers or static issues found in production sources.")
+            append("\n- Static scan found no TODO/FIXME/stub markers in production sources.")
         } else {
             task.verification.issues.forEach { issue ->
                 append("\n- ")
