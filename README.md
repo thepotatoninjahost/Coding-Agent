@@ -2,22 +2,36 @@
 
 A modular Android coding workbench designed for phone-only use. The project is organized as replaceable core modules for intake, planning, project indexing, knowledge retrieval, code synthesis, workspace mutation, verification, repair, live updates, and local learning.
 
-The runtime keeps a degraded offline knowledge path, but non-trivial coding requests now fail closed unless a web research provider is configured and returns evidence. The model-driven autonomous path uses an OpenAI-compatible gateway with tool calling; the gateway also supports streamed server-sent-event deltas. Configure the gateway in the host integration before treating the app as production-ready.
+The runtime keeps a degraded offline knowledge path, but non-trivial coding requests now fail closed unless a web research provider is configured and returns evidence. The model-driven autonomous path uses an OpenAI-compatible gateway with tool calling; the gateway also supports streamed server-sent-event deltas. Configure the gateway via the in-app Model settings screen (base URL, model id, API key).
 
 ## Current product status
 
-The repository contains the modular backend and an Android workbench with a persistent Chat workspace. It is **not yet a fully operational phone coding agent**.
+The repository contains the modular backend and an Android workbench with a persistent Chat workspace. Core agent loop, evidence gates, and static verification are implemented and hardened.
 
-The current APK supports project import, project indexing, source search, local reference-material import/search, mandatory DuckDuckGo research before non-trivial runtime execution, a portrait-first chat/files/review/terminal/research shell, exact transactional replacement, verification, and persisted chat history. The autonomous model loop is modular and supports tool calls and streaming, but the UI still needs a model-settings surface and end-to-end proposal staging before it should be called complete.
+The current APK supports:
+- Project import via Storage Access Framework and indexing
+- Source search and local knowledge search
+- Autonomous model loop with real tool calling (list_files, read_file, search_project, verify, mutations with dual approval, etc.)
+- Always-on static verification (TODO/FIXME/stub scan) — never reports a fake pass
+- Evidence requirement: inspect/error/analyze requests must actually read or search project files before a final answer is accepted
+- Model settings UI for any OpenAI-compatible provider (Groq, SambaNova, OpenRouter, local, etc.)
+- Transactional file changes with checksum-backed rollback
+- Persisted chat history and task journal
 
-The following product surfaces are still implementation work:
+Remaining product polish (not blockers for basic use):
+- Multi-file diff staging UI refinements
+- Broader document ingestion beyond the example asset
+- Extended physical-device verification of terminal cancellation and long streaming sessions
 
-- Configurable model-gateway settings and user-facing model onboarding
-- Model-generated multi-file diff staging and applying those changes only after approval
-- General document/file/reference ingestion beyond the current example asset
-- Full verification of terminal cancellation and live streaming on a physical Galaxy S25
+## Recommended remote provider (as of 2026-08)
 
-The project must not be described as a complete coding agent until all required surfaces are implemented and visually verified on a running build.
+SambaNova has shown rate-limit (429) and occasional Cloudflare blocks. Prefer **Groq** for reliability:
+
+- Base URL: `https://api.groq.com/openai/v1`
+- Model: `llama-3.3-70b-versatile`
+- API key: from console.groq.com
+
+Any other OpenAI-compatible endpoint works the same way.
 
 ## Architecture
 
@@ -129,7 +143,7 @@ The Android unit tests are JVM tests and run with:
 
 ## Build on GitHub
 
-The repository includes `.github/workflows/android.yml`. GitHub Actions runs automatically on pushes to `master`, pull requests, and manual workflow dispatch. It installs the Android SDK, runs the unit tests, assembles the debug APK, and publishes the APK as the `coding-agent-debug-apk` workflow artifact.
+The repository includes `.github/workflows/android-build.yml`. GitHub Actions runs automatically on pushes to `main`, pull requests, and manual workflow dispatch. It installs the Android SDK, runs the unit tests, assembles the debug APK, and publishes the APK as the `coding-agent-debug-apk` workflow artifact.
 
 To run it manually:
 
@@ -137,7 +151,7 @@ To run it manually:
 2. Open **Actions**.
 3. Select **Android build**.
 4. Select **Run workflow**.
-5. Choose `master` and run it.
+5. Choose `main` and run it.
 6. Open the completed run and download `coding-agent-debug-apk` under **Artifacts**.
 
 ## Supported device contract
