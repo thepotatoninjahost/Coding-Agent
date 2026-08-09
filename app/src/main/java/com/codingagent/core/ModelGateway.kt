@@ -128,6 +128,7 @@ class RemoteHttpGateway(
         if (apiKey.isNotBlank()) connection.setRequestProperty("Authorization", "Bearer $apiKey")
         connection.setRequestProperty("Content-Type", "application/json")
         connection.setRequestProperty("Accept", if (streaming) "text/event-stream" else "application/json")
+        connection.setRequestProperty("Accept-Language", "en-US,en;q=0.9")
         connection.setRequestProperty("User-Agent", USER_AGENT)
     }
 
@@ -190,7 +191,22 @@ class RemoteHttpGateway(
 
     private fun failure(connection: HttpURLConnection): ModelResponse.Failure {
         val body = connection.errorStream?.bufferedReader()?.use { it.readText() }.orEmpty()
-        return ModelResponse.Failure("Model HTTP ${connection.responseCode}: ${body.take(500)}")
+            .ifBlank { connection.inputStream?.bufferedReader()?.use { it.readText() }.orEmpty() }
+        val headerBits = listOf("server", "cf-ray", "x-request-id", "www-authenticate", "x-error", "error")
+            .mapNotNull { name ->
+                connection.getHeaderField(name)?.takeIf { it.isNotBlank() }?.let { "$name=$it" }
+            }
+            .joinToString("; ")
+        val target = runCatching { connection.url?.host.orEmpty() + (connection.url?.path.orEmpty()) }.getOrDefault("")
+        val detail = buildString {
+            append("Model HTTP ${connection.responseCode}")
+            if (target.isNotBlank()) append(" @ $target")
+            if (headerBits.isNotBlank()) append(" [$headerBits]")
+            val snippet = body.replace("\\s+".toRegex(), " ").trim().take(600)
+            if (snippet.isNotBlank()) append(": $snippet")
+            else append(": (empty body)")
+        }
+        return ModelResponse.Failure(detail)
     }
 
     private fun appendStreamDelta(delta: JSONObject, content: StringBuilder, toolCalls: MutableMap<Int, StreamToolCall>, onDelta: (String) -> Unit) {
