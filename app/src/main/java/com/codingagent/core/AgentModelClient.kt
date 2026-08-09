@@ -24,6 +24,7 @@ class HttpModelGateway(
             connection.setRequestProperty("Authorization", "Bearer $apiKey")
             connection.setRequestProperty("Content-Type", "application/json")
             connection.setRequestProperty("Accept", "application/json")
+            connection.setRequestProperty("Accept-Language", "en-US,en;q=0.9")
             connection.setRequestProperty("User-Agent",
                 "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36")
             val payload = JSONObject()
@@ -34,8 +35,21 @@ class HttpModelGateway(
             connection.outputStream.use { it.write(payload.toString().toByteArray(StandardCharsets.UTF_8)) }
             val body = (if (connection.responseCode in 200..299) connection.inputStream else connection.errorStream)
                 ?.bufferedReader()?.use { it.readText() }.orEmpty()
-            if (connection.responseCode !in 200..299) ModelResponse.Failure("Model HTTP ${connection.responseCode}: ${body.take(400)}")
-            else parseProviderResponse(body)
+            if (connection.responseCode !in 200..299) {
+                val target = runCatching { connection.url?.host.orEmpty() + (connection.url?.path.orEmpty()) }.getOrDefault("")
+                val headerBits = listOf("server", "cf-ray", "x-request-id", "www-authenticate")
+                    .mapNotNull { name -> connection.getHeaderField(name)?.takeIf { it.isNotBlank() }?.let { "$name=$it" } }
+                    .joinToString("; ")
+                val snippet = body.replace("\\s+".toRegex(), " ").trim().take(500)
+                ModelResponse.Failure(
+                    buildString {
+                        append("Model HTTP ${connection.responseCode}")
+                        if (target.isNotBlank()) append(" @ $target")
+                        if (headerBits.isNotBlank()) append(" [$headerBits]")
+                        if (snippet.isNotBlank()) append(": $snippet") else append(": (empty body)")
+                    }
+                )
+            } else parseProviderResponse(body)
         } catch (error: IOException) {
             ModelResponse.Failure("Model network failure: ${error.message ?: error.javaClass.simpleName}")
         } catch (error: Exception) {
