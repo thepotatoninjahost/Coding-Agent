@@ -3,19 +3,24 @@ package com.codingagent.core
 /**
  * User-facing model gateway configuration.
  * Pure data so unit tests do not need Android; persistence lives in [LocalStore].
+ *
+ * Remote path: user supplies base URL, model id, and API key. Nothing is
+ * product-hardcoded for a specific host or model.
  */
 enum class ModelBackend {
-    /** On-device Nexa NPU (Qwen3-4B mobile package). */
+    /** On-device Nexa NPU (optional; not the product default). */
     LOCAL_NEXA,
-    /** Any OpenAI-compatible HTTP endpoint (tools + optional SSE). */
-    REMOTE_OPENAI
+    /** Remote HTTP model endpoint (tools + optional SSE). */
+    REMOTE
 }
 
 data class ModelSettings(
-    val backend: ModelBackend = ModelBackend.LOCAL_NEXA,
-    val baseUrl: String = DEFAULT_BASE_URL,
+    val backend: ModelBackend = ModelBackend.REMOTE,
+    /** User-supplied base URL. Empty until set. */
+    val baseUrl: String = "",
     val apiKey: String = "",
-    val modelName: String = DEFAULT_REMOTE_MODEL,
+    /** User-chosen model id. Empty until the user sets it. */
+    val modelName: String = "",
     /** False until the user finishes first-run onboarding (or saves settings once). */
     val onboarded: Boolean = false
 ) {
@@ -29,7 +34,7 @@ data class ModelSettings(
         val s = normalized()
         return when (s.backend) {
             ModelBackend.LOCAL_NEXA -> emptyList()
-            ModelBackend.REMOTE_OPENAI -> buildList {
+            ModelBackend.REMOTE -> buildList {
                 if (s.baseUrl.isBlank()) add("Base URL is required for remote models")
                 else if (!s.baseUrl.startsWith("http://") && !s.baseUrl.startsWith("https://")) {
                     add("Base URL must start with http:// or https://")
@@ -42,21 +47,23 @@ data class ModelSettings(
     }
 
     fun isRemoteConfigured(): Boolean =
-        backend == ModelBackend.REMOTE_OPENAI && validationErrors().isEmpty()
+        backend == ModelBackend.REMOTE && validationErrors().isEmpty()
 
     /** Human-readable line for the status bar (never includes the API key). */
     fun statusSummary(localActive: Boolean = false, localError: String? = null): String = when (backend) {
         ModelBackend.LOCAL_NEXA -> when {
             localError != null -> "Local NPU · error"
-            localActive -> "Local NPU · Qwen3-4B active"
+            localActive -> "Local NPU · active"
             else -> "Local NPU · loading"
         }
-        ModelBackend.REMOTE_OPENAI -> {
+        ModelBackend.REMOTE -> {
             val host = runCatching {
                 java.net.URI(normalized().baseUrl).host ?: normalized().baseUrl
-            }.getOrDefault(normalized().baseUrl)
-            if (isRemoteConfigured()) "Remote · $modelName @ $host"
-            else "Remote · incomplete settings"
+            }.getOrDefault(normalized().baseUrl).ifBlank { "…" }
+            when {
+                isRemoteConfigured() -> "Remote · $modelName @ $host"
+                else -> "Remote · set base URL, model, and API key"
+            }
         }
     }
 
@@ -67,31 +74,28 @@ data class ModelSettings(
     fun remoteGateway(
         timeoutMillis: Int = 60_000,
         connectionFactory: ((String) -> java.net.HttpURLConnection)? = null
-    ): OpenAiCompatibleGateway? {
+    ): RemoteHttpGateway? {
         val s = normalized()
-        if (s.backend != ModelBackend.REMOTE_OPENAI) return null
+        if (s.backend != ModelBackend.REMOTE) return null
         if (s.validationErrors().isNotEmpty()) return null
         return if (connectionFactory != null) {
-            OpenAiCompatibleGateway(s.baseUrl, s.apiKey, s.modelName, timeoutMillis, connectionFactory)
+            RemoteHttpGateway(s.baseUrl, s.apiKey, s.modelName, timeoutMillis, connectionFactory)
         } else {
-            OpenAiCompatibleGateway(s.baseUrl, s.apiKey, s.modelName, timeoutMillis)
+            RemoteHttpGateway(s.baseUrl, s.apiKey, s.modelName, timeoutMillis)
         }
     }
 
     companion object {
-        const val DEFAULT_BASE_URL = "https://api.openai.com/v1"
-        const val DEFAULT_REMOTE_MODEL = "gpt-4o-mini"
-
         fun fromJson(raw: String?): ModelSettings {
             if (raw.isNullOrBlank()) return ModelSettings()
             return runCatching {
                 val o = org.json.JSONObject(raw)
                 ModelSettings(
                     backend = runCatching { ModelBackend.valueOf(o.getString("backend")) }
-                        .getOrDefault(ModelBackend.LOCAL_NEXA),
-                    baseUrl = o.optString("baseUrl", DEFAULT_BASE_URL),
+                        .getOrDefault(ModelBackend.REMOTE),
+                    baseUrl = o.optString("baseUrl", ""),
                     apiKey = o.optString("apiKey", ""),
-                    modelName = o.optString("modelName", DEFAULT_REMOTE_MODEL),
+                    modelName = o.optString("modelName", ""),
                     onboarded = o.optBoolean("onboarded", false)
                 ).normalized()
             }.getOrDefault(ModelSettings())
@@ -110,7 +114,7 @@ data class ModelSettings(
     }
 }
 
-/** Probe a remote OpenAI-compatible endpoint with a minimal non-tool completion. */
+/** Probe a remote endpoint with a minimal non-tool completion. */
 object ModelConnectionProbe {
     fun probe(settings: ModelSettings): ProbeResult {
         val errors = settings.validationErrors()
