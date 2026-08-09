@@ -128,6 +128,12 @@ class RemoteHttpGateway(
         if (apiKey.isNotBlank()) connection.setRequestProperty("Authorization", "Bearer $apiKey")
         connection.setRequestProperty("Content-Type", "application/json")
         connection.setRequestProperty("Accept", if (streaming) "text/event-stream" else "application/json")
+        connection.setRequestProperty("User-Agent", USER_AGENT)
+    }
+
+    companion object {
+        private const val USER_AGENT =
+            "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
     }
 
     private fun requestBody(request: ModelRequest, streaming: Boolean): JSONObject {
@@ -257,23 +263,23 @@ object AgentModelProtocol {
     val SYSTEM = """
 Local coding agent on this device. Obey the user request.
 Do not invent file contents. For a named file, call read_file first.
-Tool call JSON only: {"tool":"name","arguments":{...},"thought":"short"}
-Final answer JSON only: {"content":"..."}
+Tool call JSON only: {\"tool\":\"name\",\"arguments\":{...},\"thought\":\"short\"}
+Final answer JSON only: {\"content\":\"...\"}
 Tools: list_files, read_file, search_project, search_knowledge, research_web, replace_text, create_file, approve_change, reject_change, run_command, verify
 """.trimIndent()
 
     fun tools(): List<ModelToolDefinition> = listOf(
-        ModelToolDefinition("list_files", "List files in a relative directory", """{"type":"object","properties":{"path":{"type":"string"}},"required":[]}"""),
-        ModelToolDefinition("read_file", "Read one project file", """{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}"""),
-        ModelToolDefinition("search_project", "Search project text", """{"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}"""),
-        ModelToolDefinition("search_knowledge", "Search local knowledge base", """{"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}"""),
-        ModelToolDefinition("research_web", "Research the web", """{"type":"object","properties":{"query":{"type":"string"},"mode":{"type":"string"},"sources":{"type":"integer"}},"required":["query"]}"""),
-        ModelToolDefinition("replace_text", "Stage an exact text replacement (needs dual approval)", """{"type":"object","properties":{"path":{"type":"string"},"oldText":{"type":"string"},"newText":{"type":"string"},"reason":{"type":"string"}},"required":["path","oldText","newText"]}"""),
-        ModelToolDefinition("create_file", "Stage a new file (needs dual approval)", """{"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"},"reason":{"type":"string"}},"required":["path","content"]}"""),
-        ModelToolDefinition("approve_change", "Record one owner approval (two required)", """{"type":"object","properties":{"id":{"type":"string"},"ownerVerified":{"type":"boolean"},"ownerLabel":{"type":"string"}},"required":["id","ownerVerified","ownerLabel"]}"""),
-        ModelToolDefinition("reject_change", "Reject a pending change", """{"type":"object","properties":{"id":{"type":"string"}},"required":["id"]}"""),
-        ModelToolDefinition("run_command", "Run a command in the project root", """{"type":"object","properties":{"command":{"type":"string"}},"required":["command"]}"""),
-        ModelToolDefinition("verify", "Run static verification", """{"type":"object","properties":{},"required":[]}""")
+        ModelToolDefinition("list_files", "List files in a relative directory", """{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}},\"required\":[]}"""),
+        ModelToolDefinition("read_file", "Read one project file", """{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}},\"required\":[\"path\"]}"""),
+        ModelToolDefinition("search_project", "Search project text", """{\"type\":\"object\",\"properties\":{\"query\":{\"type\":\"string\"}},\"required\":[\"query\"]}"""),
+        ModelToolDefinition("search_knowledge", "Search local knowledge base", """{\"type\":\"object\",\"properties\":{\"query\":{\"type\":\"string\"}},\"required\":[\"query\"]}"""),
+        ModelToolDefinition("research_web", "Research the web", """{\"type\":\"object\",\"properties\":{\"query\":{\"type\":\"string\"},\"mode\":{\"type\":\"string\"},\"sources\":{\"type\":\"integer\"}},\"required\":[\"query\"]}"""),
+        ModelToolDefinition("replace_text", "Stage an exact text replacement (needs dual approval)", """{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"},\"oldText\":{\"type\":\"string\"},\"newText\":{\"type\":\"string\"},\"reason\":{\"type\":\"string\"}},\"required\":[\"path\",\"oldText\",\"newText\"]}"""),
+        ModelToolDefinition("create_file", "Stage a new file (needs dual approval)", """{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"},\"content\":{\"type\":\"string\"},\"reason\":{\"type\":\"string\"}},\"required\":[\"path\",\"content\"]}"""),
+        ModelToolDefinition("approve_change", "Record one owner approval (two required)", """{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"string\"},\"ownerVerified\":{\"type\":\"boolean\"},\"ownerLabel\":{\"type\":\"string\"}},\"required\":[\"id\",\"ownerVerified\",\"ownerLabel\"]}"""),
+        ModelToolDefinition("reject_change", "Reject a pending change", """{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"string\"}},\"required\":[\"id\"]}"""),
+        ModelToolDefinition("run_command", "Run a command in the project root", """{\"type\":\"object\",\"properties\":{\"command\":{\"type\":\"string\"}},\"required\":[\"command\"]}"""),
+        ModelToolDefinition("verify", "Run static verification", """{\"type\":\"object\",\"properties\":{},\"required\":[]}""")
     )
 
     fun toolsForIntent(intent: TaskIntent): List<ModelToolDefinition> {
