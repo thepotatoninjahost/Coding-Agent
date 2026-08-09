@@ -40,8 +40,6 @@ data class ModelSettings(
             }
             if (s.modelName.isBlank()) add("Model name is required")
             if (!s.apiKeyRef.matches(SECRET_REF_PATTERN)) add("Secret reference is invalid")
-            val local = endpoint?.host?.let(::isLoopback) == true
-            if (s.apiKey.isBlank() && !local) add("API key is required except for localhost endpoints")
         }
     }
 
