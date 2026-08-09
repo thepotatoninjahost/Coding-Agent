@@ -9,7 +9,7 @@ class ModelGatewayTest {
     @Test
     fun `openai compatible request sends tool schemas and parses a tool call`() {
         var requestBody = ""
-        val gateway = OpenAiCompatibleGateway("http://127.0.0.1:8080/v1", "", "local", connectionFactory = { _ ->
+        val gateway = HttpChatModelGateway("http://127.0.0.1:8080/v1", "", "local", connectionFactory = { _ ->
             fakeConnection("""
                 {"choices":[{"message":{"role":"assistant","tool_calls":[{"id":"call_1","index":0,"function":{"name":"read_file","arguments":"{\"path\":\"src/Main.kt\"}"}}]}}]}
             """.trimIndent(), onRequest = { requestBody = it })
@@ -24,7 +24,7 @@ class ModelGatewayTest {
 
     @Test
     fun `streamed tool call arguments are accumulated instead of treated as text`() {
-        val gateway = OpenAiCompatibleGateway("http://127.0.0.1:8080/v1", "", "local", connectionFactory = { _ ->
+        val gateway = HttpChatModelGateway("http://127.0.0.1:8080/v1", "", "local", connectionFactory = { _ ->
             fakeConnection("""data: {"choices":[{"delta":{"tool_calls":[{"id":"call_1","index":0,"function":{"name":"read_file","arguments":"{\"path\":\"src/"}}}]}}]}
 data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"Main.kt\"}"}}]}}]}
 data: [DONE]
@@ -36,8 +36,29 @@ data: [DONE]
         assertEquals(com.codingagent.model.ModelResponse.ToolCall("read_file", "{\"path\":\"src/Main.kt\"}", "", "call_1"), result)
     }
 
-    private fun fakeConnection(body: String, onRequest: (String) -> Unit = {}): HttpURLConnection = object : HttpURLConnection(java.net.URL("http://127.0.0.1:8080/v1/chat/completions")) {
+    @Test
+    fun `custom authentication and extra headers are sent`() {
+        val headers = mutableMapOf<String, String>()
+        val gateway = HttpChatModelGateway(
+            "http://127.0.0.1:8080/v1",
+            "secret",
+            "local",
+            authHeaderName = "X-Api-Key",
+            authHeaderPrefix = "",
+            extraHeaders = mapOf("X-Tenant" to "tenant-a"),
+            connectionFactory = { _ ->
+                fakeConnection("""{"choices":[{"message":{"content":"pong"}}]}""", onHeaders = { headers.putAll(it) })
+            }
+        )
+
+        assertEquals(com.codingagent.model.ModelResponse.Text("pong"), gateway.complete(ModelRequest("system", "ping", emptyList())))
+        assertEquals("secret", headers["X-Api-Key"])
+        assertEquals("tenant-a", headers["X-Tenant"])
+    }
+
+    private fun fakeConnection(body: String, onRequest: (String) -> Unit = {}, onHeaders: (Map<String, String>) -> Unit = {}): HttpURLConnection = object : HttpURLConnection(java.net.URL("http://127.0.0.1:8080/v1/chat/completions")) {
         private val request = java.io.ByteArrayOutputStream()
+        private val requestHeaders = mutableMapOf<String, String>()
         override fun connect() = Unit
         override fun disconnect() = Unit
         override fun usingProxy() = false
@@ -55,7 +76,11 @@ data: [DONE]
         override fun getResponseMessage() = "OK"
         override fun getRequestMethod() = "POST"
         override fun setRequestMethod(method: String?) = Unit
+        override fun setRequestProperty(key: String?, value: String?) {
+            if (key != null && value != null) requestHeaders[key] = value
+        }
         override fun toString(): String {
+            onHeaders(requestHeaders)
             onRequest(request.toString(Charsets.UTF_8.name()))
             return super.toString()
         }

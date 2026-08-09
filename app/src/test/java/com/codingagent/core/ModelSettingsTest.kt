@@ -51,15 +51,21 @@ class ModelSettingsTest {
             baseUrl = "https://example.com/v1/",
             apiKey = "sk-secret-value",
             modelName = "goliath-400b",
-            onboarded = true
+            onboarded = true,
+            authHeaderName = "X-Api-Key",
+            authHeaderPrefix = "",
+            extraHeaders = mapOf("X-Tenant" to "tenant-a")
         )
         val serialized = ModelSettings.toJson(original)
         val restored = ModelSettings.fromJson(serialized)
-        assertEquals(ModelBackend.REMOTE_OPENAI, restored.backend)
+        assertEquals(ModelBackend.HTTP_CHAT, restored.backend)
         assertEquals("https://example.com/v1", restored.baseUrl)
         assertEquals("", restored.apiKey)
         assertEquals("CODING_AGENT_MODEL_API_KEY", restored.apiKeyRef)
         assertEquals("goliath-400b", restored.modelName)
+        assertEquals("X-Api-Key", restored.authHeaderName)
+        assertEquals("", restored.authHeaderPrefix)
+        assertEquals(mapOf("X-Tenant" to "tenant-a"), restored.extraHeaders)
         assertFalse(serialized.contains("sk-secret-value"))
         assertTrue(restored.onboarded)
         assertFalse(restored.statusSummary().contains("sk-secret"))
@@ -68,7 +74,7 @@ class ModelSettingsTest {
     @Test
     fun legacyLocalSettingsAreNotReactivated() {
         val restored = ModelSettings.fromJson("{\"backend\":\"LOCAL_OLD_PROVIDER\",\"onboarded\":true}")
-        assertEquals(ModelBackend.REMOTE_OPENAI, restored.backend)
+        assertEquals(ModelBackend.HTTP_CHAT, restored.backend)
         assertFalse(restored.onboarded)
         assertTrue(restored.validationErrors().isNotEmpty())
     }
@@ -76,7 +82,7 @@ class ModelSettingsTest {
     @Test
     fun corruptJsonFallsBackToUnconfiguredRemoteDefaults() {
         val defaults = ModelSettings.fromJson("{not-json")
-        assertEquals(ModelBackend.REMOTE_OPENAI, defaults.backend)
+        assertEquals(ModelBackend.HTTP_CHAT, defaults.backend)
         assertFalse(defaults.onboarded)
         assertTrue(defaults.validationErrors().isNotEmpty())
     }

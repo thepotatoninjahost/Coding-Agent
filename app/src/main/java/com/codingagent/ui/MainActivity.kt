@@ -518,18 +518,35 @@ private fun ModelSetupDialog(
     var modelName by remember(initial) { mutableStateOf(initial.modelName) }
     var apiKey by remember(initial) { mutableStateOf(initial.apiKey) }
     var apiKeyRef by remember(initial) { mutableStateOf(initial.apiKeyRef) }
-    val candidate = ModelSettings(com.codingagent.model.ModelBackend.REMOTE_OPENAI, baseUrl, apiKey, apiKeyRef, modelName, initial.onboarded)
+    var authHeaderName by remember(initial) { mutableStateOf(initial.authHeaderName) }
+    var authHeaderPrefix by remember(initial) { mutableStateOf(initial.authHeaderPrefix) }
+    var extraHeadersText by remember(initial) { mutableStateOf(initial.extraHeaders.entries.joinToString("\n") { "${it.key}: ${it.value}" }) }
+    val extraHeaders = parseHeaderLines(extraHeadersText)
+    val candidate = ModelSettings(
+        backend = com.codingagent.model.ModelBackend.HTTP_CHAT,
+        baseUrl = baseUrl,
+        apiKey = apiKey,
+        apiKeyRef = apiKeyRef,
+        modelName = modelName,
+        onboarded = initial.onboarded,
+        authHeaderName = authHeaderName,
+        authHeaderPrefix = authHeaderPrefix,
+        extraHeaders = extraHeaders
+    )
     androidx.compose.material3.AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Remote model setup", color = NeonGreen) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Connect any OpenAI-compatible model server. This is the only model path; the API key is encrypted with Android Keystore and never written to settings JSON.", color = SoftGreen, fontSize = 12.sp)
-                OutlinedTextField(baseUrl, { baseUrl = it }, label = { Text("OpenAI-compatible base URL") }, singleLine = true, colors = fieldColors())
+                Text("Endpoint must be the complete chat endpoint, for example SambaNova Cloud's HTTPS /v1/chat/completions URL. The request format is generic OpenAI-compatible chat JSON; no provider is hard-coded. API keys are encrypted with Android Keystore and never written to settings JSON.", color = SoftGreen, fontSize = 12.sp)
+                OutlinedTextField(baseUrl, { baseUrl = it }, label = { Text("Chat completion endpoint URL") }, singleLine = true, colors = fieldColors())
                 OutlinedTextField(modelName, { modelName = it }, label = { Text("Model name / ID") }, singleLine = true, colors = fieldColors())
                 OutlinedTextField(apiKeyRef, { apiKeyRef = it }, label = { Text("Secret reference") }, singleLine = true, colors = fieldColors())
+                OutlinedTextField(authHeaderName, { authHeaderName = it }, label = { Text("Auth header (blank for none)") }, singleLine = true, colors = fieldColors())
+                OutlinedTextField(authHeaderPrefix, { authHeaderPrefix = it }, label = { Text("Auth prefix") }, singleLine = true, colors = fieldColors())
+                OutlinedTextField(extraHeadersText, { extraHeadersText = it }, label = { Text("Additional headers (Name: value)") }, minLines = 2, maxLines = 4, colors = fieldColors())
                 OutlinedTextField(apiKey, { apiKey = it }, label = { Text("API key") }, singleLine = true, visualTransformation = PasswordVisualTransformation(), colors = fieldColors())
-                Text("Use HTTPS. HTTP is accepted only for localhost/127.0.0.1.", color = SoftGreen, fontSize = 11.sp)
+                Text("For SambaNova Cloud, use its current HTTPS chat-completions URL from the SambaNova dashboard, your model ID, Authorization / Bearer, and API key. Other compatible servers use their own endpoint, header, and prefix.", color = SoftGreen, fontSize = 11.sp)
                 candidate.validationErrors().forEach { Text(it, color = Danger, fontSize = 11.sp) }
                 probeResult?.let { Text(it, color = if (it.startsWith("Probe passed")) NeonGreen else Danger, fontSize = 11.sp) }
                 TextButton(onClick = { onProbe(candidate) }, enabled = candidate.validationErrors().isEmpty()) { Text("Test connection", color = FluoroOrange) }
@@ -1032,6 +1049,11 @@ private fun fieldColors() = androidx.compose.material3.OutlinedTextFieldDefaults
     focusedContainerColor = DarkPurple,
     unfocusedContainerColor = DarkPurple
 )
+
+private fun parseHeaderLines(value: String): Map<String, String> = value.lineSequence()
+    .map { it.trim() }
+    .filter { it.isNotBlank() && it.contains(':') }
+    .associate { line -> line.substringBefore(':').trim() to line.substringAfter(':').trim() }
 
 private fun importProject(context: Context, privateDir: File, uri: Uri): File {
     val source = DocumentFile.fromTreeUri(context, uri) ?: error("Folder is unavailable")

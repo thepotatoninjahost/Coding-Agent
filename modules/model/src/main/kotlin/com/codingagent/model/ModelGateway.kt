@@ -40,11 +40,14 @@ sealed class ModelResponse {
     data class Failure(val message: String) : ModelResponse()
 }
 
-class OpenAiCompatibleGateway(
+class HttpChatModelGateway(
     private val endpoint: String,
     private val apiKey: String,
     private val model: String,
     private val timeoutMillis: Int = 60_000,
+    private val authHeaderName: String = "Authorization",
+    private val authHeaderPrefix: String = "Bearer ",
+    private val extraHeaders: Map<String, String> = emptyMap(),
     private val connectionFactory: (String) -> HttpURLConnection = { URL(it).openConnection() as HttpURLConnection }
 ) : ModelGateway {
     override fun stream(request: ModelRequest, onDelta: (String) -> Unit): ModelResponse {
@@ -113,9 +116,8 @@ class OpenAiCompatibleGateway(
 
     private fun openConnection(): HttpURLConnection? {
         if (endpoint.isBlank() || model.isBlank()) return null
-        if (apiKey.isBlank() && !endpoint.startsWith("http://127.0.0.1") && !endpoint.startsWith("http://localhost")) return null
         return try {
-            connectionFactory(endpoint.trimEnd('/') + "/chat/completions")
+            connectionFactory(endpoint)
         } catch (error: Exception) {
             throw IllegalArgumentException("Model endpoint is invalid: ${error.message.orEmpty()}")
         }
@@ -126,7 +128,8 @@ class OpenAiCompatibleGateway(
         connection.readTimeout = timeoutMillis
         connection.requestMethod = "POST"
         connection.doOutput = true
-        if (apiKey.isNotBlank()) connection.setRequestProperty("Authorization", "Bearer $apiKey")
+        if (apiKey.isNotBlank() && authHeaderName.isNotBlank()) connection.setRequestProperty(authHeaderName, authHeaderPrefix + apiKey)
+        extraHeaders.forEach { (name, value) -> if (name.isNotBlank() && value.isNotBlank()) connection.setRequestProperty(name, value) }
         connection.setRequestProperty("Content-Type", "application/json")
         connection.setRequestProperty("Accept", if (streaming) "text/event-stream" else "application/json")
     }
