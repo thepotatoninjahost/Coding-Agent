@@ -5,7 +5,7 @@ Status: active
 
 ## Scope
 
-Remediate the audit defects while preserving the twelve constitution rules, the typed ChangeSet/checksum/rollback foundation, mandatory research for coding, and a replaceable model provider. The local Qwen3-4B package remains a provider option, not a product assumption.
+Remediate the audit defects while preserving the twelve constitution rules, the typed ChangeSet/checksum/rollback foundation, mandatory research for coding, and a replaceable model provider. The app now uses a remote OpenAI-compatible provider configured by the owner.
 
 ## Completed in this increment
 

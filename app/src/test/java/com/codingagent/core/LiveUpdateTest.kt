@@ -27,20 +27,6 @@ class LiveUpdateTest {
     }
 
     @Test
-    fun `nexa package validator accepts manifest-declared shards`() {
-        val root = Files.createTempDirectory("coding-agent-nexa").toFile()
-        val packageDir = root.resolve("package").apply { mkdirs() }
-        packageDir.resolve("nexa.manifest").writeText("{\"ModelName\":\"qwen3-4b\",\"PluginId\":\"npu\"}")
-        packageDir.resolve("files-1-2.nexa").writeBytes(byteArrayOf(1))
-        packageDir.resolve("weights-1-1.nexa").writeBytes(byteArrayOf(2))
-        val store = LiveModelStore(root)
-        val action = AgentAction("install-package", AgentActionCategory.CODE_CHANGE, ownerVerified = true, approvalCount = 2)
-        val result = store.installPackage(packageDir, "qwen3-4b", "nexa-npu", action, VerificationReport(true, emptyList()))
-        assertTrue(result is com.codingagent.model.ModelInstallResult.Installed)
-        assertEquals(2L, store.active()?.sizeBytes)
-    }
-
-    @Test
     fun `model router replaces loaded model bytes`() {
         val root = Files.createTempDirectory("coding-agent-model").toFile()
         val source = File(root, "model.bin").apply { writeBytes(byteArrayOf(1, 2, 3)) }

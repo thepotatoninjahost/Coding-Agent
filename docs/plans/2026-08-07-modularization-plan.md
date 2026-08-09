@@ -49,7 +49,7 @@ The twelve registered modules compile. The Android app also compiles. App files 
 ## Remaining work
 
 1. Migrate Android tests and callers from compatibility names to module package names where that improves ownership clarity.
-2. Keep only Android-specific model runtime (`NexaLocalModelGateway`), Android persistence (`LocalStore`), UI adapters, and composition wiring in `app`.
+2. Keep only Android persistence (`LocalStore`), UI adapters, and composition wiring in `app`; model execution is remote and owned by `modules/model`.
 3. Add direct tests for the live module's canonical runtime and model-store adapters before deleting compatibility aliases.
 4. Update the UI to expose model settings and end-to-end proposal staging; this is product work, not evidence that the module split is complete.
 

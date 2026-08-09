@@ -12,11 +12,11 @@ This is an active remediation build, not a finished coding product. The current 
 - Project import uses a temporary directory, cleanup on failure, path-name checks, and 10,000-file/512 MB quotas.
 - Chat and Review show proposal file summaries and bounded unified diffs.
 - Stop requests cancellation from the agent and terminal layers, not only the Compose job.
-- The Qwen3-4B Nexa package is only the current local provider option. The model layer is intentionally replaceable through `ModelGateway`; replacing it does not change the transaction or approval contract.
+- The app uses a remote OpenAI-compatible gateway as its only model path. Provider URL, model ID, and API-key reference are configurable; the transaction and approval contract is provider-independent.
 
-The current product path is intentionally fail-closed: non-trivial coding requires a configured model gateway and a successful external research session before the model can propose changes. Model tool calls cannot write files, approve changes, or run shell commands. File mutations use typed multi-file ChangeSets, remain checksum guarded, and require two owner approvals in the UI. Approval runs post-apply verification; use the Review surface to inspect the actual unified diff. The built-in Qwen3-4B NPU package is a replaceable degraded local backend, not the quality target for serious coding.
+The current product path is intentionally fail-closed: non-trivial coding requires a configured model gateway and a successful external research session before the model can propose changes. Model tool calls cannot write files, approve changes, or run shell commands. File mutations use typed multi-file ChangeSets, remain checksum guarded, and require two owner approvals in the UI. Approval runs post-apply verification; use the Review surface to inspect the actual unified diff. The app does not ship or initialize an on-device model; serious coding requires the configured remote gateway.
 
-The following remain incomplete and must not be described as shipped: durable transaction and proposal recovery, bounded cancellable web research with remaining SSRF hardening, durable undo across process restart, complete streaming assistant-message state, and a fully unified production runtime.
+The following remain incomplete and must not be described as shipped: durable transaction and proposal recovery, bounded cancellable web research with remaining SSRF hardening, durable undo across process restart, complete streaming assistant-message state, and physical-device validation. Physical-device validation remains required for release. Physical-device UI verification and release installation are also owner-side steps.
 
 ## Safe coding flow
 
@@ -29,7 +29,7 @@ The following remain incomplete and must not be described as shipped: durable tr
 
 ## Model replacement
 
-The model provider is replaceable. The app now has a first-run Model setup dialog with On-device and Remote choices, HTTPS/loopback validation, connection probing, and a model-name field. Remote API keys are encrypted with Android Keystore and are never written to the settings JSON. `modules/model` owns the `ModelGateway` contract and OpenAI-compatible transport; the Android Nexa adapter is an app-specific provider. A replacement model should support reliable structured tool calls or a strict JSON protocol, streaming if available, enough context for project evidence, and coding quality appropriate to the target project. Model weights and provider-specific code must not bypass the typed proposal or policy boundaries.
+The app has a first-run Remote Model setup dialog with HTTPS/loopback validation, connection probing, a model-ID field, and an encrypted API-key field. Remote API keys are encrypted with Android Keystore and are never written to the settings JSON. `modules/model` owns the `ModelGateway` contract and OpenAI-compatible transport. The configured server may host any model, including a 400B+ coding model, provided it exposes the OpenAI-compatible chat-completions contract with reliable structured tool calls or strict JSON, streaming if available, and enough context for project evidence. Provider code must not bypass the typed proposal or policy boundaries.
 
 ## Build and verification
 

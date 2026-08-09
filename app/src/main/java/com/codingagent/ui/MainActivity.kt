@@ -70,12 +70,11 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
-import com.codingagent.core.ModelBackend
 import com.codingagent.core.ModelConnectionProbe
 import com.codingagent.core.ModelSettings
+import androidx.documentfile.provider.DocumentFile
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.documentfile.provider.DocumentFile
 import com.codingagent.core.AgentJournal
 import com.codingagent.core.AgentKnowledge
 import com.codingagent.core.AgentTools
@@ -87,11 +86,8 @@ import com.codingagent.core.CodingAgentRuntime
 import com.codingagent.core.EditorDocument
 import com.codingagent.ui.knowledge.KnowledgeBase
 import com.codingagent.ui.session.LocalStore
-import com.codingagent.core.ModelDownloadProgress
 import com.codingagent.core.MutationApprovalResult
 import com.codingagent.core.MutationCoordinator
-import com.codingagent.core.NexaLocalModelGateway
-import com.codingagent.core.NexaModelProvisioner
 import com.codingagent.core.PendingChangeProposal
 import com.codingagent.core.ProjectWorkspace
 import com.codingagent.terminal.TerminalEntry
@@ -191,9 +187,7 @@ private fun CodingAgentApp(privateDir: File) {
     var pendingProposal by remember { mutableStateOf<PendingChangeProposal?>(null) }
     val mutationCoordinator = remember(workspace) { workspace?.let { MutationCoordinator(it) } }
     var messageQueue by remember { mutableStateOf(emptyList<String>()) }
-    var modelStatus by remember { mutableStateOf("Preparing Qwen3-4B NPU (mobile) model") }
-    var modelProgress by remember { mutableStateOf<ModelDownloadProgress?>(null) }
-    var localModel by remember { mutableStateOf<NexaLocalModelGateway?>(null) }
+    var modelStatus by remember { mutableStateOf("Remote API · setup required") }
     var modelLoadError by remember { mutableStateOf<String?>(null) }
     var modelSettings by remember { mutableStateOf(ModelSettings()) }
     var showModelSetup by remember { mutableStateOf(false) }
@@ -226,36 +220,12 @@ private fun CodingAgentApp(privateDir: File) {
             }
             store.loadLastResearchQuery()?.let { q -> if (researchQuery.isBlank()) researchQuery = q }
 
-            if (modelSettings.backend == ModelBackend.LOCAL_NEXA) {
-                runCatching {
-                    NexaModelProvisioner({ name -> context.assets.open(name) }, privateDir).ensure { progress ->
-                        modelProgress = progress
-                        modelStatus = "${progress.phase}: ${progress.percent}% (${progress.currentFile})"
-                    }
-                }.onSuccess {
-                    modelStatus = "Qwen3-4B NPU (mobile) files verified; loading NPU runtime"
-                    runCatching { NexaLocalModelGateway(context, it.directory) }
-                        .onSuccess { gateway ->
-                            localModel = gateway
-                            modelLoadError = null
-                            modelStatus = "Qwen3-4B NPU (mobile) active"
-                        }
-                        .onFailure { error ->
-                            modelLoadError = listOf(error.message, error.cause?.message, error.javaClass.name).mapNotNull { it?.takeIf(String::isNotBlank) }.joinToString(" | ").ifBlank { error.stackTraceToString().take(500) }
-                            modelStatus = "Model load failed: ${modelLoadError.orEmpty().take(500)}"
-                        }
-                }.onFailure {
-                    modelLoadError = listOf(it.message, it.cause?.message, it.javaClass.name).mapNotNull { m -> m?.takeIf(String::isNotBlank) }.joinToString(" | ").ifBlank { it.stackTraceToString().take(500) }
-                    modelStatus = "Model setup failed: ${modelLoadError.orEmpty().take(500)}"
-                }
-            } else {
-                modelStatus = modelSettings.statusSummary()
-            }
+            modelStatus = modelSettings.statusSummary()
         }
     }
 
     val configuredRemote = remember(modelSettings) { modelSettings.remoteGateway() }
-    val selectedGateway = configuredRemote ?: localModel
+    val selectedGateway = configuredRemote
     val tools = remember(workspace) { workspace?.let(::AgentTools) }
     val agent = remember(workspace, selectedGateway) {
         workspace?.let { current ->
@@ -312,15 +282,6 @@ private fun CodingAgentApp(privateDir: File) {
         )
     }
 
-    val modelPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
-        if (uri == null) return@rememberLauncherForActivityResult
-        scope.launch(Dispatchers.IO) {
-            runCatching { importModelPackage(context, privateDir, uri) }
-                .onSuccess { summary -> modelStatus = summary; status = AgentStatus.READY; detail = "Model package staged; restart model loading if needed" }
-                .onFailure { modelStatus = "Import failed"; status = AgentStatus.STOPPED; detail = it.message.orEmpty() }
-        }
-    }
-
     if (showModelSetup) {
         ModelSetupDialog(
             initial = modelSettings,
@@ -333,7 +294,7 @@ private fun CodingAgentApp(privateDir: File) {
                             modelSettings = updated.normalized().copy(onboarded = true)
                             modelProbe = null
                             showModelSetup = false
-                            modelStatus = modelSettings.statusSummary(localActive = localModel != null)
+                            modelStatus = modelSettings.statusSummary()
                             detail = "Model settings saved"
                         }
                         .onFailure { error ->
@@ -350,8 +311,7 @@ private fun CodingAgentApp(privateDir: File) {
                         is com.codingagent.model.ProbeResult.Failed -> "Probe failed: ${result.reason}"
                     }
                 }
-            },
-            onImportLocal = { modelPicker.launch(null) }
+            }
         )
     }
 
@@ -454,7 +414,7 @@ private fun CodingAgentApp(privateDir: File) {
         Scaffold(
             containerColor = Canvas,
             topBar = {
-                CompactStatusBar(status, detail, workspace != null, modelStatus, modelProgress,
+                CompactStatusBar(status, detail, workspace != null, modelStatus,
                     onImport = { folderPicker.launch(null) },
                     onModelImport = { showModelSetup = true },
                     onStop = ::stopAgent)
@@ -552,38 +512,27 @@ private fun ModelSetupDialog(
     probeResult: String?,
     onDismiss: () -> Unit,
     onSave: (ModelSettings) -> Unit,
-    onProbe: (ModelSettings) -> Unit,
-    onImportLocal: () -> Unit
+    onProbe: (ModelSettings) -> Unit
 ) {
-    var backend by remember(initial) { mutableStateOf(initial.backend) }
     var baseUrl by remember(initial) { mutableStateOf(initial.baseUrl) }
     var modelName by remember(initial) { mutableStateOf(initial.modelName) }
     var apiKey by remember(initial) { mutableStateOf(initial.apiKey) }
     var apiKeyRef by remember(initial) { mutableStateOf(initial.apiKeyRef) }
-    val candidate = ModelSettings(backend, baseUrl, apiKey, apiKeyRef, modelName, initial.onboarded)
+    val candidate = ModelSettings(com.codingagent.model.ModelBackend.REMOTE_OPENAI, baseUrl, apiKey, apiKeyRef, modelName, initial.onboarded)
     androidx.compose.material3.AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Model setup", color = NeonGreen) },
+        title = { Text("Remote model setup", color = NeonGreen) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Coding tasks require a real model and internet research. The API key is encrypted with Android Keystore and is never written to the settings JSON.", color = SoftGreen, fontSize = 12.sp)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = { backend = ModelBackend.LOCAL_NEXA }, colors = ButtonDefaults.buttonColors(containerColor = if (backend == ModelBackend.LOCAL_NEXA) NeonGreen else RaisedPurple, contentColor = DarkPurple)) { Text("On-device") }
-                    Button(onClick = { backend = ModelBackend.REMOTE_OPENAI }, colors = ButtonDefaults.buttonColors(containerColor = if (backend == ModelBackend.REMOTE_OPENAI) NeonGreen else RaisedPurple, contentColor = DarkPurple)) { Text("Remote") }
-                }
-                if (backend == ModelBackend.REMOTE_OPENAI) {
-                    OutlinedTextField(baseUrl, { baseUrl = it }, label = { Text("OpenAI-compatible base URL") }, singleLine = true, colors = fieldColors())
-                    OutlinedTextField(modelName, { modelName = it }, label = { Text("Model name") }, singleLine = true, colors = fieldColors())
-                    OutlinedTextField(apiKeyRef, { apiKeyRef = it }, label = { Text("Secret reference") }, singleLine = true, colors = fieldColors())
-                    OutlinedTextField(apiKey, { apiKey = it }, label = { Text("API key") }, singleLine = true, visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(), colors = fieldColors())
-                    Text("Use HTTPS. HTTP is accepted only for localhost/127.0.0.1.", color = SoftGreen, fontSize = 11.sp)
-                    candidate.validationErrors().forEach { Text(it, color = Danger, fontSize = 11.sp) }
-                    probeResult?.let { Text(it, color = if (it.startsWith("Probe passed")) NeonGreen else Danger, fontSize = 11.sp) }
-                    TextButton(onClick = { onProbe(candidate) }, enabled = candidate.validationErrors().isEmpty()) { Text("Test connection", color = FluoroOrange) }
-                } else {
-                    Text("The bundled Qwen3-4B Nexa package remains an optional local provider. You can replace it later without changing the agent loop.", color = SoftGreen, fontSize = 12.sp)
-                    TextButton(onClick = onImportLocal) { Text("Import local Nexa package", color = FluoroOrange) }
-                }
+                Text("Connect any OpenAI-compatible model server. This is the only model path; the API key is encrypted with Android Keystore and never written to settings JSON.", color = SoftGreen, fontSize = 12.sp)
+                OutlinedTextField(baseUrl, { baseUrl = it }, label = { Text("OpenAI-compatible base URL") }, singleLine = true, colors = fieldColors())
+                OutlinedTextField(modelName, { modelName = it }, label = { Text("Model name / ID") }, singleLine = true, colors = fieldColors())
+                OutlinedTextField(apiKeyRef, { apiKeyRef = it }, label = { Text("Secret reference") }, singleLine = true, colors = fieldColors())
+                OutlinedTextField(apiKey, { apiKey = it }, label = { Text("API key") }, singleLine = true, visualTransformation = PasswordVisualTransformation(), colors = fieldColors())
+                Text("Use HTTPS. HTTP is accepted only for localhost/127.0.0.1.", color = SoftGreen, fontSize = 11.sp)
+                candidate.validationErrors().forEach { Text(it, color = Danger, fontSize = 11.sp) }
+                probeResult?.let { Text(it, color = if (it.startsWith("Probe passed")) NeonGreen else Danger, fontSize = 11.sp) }
+                TextButton(onClick = { onProbe(candidate) }, enabled = candidate.validationErrors().isEmpty()) { Text("Test connection", color = FluoroOrange) }
             }
         },
         confirmButton = { Button(onClick = { onSave(candidate) }, enabled = candidate.validationErrors().isEmpty(), colors = ButtonDefaults.buttonColors(containerColor = NeonGreen, contentColor = DarkPurple)) { Text("Save") } },
@@ -598,7 +547,6 @@ private fun CompactStatusBar(
     detail: String,
     mounted: Boolean,
     modelStatus: String,
-    modelProgress: ModelDownloadProgress?,
     onImport: () -> Unit,
     onModelImport: () -> Unit,
     onStop: () -> Unit
@@ -634,10 +582,9 @@ private fun CompactStatusBar(
             Spacer(Modifier.width(6.dp))
             Text(detail, color = SoftGreen, fontSize = 11.sp, maxLines = 1)
         }
-        if (status == AgentStatus.RESEARCHING || status == AgentStatus.PLANNING || status == AgentStatus.WORKING || status == AgentStatus.MODEL || status == AgentStatus.TOOL || status == AgentStatus.RUNNING || modelProgress?.phase == "downloading") {
+        if (status == AgentStatus.RESEARCHING || status == AgentStatus.PLANNING || status == AgentStatus.WORKING || status == AgentStatus.MODEL || status == AgentStatus.TOOL || status == AgentStatus.RUNNING) {
             Spacer(Modifier.height(4.dp))
             LinearProgressIndicator(
-                progress = { ((modelProgress?.percent ?: 0) / 100f).coerceIn(0f, 1f) },
                 Modifier.fillMaxWidth(),
                 color = status.color,
                 trackColor = Line
@@ -1085,20 +1032,6 @@ private fun fieldColors() = androidx.compose.material3.OutlinedTextFieldDefaults
     focusedContainerColor = DarkPurple,
     unfocusedContainerColor = DarkPurple
 )
-
-private fun importModelPackage(context: Context, privateDir: File, uri: Uri): String {
-    val source = DocumentFile.fromTreeUri(context, uri) ?: error("Model folder is unavailable")
-    val destination = privateDir.resolve("model-import-${System.currentTimeMillis()}")
-    require(destination.mkdirs()) { "Could not create model staging directory" }
-    copyDocumentTree(context, source, destination)
-    val manifest = destination.resolve("nexa.manifest")
-    require(manifest.isFile) { "Missing nexa.manifest; choose the folder containing the manifest and every shard" }
-    val files = destination.listFiles()?.filter { it.isFile }.orEmpty()
-    val shards = files.filter { it.name.endsWith(".nexa") && it.name != "nexa.manifest" }
-    require(shards.isNotEmpty()) { "No .nexa model shards found" }
-    require(shards.none { it.length() == 0L }) { "A model shard is empty; download it again" }
-    return "Nexa package staged: ${shards.size} shards, ${files.sumOf { it.length() } / (1024 * 1024)} MB"
-}
 
 private fun importProject(context: Context, privateDir: File, uri: Uri): File {
     val source = DocumentFile.fromTreeUri(context, uri) ?: error("Folder is unavailable")
