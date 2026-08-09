@@ -93,15 +93,15 @@ class AcceptancePathTest {
     @Test
     fun modelSettingsRemoteGatewayFactory() {
         val settings = ModelSettings(
-            backend = ModelBackend.REMOTE_OPENAI,
-            baseUrl = "https://api.openai.com/v1",
-            modelName = "gpt-4o-mini",
-            apiKey = "sk-test",
+            backend = ModelBackend.REMOTE,
+            baseUrl = "https://example.com/v1",
+            modelName = "user-chosen-model",
+            apiKey = "key-test",
             onboarded = true
         )
         assertTrue(settings.validationErrors().isEmpty())
         val gateway = settings.remoteGateway()
-        assertTrue(gateway is OpenAiCompatibleGateway)
+        assertTrue(gateway is RemoteHttpGateway)
     }
 
     @Test
