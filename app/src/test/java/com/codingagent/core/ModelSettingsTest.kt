@@ -19,7 +19,7 @@ class ModelSettingsTest {
     @Test
     fun remoteRequiresUrlModelAndKeyUnlessLocalhost() {
         val incomplete = ModelSettings(
-            backend = ModelBackend.REMOTE_OPENAI,
+            backend = ModelBackend.REMOTE,
             baseUrl = "",
             apiKey = "",
             modelName = ""
@@ -27,17 +27,17 @@ class ModelSettingsTest {
         assertTrue(incomplete.validationErrors().size >= 2)
 
         val remote = ModelSettings(
-            backend = ModelBackend.REMOTE_OPENAI,
-            baseUrl = "https://api.openai.com/v1",
-            apiKey = "sk-test",
-            modelName = "gpt-4o-mini"
+            backend = ModelBackend.REMOTE,
+            baseUrl = "https://example.com/v1",
+            apiKey = "key-test",
+            modelName = "user-chosen-model"
         )
         assertTrue(remote.validationErrors().isEmpty())
         assertTrue(remote.isRemoteConfigured())
         assertNotNull(remote.remoteGateway())
 
         val localhost = ModelSettings(
-            backend = ModelBackend.REMOTE_OPENAI,
+            backend = ModelBackend.REMOTE,
             baseUrl = "http://127.0.0.1:8080/v1",
             apiKey = "",
             modelName = "local-model"
@@ -49,25 +49,43 @@ class ModelSettingsTest {
     @Test
     fun jsonRoundTripPreservesFieldsWithoutLoggingKeyInSummary() {
         val original = ModelSettings(
-            backend = ModelBackend.REMOTE_OPENAI,
+            backend = ModelBackend.REMOTE,
             baseUrl = "https://example.com/v1/",
-            apiKey = "sk-secret-value",
-            modelName = "my-model",
+            apiKey = "secret-value",
+            modelName = "whatever-the-user-picked",
             onboarded = true
         )
         val restored = ModelSettings.fromJson(ModelSettings.toJson(original))
-        assertEquals(ModelBackend.REMOTE_OPENAI, restored.backend)
+        assertEquals(ModelBackend.REMOTE, restored.backend)
         assertEquals("https://example.com/v1", restored.baseUrl)
-        assertEquals("sk-secret-value", restored.apiKey)
-        assertEquals("my-model", restored.modelName)
+        assertEquals("secret-value", restored.apiKey)
+        assertEquals("whatever-the-user-picked", restored.modelName)
         assertTrue(restored.onboarded)
-        assertFalse(restored.statusSummary().contains("sk-secret"))
+        assertFalse(restored.statusSummary().contains("secret-value"))
     }
 
     @Test
-    fun corruptJsonFallsBackToDefaults() {
+    fun corruptJsonFallsBackToEmptyRemoteDefaults() {
         val defaults = ModelSettings.fromJson("{not-json")
-        assertEquals(ModelBackend.LOCAL_NEXA, defaults.backend)
+        assertEquals(ModelBackend.REMOTE, defaults.backend)
+        assertTrue(defaults.baseUrl.isEmpty())
+        assertTrue(defaults.modelName.isEmpty())
+        assertTrue(defaults.apiKey.isEmpty())
         assertFalse(defaults.onboarded)
+    }
+
+    @Test
+    fun defaultsDoNotHardcodeProviderOrModel() {
+        val defaults = ModelSettings()
+        assertEquals(ModelBackend.REMOTE, defaults.backend)
+        assertTrue(defaults.baseUrl.isEmpty())
+        assertTrue(defaults.modelName.isEmpty())
+        assertTrue(defaults.apiKey.isEmpty())
+        assertFalse(defaults.isRemoteConfigured())
+        assertTrue(defaults.statusSummary().contains("Remote"))
+        val errors = defaults.validationErrors()
+        assertTrue(errors.any { it.contains("Base URL") })
+        assertTrue(errors.any { it.contains("Model name") })
+        assertTrue(errors.any { it.contains("API key") })
     }
 }
