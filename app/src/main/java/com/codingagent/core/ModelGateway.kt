@@ -261,8 +261,8 @@ class JsonModelResponseParser {
         return try {
             val json = JSONObject(trimmed)
             when {
-                json.optString("tool").isNotBlank() -> ModelResponse.ToolCall(
-                    name = json.getString("tool"),
+                (json.optString("tool").ifBlank { json.optString("name") }).isNotBlank() -> ModelResponse.ToolCall(
+                    name = json.optString("tool").ifBlank { json.getString("name") },
                     arguments = json.optJSONObject("arguments")?.toString() ?: json.optString("arguments", "{}"),
                     thought = json.optString("thought")
                 )
@@ -279,9 +279,9 @@ object AgentModelProtocol {
     val SYSTEM = """
 Local coding agent on this device. Obey the user request.
 Do not invent file contents. For a named file, call read_file first.
-Tool call JSON only: {\"tool\":\"name\",\"arguments\":{...},\"thought\":\"short\"}
-Final answer JSON only: {\"content\":\"...\"}
-Tools: list_files, read_file, search_project, search_knowledge, research_web, replace_text, create_file, approve_change, reject_change, run_command, verify
+When you need information or to change files, use the provided function tools (tool calls). Prefer one tool call per turn.
+When you are done, answer the user directly in plain text (no JSON wrapper required).
+Available tools: list_files, read_file, search_project, search_knowledge, research_web, replace_text, create_file, approve_change, reject_change, run_command, verify
 """.trimIndent()
 
     fun tools(): List<ModelToolDefinition> = listOf(
