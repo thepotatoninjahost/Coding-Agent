@@ -69,9 +69,10 @@ class RemoteHttpGateway(
                 }
             }
             when {
-                toolCalls.size > 1 -> ModelResponse.Failure("Model returned ${toolCalls.size} tool calls; the agent currently executes one tool per turn")
                 toolCalls.isNotEmpty() -> {
-                    val call = toolCalls.values.single()
+                    // Models (especially Llama on Groq) often return parallel tool calls.
+                    // Execute the first one; the agent will continue on the next turn with the result.
+                    val call = toolCalls.values.first()
                     val arguments = call.arguments.toString().trim().let { raw ->
                         when {
                             raw.isBlank() -> "{}"
@@ -80,7 +81,12 @@ class RemoteHttpGateway(
                         }
                     }
                     if (call.name.isBlank()) ModelResponse.Failure("Model streamed a tool call without a function name")
-                    else ModelResponse.ToolCall(call.name, arguments, content.toString(), call.id?.takeIf { it.isNotBlank() })
+                    else {
+                        val note = if (toolCalls.size > 1) {
+                            " (model offered ${toolCalls.size} tools; executing first: ${call.name})"
+                        } else ""
+                        ModelResponse.ToolCall(call.name, arguments, content.toString() + note, call.id?.takeIf { it.isNotBlank() })
+                    }
                 }
                 content.isBlank() -> ModelResponse.Failure("Model returned no streamed message content")
                 else -> JsonModelResponseParser().parse(content.toString())
@@ -178,12 +184,18 @@ class RemoteHttpGateway(
     private fun responseFromChatMessage(message: JSONObject): ModelResponse {
         val calls = message.optJSONArray("tool_calls")
         if (calls != null && calls.length() > 0) {
-            if (calls.length() > 1) return ModelResponse.Failure("Model returned ${calls.length()} tool calls; the agent currently executes one tool per turn")
+            // Accept the first tool call when the model returns parallel calls.
+            // The agent loop will continue on subsequent turns with the result.
             val function = calls.optJSONObject(0)?.optJSONObject("function")
                 ?: return ModelResponse.Failure("Model returned a malformed tool call")
             val name = function.optString("name")
             if (name.isBlank()) return ModelResponse.Failure("Model returned a tool call without a function name")
-            return ModelResponse.ToolCall(name, function.optString("arguments", "{}"), message.optString("content"), calls.optJSONObject(0)?.optString("id"))
+            val note = if (calls.length() > 1) {
+                " (model offered ${calls.length()} tools; executing first: $name)"
+            } else {
+                message.optString("content")
+            }
+            return ModelResponse.ToolCall(name, function.optString("arguments", "{}"), note, calls.optJSONObject(0)?.optString("id"))
         }
         val content = message.optString("content")
         return if (content.isBlank()) ModelResponse.Failure("Model returned no message content") else JsonModelResponseParser().parse(content)
@@ -279,7 +291,7 @@ object AgentModelProtocol {
     val SYSTEM = """
 Local coding agent on this device. Obey the user request.
 Do not invent file contents. For a named file, call read_file first.
-When you need information or to change files, use the provided function tools (tool calls). Prefer one tool call per turn.
+When you need information or to change files, use the provided function tools (tool calls). Call exactly one tool per turn. Never return multiple tool calls at once.
 When you are done, answer the user directly in plain text (no JSON wrapper required).
 Available tools: list_files, read_file, search_project, search_knowledge, research_web, replace_text, create_file, approve_change, reject_change, run_command, verify
 """.trimIndent()
