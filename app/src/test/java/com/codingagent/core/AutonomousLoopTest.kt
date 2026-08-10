@@ -130,10 +130,15 @@ class AutonomousLoopTest {
         assertTrue((events.last() as AutonomousAgentEvent.Failed).message.contains("without reading"))
     }
 
+    /**
+     * Listing requests must finish after a successful list_files / search_project.
+     * The agent is a coding agent: observe → act → complete. It must not abort a pure listing.
+     */
     @Test
-    fun identicalToolLoopAborts() {
-        val root = Files.createTempDirectory("agent-loop-repeat").toFile()
+    fun listingRequestCompletesInsteadOfAborting() {
+        val root = Files.createTempDirectory("agent-listing-complete").toFile()
         root.resolve("a.txt").writeText("hello world content enough\n")
+        root.resolve("b.txt").writeText("second file\n")
         val gateway = ScriptedGateway(
             List(6) { ModelResponse.ToolCall("list_files", "{}") }
         )
@@ -146,7 +151,40 @@ class AutonomousLoopTest {
             root, runtime, knowledge, gateway,
             AutonomousAgentConfig(maxTurns = 10, maxIdenticalToolRepeats = 3)
         )
-        val events = agent.run("List files repeatedly")
+        val events = agent.run("list project files")
+        assertTrue(
+            "listing request must complete, not fail",
+            events.last() is AutonomousAgentEvent.Completed
+        )
+        val completed = events.last() as AutonomousAgentEvent.Completed
+        assertTrue(
+            "summary should contain the file listing",
+            completed.task.summary.contains("a.txt") || completed.task.summary.contains("Project files")
+        )
+    }
+
+    /**
+     * Non-listing identical tool loops must still abort so the agent cannot spin forever
+     * on the same tool call when the request is not a pure listing.
+     */
+    @Test
+    fun identicalNonListingToolLoopAborts() {
+        val root = Files.createTempDirectory("agent-loop-repeat").toFile()
+        root.resolve("a.txt").writeText("hello world content enough\n")
+        val gateway = ScriptedGateway(
+            List(6) { ModelResponse.ToolCall("run_command", """{"command":"echo hi"}""") }
+        )
+        val workspace = ProjectWorkspace(root)
+        val knowledge = object : AgentKnowledge {
+            override fun search(query: String, limit: Int) = emptyList<KnowledgeHit>()
+        }
+        val runtime = CodingAgentRuntime(workspace, knowledge, AgentJournal(root), modelGateway = gateway)
+        val agent = AutonomousAgent(
+            root, runtime, knowledge, gateway,
+            AutonomousAgentConfig(maxTurns = 10, maxIdenticalToolRepeats = 3)
+        )
+        // Request deliberately avoids listing keywords so isListingRequest is false
+        val events = agent.run("Run the same diagnostic command until you understand the state")
         assertTrue(events.last() is AutonomousAgentEvent.Failed)
         assertTrue((events.last() as AutonomousAgentEvent.Failed).message.contains("repeated"))
     }
