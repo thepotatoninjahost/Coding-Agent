@@ -12,7 +12,9 @@ enum class ConstitutionRule {
     NO_SILENT_BACKGROUND_POWER,
     DATA_LOYALTY,
     ANTI_IMPERSONATION,
-    SAFETY_BOUNDARY
+    SAFETY_BOUNDARY,
+    /** Goals (fewer errors, no silent failure) beat polite agreement with a harmful plan. */
+    ANTI_YES_MAN
 }
 
 enum class AgentActionCategory {
