@@ -1,102 +1,9 @@
 package com.codingagent.ui
 
-import android.content.Context
-import android.content.Intent
-import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.ime
-import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.withStyle
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import androidx.documentfile.provider.DocumentFile
-import com.codingagent.core.AgentJournal
-import com.codingagent.core.AgentKnowledge
-import com.codingagent.core.AgentTools
-import com.codingagent.core.AutonomousAgent
-import com.codingagent.core.ChatMessage
-import com.codingagent.core.ChatRole
-import com.codingagent.core.ChatWorkspace
-import com.codingagent.core.CodingAgentRuntime
-import com.codingagent.core.CompositeWebResearchProvider
-import com.codingagent.core.DeepResearchProgress
-import com.codingagent.core.DurableDeepResearchProvider
-import com.codingagent.core.EditorDocument
-import com.codingagent.core.KnowledgeBase
-import com.codingagent.core.LocalStore
-import com.codingagent.core.ModelBackend
-import com.codingagent.core.ModelDownloadProgress
-import com.codingagent.core.ModelGateway
-import com.codingagent.core.ModelSettings
-import com.codingagent.core.MutationApprovalResult
-import com.codingagent.core.MutationCoordinator
-import com.codingagent.core.PendingChangeProposal
-import com.codingagent.core.ProjectWorkspace
-import com.codingagent.core.ResearchDisplayState
-import com.codingagent.core.ResearchHit
-import com.codingagent.core.ResearchModeDetector
-import com.codingagent.core.TerminalEntry
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import java.io.File
 
 class MainActivity : ComponentActivity() {
@@ -105,3 +12,7 @@ class MainActivity : ComponentActivity() {
         setContent { CodingAgentApp(filesDir) }
     }
 }
+
+// CodingAgentApp lives in artifacts/CodingAgentApp.kt — upload that file to
+// app/src/main/java/com/codingagent/ui/CodingAgentApp.kt on GitHub to complete the UI.
+// MainUiScreens.kt and UiTheme.kt are already on the repo.
