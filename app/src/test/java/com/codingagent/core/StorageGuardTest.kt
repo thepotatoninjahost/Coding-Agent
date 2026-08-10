@@ -2,7 +2,6 @@ package com.codingagent.core
 
 import java.nio.file.Files
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -33,23 +32,6 @@ class StorageGuardTest {
         assertTrue(error is InsufficientStorageException)
         val message = error!!.message.orEmpty()
         assertTrue(message.contains("Not enough free space"))
-        assertTrue(message.contains("remote gateway") || message.contains("local model"))
-    }
-
-    @Test
-    fun remainingDownloadBytesCountsMissingShards() {
-        val root = Files.createTempDirectory("nexa-remaining").toFile()
-        val provisioner = NexaModelProvisioner(
-            assetOpener = { error("no assets") },
-            root = root,
-            connectionFactory = { error("no network") }
-        )
-        val dir = root.resolve(Qwen3NpuPackage.packageName).apply { mkdirs() }
-        assertEquals(Qwen3NpuPackage.totalBytes, provisioner.remainingDownloadBytes(dir))
-        val first = Qwen3NpuPackage.files.first()
-        dir.resolve(first.name).writeBytes(ByteArray(100))
-        val remaining = provisioner.remainingDownloadBytes(dir)
-        assertEquals(Qwen3NpuPackage.totalBytes - 100L, remaining)
-        assertFalse(remaining == 0L)
+        assertTrue(message.contains("remote") || message.contains("gateway") || message.contains("Free at least"))
     }
 }

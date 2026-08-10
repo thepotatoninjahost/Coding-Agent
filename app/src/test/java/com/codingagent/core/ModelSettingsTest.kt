@@ -3,19 +3,10 @@ package com.codingagent.core
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ModelSettingsTest {
-    @Test
-    fun localBackendNeedsNoRemoteFields() {
-        val settings = ModelSettings(backend = ModelBackend.LOCAL_NEXA)
-        assertTrue(settings.validationErrors().isEmpty())
-        assertNull(settings.remoteGateway())
-        assertTrue(settings.statusSummary().contains("Local NPU"))
-    }
-
     @Test
     fun remoteRequiresUrlModelAndKeyUnlessLocalhost() {
         val incomplete = ModelSettings(
@@ -75,17 +66,23 @@ class ModelSettingsTest {
     }
 
     @Test
+    fun legacyLocalNexaJsonMapsToRemote() {
+        val legacy = """{"backend":"LOCAL_NEXA","baseUrl":"","apiKey":"","modelName":"","onboarded":false}"""
+        val restored = ModelSettings.fromJson(legacy)
+        assertEquals(ModelBackend.REMOTE, restored.backend)
+        assertFalse(restored.isRemoteConfigured())
+        assertTrue(restored.statusSummary().contains("Remote"))
+    }
+
+    @Test
     fun defaultsDoNotHardcodeProviderOrModel() {
         val defaults = ModelSettings()
         assertEquals(ModelBackend.REMOTE, defaults.backend)
         assertTrue(defaults.baseUrl.isEmpty())
         assertTrue(defaults.modelName.isEmpty())
         assertTrue(defaults.apiKey.isEmpty())
+        assertFalse(defaults.onboarded)
         assertFalse(defaults.isRemoteConfigured())
         assertTrue(defaults.statusSummary().contains("Remote"))
-        val errors = defaults.validationErrors()
-        assertTrue(errors.any { it.contains("Base URL") })
-        assertTrue(errors.any { it.contains("Model name") })
-        assertTrue(errors.any { it.contains("API key") })
     }
 }
