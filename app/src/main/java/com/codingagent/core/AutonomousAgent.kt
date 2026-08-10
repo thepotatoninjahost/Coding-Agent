@@ -167,7 +167,6 @@ class AutonomousAgent(
                         lastEvidence = missing + "\n\n" + lastEvidence.take(config.maxOutputCharacters / 2)
                         continue
                     }
-                    // Always run static verification — never report a fake pass.
                     val report = workspace.verify()
                     val summary = sanitizeModelText(response.content, report)
                     val status = when {
@@ -198,6 +197,21 @@ class AutonomousAgent(
                     if (signature == lastToolSignature) {
                         identicalRepeats++
                         if (identicalRepeats >= config.maxIdenticalToolRepeats) {
+                            if ((response.name == "list_files" || response.name == "search_project") &&
+                                lastEvidence.isNotBlank() && !lastEvidence.startsWith("ERROR:")
+                            ) {
+                                val report = workspace.verify()
+                                val summary = "Project files:\n$lastEvidence"
+                                val task = AgentTask(
+                                    taskId, normalized, "completed", plan,
+                                    changeSets.flatMap { it.changes }, report,
+                                    listOf("${Instant.now()}: stopped identical ${response.name} loop; returned last listing"),
+                                    summary
+                                )
+                                journal.record(task)
+                                emit(AutonomousAgentEvent.Completed(task))
+                                return events
+                            }
                             val msg = "Aborted: tool ${response.name} repeated identically $identicalRepeats times"
                             val task = failedTask(taskId, normalized, plan, msg, changeSets.flatMap { it.changes })
                             emit(AutonomousAgentEvent.Failed(task, msg))
@@ -227,6 +241,29 @@ class AutonomousAgent(
                     emit(AutonomousAgentEvent.ToolFinished(response.name, toolResult, success))
                     if (success) {
                         consecutiveFailures = 0
+                        if (response.name == "list_files" || response.name == "search_project") {
+                            if (isListingRequest(normalized)) {
+                                val report = workspace.verify()
+                                val summary = buildString {
+                                    append("Project files:\n")
+                                    append(toolResult)
+                                }
+                                val task = AgentTask(
+                                    taskId, normalized, "completed", plan,
+                                    changeSets.flatMap { it.changes }, report,
+                                    listOf("${Instant.now()}: answered listing via ${response.name}"),
+                                    summary
+                                )
+                                journal.record(task)
+                                emit(AutonomousAgentEvent.Completed(task))
+                                return events
+                            }
+                            transcript += com.codingagent.core.ModelMessage(
+                                "user",
+                                "SYSTEM: ${response.name} already returned the result above. " +
+                                    "Use that result to answer the user. Do NOT call ${response.name} again with the same arguments."
+                            )
+                        }
                     } else {
                         consecutiveFailures++
                         if (consecutiveFailures >= config.maxConsecutiveToolFailures) {
@@ -334,7 +371,11 @@ class AutonomousAgent(
         return try {
             val arguments = JSONObject(rawArguments)
             when (name) {
-                "list_files" -> files.list(arguments.optString("path")).joinToString("\n").limitOutput()
+                "list_files" -> {
+                    val listed = files.list(arguments.optString("path"))
+                    if (listed.isEmpty()) "(no files in this directory)"
+                    else listed.joinToString("\n")
+                }.limitOutput()
                 "read_file" -> files.read(arguments.getString("path")).content.limitOutput()
                 "search_project" -> workspace.search(arguments.getString("query")).joinToString("\n") { "${it.path}:${it.line}: ${it.text}" }.limitOutput()
                 "search_knowledge" -> knowledge.search(arguments.getString("query")).joinToString("\n") { "${it.document}/${it.section}: ${it.excerpt}" }.limitOutput()
@@ -399,6 +440,16 @@ class AutonomousAgent(
                 }
             }
         }
+    }
+
+    private fun isListingRequest(request: String): Boolean {
+        val t = request.lowercase()
+        val listingHints = listOf(
+            "list file", "list files", "list the file", "list project", "list the project",
+            "show file", "show files", "show the file", "what files", "which files",
+            "file list", "files in the project", "project files", "directory listing"
+        )
+        return listingHints.any { t.contains(it) }
     }
 
     private fun failedTask(id: String, request: String, plan: AgentPlan, message: String, changes: List<ChangeRecord>) =
