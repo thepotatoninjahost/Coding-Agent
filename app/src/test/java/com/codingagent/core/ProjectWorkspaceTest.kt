@@ -55,6 +55,24 @@ class ProjectWorkspaceTest {
         assertFalse(report.passed)
         assertTrue(report.issues.any { it.message.contains("TODO") })
     }
+
+    @Test fun verifyIgnoresStringProseWithoutCommentMarker() {
+        val root = Files.createTempDirectory("coding-agent-prose").toFile()
+        root.resolve("Copy.kt").writeText(
+            "fun msg() = \"markers are scanned by verify\"\n"
+        )
+        root.resolve("Ok.kt").writeText("fun ok() = 1\n")
+        val report = ProjectWorkspace(root).verify()
+        assertTrue(report.passed)
+    }
+
+    @Test fun verifyCatchesTodoCallForm() {
+        val root = Files.createTempDirectory("coding-agent-todo-call").toFile()
+        root.resolve("Broken.kt").writeText("fun x() = TODO(\"finish\")\n")
+        val report = ProjectWorkspace(root).verify()
+        assertFalse(report.passed)
+        assertTrue(report.issues.any { it.message.contains("TODO", ignoreCase = true) })
+    }
 }
 
 class TerminalSessionTest {
