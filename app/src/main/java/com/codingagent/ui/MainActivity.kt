@@ -99,6 +99,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 
+/**
+ * ONE JOB: Host activity and system entry for the coding workbench.
+ */
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -106,6 +109,9 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+/**
+ * ONE JOB: Top-level workbench state and navigation between surfaces.
+ */
 @Composable
 private fun CodingAgentApp(privateDir: File) {
     val context = LocalContext.current
