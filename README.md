@@ -12,7 +12,7 @@ The current APK supports:
 - Project import via Storage Access Framework and indexing
 - Source search and local knowledge search
 - Autonomous model loop with real tool calling (list_files, read_file, search_project, verify, mutations with dual approval, etc.)
-- Always-on static verification (TODO/FIXME/stub scan) — never reports a fake pass
+- Always-on static verification (unfinished-work marker scan) — never reports a fake pass
 - Evidence requirement: inspect/error/analyze requests must actually read or search project files before a final answer is accepted
 - Model settings UI for any OpenAI-compatible provider (Groq, SambaNova, OpenRouter, local, etc.)
 - Transactional file changes with checksum-backed rollback
