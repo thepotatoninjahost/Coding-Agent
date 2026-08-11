@@ -1,5 +1,8 @@
 package com.codingagent.core
 
+/**
+ * ONE JOB: Intake → ordered tool plan for the offline/runtime path.
+ */
 enum class ToolKind {
     INDEX_REPOSITORY,
     SEARCH_PROJECT,
