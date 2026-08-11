@@ -1,8 +1,7 @@
 package com.codingagent.core
 
 /**
- * Presentation helpers for pending transactional changes.
- * Pure functions so Review UI and unit tests share the same formatting.
+ * ONE JOB: Format pending transactional changes for Review UI and tests.
  */
 enum class DiffLineKind { CONTEXT, ADD, REMOVE, HEADER }
 
@@ -75,10 +74,6 @@ object ChangeDiff {
         )
     }
 
-    /**
-     * Simple line-oriented unified diff. Not Myers — good enough for phone review of typical edits.
-     * Caps output so huge files do not freeze Compose.
-     */
     fun unified(record: ChangeRecord, maxLines: Int = MAX_UNIFIED_LINES): List<DiffLine> {
         val before = record.before?.lines().orEmpty()
         val after = record.after?.lines().orEmpty()
@@ -157,7 +152,6 @@ object ChangeDiff {
         return (after.size - lcs.size) to (before.size - lcs.size)
     }
 
-    /** Classic DP LCS on lines; O(n*m) but fine for review-sized files. */
     internal fun longestCommonSubsequence(a: List<String>, b: List<String>): List<String> {
         if (a.isEmpty() || b.isEmpty()) return emptyList()
         val left = a.take(2_000)
