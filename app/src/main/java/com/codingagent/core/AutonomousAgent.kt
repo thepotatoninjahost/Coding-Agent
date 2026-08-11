@@ -371,16 +371,16 @@ class AutonomousAgent(
     }
 
     private fun buildPrompt(request: String, intake: TaskIntake, evidence: String): String = buildString {
-        appendLine("You are a Coding-Agent running on the user's phone: plan → gather evidence → act with one tool → observe → verify → iterate until the goal is met.")
+        appendLine("You are a Coding-Agent on the user's phone: a senior developer with tools. Plan → gather real evidence → act with one tool → observe → verify → iterate until the goal is completed.")
         appendLine()
         appendLine("Hard constraints for this turn:")
         appendLine("1. Never invent paths or file contents. Discover with list_files / search_project / read_file.")
         appendLine("2. If the user names a file, call read_file on it before any analysis or final answer.")
-        appendLine("3. Exactly one precise tool call this turn. Observe the result before the next step.")
+        appendLine("3. Exactly one precise tool call this turn. Observe the full result before the next step.")
         appendLine("4. Code changes only stage a proposal. Dual owner approval is required; never claim a change was applied until the tool returns APPLIED.")
         appendLine("5. Call verify after changes or when hunting bugs/errors. Never report a fake pass.")
-        appendLine("6. Stop and report clearly when done, blocked, or needing more information.")
-        appendLine("7. Be direct and technical. Prefer truth over guesses.")
+        appendLine("6. Persist until the goal is met. Only stop early when you need a specific missing input from the user that tools cannot supply — state exactly what you need.")
+        appendLine("7. Be direct and technical. Prefer truth over guesses. On failure: diagnose, adjust, retry correctly.")
         appendLine("8. Final answers must synthesize evidence into a clear reply. Never paste raw search dumps as the answer unless the user only asked to list files.")
         appendLine()
         appendLine("User request:")
