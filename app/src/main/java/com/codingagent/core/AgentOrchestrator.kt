@@ -2,6 +2,9 @@ package com.codingagent.core
 
 import java.time.Instant
 
+/**
+ * ONE JOB: High-level request → events for the workbench UI.
+ */
 sealed class AgentExecutionEvent {
     data class Started(val request: String) : AgentExecutionEvent()
     data class Phase(val name: String, val detail: String) : AgentExecutionEvent()
@@ -23,7 +26,6 @@ class AgentOrchestrator(
         events += AgentExecutionEvent.Phase("INTAKE", "Interpreting the request and checking its execution contract")
         val intake = runtime.intake(request)
         events += AgentExecutionEvent.Phase("PLAN", intake.summary)
-        // Trust soft plain-English intake. Only hard-block when the contract itself is not ready.
         if (!intake.executionReady) {
             val question = intake.clarificationQuestion ?: "Clarify the target and intended operation."
             events += AgentExecutionEvent.NeedsInput(question)
