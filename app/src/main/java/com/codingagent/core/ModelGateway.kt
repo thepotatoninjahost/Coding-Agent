@@ -7,6 +7,9 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.nio.charset.StandardCharsets
 
+/**
+ * ONE JOB: Model calls + streaming for OpenAI-compatible gateways.
+ */
 interface ModelGateway {
     fun complete(request: ModelRequest): ModelResponse
     fun stream(request: ModelRequest, onDelta: (String) -> Unit): ModelResponse = complete(request)
