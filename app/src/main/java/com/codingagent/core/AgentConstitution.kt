@@ -1,5 +1,8 @@
 package com.codingagent.core
 
+/**
+ * ONE JOB: Enforce the twelve safety rules (owner lock, dual confirmation, sandbox-first, expiration).
+ */
 enum class ConstitutionRule {
     OWNER_LOCK,
     DEFAULT_NO,
