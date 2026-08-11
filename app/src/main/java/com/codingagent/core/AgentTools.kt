@@ -3,6 +3,9 @@ package com.codingagent.core
 import java.io.File
 import java.security.MessageDigest
 
+/**
+ * ONE JOB: Shared tool implementations used by autonomous and offline paths.
+ */
 class AgentTools(private val workspace: ProjectWorkspace) {
     private val terminalSession = TerminalSession(workspace.projectRoot())
 
@@ -19,7 +22,6 @@ class AgentTools(private val workspace: ProjectWorkspace) {
         return coordinator.propose("Editor save: $path", listOf(TaskOperation(OperationKind.REPLACE, path, current.content, content)), "Editor save")
     }
 
-    /** Preferred entry — runs through the shared session so cancel works. */
     fun terminal(
         command: List<String>,
         timeoutSeconds: Long = 90,
@@ -43,10 +45,6 @@ class AgentTools(private val workspace: ProjectWorkspace) {
 
     fun terminalHistory(limit: Int = 50): List<TerminalEntry> = terminalSession.history(limit)
 
-    /**
-     * Resolve a project-relative path. On Android the filesystem is often case-insensitive,
-     * but Java File.isFile is still case-sensitive on some mounts — walk for a case-insensitive match.
-     */
     private fun resolveExistingFile(path: String): File {
         val root = workspace.projectRoot().canonicalFile
         val direct = root.resolve(path).canonicalFile

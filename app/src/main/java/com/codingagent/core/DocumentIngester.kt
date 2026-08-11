@@ -3,6 +3,9 @@ package com.codingagent.core
 import java.io.File
 import java.util.Locale
 
+/**
+ * ONE JOB: Ingest free text into the local offline knowledge base.
+ */
 data class IngestRequest(
     val documentName: String,
     val source: String,

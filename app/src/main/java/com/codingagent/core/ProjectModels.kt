@@ -1,5 +1,8 @@
 package com.codingagent.core
 
+/**
+ * ONE JOB: Shared data models for indexed project files and workspace state.
+ */
 data class ProjectFile(
     val path: String,
     val bytes: Long,
