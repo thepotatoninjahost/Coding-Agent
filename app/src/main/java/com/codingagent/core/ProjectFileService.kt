@@ -2,6 +2,9 @@ package com.codingagent.core
 
 import java.io.File
 
+/**
+ * ONE JOB: Safe list/read of project files for agent tools.
+ */
 class ProjectFileService(private val workspace: ProjectWorkspace) {
     fun list(path: String = ""): List<String> {
         val directory = resolveDirectory(path)
