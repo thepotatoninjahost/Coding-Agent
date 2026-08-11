@@ -1,5 +1,8 @@
 package com.codingagent.core
 
+/**
+ * ONE JOB: Advance and track ordered plan steps through execution.
+ */
 enum class PlanStepStatus { PENDING, ACTIVE, COMPLETE, FAILED, BLOCKED }
 
 data class PlannedStep(

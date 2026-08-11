@@ -4,6 +4,9 @@ import android.content.Context
 import org.json.JSONObject
 import java.io.File
 
+/**
+ * ONE JOB: Persist small JSON settings and state on device.
+ */
 class LocalStore(context: Context) : ChatMessageStore {
     private val root = File(context.filesDir, "coding-agent").apply { mkdirs() }
     private val tasksFile = File(root, "tasks.jsonl")
