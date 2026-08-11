@@ -2,6 +2,9 @@ package com.codingagent.core
 
 import java.io.File
 
+/**
+ * ONE JOB: Turn intake into a deterministic synthesis proposal when ops are explicit.
+ */
 sealed class SynthesisResult {
     data class Ready(val proposal: SynthesisProposal) : SynthesisResult()
     data class NeedsInput(val question: String) : SynthesisResult()
