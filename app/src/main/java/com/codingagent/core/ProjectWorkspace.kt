@@ -21,6 +21,9 @@ sealed class RollbackResult {
     data class Rejected(val reason: String) : RollbackResult()
 }
 
+/**
+ * ONE JOB: File state, transactional edits, checksums, verify, and rollback.
+ */
 class ProjectWorkspace(private val root: File) {
     private val indexer = ProjectIndexer()
     private val metadataDir = root.resolve(".coding-agent")
