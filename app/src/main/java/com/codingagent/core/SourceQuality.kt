@@ -2,19 +2,20 @@ package com.codingagent.core
 
 import java.util.regex.Pattern
 
+/**
+ * ONE JOB: Accept/reject/score research sources by domain, title, and relevance.
+ */
 object SourceQuality {
-    // In Kotlin raw strings, a single backslash is literal — use \b, \{, \[ for Java regex metacharacters.
-    // Doubling them (\\[) leaves an unescaped '[' and blows up Pattern.compile in the static initializer.
     private val junkTitle = Pattern.compile(
-        """\b(talk|disambiguation|user talk|wikiProject|sandbox|article talk|wikipedia search)\b""",
+        """\\b(talk|disambiguation|user talk|wikiProject|sandbox|article talk|wikipedia search)\\b""",
         Pattern.CASE_INSENSITIVE
     )
     private val junkExcerpt = Pattern.compile(
-        """(please help improve|this article needs|not a guidebook|learn how and when to remove|for other uses, see|\{\{cite|cite web\||Article Talk|\[\[Category:)""",
+        """(please help improve|this article needs|not a guidebook|learn how and when to remove|for other uses, see|\\{\\{cite|cite web\\||Article Talk|\\[\\[Category:)""",
         Pattern.CASE_INSENSITIVE
     )
     private val wikiNoise = Pattern.compile(
-        """(\{\{cite|\|access-date=|\|archive-url=|\|url-status=|Article Talk|\[\[Category:|Help improve this article)""",
+        """(\\{\\{cite|\\|access-date=|\\|archive-url=|\\|url-status=|Article Talk|\\[\\[Category:|Help improve this article)""",
         Pattern.CASE_INSENSITIVE
     )
     private val blockedDomains = listOf(
@@ -24,7 +25,6 @@ object SourceQuality {
         "nytimes.com", "forbes.com", "medium.com/tag", "quora.com",
         "fullframeinitiative.org", "thisvsthat.io", "geeksforgeeks.org/system-design",
         "educative.io", "wellbeing", "wordvice.com", "aje.com",
-        // no-code / low-code app builders and marketing sites that drown UI coding queries
         "adalo.com", "knack.com", "zoho.com/creator", "bubble.io", "glideapps.com",
         "thunkable.com", "appgyver.com", "mendix.com", "outsystems.com",
         "powerapps.microsoft.com", "make.com", "zapier.com"
@@ -36,7 +36,6 @@ object SourceQuality {
         "windows installer", "microsoft copilot", "career opportunities",
         "elements of a metaverse", "learning through play", "limitations of the study",
         "how to write limitations", "mbti-in-thoughts", "leaky thoughts",
-        // robotics / FTC / sensor kits and no-code builders that match loose "coding + apps"
         "ftc sdk", "ftc robot", "first tech challenge", "ftcrobotcontroller",
         "no-code", "no code", "low-code", "low code", "app builder",
         "power apps", "powerapps", "adalo", "knack", "bubble.io"
@@ -48,16 +47,11 @@ object SourceQuality {
         "can", "do", "does", "using", "use", "used", "into", "about", "your",
         "my", "me", "we", "our", "their", "them", "than", "then", "also"
     )
-
-    // Short but high-signal terms kept even when length < 3
     private val keepShortTerms = setOf("ui", "ux", "api", "ios", "js", "ts", "c#", "c++")
-
     val genericResearchTerms = setOf(
         "research", "study", "paper", "article", "review", "analysis",
         "independent", "thought", "thinking", "idea", "theory", "concept"
     )
-
-    // Strong UI / coding-UI signals used to bias relevance for how-to UI queries
     private val uiSignals = listOf(
         "user interface", "custom ui", "custom view", "custom component",
         "jetpack compose", "swiftui", "react native", "compose ui",
@@ -101,19 +95,14 @@ object SourceQuality {
         if (hits == 0) return false
         val nonGeneric = terms.filter { it !in genericResearchTerms }
         if (nonGeneric.isEmpty() && !isCodeHost(url)) return false
-
-        // For UI / custom-interface queries, require a real UI signal or a code host
-        // so loose matches on "coding" + "apps" (FTC robots, no-code builders) fail.
         if (isUiQuery(terms)) {
             val hasUiSignal = uiSignals.any { hay.contains(it) } ||
                 hay.contains(" compose") || hay.contains("custom view") ||
                 hay.contains("user interface") || hay.contains("swiftui") ||
                 hay.contains("jetpack")
             if (!hasUiSignal && !isCodeHost(url)) return false
-            // Even on code hosts, require at least one non-generic term hit beyond pure noise
             if (hits < 2 && !hasUiSignal) return false
         }
-
         return when {
             terms.size <= 2 -> hits >= 1 && (isCodeHost(url) || nonGeneric.isNotEmpty())
             terms.size <= 4 -> hits >= 2 || (hits.toDouble() / terms.size >= 0.5 && isCodeHost(url))
@@ -126,14 +115,12 @@ object SourceQuality {
         if (wikiNoise.matcher(content.take(800)).find()) return false
         val hay = "$title ${content.take(4_000)}".lowercase()
         val hits = terms.count { hay.contains(it) }
-
         if (isUiQuery(terms)) {
             val hasUiSignal = uiSignals.any { hay.contains(it) } ||
                 hay.contains("custom view") || hay.contains("user interface") ||
                 hay.contains("jetpack compose") || hay.contains("swiftui")
             if (!hasUiSignal && hits < 3) return false
         }
-
         return when {
             terms.size <= 2 -> hits >= 1
             terms.size <= 4 -> hits >= 2
@@ -148,7 +135,6 @@ object SourceQuality {
         if (hay.contains("user interface") || hay.contains("custom view") || hay.contains("custom ui")) score += 8
         if (hay.contains("jetpack compose") || hay.contains("swiftui") || hay.contains("react native")) score += 6
         if (isCodeHost(hit.url)) score += 4
-        // Penalize common off-topic matches for UI queries
         if (hay.contains("ftc") || hay.contains("robot controller") || hay.contains("first tech")) score -= 12
         if (hay.contains("no-code") || hay.contains("no code") || hay.contains("app builder") ||
             hay.contains("power apps") || hay.contains("adalo") || hay.contains("knack")
@@ -175,7 +161,6 @@ object SourceQuality {
         if (t.contains("tradeoff") && (t.contains("interview") || t.contains("system design"))) return false
         if (t.contains("metaverse") || t.contains("career opportunit") || t.contains("mbti")) return false
         if (t.contains("limitations of") && t.contains("study")) return false
-        // Hard reject robotics competition SDKs and pure no-code builders for general coding/UI research
         if (t.contains("ftc") || t.contains("first tech challenge") || u.contains("ftcrobot")) return false
         if (t.contains("no-code") || t.contains("no code") || t.contains("low-code") || t.contains("app builder")) return false
         if (t.contains("power apps") || t.contains("powerapps") || u.contains("power-apps") || u.contains("powerapps")) return false
