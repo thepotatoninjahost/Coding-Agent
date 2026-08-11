@@ -10,6 +10,9 @@ import java.nio.charset.StandardCharsets
 import java.util.LinkedHashMap
 import java.util.regex.Pattern
 
+/**
+ * ONE JOB: Web search and page fetch for external evidence.
+ */
 interface WebResearchProvider {
     fun search(query: String, limit: Int = 6): ResearchResult
 }
