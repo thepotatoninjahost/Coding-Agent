@@ -1,5 +1,8 @@
 package com.codingagent.core
 
+/**
+ * ONE JOB: Diagnose failures, apply bounded repair attempts, and roll back on failure.
+ */
 enum class RepairStage { COMPILE, TEST, DIAGNOSE, REPAIR, REVERT, COMPLETE, FAILED }
 
 data class RepairAttempt(

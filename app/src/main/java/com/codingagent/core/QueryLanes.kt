@@ -1,5 +1,8 @@
 package com.codingagent.core
 
+/**
+ * ONE JOB: Expand a research query into mode-aware search lanes.
+ */
 object QueryLanes {
     private val howTo = Regex(
         "\\b(how|create|creating|build|building|implement|custom|ui|interface|layout|compose|widget|view)\\b",

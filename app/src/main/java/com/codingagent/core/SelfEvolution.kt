@@ -18,6 +18,9 @@ data class EvolutionVersion(
     val createdAt: Long
 )
 
+/**
+ * ONE JOB: Local learning from task outcomes for later sessions.
+ */
 class SelfEvolution(private val root: File) {
     private val evolutionRoot = root.resolve(".coding-agent/evolution")
     private val versionsRoot = evolutionRoot.resolve("versions")
