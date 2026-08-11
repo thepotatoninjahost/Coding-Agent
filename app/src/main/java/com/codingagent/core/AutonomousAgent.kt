@@ -5,6 +5,9 @@ import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 
+/**
+ * ONE JOB: Full evidence-driven tool-calling agent loop with dual-approval mutations.
+ */
 sealed class AutonomousAgentEvent {
     data class Started(val taskId: String, val request: String) : AutonomousAgentEvent()
     data class Phase(val name: String, val detail: String) : AutonomousAgentEvent()
