@@ -379,7 +379,7 @@ Available tools: list_files, read_file, search_project, search_knowledge, resear
         ),
         ModelToolDefinition(
             "verify",
-            "Run static verification (TODO/FIXME/stub scan). Never reports a fake pass.",
+            "Run static verification (unfinished-work marker scan). Never reports a fake pass.",
             """{"type":"object","properties":{},"required":[]}"""
         )
     )
