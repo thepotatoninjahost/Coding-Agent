@@ -3,6 +3,9 @@ package com.codingagent.core
 import java.io.File
 import java.util.concurrent.CopyOnWriteArrayList
 
+/**
+ * ONE JOB: Timed shell execution in the project root with cancellation.
+ */
 class TerminalSession(
     private val root: File,
     private val timeoutSeconds: Long = 90,

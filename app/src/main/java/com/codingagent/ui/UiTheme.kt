@@ -1,5 +1,9 @@
 package com.codingagent.ui
 
+/**
+ * ONE JOB: Palette, tabs, and status mapping for the workbench UI.
+ */
+
 import androidx.compose.ui.graphics.Color
 
 internal val NeonGreen = Color(0xFF39FF14)
