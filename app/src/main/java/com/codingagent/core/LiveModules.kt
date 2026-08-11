@@ -5,6 +5,9 @@ import java.io.File
 import java.security.MessageDigest
 import java.util.UUID
 
+/**
+ * ONE JOB: Install and swap live code modules with checksum verification.
+ */
 sealed class ModuleInstallResult {
     data class Installed(val module: LiveModule) : ModuleInstallResult()
     data class Rejected(val reason: String) : ModuleInstallResult()
@@ -90,14 +93,14 @@ class LiveModuleStore(private val root: File) {
 
     fun parse(source: String): ParsedModule {
         fun field(name: String, text: String): String {
-            val pattern = Regex("""\"$name\"\s*:\s*\"([^\"]*)\"""")
+            val pattern = Regex("\"" + name + "\"\\s*:\\s*\"([^\"]*)\"")
             return pattern.find(text)?.groupValues?.get(1)
                 ?: error("Module field $name is missing")
         }
         val kind = field("kind", source)
-        val version = Regex("""\"version\"\s*:\s*(\d+)""").find(source)?.groupValues?.get(1)?.toInt()
+        val version = Regex("\"version\"\\s*:\\s*(\\d+)").find(source)?.groupValues?.get(1)?.toInt()
             ?: error("Module version is missing")
-        val steps = Regex("""\{([^{}]*)\}""").findAll(source).mapNotNull { match ->
+        val steps = Regex("\\{([^{}]*)\\}").findAll(source).mapNotNull { match ->
             val item = match.value
             if (!item.contains("\"op\"")) return@mapNotNull null
             ModuleStep(field("op", item), fieldOrEmpty("value", item), fieldOrEmpty("argument", item))
@@ -106,7 +109,7 @@ class LiveModuleStore(private val root: File) {
     }
 
     private fun fieldOrEmpty(name: String, text: String): String {
-        val pattern = Regex("""\"$name\"\s*:\s*\"([^\"]*)\"""")
+        val pattern = Regex("\"" + name + "\"\\s*:\\s*\"([^\"]*)\"")
         return pattern.find(text)?.groupValues?.get(1) ?: ""
     }
 
