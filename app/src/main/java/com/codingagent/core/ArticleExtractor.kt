@@ -3,6 +3,9 @@ package com.codingagent.core
 import java.net.HttpURLConnection
 import java.net.URL
 
+/**
+ * ONE JOB: URL/HTML → clean text and code blocks for research.
+ */
 object ArticleExtractor {
     data class Extracted(val title: String, val text: String, val wordCount: Int, val codeBlocks: List<String>) {
         val code: List<String> get() = codeBlocks
