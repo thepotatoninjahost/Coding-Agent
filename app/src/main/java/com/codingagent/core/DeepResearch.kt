@@ -10,6 +10,9 @@ import java.util.LinkedHashMap
 import java.util.UUID
 import java.util.regex.Pattern
 
+/**
+ * ONE JOB: Multi-lane deep research with durable sessions and progress callbacks.
+ */
 enum class ResearchMode { BROAD, EXPERIMENTAL, THEORETICAL, EMPIRICAL }
 
 object ResearchModeDetector {
