@@ -73,32 +73,25 @@ class RemoteHttpGateway(
             }
             when {
                 toolCalls.isNotEmpty() -> {
-                    if (toolCalls.size > 1) {
-                        val names = toolCalls.values.map { it.name.ifBlank { "?" } }.joinToString(", ")
-                        ModelResponse.Failure(
-                            "Model returned ${toolCalls.size} tool calls at once ($names). " +
-                                "This agent runs exactly one tool per turn. Nothing was executed. " +
-                                "Ask the model to retry with a single tool call."
-                        )
+                    // Accept the first tool call when the model returns parallel tools.
+                    // The system prompt still demands exactly one tool per turn.
+                    val call = toolCalls.values.first()
+                    val arguments = call.arguments.toString().trim().let { raw ->
+                        when {
+                            raw.isBlank() -> "{}"
+                            raw.startsWith("{") -> raw
+                            else -> "{$raw}"
+                        }
+                    }
+                    if (call.name.isBlank()) {
+                        ModelResponse.Failure("Model streamed a tool call without a function name")
                     } else {
-                        val call = toolCalls.values.first()
-                        val arguments = call.arguments.toString().trim().let { raw ->
-                            when {
-                                raw.isBlank() -> "{}"
-                                raw.startsWith("{") -> raw
-                                else -> "{$raw}"
-                            }
-                        }
-                        if (call.name.isBlank()) {
-                            ModelResponse.Failure("Model streamed a tool call without a function name")
-                        } else {
-                            ModelResponse.ToolCall(
-                                call.name,
-                                arguments,
-                                content.toString(),
-                                call.id?.takeIf { it.isNotBlank() }
-                            )
-                        }
+                        ModelResponse.ToolCall(
+                            call.name,
+                            arguments,
+                            content.toString(),
+                            call.id?.takeIf { it.isNotBlank() }
+                        )
                     }
                 }
                 content.isBlank() -> ModelResponse.Failure("Model returned no streamed message content")
@@ -197,16 +190,7 @@ class RemoteHttpGateway(
     private fun responseFromChatMessage(message: JSONObject): ModelResponse {
         val calls = message.optJSONArray("tool_calls")
         if (calls != null && calls.length() > 0) {
-            if (calls.length() > 1) {
-                val names = (0 until calls.length()).map { i ->
-                    calls.optJSONObject(i)?.optJSONObject("function")?.optString("name").orEmpty().ifBlank { "?" }
-                }.joinToString(", ")
-                return ModelResponse.Failure(
-                    "Model returned ${calls.length()} tool calls at once ($names). " +
-                        "This agent runs exactly one tool per turn. Nothing was executed. " +
-                        "Ask the model to retry with a single tool call."
-                )
-            }
+            // Accept the first tool call when the model returns parallel tools.
             val function = calls.optJSONObject(0)?.optJSONObject("function")
                 ?: return ModelResponse.Failure("Model returned a malformed tool call")
             val name = function.optString("name")
@@ -310,16 +294,26 @@ class JsonModelResponseParser {
 
 object AgentModelProtocol {
     val DEFAULT_SYSTEM = """
-You are a rigorous local coding agent running on the user's Android device.
+You are a Coding-Agent: an autonomous software-engineering system that plans, acts, observes, and iterates until a goal is reached (or you determine you cannot proceed).
 
-Operating principles:
-- Evidence first: never invent file paths or contents. Discover with list_files / search_project / read_file.
-- If the user names a file, you MUST call read_file on that path before any analysis or final answer.
-- One tool call per turn. Observe the result before deciding the next action.
-- Code changes (create_file, replace_text) only stage a proposal. Dual owner approval is required before anything is written. Never claim a change was applied until the tool returns APPLIED.
-- After meaningful changes or when hunting bugs, call verify.
+You are not a chatbot that answers coding questions in one shot. You are an agentic loop that works like a careful junior developer with tool access.
+
+## Core loop (follow this every turn)
+1. Goal understanding — interpret the high-level request; break it into concrete ordered steps if needed.
+2. Context gathering — discover the real codebase with list_files / search_project / read_file. Never invent paths or file contents.
+3. Planning — keep a short mental plan; revise it when new evidence appears.
+4. Action — call exactly ONE tool per turn. Observe the full result before the next decision.
+5. Observation & iteration — use tool results as ground truth. If a step fails, diagnose and retry with a better approach.
+6. Verification — call verify after meaningful edits or when hunting bugs/errors. Never claim success without evidence.
+7. Handover — when done (or blocked), answer the user in clear, direct technical English. Synthesize; do not dump raw search output unless the user only asked for a listing.
+
+## Hard rules
+- Evidence first. If the user names a file, you MUST call read_file on it before analysis or a final answer.
+- Exactly one tool call per turn. If you emit multiple tool calls, only the first is executed.
+- Code changes (create_file, replace_text) only STAGE a proposal. Dual owner approval is required. Never claim a change was applied until a tool returns APPLIED.
 - Prefer small, precise, reversible steps. Prefer truth over plausible-sounding guesses.
-- When finished, answer the user directly in clear plain English (no JSON wrapper).
+- Stop cleanly when the goal is met, when blocked, or when you need clarification. Do not loop on the same tool with the same arguments.
+- Final answers must be useful to a human developer: concise, accurate, and grounded in what you actually read or ran.
 
 Available tools: list_files, read_file, search_project, search_knowledge, research_web, replace_text, create_file, approve_change, reject_change, run_command, verify
 """.trimIndent()
