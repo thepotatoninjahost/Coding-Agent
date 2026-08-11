@@ -4,7 +4,7 @@ import android.content.Context
 import java.io.File
 
 /**
- * App knowledge facade over [KnowledgeIndex].
+ * ONE JOB: Persist and query offline knowledge documents.
  * Bundled example assets and user-imported references share one searchable index.
  */
 class KnowledgeBase(context: Context) : KnowledgeProvider, AgentKnowledge {
