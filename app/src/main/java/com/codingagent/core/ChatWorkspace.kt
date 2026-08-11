@@ -2,6 +2,9 @@ package com.codingagent.core
 
 import java.util.UUID
 
+/**
+ * ONE JOB: Chat turn → agent execution → persisted history.
+ */
 enum class ChatRole { USER, AGENT, SYSTEM }
 
 data class ChatMessage(
@@ -97,8 +100,6 @@ class ChatWorkspace(
     }
 
     private fun withConversationContext(request: String): String {
-        // SYSTEM messages are UI gate text ("show active", "choose a project folder").
-        // Feeding them into GoalInterpreter flipped intent to INSPECT via the word "show".
         val prior = history(12)
             .filter { it.role == ChatRole.USER || it.role == ChatRole.AGENT }
             .joinToString("\n") { "${it.role.name.lowercase()}: ${it.content.take(400)}" }
