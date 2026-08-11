@@ -2,6 +2,9 @@ package com.codingagent.core
 
 import java.io.File
 
+/**
+ * ONE JOB: Shared support types — knowledge search, planning, journaling.
+ */
 interface AgentKnowledge {
     fun search(query: String, limit: Int = 8): List<KnowledgeHit>
 }

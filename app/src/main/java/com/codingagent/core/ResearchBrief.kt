@@ -1,5 +1,8 @@
 package com.codingagent.core
 
+/**
+ * ONE JOB: Session → ranked evidence brief for the agent loop.
+ */
 data class ResearchBrief(
     val query: String,
     val sourceCount: Int,
