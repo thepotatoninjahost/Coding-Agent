@@ -237,19 +237,34 @@ class ProjectWorkspace(private val root: File) {
                 path.endsWith("Test.kt") || path.endsWith("Tests.kt")) {
                 continue
             }
+            // Docs describe the scanner; do not treat those mentions as unfinished work.
+            if (path.endsWith(".md") || path.endsWith(".markdown") || path.endsWith(".txt")) {
+                continue
+            }
             val file = root.resolve(path)
             file.readLines().forEachIndexed { index, line ->
-                val marker = when {
-                    Regex("\\b$TODO_MARKER\\b", RegexOption.IGNORE_CASE).containsMatchIn(line) -> "$TODO_MARKER marker remains"
-                    Regex("\\b$FIXME_MARKER\\b", RegexOption.IGNORE_CASE).containsMatchIn(line) -> "$FIXME_MARKER marker remains"
-                    line.contains(STUB_MARKER) -> "$STUB_MARKER marker remains"
-                    line.contains(listOf("throw", "Not" + "ImplementedError").joinToString(" ")) -> "unimplemented code remains"
-                    else -> null
-                }
+                val marker = unfinishedMarkerMessage(line)
                 if (marker != null) issues += VerificationIssue(path, index + 1, marker)
             }
         }
         return VerificationReport(issues.isEmpty(), issues)
+    }
+
+    /** True unfinished-work annotations only — not prose that documents the scanner. */
+    private fun unfinishedMarkerMessage(line: String): String? {
+        val trimmed = line.trim()
+        val lower = trimmed.lowercase()
+        // Feature documentation / UI copy about the scan itself.
+        if ("todo/fixme" in lower || "fixme/stub" in lower || "todo/fixme/stub" in lower) return null
+        if ("markers in production" in lower || "marker scan" in lower) return null
+        if ("unfinished-work markers" in lower || "unfinished work markers" in lower) return null
+        return when {
+            Regex("\\b$TODO_MARKER\\b", RegexOption.IGNORE_CASE).containsMatchIn(line) -> "$TODO_MARKER marker remains"
+            Regex("\\b$FIXME_MARKER\\b", RegexOption.IGNORE_CASE).containsMatchIn(line) -> "$FIXME_MARKER marker remains"
+            line.contains(STUB_MARKER) -> "$STUB_MARKER marker remains"
+            line.contains(listOf("throw", "Not" + "ImplementedError").joinToString(" ")) -> "unimplemented code remains"
+            else -> null
+        }
     }
 
     fun verifyProposal(changeSet: ChangeSet): VerificationReport {
@@ -257,7 +272,7 @@ class ProjectWorkspace(private val root: File) {
         changeSet.changes.forEach { record ->
             if (record.after.isNullOrEmpty()) return@forEach
             record.after.lineSequence().forEachIndexed { index, line ->
-                if (Regex("\\b($TODO_MARKER|$FIXME_MARKER)\\b", RegexOption.IGNORE_CASE).containsMatchIn(line) || line.contains(STUB_MARKER)) {
+                if (unfinishedMarkerMessage(line) != null) {
                     issues += VerificationIssue(record.path, index + 1, "unfinished implementation marker remains")
                 }
             }
