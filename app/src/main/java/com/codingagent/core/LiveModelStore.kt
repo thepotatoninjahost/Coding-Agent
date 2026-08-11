@@ -36,13 +36,15 @@ data class LiveModel(
     val createdAt: Long
 )
 
+/**
+ * ONE JOB: Store and checksum live model packages.
+ */
 class LiveModelStore(private val root: File) {
     private val modelRoot = root.resolve(".coding-agent/models")
     private val activeFile = modelRoot.resolve("active-model")
     private val historyFile = modelRoot.resolve("history.tsv")
 
     init { modelRoot.mkdirs() }
-
 
     fun inspectPackage(directory: File): LiveModelPackage {
         val manifest = directory.resolve("nexa.manifest")
