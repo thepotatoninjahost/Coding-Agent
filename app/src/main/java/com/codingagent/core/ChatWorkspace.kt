@@ -1,86 +1,114 @@
 package com.codingagent.core
 
-import java.io.File
-import java.time.Instant
+import java.util.UUID
 
 /**
- * ONE JOB: Persist chat history and format task results for the UI.
+ * ONE JOB: Chat turn → agent execution → persisted history.
  */
+enum class ChatRole { USER, AGENT, SYSTEM }
+
 data class ChatMessage(
-    val id: String,
+    val id: String = UUID.randomUUID().toString(),
     val role: ChatRole,
-    val text: String,
-    val createdAt: String,
+    val content: String,
+    val createdAt: Long = System.currentTimeMillis(),
     val taskId: String? = null
 )
 
-enum class ChatRole { USER, AGENT, SYSTEM }
+interface ChatMessageStore {
+    fun recordChatMessage(message: ChatMessage)
+    fun recentChatMessages(limit: Int = 100): List<ChatMessage>
+}
 
-data class ChatTaskRecord(
-    val id: String,
-    val request: String,
-    val status: String,
-    val summary: String,
-    val verification: VerificationReport,
-    val events: List<String>,
-    val createdAt: String,
-    val completedAt: String?
-)
+fun interface CodingAgentExecutor {
+    fun execute(request: String): AgentRuntimeResult
+}
 
-class ChatWorkspace(private val root: File) {
-    private val dir = root.resolve(".coding-agent/chat")
-    private val messagesFile = dir.resolve("messages.tsv")
-    private val tasksFile = dir.resolve("tasks.tsv")
+/** Optional progress sink used by the UI to show real phases instead of a fake "Researching" label. */
+fun interface AgentProgressListener {
+    fun onProgress(phase: String, detail: String)
+}
 
-    init { dir.mkdirs() }
+class ChatWorkspace(
+    private val store: ChatMessageStore,
+    private val unavailableMessageProvider: () -> String = { "Model unavailable. Finish model setup before sending coding requests." },
+    private val progressListener: AgentProgressListener? = null,
+    private val runtimeProvider: () -> CodingAgentExecutor?
+) {
+    fun history(limit: Int = 100): List<ChatMessage> = store.recentChatMessages(limit).asReversed()
 
-    fun messages(): List<ChatMessage> {
-        if (!messagesFile.isFile) return emptyList()
-        return messagesFile.readLines().mapNotNull { line ->
-            val parts = line.split('\t')
-            if (parts.size < 4) return@mapNotNull null
-            ChatMessage(
-                id = parts[0],
-                role = runCatching { ChatRole.valueOf(parts[1]) }.getOrElse { ChatRole.SYSTEM },
-                text = parts[2].replace("\\n", "\n").replace("\\t", "\t"),
-                createdAt = parts[3],
-                taskId = parts.getOrNull(4)?.ifBlank { null }
-            )
+    fun send(request: String): ChatTurn {
+        val trimmed = request.trim()
+        require(trimmed.isNotEmpty()) { "A message is required" }
+        store.recordChatMessage(ChatMessage(role = ChatRole.USER, content = trimmed))
+        val runtime = runtimeProvider()
+        progressListener?.onProgress("PLANNING", "Starting request")
+        val result = when (runtime) {
+            is AutonomousAgent -> {
+                val events = runtime.run(withConversationContext(trimmed)) { event ->
+                    when (event) {
+                        is AutonomousAgentEvent.Phase -> progressListener?.onProgress(event.name, event.detail)
+                        is AutonomousAgentEvent.ToolStarted -> progressListener?.onProgress("TOOL", "${event.name}: ${event.arguments.take(80)}")
+                        is AutonomousAgentEvent.ToolFinished -> progressListener?.onProgress(
+                            "TOOL",
+                            if (event.success) "${event.name} ok" else "${event.name} failed"
+                        )
+                        is AutonomousAgentEvent.ModelDelta -> progressListener?.onProgress("MODEL", "Streaming… ${event.text.take(40)}")
+                        is AutonomousAgentEvent.ModelMessage -> progressListener?.onProgress("MODEL", "Writing reply")
+                        is AutonomousAgentEvent.Started -> progressListener?.onProgress("STARTED", event.request.take(60))
+                        is AutonomousAgentEvent.Completed -> progressListener?.onProgress("DONE", "Completed")
+                        is AutonomousAgentEvent.Failed -> progressListener?.onProgress("FAILED", event.message.take(120))
+                        is AutonomousAgentEvent.Stopped -> progressListener?.onProgress("STOPPED", event.message.take(120))
+                        is AutonomousAgentEvent.ApprovalRequired -> progressListener?.onProgress("APPROVAL", "Waiting for owner approval")
+                    }
+                }
+                when (val terminal = events.lastOrNull()) {
+                    is AutonomousAgentEvent.ApprovalRequired -> AgentRuntimeResult.NeedsApproval(
+                        terminal.task,
+                        "Review proposal ${terminal.proposal.id} and confirm twice before applying any code change.",
+                        terminal.proposal.id
+                    )
+                    is AutonomousAgentEvent.Completed -> AgentRuntimeResult.Completed(terminal.task)
+                    is AutonomousAgentEvent.Stopped -> AgentRuntimeResult.Failed(terminal.task)
+                    is AutonomousAgentEvent.Failed -> terminal.task?.let { AgentRuntimeResult.Failed(it) }
+                        ?: AgentRuntimeResult.Failed(
+                            AgentTask(
+                                id = UUID.randomUUID().toString(),
+                                request = trimmed,
+                                status = "failed",
+                                plan = AgentPlan(trimmed, emptyList(), emptyList()),
+                                changes = emptyList(),
+                                verification = VerificationReport(false, emptyList()),
+                                events = emptyList(),
+                                summary = terminal.message
+                            )
+                        )
+                    else -> runtime.execute(withConversationContext(trimmed))
+                }
+            }
+            else -> runtime?.execute(withConversationContext(trimmed))
         }
+        val response = when (result) {
+            is AgentRuntimeResult.Completed -> ChatMessage(role = ChatRole.AGENT, content = formatTask(result.task), taskId = result.task.id)
+            is AgentRuntimeResult.NeedsInput -> ChatMessage(role = ChatRole.AGENT, content = result.question, taskId = result.task.id)
+            is AgentRuntimeResult.NeedsApproval -> ChatMessage(role = ChatRole.AGENT, content = result.question, taskId = result.task.id)
+            is AgentRuntimeResult.Failed -> ChatMessage(role = ChatRole.AGENT, content = formatTask(result.task), taskId = result.task.id)
+            null -> ChatMessage(role = ChatRole.SYSTEM, content = unavailableMessageProvider())
+        }
+        store.recordChatMessage(response)
+        return ChatTurn(response, result)
     }
 
-    fun append(role: ChatRole, text: String, taskId: String? = null): ChatMessage {
-        val msg = ChatMessage(
-            id = "msg-${System.currentTimeMillis()}-${(0..9999).random()}",
-            role = role,
-            text = text,
-            createdAt = Instant.now().toString(),
-            taskId = taskId
-        )
-        val escaped = msg.text.replace("\t", "\\t").replace("\n", "\\n")
-        messagesFile.appendText(listOf(msg.id, msg.role.name, escaped, msg.createdAt, msg.taskId.orEmpty()).joinToString("\t") + "\n")
-        return msg
+    private fun withConversationContext(request: String): String {
+        // SYSTEM messages are UI gate text ("show active", "choose a project folder").
+        // Feeding them into GoalInterpreter flipped intent to INSPECT via the word "show".
+        val prior = history(12)
+            .filter { it.role == ChatRole.USER || it.role == ChatRole.AGENT }
+            .joinToString("\n") { "${it.role.name.lowercase()}: ${it.content.take(400)}" }
+        return if (prior.isBlank()) request else "Conversation context:\n$prior\n\nCurrent request:\n$request"
     }
 
-    fun recordTask(task: ChatTaskRecord) {
-        val escapedSummary = task.summary.replace("\t", "\\t").replace("\n", "\\n")
-        val escapedEvents = task.events.joinToString(" | ").replace("\t", "\\t").replace("\n", "\\n")
-        tasksFile.appendText(
-            listOf(
-                task.id,
-                task.request.replace("\t", "\\t").replace("\n", "\\n"),
-                task.status,
-                escapedSummary,
-                if (task.verification.passed) "pass" else "fail",
-                task.verification.issues.size.toString(),
-                escapedEvents,
-                task.createdAt,
-                task.completedAt.orEmpty()
-            ).joinToString("\t") + "\n"
-        )
-    }
-
-    fun formatTaskResult(task: ChatTaskRecord): String = buildString {
+    private fun formatTask(task: AgentTask): String = buildString {
         append("Status: ")
         append(task.status)
         append("\n\nVerification: ")
@@ -130,6 +158,12 @@ class ChatWorkspace(private val root: File) {
             }
         }
         if (streak > 2) deduped += "… (repeated ${streak - 2} more times)"
-        return deduped.joinToString("\n").take(4_000)
+        return deduped.joinToString("\n").take(2_000)
     }
+
 }
+
+data class ChatTurn(
+    val response: ChatMessage,
+    val result: AgentRuntimeResult?
+)
