@@ -3,8 +3,7 @@ package com.codingagent.core
 import java.io.File
 
 /**
- * Pre-flight disk checks so large model downloads fail with a clear message
- * instead of filling the device and crashing mid-shard.
+ * ONE JOB: Pre-flight disk-space checks before large downloads.
  */
 object StorageGuard {
     /** Extra headroom beyond the remaining download payload (OS + unpack). */
