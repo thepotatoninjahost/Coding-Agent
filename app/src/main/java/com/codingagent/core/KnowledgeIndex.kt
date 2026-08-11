@@ -6,8 +6,8 @@ import java.io.File
 import java.util.Locale
 
 /**
- * File-backed knowledge index independent of Android Context (unit-testable).
- * Chunks append; documents are tracked in documents.jsonl for the UI list.
+ * ONE JOB: Index knowledge documents for fast local search.
+ * File-backed, unit-testable; chunks append, documents tracked in documents.jsonl.
  */
 class KnowledgeIndex(private val root: File) : KnowledgeProvider {
     private val indexFile = File(root, "chunks.jsonl")

@@ -8,11 +8,8 @@ import java.net.URL
 import java.util.UUID
 
 /**
- * Personal Research tab provider (BROAD mode).
- *
- * Uses QueryLanes for how-to / UI queries so results bias toward Jetpack Compose,
- * SwiftUI, custom views, and code hosts. Rejects generic-term-only hits and common
- * junk (metaverse intros, career READMEs, FTC robots, no-code builders, Wikipedia noise).
+ * ONE JOB: BROAD research path for personal/general queries.
+ * Uses QueryLanes for how-to/UI queries; rejects generic-term-only and junk sources.
  */
 class PersonalResearchProvider(
     private val researchRoot: File,
@@ -37,8 +34,6 @@ class PersonalResearchProvider(
 
         onProgress(DeepResearchProgress("searching", 0, target, 0, 0))
 
-        // Prefer QueryLanes expansion for how-to / UI queries so search is biased
-        // toward coding UI docs instead of loose "coding + apps" web noise.
         val laneQueries = QueryLanes.expand(normalized, ResearchMode.BROAD)
             .map { it.query }
             .filter { it.isNotBlank() }
