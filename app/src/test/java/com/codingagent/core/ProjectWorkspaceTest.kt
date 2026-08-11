@@ -36,6 +36,25 @@ class ProjectWorkspaceTest {
         assertEquals("out", result.stdout)
         assertEquals("err", result.stderr)
     }
+
+    @Test fun verifyIgnoresScannerDocumentation() {
+        val root = Files.createTempDirectory("coding-agent-docs").toFile()
+        root.resolve("README.md").writeText("Always-on static verification (TODO/FIXME/stub scan)\n")
+        root.resolve("Notes.kt").writeText("fun ok() = 1 // no markers\n")
+        root.resolve("UiCopy.kt").writeText(
+            """fun msg() = "Static scan found no TODO/FIXME/stub markers in production sources."\n"""
+        )
+        val report = ProjectWorkspace(root).verify()
+        assertTrue("docs and UI copy about the scanner must not fail verify: " + report.issues, report.passed)
+    }
+
+    @Test fun verifyStillCatchesRealTodoComments() {
+        val root = Files.createTempDirectory("coding-agent-real-todo").toFile()
+        root.resolve("Broken.kt").writeText("fun x() {\n  // TODO finish this\n}\n")
+        val report = ProjectWorkspace(root).verify()
+        assertFalse(report.passed)
+        assertTrue(report.issues.any { it.message.contains("TODO") })
+    }
 }
 
 class TerminalSessionTest {
