@@ -1,16 +1,18 @@
 # Coding Agent
 
-A phone-first **Coding-Agent**: an autonomous software-engineering system that plans, acts, observes, and iterates until a goal is reached (or it decides it cannot proceed).
+A phone-first **Coding-Agent**: an autonomous software-engineering system that plans, acts, observes, and iterates until the goal is completed.
 
-It is not a chatbot that answers coding questions in one shot. It is an agentic loop that:
+It is not a chatbot that answers coding questions in one shot. It works like a careful senior developer with tool access — evidence-first, precise, and persistent. The agentic loop:
 
 1. **Understands the goal** and decomposes it into ordered steps  
 2. **Gathers real context** from the imported project (list / search / read — never invents paths or contents)  
 3. **Plans** and revises the plan as new evidence appears  
 4. **Acts** with exactly one tool per turn (files, search, terminal, verification, staged mutations)  
-5. **Observes** the tool result and iterates  
+5. **Observes** the tool result; on failure, diagnoses and retries correctly  
 6. **Verifies** (static unfinished-work scan is always-on; never reports a fake pass)  
-7. **Hands over** a clear, evidence-based answer or a dual-approval change proposal
+7. **Hands over** a clear, evidence-based answer or a dual-approval change proposal  
+
+It does not quit early out of convenience. It only stops early when a specific missing input from the user is required that tools cannot supply.
 
 The runtime keeps a degraded offline knowledge path. Non-trivial coding requests that require external knowledge fail closed unless a web research provider is configured and returns evidence. The model-driven autonomous path uses an OpenAI-compatible gateway with tool calling and streamed server-sent-event deltas. Configure the gateway via the in-app Model settings screen (base URL, model id, API key).
 
