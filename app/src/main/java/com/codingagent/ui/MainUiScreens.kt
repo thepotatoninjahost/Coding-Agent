@@ -1,5 +1,9 @@
 package com.codingagent.ui
 
+/**
+ * ONE JOB: Chat / Files / Review / Terminal / Research surfaces.
+ */
+
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
