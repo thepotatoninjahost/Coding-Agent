@@ -3,6 +3,9 @@ package com.codingagent.core
 import java.time.Instant
 import java.util.UUID
 
+/**
+ * ONE JOB: Execute a typed coding request end-to-end (intake → plan → tools → approval).
+ */
 sealed class AgentRuntimeResult {
     data class Completed(val task: AgentTask) : AgentRuntimeResult()
     data class NeedsInput(val task: AgentTask, val question: String) : AgentRuntimeResult()
@@ -52,14 +55,12 @@ class CodingAgentRuntime(
             return needsInput(taskId, request, plan, emptyList(), events, intake.clarificationQuestion ?: "Clarify the coding request before execution.")
         }
 
-        // Offline mutation staging: no model required when ops are explicit or synthesizable.
         if (modelGateway == null) {
             return executeOfflineMutation(taskId, request, intake, plan, events)
         }
 
         val model = modelGateway
 
-        // Research is best-effort only. Local project evidence is enough to proceed.
         var researchEvidence = ""
         val wantsResearch = Regex("\\b(research|look up|search the web|documentation online)\\b", RegexOption.IGNORE_CASE).containsMatchIn(request)
         val researchProvider = deepResearch
@@ -126,7 +127,6 @@ class CodingAgentRuntime(
                     transcript += ModelMessage("tool", toolResult.output, response.callId)
                     events += "tool result: ${toolResult.output.take(500)}"
                     if (toolResult.proposalId != null) {
-                        // Already staged once inside stageOrExecute — do not propose again.
                         pendingProposalId = toolResult.proposalId
                         pendingChanges = toolResult.changeSet?.changes.orEmpty()
                         break
@@ -149,11 +149,6 @@ class CodingAgentRuntime(
         return AgentRuntimeResult.Completed(task)
     }
 
-    /**
-     * Stage mutations without a model when the request already carries concrete ops,
-     * or when [CodeSynthesisEngine] can deterministically produce them (e.g. single-path CREATE).
-     * Vague DEBUG/CHANGE without ops still requires a model (or more user input).
-     */
     private fun executeOfflineMutation(
         taskId: String,
         request: String,
