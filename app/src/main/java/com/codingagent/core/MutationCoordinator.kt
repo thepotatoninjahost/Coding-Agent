@@ -2,6 +2,9 @@ package com.codingagent.core
 
 import java.util.UUID
 
+/**
+ * ONE JOB: Dual-approval staging, constitution checks, and apply/reject of code changes.
+ */
 sealed class MutationApprovalResult {
     data class AwaitingSecond(val proposal: PendingChangeProposal, val approval: ApprovalRecord) : MutationApprovalResult()
     data class Applied(val proposal: PendingChangeProposal, val changeSet: ChangeSet) : MutationApprovalResult()
