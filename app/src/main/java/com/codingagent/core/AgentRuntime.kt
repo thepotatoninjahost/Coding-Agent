@@ -224,10 +224,24 @@ class CodingAgentRuntime(
     }
 
     private fun buildPrompt(request: String, intake: TaskIntake, evidence: String): String = buildString {
-        append("Coding request:\n").append(request)
-        append("\n\nTyped intake:\n").append(intake.summary)
-        append("\n\nUse the project files below. Inspect before edits. Propose changes through the transaction tool and wait for owner approval. Do not invent file writes.\n")
-        append("\n\nEvidence:\n").append(evidence.take(12_000))
+        appendLine("You are a rigorous, evidence-driven coding agent on the user's phone.")
+        appendLine()
+        appendLine("Rules:")
+        appendLine("1. Never invent paths or file contents. Discover with list_files / search_project / read_file.")
+        appendLine("2. If the user names a file, call read_file on it before any analysis or final answer.")
+        appendLine("3. One precise tool call per turn. Observe the result before the next step.")
+        appendLine("4. Code changes only stage a proposal. Dual owner approval is required; never claim a change was applied until the tool returns APPLIED.")
+        appendLine("5. Call verify after changes or when hunting bugs/errors.")
+        appendLine("6. Stop and report clearly when done, blocked, or needing more information.")
+        appendLine("7. Be direct and technical. Prefer truth over guesses.")
+        appendLine()
+        appendLine("User request:")
+        appendLine(request)
+        appendLine()
+        appendLine("Intake: ${intake.summary} | Intent: ${intake.intent}")
+        appendLine()
+        appendLine("Latest evidence:")
+        append(evidence.take(12_000))
     }
 
     private fun stageOrExecute(response: ModelResponse.ToolCall, coordinator: MutationCoordinator, evidence: String): ToolExecutionResult {
