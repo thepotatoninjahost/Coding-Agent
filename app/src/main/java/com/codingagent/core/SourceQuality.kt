@@ -6,16 +6,18 @@ import java.util.regex.Pattern
  * ONE JOB: Accept/reject/score research sources by domain, title, and relevance.
  */
 object SourceQuality {
+    // In Kotlin raw strings, a single backslash is literal — use \b, \{, \[ for Java regex metacharacters.
+    // Doubling them (\\[) leaves an unescaped '[' and blows up Pattern.compile in the static initializer.
     private val junkTitle = Pattern.compile(
-        """\\b(talk|disambiguation|user talk|wikiProject|sandbox|article talk|wikipedia search)\\b""",
+        """\b(talk|disambiguation|user talk|wikiProject|sandbox|article talk|wikipedia search)\b""",
         Pattern.CASE_INSENSITIVE
     )
     private val junkExcerpt = Pattern.compile(
-        """(please help improve|this article needs|not a guidebook|learn how and when to remove|for other uses, see|\\{\\{cite|cite web\\||Article Talk|\\[\\[Category:)""",
+        """(please help improve|this article needs|not a guidebook|learn how and when to remove|for other uses, see|\{\{cite|cite web\||Article Talk|\[\[Category:)""",
         Pattern.CASE_INSENSITIVE
     )
     private val wikiNoise = Pattern.compile(
-        """(\\{\\{cite|\\|access-date=|\\|archive-url=|\\|url-status=|Article Talk|\\[\\[Category:|Help improve this article)""",
+        """(\{\{cite|\|access-date=|\|archive-url=|\|url-status=|Article Talk|\[\[Category:|Help improve this article)""",
         Pattern.CASE_INSENSITIVE
     )
     private val blockedDomains = listOf(
