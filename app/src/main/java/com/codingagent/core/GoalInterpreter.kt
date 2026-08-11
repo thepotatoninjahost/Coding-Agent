@@ -2,6 +2,9 @@ package com.codingagent.core
 
 import java.io.File
 
+/**
+ * ONE JOB: Free text → structured goal contract.
+ */
 data class GoalContract(
     val request: String,
     val goal: String,
@@ -19,15 +22,12 @@ class GoalInterpreter(private val root: File) {
     fun interpret(request: String, operation: TaskOperation = TaskOperation()): GoalContract {
         val normalized = request.replace(Regex("\\s+"), " ").trim()
         require(normalized.isNotEmpty()) { "A coding request is required" }
-        // ChatWorkspace may prefix history; classify from Current request only.
         val focus = currentRequestFocus(normalized)
         val paths = pathTokens(focus).distinct()
         val symbols = symbolTokens(focus).distinct()
         val intent = intent(focus, operation)
         val constraints = constraints(focus)
         val acceptance = acceptance(focus, intent)
-        // Do not treat missing exact mutation syntax as blocking ambiguity.
-        // The model can inspect files and propose changes via tools.
         val ambiguity = softAmbiguity(focus, intent)
         val confidence = score(intent, operation, paths, symbols, ambiguity)
         return GoalContract(
@@ -40,7 +40,6 @@ class GoalInterpreter(private val root: File) {
             acceptanceCriteria = acceptance,
             ambiguity = ambiguity,
             confidence = confidence,
-            // UNKNOWN (greetings) is still runnable — agent replies without tools.
             ready = ambiguity.isEmpty() && (confidence >= 40 || intent == TaskIntent.UNKNOWN)
         )
     }
@@ -103,7 +102,6 @@ class GoalInterpreter(private val root: File) {
         else add("static verification passes when verification is run")
     }
 
-    /** Only hard-block on truly empty/too-short *coding* requests. Greetings are runnable UNKNOWN. */
     private fun softAmbiguity(request: String, intent: TaskIntent): List<String> = buildList {
         if (intent == TaskIntent.UNKNOWN) return@buildList
         if (request.length < 4) add("request is too short to establish a goal")
