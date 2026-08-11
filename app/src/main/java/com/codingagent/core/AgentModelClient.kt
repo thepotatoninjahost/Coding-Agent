@@ -7,6 +7,9 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.nio.charset.StandardCharsets
 
+/**
+ * ONE JOB: Lightweight non-streaming HTTP client for OpenAI-compatible completions.
+ */
 class HttpModelGateway(
     private val endpoint: String,
     private val apiKey: String,
