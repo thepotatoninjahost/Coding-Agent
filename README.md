@@ -1,8 +1,18 @@
 # Coding Agent
 
-A modular Android coding workbench designed for phone-only use. The project is organized as replaceable core modules for intake, planning, project indexing, knowledge retrieval, code synthesis, workspace mutation, verification, repair, live updates, and local learning.
+A phone-first **Coding-Agent**: an autonomous software-engineering system that plans, acts, observes, and iterates until a goal is reached (or it decides it cannot proceed).
 
-The runtime keeps a degraded offline knowledge path, but non-trivial coding requests now fail closed unless a web research provider is configured and returns evidence. The model-driven autonomous path uses an OpenAI-compatible gateway with tool calling; the gateway also supports streamed server-sent-event deltas. Configure the gateway via the in-app Model settings screen (base URL, model id, API key).
+It is not a chatbot that answers coding questions in one shot. It is an agentic loop that:
+
+1. **Understands the goal** and decomposes it into ordered steps  
+2. **Gathers real context** from the imported project (list / search / read — never invents paths or contents)  
+3. **Plans** and revises the plan as new evidence appears  
+4. **Acts** with exactly one tool per turn (files, search, terminal, verification, staged mutations)  
+5. **Observes** the tool result and iterates  
+6. **Verifies** (static unfinished-work scan is always-on; never reports a fake pass)  
+7. **Hands over** a clear, evidence-based answer or a dual-approval change proposal
+
+The runtime keeps a degraded offline knowledge path. Non-trivial coding requests that require external knowledge fail closed unless a web research provider is configured and returns evidence. The model-driven autonomous path uses an OpenAI-compatible gateway with tool calling and streamed server-sent-event deltas. Configure the gateway via the in-app Model settings screen (base URL, model id, API key).
 
 ## Current product status
 

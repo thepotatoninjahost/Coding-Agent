@@ -170,6 +170,7 @@ class AutonomousAgent(
                         lastEvidence = missing + "\n\n" + lastEvidence.take(config.maxOutputCharacters / 2)
                         continue
                     }
+                    // Always run static verification — never report a fake pass.
                     val report = workspace.verify()
                     val summary = sanitizeModelText(response.content, report)
                     val status = when {
@@ -370,14 +371,14 @@ class AutonomousAgent(
     }
 
     private fun buildPrompt(request: String, intake: TaskIntake, evidence: String): String = buildString {
-        appendLine("You are a rigorous, evidence-driven coding agent on the user's phone.")
+        appendLine("You are a Coding-Agent running on the user's phone: plan → gather evidence → act with one tool → observe → verify → iterate until the goal is met.")
         appendLine()
-        appendLine("Rules:")
+        appendLine("Hard constraints for this turn:")
         appendLine("1. Never invent paths or file contents. Discover with list_files / search_project / read_file.")
         appendLine("2. If the user names a file, call read_file on it before any analysis or final answer.")
-        appendLine("3. One precise tool call per turn. Observe the result before the next step.")
+        appendLine("3. Exactly one precise tool call this turn. Observe the result before the next step.")
         appendLine("4. Code changes only stage a proposal. Dual owner approval is required; never claim a change was applied until the tool returns APPLIED.")
-        appendLine("5. Call verify after changes or when hunting bugs/errors.")
+        appendLine("5. Call verify after changes or when hunting bugs/errors. Never report a fake pass.")
         appendLine("6. Stop and report clearly when done, blocked, or needing more information.")
         appendLine("7. Be direct and technical. Prefer truth over guesses.")
         appendLine("8. Final answers must synthesize evidence into a clear reply. Never paste raw search dumps as the answer unless the user only asked to list files.")
@@ -385,9 +386,9 @@ class AutonomousAgent(
         appendLine("User request:")
         appendLine(request)
         appendLine()
-        appendLine("Intake: ${intake.summary} | Intent: ${intake.intent} | Targets: ${intake.contract.targetPaths.joinToString().ifBlank { "none yet" }}")
+        appendLine("Intake: ${intake.summary} | Intent: ${intake.intent} | Targets: ${intake.contract.targetPaths.joinToString().ifBlank { \"none yet\" }}")
         appendLine()
-        appendLine("Latest evidence:")
+        appendLine("Latest evidence (ground truth from tools):")
         append(evidence.take(config.maxOutputCharacters))
     }
 
