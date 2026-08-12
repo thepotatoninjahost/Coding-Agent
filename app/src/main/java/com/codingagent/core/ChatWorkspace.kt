@@ -109,6 +109,33 @@ class ChatWorkspace(
     }
 
     private fun formatTask(task: AgentTask): String = buildString {
+        val summary = sanitizeSummary(task.summary)
+        // Lead with the answer. Verification theater must not bury tool results or greetings.
+        val isDirect =
+            task.status == "needs-input" ||
+                summary.startsWith("Hello.") ||
+                summary.startsWith("Status report") ||
+                summary.startsWith("Project files:") ||
+                summary.startsWith("File:")
+
+        if (isDirect) {
+            append(summary)
+            if (task.status != "needs-input" && !task.verification.passed) {
+                append("\n\nVerification: FAILED; ")
+                append(task.verification.issues.size)
+                append(" issue(s)")
+                task.verification.issues.take(10).forEach { issue ->
+                    append("\n- ")
+                    append(issue.path)
+                    append(":")
+                    append(issue.line)
+                    append(" — ")
+                    append(issue.message)
+                }
+            }
+            return@buildString
+        }
+
         append("Status: ")
         append(task.status)
         append("\n\nVerification: ")
@@ -129,7 +156,7 @@ class ChatWorkspace(
             }
         }
         append("\n\nSummary:\n")
-        append(sanitizeSummary(task.summary))
+        append(summary)
         if (task.events.isNotEmpty()) {
             append("\n\nActivity log:\n")
             val cleaned = task.events.map { sanitizeSummary(it) }.distinct().take(40)
@@ -139,6 +166,15 @@ class ChatWorkspace(
 
     private fun sanitizeSummary(text: String): String {
         if (text.isBlank()) return "(empty)"
+        // Tool evidence and direct-lane answers are not model prose — never replace them.
+        val head = text.trimStart()
+        if (head.startsWith("Project files:") ||
+            head.startsWith("File:") ||
+            head.startsWith("Hello.") ||
+            head.startsWith("Status report")
+        ) {
+            return text.take(12_000)
+        }
         if (DegenerateOutput.isDegenerate(text)) {
             return DegenerateOutput.sanitize(text) + " Rely on the verification section above for the real findings."
         }
