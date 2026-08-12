@@ -259,8 +259,9 @@ class ProjectWorkspace(private val root: File) {
         val trimmed = line.trim()
         if (trimmed.isEmpty()) return null
         // Comment annotation forms: line-comment / hash / block-comment prefix + marker token
+        // Raw string: single \ for regex escapes (\\ becomes literal backslash in pattern).
         val commentMarker = Regex(
-            """(?://|#|/\\*|\\*)\\s*($TODO_MARKER|$FIXME_MARKER|$STUB_MARKER)\\b""",
+            """(?://|#|/\*|\*)\s*($TODO_MARKER|$FIXME_MARKER|$STUB_MARKER)\b""",
             RegexOption.IGNORE_CASE
         )
         commentMarker.find(trimmed)?.groupValues?.getOrNull(1)?.let { hit ->
@@ -268,7 +269,7 @@ class ProjectWorkspace(private val root: File) {
         }
         // Explicit unfinished call form: MarkerName("...")
         val callMarker = Regex(
-            """\\b($TODO_MARKER|$FIXME_MARKER)\\s*\\(""",
+            """\b($TODO_MARKER|$FIXME_MARKER)\s*\(""",
             RegexOption.IGNORE_CASE
         )
         callMarker.find(trimmed)?.groupValues?.getOrNull(1)?.let { hit ->
