@@ -137,8 +137,9 @@ class CodingAgentRuntime(
                 }
             }
         }
-        if (pendingProposalId != null) {
-            return needsApproval(taskId, request, plan, pendingChanges, events, pendingProposalId!!)
+        val stagedProposalId = pendingProposalId
+        if (stagedProposalId != null) {
+            return needsApproval(taskId, request, plan, pendingChanges, events, stagedProposalId)
         }
         val report = verify(plan)
         planning.complete("verification checked")
@@ -314,7 +315,7 @@ class CodingAgentRuntime(
         changes: List<ChangeRecord>,
         events: MutableList<String>,
         question: String
-    ): AgentRuntimeResult.NeedsInput {
+): AgentRuntimeResult.NeedsInput {
         val task = task(id, request, "needs-input", plan, changes, VerificationReport(false, emptyList()), events)
         journal.record(task)
         return AgentRuntimeResult.NeedsInput(task, question)
