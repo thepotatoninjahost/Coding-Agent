@@ -74,21 +74,25 @@ class PersonalResearchProvider(
             val fetched = runCatching {
                 ArticleExtractor.fetch(hit.url, connectionFactory, pageTimeoutMillis)
             }.getOrNull()
-            val title = fetched?.title?.takeIf { it.isNotBlank() } ?: hit.title
-            val body = fetched?.text.orEmpty()
-            val ok = fetched != null &&
-                fetched.wordCount >= 40 &&
+            if (fetched == null) {
+                failed++
+                onProgress(DeepResearchProgress("fetching", index + 1, ranked.size, sources.size, failed))
+                return@forEachIndexed
+            }
+            val title = fetched.title.takeIf { it.isNotBlank() } ?: hit.title
+            val body = fetched.text
+            val acceptable = fetched.wordCount >= 40 &&
                 SourceQuality.isAcceptable(hit.url, title, body.take(500)) &&
                 SourceQuality.contentRelevant(terms, title, body) &&
                 !(hit.url.lowercase().contains("wikipedia.org") && !normalized.lowercase().contains("wiki"))
-            if (ok) {
+            if (acceptable) {
                 sources += ResearchSource(
                     title = title,
                     url = hit.url,
                     domain = DurableDeepResearchProvider.domainOf(hit.url),
                     lane = "personal",
                     status = 200,
-                    wordCount = fetched!!.wordCount,
+                    wordCount = fetched.wordCount,
                     content = body,
                     codeExamples = fetched.codeBlocks.take(8)
                 )
