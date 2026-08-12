@@ -48,31 +48,40 @@ class LiveModuleStore(private val root: File) {
     fun install(source: String, kind: String, version: Int = 1, action: AgentAction, evaluation: VerificationReport): ModuleInstallResult {
         val violations = AgentConstitution.check(action.copy(sandboxPassed = true, ownerVerified = true, approvalCount = maxOf(2, action.approvalCount), clearPermission = true))
         if (violations.isNotEmpty()) return ModuleInstallResult.Rejected(violations.joinToString("; ") { "${it.rule}: ${it.message}" })
-        val id = UUID.randomUUID().toString()
-        val path = moduleRoot.resolve("$id.module")
-        path.writeText(source)
-        val module = LiveModule(id, kind, version, path.absolutePath, checksum(source), System.currentTimeMillis())
-        historyFile.appendText("${module.id}\t${module.kind}\t${module.version}\t${module.checksum}\t${module.createdAt}\n")
+        val parsed = runCatching { parse(source) }.getOrElse { return ModuleInstallResult.Rejected("Invalid module: ${it.message}") }
+        if (parsed.kind != kind) return ModuleInstallResult.Rejected("Module kind does not match requested kind")
+        if (parsed.version != version) return ModuleInstallResult.Rejected("Module version does not match requested version")
+        val id = "${kind}-${System.currentTimeMillis()}-${UUID.randomUUID().toString().take(8)}"
+        val destination = moduleRoot.resolve(id).apply { mkdirs() }.resolve("module.json")
+        destination.writeText(source)
+        val module = LiveModule(id, kind, version, destination.absolutePath, checksum(source), System.currentTimeMillis())
+        historyFile.appendText(listOf(module.id, module.kind, module.version, module.checksum, module.createdAt).joinToString("\t") + "\n")
         activeFile.writeText(module.id)
         return ModuleInstallResult.Installed(module)
     }
 
-    fun active(): LiveModule? {
-        if (!activeFile.isFile) return null
-        val id = activeFile.readText().trim()
-        return history().firstOrNull { it.id == id }?.copy(sourcePath = moduleRoot.resolve("$id.module").absolutePath)
+    fun patchActive(transform: (String) -> String, action: AgentAction, evaluation: VerificationReport): ModuleInstallResult {
+        val current = active() ?: return ModuleInstallResult.Rejected("No active module")
+        val patched = runCatching { transform(source(current)) }.getOrElse { return ModuleInstallResult.Rejected("Patch failed: ${it.message}") }
+        val next = install(patched, current.kind, current.version, action, evaluation)
+        if (next !is ModuleInstallResult.Installed) return next
+        return next
     }
 
     fun rollback(id: String): Boolean {
-        val module = history().firstOrNull { it.id == id } ?: return false
-        activeFile.writeText(module.id)
+        val module = moduleRoot.resolve(id).resolve("module.json")
+        if (!module.isFile) return false
+        activeFile.writeText(id)
         return true
     }
 
-    fun patchActive(transform: (String) -> String, action: AgentAction, evaluation: VerificationReport): ModuleInstallResult {
-        val current = active() ?: return ModuleInstallResult.Rejected("No active module")
-        val source = source(current)
-        return install(transform(source), current.kind, current.version + 1, action, evaluation)
+    fun active(): LiveModule? {
+        val id = activeFile.takeIf { it.isFile }?.readText()?.trim().orEmpty()
+        if (id.isBlank()) return null
+        val source = moduleRoot.resolve(id).resolve("module.json")
+        if (!source.isFile) return null
+        val parsed = runCatching { parse(source.readText()) }.getOrNull() ?: return null
+        return LiveModule(id, parsed.kind, parsed.version, source.absolutePath, checksum(source.readText()), source.parentFile?.lastModified() ?: 0L)
     }
 
     fun source(module: LiveModule): String = File(module.sourcePath).readText()
@@ -93,7 +102,7 @@ class LiveModuleStore(private val root: File) {
         val version = Regex("\"version\"\\s*:\\s*(\\d+)")
             .find(source)?.groupValues?.get(1)?.toInt()
             ?: error("Module version is missing")
-        val steps = Regex("""\\{([^{}]*)\\}""").findAll(source).mapNotNull { match ->
+        val steps = Regex("""\{([^{}]*)\}""").findAll(source).mapNotNull { match ->
             val item = match.value
             if (!item.contains("\"op\"")) return@mapNotNull null
             ModuleStep(field("op", item), fieldOrEmpty("value", item), fieldOrEmpty("argument", item))
@@ -116,15 +125,20 @@ class LiveModuleRuntime(
 ) {
     private var loaded: LoadedModule? = null
 
+    @Synchronized
     fun reload(): LiveModule? {
-        val module = store.active() ?: return null
-        val source = store.source(module)
-        loaded = LoadedModule(module, store.parse(source), System.currentTimeMillis())
-        return module
+        val active = store.active() ?: run { loaded = null; return null }
+        val parsed = store.parse(store.source(active))
+        loaded = LoadedModule(active, parsed, System.currentTimeMillis())
+        return active
     }
 
+    fun active(): LiveModule? = loaded?.module ?: reload()
+
     fun execute(input: String): ModuleExecution {
-        val current = loaded ?: reload()?.let { loaded } ?: error("No live module loaded")
+        val persisted = store.active()
+        if (persisted?.id != loaded?.module?.id) reload()
+        val current = loaded ?: error("No live module is active")
         val output = mutableListOf<String>()
         val changes = mutableListOf<ChangeRecord>()
         var verification = workspace.verify()
