@@ -13,7 +13,7 @@ object DegenerateOutput {
         if (trimmed.isEmpty()) return false
 
         // Structured listing summaries are never treated as model spam.
-        if (trimmed.startsWith("Project files:")) return false
+        if (trimmed.startsWith("Project files:") || trimmed.startsWith("Source files:")) return false
 
         val lines = trimmed.lineSequence().map { it.trim() }.filter { it.isNotEmpty() }.toList()
         if (lines.isEmpty()) return false
@@ -29,19 +29,15 @@ object DegenerateOutput {
         val compact = trimmed.replace(Regex("\\s+"), "")
         if (compact.length >= 80) {
             val unique = compact.toSet().size
-            // Single-character or tiny alphabet spam (e.g. "aaaa…", "ababab…")
             if (unique <= 3) return true
         }
 
-        // Same short token repeated many times
         val tokens = trimmed.split(Regex("\\s+")).filter { it.isNotEmpty() }
         if (tokens.size >= 12) {
             val topToken = tokens.groupingBy { it }.eachCount().values.maxOrNull() ?: 0
             if (topToken >= 10 && topToken * 2 >= tokens.size) return true
         }
 
-        // True import-cycle spam only (model dumping the same import block).
-        // Do NOT use package-name contains checks — those fire on normal path listings.
         val importLike = lines.filter { it.startsWith("import ") }
         if (importLike.size >= 12 && importLike.size * 2 >= lines.size) return true
 
@@ -65,6 +61,7 @@ object DegenerateOutput {
             val s = line.trim()
             when {
                 s.startsWith("Project files:") -> true
+                s.startsWith("Source files:") -> true
                 s.startsWith("Verification:") -> true
                 s.contains('/') && !s.contains(' ') -> true
                 s.contains('\\') && !s.contains(' ') -> true

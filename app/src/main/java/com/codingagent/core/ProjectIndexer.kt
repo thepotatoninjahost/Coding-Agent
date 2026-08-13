@@ -16,7 +16,7 @@ class ProjectIndexer {
         .map { file ->
             val text = file.readText()
             ProjectFile(
-                path = file.relativeTo(root).invariantSeparatorsPath,
+                path = ProjectPaths.relative(root, file),
                 bytes = file.length(),
                 language = language(file),
                 imports = imports(text),
