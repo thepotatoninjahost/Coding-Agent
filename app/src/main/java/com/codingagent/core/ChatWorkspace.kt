@@ -116,6 +116,7 @@ class ChatWorkspace(
                 summary.startsWith("Hello.") ||
                 summary.startsWith("Status report") ||
                 summary.startsWith("Project files:") ||
+                summary.startsWith("Source files:") ||
                 summary.startsWith("File:")
 
         if (isDirect) {
@@ -169,6 +170,7 @@ class ChatWorkspace(
         // Tool evidence and direct-lane answers are not model prose — never replace them.
         val head = text.trimStart()
         if (head.startsWith("Project files:") ||
+            head.startsWith("Source files:") ||
             head.startsWith("File:") ||
             head.startsWith("Hello.") ||
             head.startsWith("Status report")
