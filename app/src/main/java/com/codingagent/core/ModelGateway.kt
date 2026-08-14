@@ -92,13 +92,25 @@ class RemoteHttpGateway(
                         )
                     }
                 }
-                content.isBlank() -> ModelResponse.Failure("Model returned no streamed message content")
+                content.isBlank() -> {
+                    // Some providers (e.g. NVIDIA OpenAI-compat) return HTTP 200 with empty SSE.
+                    // Fall back to a non-streaming completion before failing the turn.
+                    connection.disconnect()
+                    return complete(request)
+                }
                 else -> JsonModelResponseParser().parse(content.toString())
             }
         } catch (error: Exception) {
-            ModelResponse.Failure("Model stream failed: ${error.message.orEmpty().ifBlank { error.javaClass.simpleName }}")
+            // Stream path failed — try one non-streaming request before giving up.
+            return try {
+                complete(request)
+            } catch (fallbackError: Exception) {
+                ModelResponse.Failure(
+                    "Model stream failed: ${error.message.orEmpty().ifBlank { error.javaClass.simpleName }}"
+                )
+            }
         } finally {
-            connection.disconnect()
+            try { connection.disconnect() } catch (_: Exception) { }
         }
     }
 
