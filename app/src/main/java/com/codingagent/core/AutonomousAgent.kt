@@ -1,1 +1,3 @@
-SEE_LOCAL_FILE
+package com.codingagent.core
+
+// PLACEHOLDER - will fix
