@@ -24,7 +24,7 @@ sealed class AutonomousAgentEvent {
 data class AutonomousAgentConfig(
     val maxTurns: Int = 24,
     val commandTimeoutSeconds: Long = 180,
-    val maxOutputCharacters: Int = 8_000,
+    val maxOutputCharacters: Int = 6_000,
     val maxConsecutiveToolFailures: Int = 5,
     val maxIdenticalToolRepeats: Int = 3,
     val maxEvidenceRefusals: Int = 3
@@ -147,7 +147,7 @@ class AutonomousAgent(
         for (turn in 0 until config.maxTurns) {
             if (cancelled.get()) return stopNow(taskId, normalized, plan, events) { emit(it) }
             emit(AutonomousAgentEvent.Phase("MODEL", "Decision turn ${turn + 1}/${config.maxTurns}"))
-            val response = gateway.stream(
+            var response = gateway.stream(
                 ModelRequest(
                     AgentModelProtocol.SYSTEM,
                     buildPrompt(normalized, intake, lastEvidence),
@@ -157,6 +157,28 @@ class AutonomousAgent(
                 )
             ) { delta ->
                 if (!cancelled.get()) emit(AutonomousAgentEvent.ModelDelta(delta))
+            }
+            // One automatic wait+retry on provider rate limit (TPM).
+            if (response is ModelResponse.Failure && isRateLimitFailure(response.message)) {
+                val waitSec = rateLimitWaitSeconds(response.message).coerceIn(1, 45)
+                emit(AutonomousAgentEvent.Phase("MODEL", "Rate limited — waiting ${waitSec}s then retrying once"))
+                try {
+                    Thread.sleep(waitSec * 1000L)
+                } catch (_: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                }
+                if (cancelled.get()) return stopNow(taskId, normalized, plan, events) { emit(it) }
+                response = gateway.stream(
+                    ModelRequest(
+                        AgentModelProtocol.SYSTEM,
+                        buildPrompt(normalized, intake, lastEvidence),
+                        AgentModelProtocol.tools(),
+                        transcript.toList(),
+                        researchRequired = false
+                    )
+                ) { delta ->
+                    if (!cancelled.get()) emit(AutonomousAgentEvent.ModelDelta(delta))
+                }
             }
             if (cancelled.get()) return stopNow(taskId, normalized, plan, events) { emit(it) }
             when (response) {
@@ -432,32 +454,35 @@ class AutonomousAgent(
 
     private fun shouldResearch(request: String, intake: TaskIntake): Boolean {
         val lower = request.lowercase()
-        if (Regex("\\b(research|look up|search the web|google|documentation online|how does .+ work online)\\b").containsMatchIn(lower)) return true
+        if (Regex("\\b(research|look up|search the web|google|documentation|docs online|best practice|how does .+ work online|what is the current|latest version)\\b").containsMatchIn(lower)) return true
+        if (Regex("\\b(android|kotlin|gradle|compose|retrofit|okhttp|room|hilt|coroutine)\\b").containsMatchIn(lower) &&
+            Regex("\\b(how|latest|current|docs|documentation|api|migrate|deprecated)\\b").containsMatchIn(lower)
+        ) return true
         if (intake.intent == TaskIntent.EXPLAIN && Regex("\\b(library|framework|api|sdk|package|crate|npm|pip)\\b").containsMatchIn(lower)) return true
         return false
     }
 
     private fun buildPrompt(request: String, intake: TaskIntake, evidence: String): String = buildString {
-        appendLine("You are a Coding-Agent on the user's phone: a senior developer with tools. Plan → gather real evidence → act with one tool → observe → verify → iterate until the goal is completed.")
+        appendLine("You are the Coding-Agent on this device. Execute the request fully.")
         appendLine()
-        appendLine("Hard constraints for this turn:")
-        appendLine("1. Never invent paths or file contents. Discover with list_files / search_project / read_file.")
-        appendLine("2. If the user names a file, call read_file on it before any analysis or final answer.")
-        appendLine("3. Exactly one precise tool call this turn. Observe the full result before the next step.")
-        appendLine("4. Code changes only stage a proposal. Dual owner approval is required; never claim a change was applied until the tool returns APPLIED.")
-        appendLine("5. Call verify after changes or when hunting bugs/errors. Never report a fake pass.")
-        appendLine("6. Persist until the goal is met. Only stop early when you need a specific missing input from the user that tools cannot supply — state exactly what you need.")
-        appendLine("7. Be direct and technical. Prefer truth over guesses. On failure: diagnose, adjust, retry correctly.")
-        appendLine("8. Final answers must synthesize evidence into a clear reply. Never paste raw search dumps as the answer unless the user only asked to list files.")
-        appendLine()
-        appendLine("User request:")
+        appendLine("Request:")
         appendLine(request)
         appendLine()
         val targets = intake.contract.targetPaths.joinToString().ifBlank { "none yet" }
-        appendLine("Intake: ${intake.summary} | Intent: ${intake.intent} | Targets: $targets")
+        appendLine("Intent: ${intake.intent}")
+        appendLine("Target paths: $targets")
         appendLine()
-        appendLine("Latest evidence (ground truth from tools):")
-        append(evidence.take(config.maxOutputCharacters))
+        appendLine("Operating rules for this turn:")
+        appendLine("1. Gather real evidence with tools. Never invent file contents or paths.")
+        appendLine("2. If the user names a file, call read_file on it before analysis or final answer.")
+        appendLine("3. Exactly one tool call this turn. Observe the full result before the next step.")
+        appendLine("4. Code changes only stage a proposal. Dual owner approval is required.")
+        appendLine("5. Call verify after changes or when hunting bugs. Never report a fake pass.")
+        appendLine("6. Use research_web when the task needs current docs, APIs, or practices.")
+        appendLine("7. Persist until the goal is met. Only stop early for a specific missing user input.")
+        appendLine()
+        appendLine("Evidence so far:")
+        append(evidence.take(config.maxOutputCharacters.coerceAtMost(6_000)))
     }
 
     private fun executeTool(name: String, rawArguments: String): String {
@@ -954,6 +979,19 @@ class AutonomousAgent(
     /**
      * Classify provider failures into one actionable line instead of raw HTTP/JSON walls.
      */
+
+    private fun isRateLimitFailure(message: String): Boolean {
+        val lower = message.lowercase()
+        return "rate_limit" in lower || "rate limit" in lower ||
+            "tokens per minute" in lower || "tpm" in lower || "429" in lower
+    }
+
+    private fun rateLimitWaitSeconds(message: String): Int {
+        val match = Regex("try again in ([0-9.]+)", RegexOption.IGNORE_CASE).find(message)
+        val sec = match?.groupValues?.getOrNull(1)?.toDoubleOrNull()?.toInt()
+        return sec ?: 20
+    }
+
     private fun humanizeModelFailure(message: String): String {
         val lower = message.lowercase()
         return when {
