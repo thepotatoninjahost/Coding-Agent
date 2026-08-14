@@ -161,8 +161,20 @@ class AutonomousAgent(
             if (cancelled.get()) return stopNow(taskId, normalized, plan, events) { emit(it) }
             when (response) {
                 is ModelResponse.Failure -> {
-                    val task = failedTask(taskId, normalized, plan, response.message, changeSets.flatMap { it.changes })
-                    emit(AutonomousAgentEvent.Failed(task, response.message))
+                    val friendly = humanizeModelFailure(response.message)
+                    val named = extractInspectTarget(normalized) ?: extractExplicitReadPath(normalized)
+                    val localExtra = named?.let { buildLocalFileReport(it) }
+                        ?.asUserText(includePolicy = true, includeStructure = true)
+                    val summary = if (localExtra != null) {
+                        "$friendly
+
+Local evidence gathered before model failure:
+$localExtra"
+                    } else {
+                        friendly
+                    }
+                    val task = failedTask(taskId, normalized, plan, summary, changeSets.flatMap { it.changes })
+                    emit(AutonomousAgentEvent.Failed(task, summary))
                     journal.record(task)
                     return events
                 }
@@ -724,23 +736,60 @@ class AutonomousAgent(
         // Explicit "read X" / "show contents of X" when a single path is named.
         val readPath = extractExplicitReadPath(request)
         if (readPath != null) {
-            val content = runCatching { files.read(readPath).content }.getOrElse {
+            val resolved = resolveProjectPath(readPath) ?: readPath
+            val content = runCatching { files.read(resolved).content }.getOrElse {
                 return AgentTask(
                     taskId, request, "failed", plan, emptyList(),
-                    VerificationReport(false, listOf(VerificationIssue(readPath, 0, it.message ?: "read failed"))),
-                    listOf("${Instant.now()}: read failed for $readPath"),
-                    "Could not read `$readPath`: ${it.message ?: it.javaClass.simpleName}"
+                    VerificationReport(false, listOf(VerificationIssue(resolved, 0, it.message ?: "read failed"))),
+                    listOf("${Instant.now()}: read failed for $resolved"),
+                    "Could not read `$resolved`: ${it.message ?: it.javaClass.simpleName}"
                 )
             }
             val text = buildString {
-                append("File: $readPath\n")
+                append("File: $resolved\n")
                 append("───\n")
                 append(content.take(12_000))
                 if (content.length > 12_000) append("\n… (truncated)")
             }
             return AgentTask(
                 taskId, request, "completed", plan, emptyList(), report,
-                listOf("${Instant.now()}: direct read_file $readPath"),
+                listOf("${Instant.now()}: direct read_file $resolved"),
+                text
+            )
+        }
+
+        // Named-file inspect/analyze: local evidence first. Markers = policy, not errors.
+        val inspectTarget = extractInspectTarget(request)
+        if (inspectTarget != null) {
+            val local = buildLocalFileReport(inspectTarget)
+            if (local == null) {
+                return AgentTask(
+                    taskId, request, "failed", plan, emptyList(),
+                    VerificationReport(false, listOf(VerificationIssue(inspectTarget, 0, "file not found in project index"))),
+                    listOf("${Instant.now()}: inspect target not found: $inspectTarget"),
+                    "Could not find `$inspectTarget` in the project. Try `list project source files`, then use the exact name."
+                )
+            }
+            if (isMarkerOnlyRequest(request)) {
+                return AgentTask(
+                    taskId, request, "completed", plan, emptyList(),
+                    local.report,
+                    listOf("${Instant.now()}: local policy scan ${local.path}"),
+                    local.asUserText(includePolicy = true, includeStructure = false)
+                )
+            }
+            val text = buildString {
+                append(local.asUserText(includePolicy = true, includeStructure = true))
+                append("\n\n")
+                append("Scope note: local evidence only.\n")
+                append("- Policy markers (TODO/FIXME/stub) are rule violations, not compile errors.\n")
+                append("- Structure notes are heuristics, not a compiler.\n")
+                append("- For logic/API/compile diagnosis, retry when the model is not rate-limited, or switch provider in Model settings.")
+            }
+            return AgentTask(
+                taskId, request, "completed", plan, emptyList(),
+                local.report,
+                listOf("${Instant.now()}: local evidence package ${local.path}"),
                 text
             )
         }
@@ -779,6 +828,156 @@ class AutonomousAgent(
             if (path.isNotBlank()) return path
         }
         return null
+    }
+
+
+    private fun extractInspectTarget(request: String): String? {
+        val patterns = listOf(
+            Regex("""(?is)\b(?:analyze|inspect|check|review)\s+(?:the\s+)?[`'"]?([A-Za-z0-9_./\\-]+\.[A-Za-z0-9]+)[`'"]?"""),
+            Regex("""(?is)\b(?:errors?|bugs?|issues?)\s+in\s+[`'"]?([A-Za-z0-9_./\\-]+\.[A-Za-z0-9]+)[`'"]?"""),
+            Regex("""(?is)[`'"]?([A-Za-z0-9_./\\-]+\.[A-Za-z0-9]+)[`'"]?\s+for\s+errors?""")
+        )
+        for (re in patterns) {
+            val m = re.find(request.trim()) ?: continue
+            val path = m.groupValues[1].trim().trimStart('/')
+            if (path.isNotBlank()) return path
+        }
+        return null
+    }
+
+    private fun isMarkerOnlyRequest(request: String): Boolean {
+        val lower = request.lowercase()
+        val markerWords = listOf("todo", "fixme", "stub", "placeholder", "unfinished", "marker")
+        val errorWords = listOf("error", "bug", "crash", "exception", "compile", "analyze", "logic")
+        return markerWords.any { it in lower } && errorWords.none { it in lower }
+    }
+
+    private fun resolveProjectPath(nameOrPath: String): String? {
+        val normalized = nameOrPath.trim().trimStart('/').replace('\\', '/')
+        if (normalized.isBlank()) return null
+        runCatching {
+            files.read(normalized)
+            return normalized
+        }
+        val base = java.io.File(normalized).name
+        val hits = workspace.summary().files.filter {
+            java.io.File(it.path).name.equals(base, ignoreCase = true)
+        }
+        return when {
+            hits.isEmpty() -> null
+            hits.size == 1 -> hits[0].path
+            else -> hits.minByOrNull { it.path.length }?.path
+        }
+    }
+
+    private data class LocalFileReport(
+        val path: String,
+        val content: String,
+        val policyIssues: List<VerificationIssue>,
+        val structureNotes: List<String>,
+        val report: VerificationReport
+    ) {
+        fun asUserText(includePolicy: Boolean, includeStructure: Boolean): String = buildString {
+            append("File: $path\n")
+            append("Size: ${content.length} chars, ${content.lines().size} lines\n")
+            if (includePolicy) {
+                append("\nPolicy scan (unfinished-work markers — not compiler errors):\n")
+                if (policyIssues.isEmpty()) {
+                    append("- No TODO / FIXME / stub markers in this file.\n")
+                } else {
+                    policyIssues.forEach { issue ->
+                        append("- line ${issue.line}: ${issue.message}\n")
+                    }
+                }
+            }
+            if (includeStructure) {
+                append("\nStructure heuristics (not a compiler):\n")
+                if (structureNotes.isEmpty()) {
+                    append("- No obvious brace/paren imbalance detected.\n")
+                } else {
+                    structureNotes.forEach { append("- $it\n") }
+                }
+            }
+        }
+    }
+
+    private fun buildLocalFileReport(nameOrPath: String): LocalFileReport? {
+        val resolved = resolveProjectPath(nameOrPath) ?: return null
+        val content = runCatching { files.read(resolved).content }.getOrNull() ?: return null
+        val all = workspace.verify().issues
+        val policy = all.filter { issue ->
+            val ip = issue.path.replace('\\', '/')
+            ip == resolved || ip.endsWith("/$resolved") ||
+                java.io.File(ip).name.equals(java.io.File(resolved).name, ignoreCase = true)
+        }
+        val notes = structureHeuristics(content)
+        return LocalFileReport(
+            path = resolved,
+            content = content,
+            policyIssues = policy,
+            structureNotes = notes,
+            report = VerificationReport(policy.isEmpty(), policy)
+        )
+    }
+
+    /** Cheap structural signals only — never reported as hard compiler errors. */
+    private fun structureHeuristics(content: String): List<String> {
+        val notes = mutableListOf<String>()
+        fun balance(open: Char, close: Char, label: String) {
+            var n = 0
+            var inString = false
+            var inChar = false
+            var escape = false
+            var i = 0
+            while (i < content.length) {
+                val c = content[i]
+                if (escape) { escape = false; i++; continue }
+                if (c == '\\' && (inString || inChar)) { escape = true; i++; continue }
+                if (!inChar && c == '"') { inString = !inString; i++; continue }
+                if (!inString && c == '\'') { inChar = !inChar; i++; continue }
+                if (inString || inChar) { i++; continue }
+                if (c == open) n++
+                if (c == close) n--
+                i++
+            }
+            if (n != 0) {
+                notes += if (n > 0) "$label imbalance: extra $open ($n)" else "$label imbalance: extra $close (${-n})"
+            }
+        }
+        balance('{', '}', "Brace")
+        balance('(', ')', "Paren")
+        balance('[', ']', "Bracket")
+        val last = content.lines().map { it.trim() }.lastOrNull { it.isNotEmpty() }.orEmpty()
+        if (last.endsWith("=") || last.endsWith(".")) {
+            notes += "File ends mid-expression (line ends with '${last.last()}')"
+        }
+        return notes
+    }
+
+    /**
+     * Classify provider failures into one actionable line instead of raw HTTP/JSON walls.
+     */
+    private fun humanizeModelFailure(message: String): String {
+        val lower = message.lowercase()
+        return when {
+            "rate_limit" in lower || "rate limit" in lower ||
+                "tokens per minute" in lower || "tpm" in lower ||
+                "429" in lower -> {
+                val seconds = Regex("try again in ([0-9.]+)").find(lower)?.groupValues?.getOrNull(1)
+                val wait = seconds?.toDoubleOrNull()?.toInt() ?: 30
+                "Model rate-limited (tokens/minute). Wait ~${wait}s, or switch provider in Model settings. Local file evidence still available via inspect/read."
+            }
+            "401" in lower || "unauthorized" in lower || "invalid api key" in lower ->
+                "Model auth failed (check API key in Model settings)."
+            "403" in lower || "forbidden" in lower ->
+                "Model request forbidden (provider rejected the key or model)."
+            "timeout" in lower || "timed out" in lower ->
+                "Model request timed out. Retry once; if it keeps happening, shorten the request or switch provider."
+            "connection" in lower || "unreachable" in lower || "unknownhost" in lower ->
+                "Could not reach the model endpoint (network)."
+            message.length > 280 -> message.take(280) + "…"
+            else -> message
+        }
     }
 
     private fun failedTask(
