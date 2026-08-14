@@ -110,6 +110,24 @@ class AutonomousLoopTest {
     }
 
     @Test
+    fun localInspectCompletesWithoutModel() {
+        val root = Files.createTempDirectory("agent-local-inspect").toFile()
+        root.resolve("Report.kt").writeText("class Report\n")
+        // Gateway would fail the build if called — empty script means any model call blows up.
+        val gateway = ScriptedGateway(emptyList())
+        val workspace = ProjectWorkspace(root)
+        val knowledge = object : AgentKnowledge {
+            override fun search(query: String, limit: Int) = emptyList<KnowledgeHit>()
+        }
+        val runtime = CodingAgentRuntime(workspace, knowledge, AgentJournal(root), modelGateway = gateway)
+        val agent = AutonomousAgent(root, runtime, knowledge, gateway, AutonomousAgentConfig(maxTurns = 4))
+        val events = agent.run("analyze Report.kt for errors")
+        assertTrue(events.last() is AutonomousAgentEvent.Completed)
+        val summary = (events.last() as AutonomousAgentEvent.Completed).task.summary
+        assertTrue(summary.contains("Report.kt") || summary.contains("Policy scan") || summary.contains("File:"))
+    }
+
+    @Test
     fun failsAfterRepeatedUngroundedCompletions() {
         val root = Files.createTempDirectory("agent-evidence-fail").toFile()
         root.resolve("Report.kt").writeText("class Report\n")
@@ -125,7 +143,10 @@ class AutonomousLoopTest {
             root, runtime, knowledge, gateway,
             AutonomousAgentConfig(maxTurns = 10, maxEvidenceRefusals = 2)
         )
-        val events = agent.run("Analyze Report.kt and give me a report")
+        // Must NOT match the local inspect lane (analyze/inspect/check <file>).
+        // That lane returns local evidence without the model. This test covers the
+        // model-loop evidence gate for ungrounded completions only.
+        val events = agent.run("Write a deep technical report on how Report works end to end")
         assertTrue(events.last() is AutonomousAgentEvent.Failed)
         assertTrue((events.last() as AutonomousAgentEvent.Failed).message.contains("without reading"))
     }
