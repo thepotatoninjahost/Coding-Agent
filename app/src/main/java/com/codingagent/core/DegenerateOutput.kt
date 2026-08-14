@@ -12,8 +12,14 @@ object DegenerateOutput {
         val trimmed = text.trim()
         if (trimmed.isEmpty()) return false
 
-        // Structured listing summaries are never treated as model spam.
-        if (trimmed.startsWith("Project files:") || trimmed.startsWith("Source files:")) return false
+        // Structured listing / local-evidence summaries are never treated as model spam.
+        if (trimmed.startsWith("Project files:") ||
+            trimmed.startsWith("Source files:") ||
+            trimmed.startsWith("File:") ||
+            trimmed.startsWith("Inspect:") ||
+            trimmed.startsWith("Scope note:") ||
+            trimmed.startsWith("Policy scan")
+        ) return false
 
         val lines = trimmed.lineSequence().map { it.trim() }.filter { it.isNotEmpty() }.toList()
         if (lines.isEmpty()) return false
@@ -62,6 +68,8 @@ object DegenerateOutput {
             when {
                 s.startsWith("Project files:") -> true
                 s.startsWith("Source files:") -> true
+                s.startsWith("File:") -> true
+                s.startsWith("Inspect:") -> true
                 s.startsWith("Verification:") -> true
                 s.contains('/') && !s.contains(' ') -> true
                 s.contains('\\') && !s.contains(' ') -> true
