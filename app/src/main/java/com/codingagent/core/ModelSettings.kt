@@ -15,6 +15,8 @@ data class ModelSettings(
     val apiKey: String = "",
     val modelName: String = "",
     val systemPrompt: String = "",
+    /** Optional extra HTTP headers, one per line: "Header-Name: value" */
+    val extraHeaders: String = "",
     val onboarded: Boolean = false
 ) {
     fun normalized(): ModelSettings = copy(
@@ -22,8 +24,28 @@ data class ModelSettings(
         baseUrl = baseUrl.trim().trimEnd('/'),
         apiKey = apiKey.trim(),
         modelName = modelName.trim(),
-        systemPrompt = systemPrompt.trim()
+        systemPrompt = systemPrompt.trim(),
+        extraHeaders = extraHeaders.trim()
     )
+
+    /** Parse user-supplied extra headers. Lines: "Name: value" or "Name=value". */
+    fun parsedExtraHeaders(): Map<String, String> {
+        val out = linkedMapOf<String, String>()
+        for (raw in normalized().extraHeaders.lineSequence()) {
+            val line = raw.trim()
+            if (line.isEmpty() || line.startsWith("#")) continue
+            val sep = when {
+                ":" in line -> ":"
+                "=" in line -> "="
+                else -> continue
+            }
+            val idx = line.indexOf(sep)
+            val name = line.substring(0, idx).trim()
+            val value = line.substring(idx + 1).trim()
+            if (name.isNotBlank() && value.isNotBlank()) out[name] = value
+        }
+        return out
+    }
 
     fun effectiveSystemPrompt(): String =
         normalized().systemPrompt.ifBlank { AgentModelProtocol.DEFAULT_SYSTEM }
@@ -59,10 +81,11 @@ data class ModelSettings(
     ): RemoteHttpGateway? {
         val s = normalized()
         if (s.validationErrors().isNotEmpty()) return null
+        val headers = s.parsedExtraHeaders()
         return if (connectionFactory != null) {
-            RemoteHttpGateway(s.baseUrl, s.apiKey, s.modelName, timeoutMillis, connectionFactory)
+            RemoteHttpGateway(s.baseUrl, s.apiKey, s.modelName, timeoutMillis, connectionFactory, headers)
         } else {
-            RemoteHttpGateway(s.baseUrl, s.apiKey, s.modelName, timeoutMillis)
+            RemoteHttpGateway(s.baseUrl, s.apiKey, s.modelName, timeoutMillis, extraHeaders = headers)
         }
     }
 
@@ -79,6 +102,7 @@ data class ModelSettings(
                     apiKey = o.optString("apiKey", ""),
                     modelName = o.optString("modelName", ""),
                     systemPrompt = o.optString("systemPrompt", ""),
+                    extraHeaders = o.optString("extraHeaders", ""),
                     onboarded = o.optBoolean("onboarded", false)
                 ).normalized()
             }.getOrDefault(ModelSettings())
@@ -92,6 +116,7 @@ data class ModelSettings(
                 .put("apiKey", s.apiKey)
                 .put("modelName", s.modelName)
                 .put("systemPrompt", s.systemPrompt)
+                .put("extraHeaders", s.extraHeaders)
                 .put("onboarded", s.onboarded)
                 .toString()
         }
