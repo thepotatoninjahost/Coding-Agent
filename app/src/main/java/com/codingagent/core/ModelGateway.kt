@@ -48,7 +48,8 @@ class RemoteHttpGateway(
     private val apiKey: String,
     private val model: String,
     private val timeoutMillis: Int = 60_000,
-    private val connectionFactory: (String) -> HttpURLConnection = { URL(it).openConnection() as HttpURLConnection }
+    private val connectionFactory: (String) -> HttpURLConnection = { URL(it).openConnection() as HttpURLConnection },
+    private val extraHeaders: Map<String, String> = emptyMap()
 ) : ModelGateway {
     override fun stream(request: ModelRequest, onDelta: (String) -> Unit): ModelResponse {
         val connection = openConnection() ?: return ModelResponse.Failure("Model gateway configuration is incomplete")
@@ -152,6 +153,19 @@ class RemoteHttpGateway(
         connection.setRequestProperty("Accept", if (streaming) "text/event-stream" else "application/json")
         connection.setRequestProperty("Accept-Language", "en-US,en;q=0.9")
         connection.setRequestProperty("User-Agent", USER_AGENT)
+        // User-supplied headers win. OpenRouter defaults only fill gaps when host matches.
+        val host = runCatching { connection.url?.host.orEmpty() }.getOrDefault("")
+        val applied = linkedMapOf<String, String>()
+        if (host.contains("openrouter.ai")) {
+            applied["HTTP-Referer"] = "https://github.com/thepotatoninjahost/Coding-Agent"
+            applied["X-Title"] = "Coding-Agent"
+        }
+        applied.putAll(extraHeaders)
+        for ((name, value) in applied) {
+            if (name.isNotBlank() && value.isNotBlank()) {
+                connection.setRequestProperty(name, value)
+            }
+        }
     }
 
     companion object {
