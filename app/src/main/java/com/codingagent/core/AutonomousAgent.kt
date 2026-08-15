@@ -147,7 +147,7 @@ class AutonomousAgent(
         for (turn in 0 until config.maxTurns) {
             if (cancelled.get()) return stopNow(taskId, normalized, plan, events) { emit(it) }
             emit(AutonomousAgentEvent.Phase("MODEL", "Decision turn ${turn + 1}/${config.maxTurns}"))
-            var response = gateway.stream(
+            var response = gateway.complete(
                 ModelRequest(
                     AgentModelProtocol.SYSTEM,
                     buildPrompt(normalized, intake, lastEvidence),
@@ -155,20 +155,22 @@ class AutonomousAgent(
                     transcript.toList(),
                     researchRequired = false
                 )
-            ) { delta ->
-                if (!cancelled.get()) emit(AutonomousAgentEvent.ModelDelta(delta))
-            }
+            )
             // One automatic wait+retry on provider rate limit (TPM).
-            if (response is ModelResponse.Failure && isRateLimitFailure(response.message)) {
-                val waitSec = rateLimitWaitSeconds(response.message).coerceIn(1, 45)
-                emit(AutonomousAgentEvent.Phase("MODEL", "Rate limited — waiting ${waitSec}s then retrying once"))
-                try {
-                    Thread.sleep(waitSec * 1000L)
-                } catch (_: InterruptedException) {
-                    Thread.currentThread().interrupt()
+            if (response is ModelResponse.Failure && (isRateLimitFailure(response.message) || isEmptyModelFailure(response.message))) {
+                if (isRateLimitFailure(response.message)) {
+                    val waitSec = rateLimitWaitSeconds(response.message).coerceIn(1, 45)
+                    emit(AutonomousAgentEvent.Phase("MODEL", "Rate limited — waiting ${waitSec}s then retrying once"))
+                    try {
+                        Thread.sleep(waitSec * 1000L)
+                    } catch (_: InterruptedException) {
+                        Thread.currentThread().interrupt()
+                    }
+                } else {
+                    emit(AutonomousAgentEvent.Phase("MODEL", "Empty model response — retrying once"))
                 }
                 if (cancelled.get()) return stopNow(taskId, normalized, plan, events) { emit(it) }
-                response = gateway.stream(
+                response = gateway.complete(
                     ModelRequest(
                         AgentModelProtocol.SYSTEM,
                         buildPrompt(normalized, intake, lastEvidence),
@@ -176,9 +178,7 @@ class AutonomousAgent(
                         transcript.toList(),
                         researchRequired = false
                     )
-                ) { delta ->
-                    if (!cancelled.get()) emit(AutonomousAgentEvent.ModelDelta(delta))
-                }
+                )
             }
             if (cancelled.get()) return stopNow(taskId, normalized, plan, events) { emit(it) }
             when (response) {
@@ -986,6 +986,14 @@ class AutonomousAgent(
             "tokens per minute" in lower || "tpm" in lower || "429" in lower
     }
 
+    private fun isEmptyModelFailure(message: String): Boolean {
+        val lower = message.lowercase()
+        return "no streamed message content" in lower ||
+            "no message content" in lower ||
+            "empty response" in lower ||
+            "returned no message" in lower
+    }
+
     private fun rateLimitWaitSeconds(message: String): Int {
         val match = Regex("try again in ([0-9.]+)", RegexOption.IGNORE_CASE).find(message)
         val sec = match?.groupValues?.getOrNull(1)?.toDoubleOrNull()?.toInt()
@@ -1002,6 +1010,8 @@ class AutonomousAgent(
                 val wait = seconds?.toDoubleOrNull()?.toInt() ?: 30
                 "Model rate-limited (tokens/minute). Wait ~${wait}s, or switch provider in Model settings. Local file evidence still available via inspect/read."
             }
+            "no streamed message content" in lower || "no message content" in lower || "empty response" in lower ->
+                "Model returned an empty response. Retrying is automatic once; if it keeps happening, switch model on OpenRouter."
             "401" in lower || "unauthorized" in lower || "invalid api key" in lower ->
                 "Model auth failed (check API key in Model settings)."
             "403" in lower || "forbidden" in lower ->
@@ -1010,6 +1020,8 @@ class AutonomousAgent(
                 "Model request timed out. Retry once; if it keeps happening, shorten the request or switch provider."
             "connection" in lower || "unreachable" in lower || "unknownhost" in lower ->
                 "Could not reach the model endpoint (network)."
+            "no streamed message content" in lower || "no message content" in lower ->
+                "Model returned an empty response. Retry once, or switch provider in Model settings."
             message.length > 280 -> message.take(280) + "…"
             else -> message
         }
