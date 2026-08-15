@@ -157,6 +157,7 @@ private fun CodingAgentApp(privateDir: File) {
     var draftApiKey by remember { mutableStateOf(modelSettings.apiKey) }
     var draftModelName by remember { mutableStateOf(modelSettings.modelName) }
     var draftBaseUrl by remember { mutableStateOf(modelSettings.baseUrl) }
+    var draftExtraHeaders by remember { mutableStateOf(modelSettings.extraHeaders) }
     var probeMessage by remember { mutableStateOf<String?>(null) }
 
     val density = LocalDensity.current
@@ -169,6 +170,7 @@ private fun CodingAgentApp(privateDir: File) {
         draftApiKey = normalized.apiKey
         draftModelName = normalized.modelName
         draftBaseUrl = normalized.baseUrl
+        draftExtraHeaders = normalized.extraHeaders
         val gateway = normalized.remoteGateway()
         if (gateway != null) {
             modelGateway = gateway
@@ -346,6 +348,7 @@ private fun CodingAgentApp(privateDir: File) {
                         draftApiKey = modelSettings.apiKey
                         draftModelName = modelSettings.modelName
                         draftBaseUrl = modelSettings.baseUrl
+                        draftExtraHeaders = modelSettings.extraHeaders
                         probeMessage = null
                         showModelSettings = true
                     },
@@ -470,6 +473,22 @@ private fun CodingAgentApp(privateDir: File) {
                             singleLine = true,
                             colors = fieldColors()
                         )
+                        Spacer(Modifier.height(8.dp))
+                        OutlinedTextField(
+                            value = draftExtraHeaders,
+                            onValueChange = { draftExtraHeaders = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            label = { Text("Extra headers (optional)", color = SoftGreen) },
+                            placeholder = { Text("HTTP-Referer: https://example.com\nX-Title: Coding-Agent", color = SoftGreen.copy(alpha = 0.5f)) },
+                            minLines = 2,
+                            maxLines = 5,
+                            colors = fieldColors()
+                        )
+                        Text(
+                            "Any provider. One header per line as Name: value. OpenRouter fills Referer/Title if left blank.",
+                            color = SoftGreen,
+                            fontSize = 10.sp
+                        )
                         if (probeMessage != null) {
                             Spacer(Modifier.height(8.dp))
                             Text(probeMessage.orEmpty(), color = SoftGreen, fontSize = 11.sp)
@@ -486,6 +505,7 @@ private fun CodingAgentApp(privateDir: File) {
                                         baseUrl = draftBaseUrl,
                                         apiKey = draftApiKey,
                                         modelName = draftModelName,
+                                        extraHeaders = draftExtraHeaders,
                                         onboarded = true
                                     )
                                     val result = com.codingagent.core.ModelConnectionProbe.probe(candidate)
@@ -506,6 +526,7 @@ private fun CodingAgentApp(privateDir: File) {
                                         baseUrl = draftBaseUrl,
                                         apiKey = draftApiKey,
                                         modelName = draftModelName,
+                                        extraHeaders = draftExtraHeaders,
                                         onboarded = true
                                     )
                                 )
