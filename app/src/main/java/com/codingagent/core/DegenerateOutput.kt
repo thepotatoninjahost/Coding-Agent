@@ -15,10 +15,13 @@ object DegenerateOutput {
         // Structured listing / local-evidence summaries are never treated as model spam.
         if (trimmed.startsWith("Project files:") ||
             trimmed.startsWith("Source files:") ||
+            trimmed.startsWith("Indexed source files") ||
+            trimmed.startsWith("Directory listing:") ||
             trimmed.startsWith("File:") ||
             trimmed.startsWith("Inspect:") ||
             trimmed.startsWith("Scope note:") ||
-            trimmed.startsWith("Policy scan")
+            trimmed.startsWith("Policy scan") ||
+            trimmed.startsWith("Hello. Coding Agent is ready")
         ) return false
 
         val lines = trimmed.lineSequence().map { it.trim() }.filter { it.isNotEmpty() }.toList()
@@ -68,6 +71,8 @@ object DegenerateOutput {
             when {
                 s.startsWith("Project files:") -> true
                 s.startsWith("Source files:") -> true
+                s.startsWith("Indexed source files") -> true
+                s.startsWith("Directory listing:") -> true
                 s.startsWith("File:") -> true
                 s.startsWith("Inspect:") -> true
                 s.startsWith("Verification:") -> true
