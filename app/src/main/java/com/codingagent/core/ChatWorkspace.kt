@@ -117,6 +117,8 @@ class ChatWorkspace(
                 summary.startsWith("Status report") ||
                 summary.startsWith("Project files:") ||
                 summary.startsWith("Source files:") ||
+                summary.startsWith("Indexed source files") ||
+                summary.startsWith("Directory listing:") ||
                 summary.startsWith("File:")
 
         if (isDirect) {
@@ -171,6 +173,8 @@ class ChatWorkspace(
         val head = text.trimStart()
         if (head.startsWith("Project files:") ||
             head.startsWith("Source files:") ||
+            head.startsWith("Indexed source files") ||
+            head.startsWith("Directory listing:") ||
             head.startsWith("File:") ||
             head.startsWith("Hello.") ||
             head.startsWith("Status report")
