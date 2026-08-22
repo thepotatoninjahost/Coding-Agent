@@ -34,7 +34,8 @@ class AutonomousAgent(
     private val root: java.io.File,
     private val runtime: CodingAgentRuntime,
     private val knowledge: AgentKnowledge,
-    private val gateway: ModelGateway,
+    /** Null = local-only mode: greeting, list, status, explicit read still work; model turns require settings. */
+    private val gateway: ModelGateway? = null,
     private val config: AutonomousAgentConfig = AutonomousAgentConfig(),
     private val research: DeepResearchProvider = DurableDeepResearchProvider(root.resolve(".coding-agent/research")),
     private val mutations: MutationCoordinator = MutationCoordinator(ProjectWorkspace(root))
@@ -110,6 +111,23 @@ class AutonomousAgent(
             return events
         }
 
+        // Model required only past direct lanes. Local ops must not depend on API keys.
+        val activeGateway = gateway
+        if (activeGateway == null) {
+            val msg =
+                "Model is not configured. Local commands still work: hello, list files, status, read <path>. " +
+                    "Open Model settings (base URL, model name, API key) for autonomous coding, research, and edits."
+            val task = AgentTask(
+                taskId, focus, "needs-input", plan, emptyList(),
+                VerificationReport(true, emptyList()),
+                listOf("${Instant.now()}: model gateway missing — local lanes only"),
+                msg
+            )
+            emit(AutonomousAgentEvent.Completed(task))
+            journal.record(task)
+            return events
+        }
+
         var researchEvidence = ""
         if (shouldResearch(normalized, intake)) {
             if (cancelled.get()) return stopNow(taskId, normalized, plan, events) { emit(it) }
@@ -134,9 +152,11 @@ class AutonomousAgent(
         }
 
         val transcript = mutableListOf<com.codingagent.core.ModelMessage>()
-        var lastEvidence = "Repository indexed files: ${workspace.summary().files.size}. " +
-            "Call list_files or search_project before read_file. Do not invent paths." +
-            researchEvidence
+        var lastEvidence = buildString {
+            append(repoMapSummary())
+            append("\nCall list_files or search_project before read_file. Do not invent paths.")
+            append(researchEvidence)
+        }
         var consecutiveFailures = 0
         var lastToolSignature: String? = null
         var identicalRepeats = 0
@@ -147,7 +167,7 @@ class AutonomousAgent(
         for (turn in 0 until config.maxTurns) {
             if (cancelled.get()) return stopNow(taskId, normalized, plan, events) { emit(it) }
             emit(AutonomousAgentEvent.Phase("MODEL", "Decision turn ${turn + 1}/${config.maxTurns}"))
-            var response = gateway.complete(
+            var response = activeGateway.complete(
                 ModelRequest(
                     AgentModelProtocol.SYSTEM,
                     buildPrompt(normalized, intake, lastEvidence),
@@ -170,7 +190,7 @@ class AutonomousAgent(
                     emit(AutonomousAgentEvent.Phase("MODEL", "Empty model response — retrying once"))
                 }
                 if (cancelled.get()) return stopNow(taskId, normalized, plan, events) { emit(it) }
-                response = gateway.complete(
+                response = activeGateway.complete(
                     ModelRequest(
                         AgentModelProtocol.SYSTEM,
                         buildPrompt(normalized, intake, lastEvidence),
@@ -462,8 +482,37 @@ class AutonomousAgent(
         return false
     }
 
+    /**
+     * Compact repo map for the model (Aider-style). Paths only — not full file bodies.
+     * Extension-filtered index; honest about that limit.
+     */
+    private fun repoMapSummary(maxPaths: Int = 100): String {
+        val paths = files.listSourceFilePaths()
+        val summary = workspace.summary()
+        return buildString {
+            append("Repo map — indexed sources: ${paths.size}")
+            append(" (extension whitelist; not every file on disk).")
+            if (summary.languages.isNotEmpty()) {
+                append(" Languages: ")
+                append(summary.languages.entries.sortedByDescending { it.value }.joinToString { "${it.key}=${it.value}" })
+            }
+            append('\n')
+            if (paths.isEmpty()) {
+                append("(no indexed source files)\n")
+            } else {
+                paths.take(maxPaths).forEach { path ->
+                    append(path)
+                    append('\n')
+                }
+                if (paths.size > maxPaths) {
+                    append("… and ${paths.size - maxPaths} more (use list_files / search_project)\n")
+                }
+            }
+        }
+    }
+
     private fun buildPrompt(request: String, intake: TaskIntake, evidence: String): String = buildString {
-        appendLine("You are the Coding-Agent on this device. Execute the request fully.")
+        appendLine("You are the Coding-Agent on this device. You extend the model with tools and real evidence — never invent paths or file contents.")
         appendLine()
         appendLine("Request:")
         appendLine(request)
@@ -490,13 +539,16 @@ class AutonomousAgent(
             val arguments = JSONObject(rawArguments)
             when (name) {
                 "list_files" -> {
-                    val pathArg = arguments.optString("path").trim()
-                    // Empty path → source file names only (AutonomousAgent.kt).
-                    // Non-empty path → relative entries under that directory.
+                    // Empty / "." / "/" → indexed source paths (extension whitelist).
+                    // Real subdirectory path → immediate children of that directory.
+                    // Never fall back to root dir names labeled as "source files".
+                    val rawPath = arguments.optString("path").trim()
+                    val pathArg = when {
+                        rawPath.isEmpty() || rawPath == "." || rawPath == "./" || rawPath == "/" -> ""
+                        else -> rawPath
+                    }
                     val listed = if (pathArg.isEmpty()) {
-                        files.listSourceFileNames().ifEmpty {
-                            files.list("").map { java.io.File(it).name }
-                        }
+                        files.listSourceFilePaths().ifEmpty { files.listSourceFileNames() }
                     } else {
                         files.list(pathArg)
                     }
@@ -646,11 +698,15 @@ class AutonomousAgent(
 
     private fun formatListingSummary(listing: String, report: VerificationReport, namesOnly: Boolean = true): String {
         return buildString {
-            append(if (namesOnly) "Source files:\n" else "Project files:\n")
+            if (namesOnly) {
+                append("Indexed source files (extension whitelist — not a full disk listing):\n")
+            } else {
+                append("Directory listing:\n")
+            }
             append(listing.trim().ifBlank { "(none)" })
             append("\n\nVerification: ")
             if (report.passed) {
-                append("passed")
+                append("passed (static unfinished-work marker scan)")
             } else {
                 append("FAILED; ")
                 append(report.issues.size)
@@ -694,8 +750,9 @@ class AutonomousAgent(
     }
 
     /**
-     * Fast paths that must work without the model: greeting, status, explicit single-file read.
-     * These are the minimum behaviors that make the agent feel present and useful.
+     * Fast paths that must work without the model: greeting, status, indexed source listing,
+     * explicit single-file read, named-file inspect. These give correct local evidence and
+     * do not discard model capability — they avoid a model round-trip when tools alone suffice.
      */
     private fun directLaneResponse(
         taskId: String,
@@ -710,19 +767,44 @@ class AutonomousAgent(
             val summary = workspace.summary()
             val text = buildString {
                 append("Hello. Coding Agent is ready.\n")
-                append("Project files indexed: ${summary.files.size}.\n")
+                append("Project files indexed: ${summary.files.size} (source extensions only — not every file on disk).\n")
                 append("Languages: ")
                 append(
                     if (summary.languages.isEmpty()) "none detected"
                     else summary.languages.entries.sortedByDescending { it.value }.joinToString { "${it.key}=${it.value}" }
                 )
                 append(".\n")
-                append("Verification: ${if (report.passed) "passed" else "FAILED (${report.issues.size} issue(s))"}.\n")
+                append("Verification: ${if (report.passed) "passed (static marker scan)" else "FAILED (${report.issues.size} issue(s))"}.\n")
                 append("Ask me to list files, read a path, analyze something, research a topic, or propose a change.")
             }
             return AgentTask(
                 taskId, request, "completed", plan, emptyList(), report,
                 listOf("${Instant.now()}: greeting / readiness"),
+                text
+            )
+        }
+
+        // Bare "list files" / "list source files": local indexed listing — no model round-trip.
+        // Gives the model correct evidence when tools are used later; does not discard model output for this case.
+        if (isListingRequest(t) && isSourceFileListRequest(t)) {
+            val paths = files.listSourceFilePaths()
+            val text = buildString {
+                append("Indexed source files: ${paths.size}\n")
+                append("(Extension whitelist only — not a full disk listing.)\n")
+                if (paths.isEmpty()) {
+                    append("(none)\n")
+                } else {
+                    paths.forEach { path ->
+                        append(path)
+                        append('\n')
+                    }
+                }
+                append("\nVerification: ")
+                append(if (report.passed) "passed (static unfinished-work marker scan)" else "FAILED (${report.issues.size} issue(s))")
+            }
+            return AgentTask(
+                taskId, request, "completed", plan, emptyList(), report,
+                listOf("${Instant.now()}: direct indexed source listing (${paths.size} files)"),
                 text
             )
         }
