@@ -86,6 +86,14 @@ class ProjectWorkspace(private val root: File) {
         try {
             changeSet.changes.forEach { record ->
                 writeAtomically(requireSafePath(record.path), requireNotNull(record.after))
+                val onDisk = requireSafePath(record.path).readText(Charsets.UTF_8)
+                require(checksum(onDisk) == record.afterChecksum) {
+                    "Integrity: disk SHA-256 does not match staged afterChecksum: ${record.path}"
+                }
+                val integrity = FileIntegrity.inspect(record.path, onDisk, record.afterChecksum)
+                require(integrity.isEmpty()) {
+                    "Integrity: applied file failed checks: ${integrity.joinToString { it.message }}"
+                }
                 written += record
             }
             persist(changeSet)
@@ -210,6 +218,11 @@ class ProjectWorkspace(private val root: File) {
             } catch (_: AtomicMoveNotSupportedException) {
                 Files.move(temporary.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING)
             }
+            val onDisk = Files.readAllBytes(file.toPath())
+            val expected = content.toByteArray(Charsets.UTF_8)
+            require(onDisk.contentEquals(expected)) {
+                "Integrity: atomic write did not persist expected bytes for ${file.name} (wrote ${expected.size}, disk ${onDisk.size})"
+            }
         } finally {
             temporary.delete()
         }
@@ -242,6 +255,8 @@ class ProjectWorkspace(private val root: File) {
                 continue
             }
             val file = root.resolve(path)
+            val text = file.readText()
+            issues += FileIntegrity.inspect(path, text, metadata.checksum)
             file.readLines().forEachIndexed { index, line ->
                 val marker = unfinishedMarkerMessage(line)
                 if (marker != null) issues += VerificationIssue(path, index + 1, marker)
@@ -286,6 +301,7 @@ class ProjectWorkspace(private val root: File) {
         val issues = mutableListOf<VerificationIssue>()
         changeSet.changes.forEach { record ->
             if (record.after.isNullOrEmpty()) return@forEach
+            issues += FileIntegrity.inspectChange(record)
             record.after.lineSequence().forEachIndexed { index, line ->
                 if (unfinishedMarkerMessage(line) != null) {
                     issues += VerificationIssue(record.path, index + 1, "unfinished implementation marker remains")
