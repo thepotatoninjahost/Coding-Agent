@@ -161,7 +161,7 @@ class AutonomousAgent(
         var lastToolSignature: String? = null
         var identicalRepeats = 0
         val readPaths = linkedSetOf<String>()
-        var searchedProject = files.listSourceFilePaths().isNotEmpty()
+        var searchedProject = false
         var evidenceRefusals = 0
 
         for (turn in 0 until config.maxTurns) {
