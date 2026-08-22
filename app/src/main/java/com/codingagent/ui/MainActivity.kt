@@ -281,7 +281,18 @@ private fun CodingAgentApp(privateDir: File) {
             runCatching { importProject(context, privateDir, uri) }
                 .onSuccess { imported ->
                     withContext(Dispatchers.Main) {
-                        mountProject(imported, "${ProjectWorkspace(imported).summary().files.size} files indexed")
+                        // Inline mount: local fun mountProject is declared later in this composable
+                        // and is not in scope at folderPicker construction time.
+                        val mounted = ProjectWorkspace(imported)
+                        workspace = mounted
+                        fileList = mounted.summary().files.map { it.path }.sorted()
+                        store.saveProjectPath(imported.absolutePath)
+                        pendingProposalId = null
+                        pendingProposal = null
+                        approvalCount = 0
+                        pendingApproval = false
+                        status = AgentStatus.READY
+                        detail = "${fileList.size} files indexed"
                     }
                 }
                 .onFailure {
