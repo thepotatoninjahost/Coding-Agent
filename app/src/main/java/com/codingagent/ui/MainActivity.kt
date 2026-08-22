@@ -121,7 +121,7 @@ private fun CodingAgentApp(privateDir: File) {
     var workspace by remember { mutableStateOf<ProjectWorkspace?>(null) }
     var tab by remember { mutableStateOf(SurfaceTab.CHAT) }
     var status by remember { mutableStateOf(AgentStatus.READY) }
-    var detail by remember { mutableStateOf("Import a project to begin") }
+    var detail by remember { mutableStateOf("Talk freely — or New / Import a project") }
     var chatInput by remember { mutableStateOf("") }
     var chatMessages by remember { mutableStateOf(store.recentChatMessages().asReversed()) }
     var researchQuery by remember { mutableStateOf("") }
@@ -184,42 +184,65 @@ private fun CodingAgentApp(privateDir: File) {
     }
 
     LaunchedEffect(Unit) {
-        withContext(Dispatchers.IO) {
-            store.loadProjectPath()?.let { path ->
-                val dir = File(path)
-                if (dir.isDirectory) {
-                    runCatching {
-                        val mounted = ProjectWorkspace(dir)
-                        workspace = mounted
-                        fileList = mounted.summary().files.map { it.path }.sorted()
-                        status = AgentStatus.READY
-                        detail = "Restored project · ${fileList.size} files"
-                    }
-                } else {
-                    store.saveProjectPath(null)
-                }
+        // Model settings first so gateway exists as soon as project mounts (avoids first-message race).
+        val loadedSettings = withContext(Dispatchers.IO) { store.loadModelSettings() }
+        applyModelSettings(loadedSettings)
+        val restored = withContext(Dispatchers.IO) {
+            val path = store.loadProjectPath() ?: return@withContext null
+            val dir = File(path)
+            if (!dir.isDirectory) {
+                store.saveProjectPath(null)
+                return@withContext null
             }
-            store.loadLastResearchQuery()?.let { q -> if (researchQuery.isBlank()) researchQuery = q }
+            runCatching {
+                val mounted = ProjectWorkspace(dir)
+                val files = mounted.summary().files.map { it.path }.sorted()
+                store.loadLastResearchQuery() to (mounted to files)
+            }.getOrNull()
         }
-        applyModelSettings(store.loadModelSettings())
+        restored?.let { (lastQuery, pair) ->
+            val (mounted, files) = pair
+            workspace = mounted
+            fileList = files
+            status = AgentStatus.READY
+            detail = "Restored project · ${files.size} files"
+            if (!lastQuery.isNullOrBlank() && researchQuery.isBlank()) researchQuery = lastQuery
+        }
         if (!modelSettings.isRemoteConfigured()) {
             showModelSettings = true
-            detail = "Enter base URL, model name, and API key in Model settings."
+            if (workspace == null) {
+                detail = "Enter base URL, model name, and API key in Model settings."
+            }
         }
     }
 
     val tools = remember(workspace) { workspace?.let(::AgentTools) }
+    // Agent is created whenever a project is mounted. Model gateway is optional:
+    // local lanes (hello, list files, status, read) work without a model; model turns require settings.
     val agent = remember(workspace, modelGateway) {
         workspace?.let { current ->
             val gateway = modelGateway
-            val runtime = CodingAgentRuntime(current, object : AgentKnowledge {
-                override fun search(query: String, limit: Int) = knowledgeBase.search(query, limit)
-            }, AgentJournal(current.projectRoot()), research = CompositeWebResearchProvider(), deepResearch = DurableDeepResearchProvider(current.projectRoot().resolve(".coding-agent/research")), modelGateway = gateway, mutationCoordinator = mutationCoordinator ?: MutationCoordinator(current))
-            gateway?.let { gw ->
-                AutonomousAgent(current.projectRoot(), runtime, object : AgentKnowledge {
+            val runtime = CodingAgentRuntime(
+                current,
+                object : AgentKnowledge {
                     override fun search(query: String, limit: Int) = knowledgeBase.search(query, limit)
-                }, gw, research = DurableDeepResearchProvider(current.projectRoot().resolve(".coding-agent/research")), mutations = mutationCoordinator ?: MutationCoordinator(current))
-            }
+                },
+                AgentJournal(current.projectRoot()),
+                research = CompositeWebResearchProvider(),
+                deepResearch = DurableDeepResearchProvider(current.projectRoot().resolve(".coding-agent/research")),
+                modelGateway = gateway,
+                mutationCoordinator = mutationCoordinator ?: MutationCoordinator(current)
+            )
+            AutonomousAgent(
+                current.projectRoot(),
+                runtime,
+                object : AgentKnowledge {
+                    override fun search(query: String, limit: Int) = knowledgeBase.search(query, limit)
+                },
+                gateway = gateway,
+                research = DurableDeepResearchProvider(current.projectRoot().resolve(".coding-agent/research")),
+                mutations = mutationCoordinator ?: MutationCoordinator(current)
+            )
         }
     }
     val progressEpoch = remember { java.util.concurrent.atomic.AtomicInteger(0) }
@@ -229,10 +252,14 @@ private fun CodingAgentApp(privateDir: File) {
             runtimeProvider = { agent },
             unavailableMessageProvider = {
                 when {
-                    workspace == null -> "Choose a project folder before sending coding requests."
-                    modelGateway == null -> "Remote model is not configured. Open Model settings and enter base URL, model name, and API key."
-                    modelLoadError != null -> "Model unavailable. ${modelLoadError.orEmpty()}"
-                    else -> "Model gateway is not ready."
+                    workspace == null ->
+                        "No project mounted. Import a folder, or restore a previous project, before coding requests."
+                    agent == null ->
+                        "Project is mounting — try again in a moment."
+                    modelLoadError != null ->
+                        "Model settings error: ${modelLoadError.orEmpty()}. Local commands (hello, list files, status, read) still work."
+                    else ->
+                        "Agent not ready."
                 }
             },
             progressListener = { phase, detailText ->
@@ -253,18 +280,16 @@ private fun CodingAgentApp(privateDir: File) {
         scope.launch(Dispatchers.IO) {
             runCatching { importProject(context, privateDir, uri) }
                 .onSuccess { imported ->
-                    val mounted = ProjectWorkspace(imported)
-                    workspace = mounted
-                    fileList = mounted.summary().files.map { it.path }.sorted()
-                    store.saveProjectPath(imported.absolutePath)
-                    pendingProposalId = null
-                    pendingProposal = null
-                    approvalCount = 0
-                    pendingApproval = false
-                    status = AgentStatus.READY
-                    detail = "${fileList.size} files indexed"
+                    withContext(Dispatchers.Main) {
+                        mountProject(imported, "${ProjectWorkspace(imported).summary().files.size} files indexed")
+                    }
                 }
-                .onFailure { status = AgentStatus.STOPPED; detail = "Import failed: ${it.message.orEmpty()}" }
+                .onFailure {
+                    withContext(Dispatchers.Main) {
+                        status = AgentStatus.STOPPED
+                        detail = "Import failed: ${it.message.orEmpty()}"
+                    }
+                }
         }
     }
 
@@ -277,11 +302,136 @@ private fun CodingAgentApp(privateDir: File) {
         detail = "Stopped. Any queued follow-ups were cleared."
     }
 
+    fun mountProject(dir: File, detailText: String) {
+        val mounted = ProjectWorkspace(dir)
+        workspace = mounted
+        fileList = mounted.summary().files.map { it.path }.sorted()
+        store.saveProjectPath(dir.absolutePath)
+        pendingProposalId = null
+        pendingProposal = null
+        approvalCount = 0
+        pendingApproval = false
+        status = AgentStatus.READY
+        detail = detailText
+    }
+
+    fun startNewProject(nameHint: String? = null) {
+        scope.launch(Dispatchers.IO) {
+            runCatching { createEmptyProject(privateDir, nameHint) }
+                .onSuccess { created ->
+                    withContext(Dispatchers.Main) {
+                        mountProject(created, "New empty project · ${created.name}")
+                        store.recordChatMessage(
+                            ChatMessage(
+                                role = ChatRole.SYSTEM,
+                                content = "Created empty project `${created.name}`. Indexed sources: ${fileList.size}. " +
+                                    "Ask me to add files, scaffold a structure, or import more code."
+                            )
+                        )
+                        chatMessages = store.recentChatMessages().asReversed()
+                    }
+                }
+                .onFailure {
+                    withContext(Dispatchers.Main) {
+                        status = AgentStatus.FAILED
+                        detail = "New project failed: ${it.message.orEmpty()}"
+                    }
+                }
+        }
+    }
+
+    fun clearProject() {
+        workspace = null
+        fileList = emptyList()
+        store.saveProjectPath(null)
+        pendingProposalId = null
+        pendingProposal = null
+        approvalCount = 0
+        pendingApproval = false
+        status = AgentStatus.READY
+        detail = "No project — New, Import, or say create project"
+        store.recordChatMessage(
+            ChatMessage(
+                role = ChatRole.SYSTEM,
+                content = "Project cleared. You can still talk. Say `create project` or tap New for an empty workspace, or Import an existing folder."
+            )
+        )
+        chatMessages = store.recentChatMessages().asReversed()
+    }
+
+    /** When no project is mounted, handle conversation + create/restart without requiring the agent root. */
+    fun handleNoProjectChat(request: String): String {
+        val t = request.lowercase().trim()
+        val createHints = listOf(
+            "create project", "new project", "start project", "start a project",
+            "create a project", "make a project", "empty project", "blank project",
+            "restart project", "reset project"
+        )
+        if (createHints.any { t == it || t.startsWith("$it ") || t.startsWith("$it:") }) {
+            val name = Regex("""(?:create|new|start|make|empty|blank|restart|reset)\s+project(?:\s+named)?\s+([A-Za-z0-9._-]+)""", RegexOption.IGNORE_CASE)
+                .find(request)?.groupValues?.getOrNull(1)
+            startNewProject(name)
+            return "Creating empty project${if (name != null) " `$name`" else ""}…"
+        }
+        if (t in listOf("hello", "hi", "hey", "yo", "sup", "ping", "help", "status", "what can you do")) {
+            return buildString {
+                append("Hello. Coding Agent is ready — no project is mounted yet.\n")
+                append("You can still talk to me.\n\n")
+                append("• Tap **New** or say `create project` — start an empty workspace\n")
+                append("• Tap **Import** — copy an existing folder into the app\n")
+                append("• Open **Model** — set base URL, model, API key for autonomous coding\n")
+                append("\nOnce a project exists I can list files, read, research, and propose code changes.")
+            }
+        }
+        return buildString {
+            append("No project is mounted yet, so I cannot read or edit code.\n\n")
+            append("Say `create project` (or tap **New**) for an empty workspace, ")
+            append("or **Import** an existing folder. ")
+            append("You can also say `hello` / `help` anytime.")
+        }
+    }
+
     fun send() {
         val request = chatInput.trim()
-        val currentChat = chat ?: return
         if (request.isBlank()) return
         chatInput = ""
+
+        // Create / new / restart project works with or without a current project.
+        val lower = request.lowercase().trim()
+        val createHints = listOf(
+            "create project", "new project", "start project", "start a project",
+            "create a project", "make a project", "empty project", "blank project",
+            "restart project", "reset project"
+        )
+        if (createHints.any { lower == it || lower.startsWith("$it ") || lower.startsWith("$it:") }) {
+            store.recordChatMessage(ChatMessage(role = ChatRole.USER, content = request))
+            val name = Regex(
+                """(?:create|new|start|make|empty|blank|restart|reset)\s+project(?:\s+named)?\s+([A-Za-z0-9._-]+)""",
+                RegexOption.IGNORE_CASE
+            ).find(request)?.groupValues?.getOrNull(1)
+            store.recordChatMessage(
+                ChatMessage(
+                    role = ChatRole.AGENT,
+                    content = "Creating empty project${if (name != null) " `$name`" else ""}…"
+                )
+            )
+            chatMessages = store.recentChatMessages().asReversed()
+            startNewProject(name)
+            return
+        }
+
+        // No project: still conversational — help / explain, never a dead end.
+        if (workspace == null) {
+            store.recordChatMessage(ChatMessage(role = ChatRole.USER, content = request))
+            val reply = handleNoProjectChat(request)
+            store.recordChatMessage(ChatMessage(role = ChatRole.AGENT, content = reply))
+            chatMessages = store.recentChatMessages().asReversed()
+            status = AgentStatus.READY
+            detail = reply.lineSequence().firstOrNull().orEmpty().take(120)
+            return
+        }
+
+        val currentChat = chat ?: return
         if (activeJob != null) {
             messageQueue = messageQueue + request
             detail = "Working; queued ${messageQueue.size} follow-up message(s)"
@@ -344,6 +494,7 @@ private fun CodingAgentApp(privateDir: File) {
             topBar = {
                 CompactStatusBar(status, detail, workspace != null, modelStatus, modelProgress,
                     onImport = { folderPicker.launch(null) },
+                    onNewProject = { startNewProject(null) },
                     onModelImport = {
                         draftApiKey = modelSettings.apiKey
                         draftModelName = modelSettings.modelName
