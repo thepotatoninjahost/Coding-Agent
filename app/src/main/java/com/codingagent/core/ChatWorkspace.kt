@@ -110,6 +110,10 @@ class ChatWorkspace(
 
     private fun formatTask(task: AgentTask): String = buildString {
         val summary = sanitizeSummary(task.summary)
+        if (task.status == "failed" || task.status == "stopped") {
+            append(summary)
+            return@buildString
+        }
         // Lead with the answer. Verification theater must not bury tool results or greetings.
         val isDirect =
             task.status == "needs-input" ||

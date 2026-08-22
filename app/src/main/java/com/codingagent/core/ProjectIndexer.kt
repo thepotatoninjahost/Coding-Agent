@@ -7,7 +7,10 @@ import java.security.MessageDigest
  * ONE JOB: Project tree → indexed file records with symbols and checksums.
  */
 class ProjectIndexer {
-    private val ignored = setOf(".git", ".gradle", "build", "node_modules", "target", "Trash")
+    private val ignored = setOf(
+        ".git", ".gradle", "build", "node_modules", "target", "Trash",
+        ".coding-agent", ".idea", "captures"
+    )
     private val extensions = setOf("kt", "java", "kts", "py", "js", "ts", "tsx", "jsx", "json", "xml", "gradle", "md", "yaml", "yml", "toml", "sh")
 
     fun index(root: File): List<ProjectFile> = root.walkTopDown()

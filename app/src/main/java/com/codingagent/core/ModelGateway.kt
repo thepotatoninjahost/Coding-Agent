@@ -116,14 +116,22 @@ class RemoteHttpGateway(
     }
 
     override fun complete(request: ModelRequest): ModelResponse {
+        val first = completeOnce(request)
+        if (first is ModelResponse.Failure && isEmptyContentFailure(first.message) && request.tools.isNotEmpty()) {
+            // NVIDIA and some OpenAI-compat models return empty bodies when tool_choice=auto.
+            return completeOnce(request.copy(tools = emptyList()))
+        }
+        return first
+    }
+
+    private fun completeOnce(request: ModelRequest): ModelResponse {
         val connection = openConnection() ?: return ModelResponse.Failure("Model gateway configuration is incomplete")
         return try {
             configure(connection, false)
             connection.outputStream.use { it.write(requestBody(request, false).toString().toByteArray(StandardCharsets.UTF_8)) }
             if (connection.responseCode !in 200..299) return failure(connection)
             val text = connection.inputStream.bufferedReader().use { it.readText() }
-            val message = JSONObject(text).optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")
-            if (message == null) JsonModelResponseParser().parse(text) else responseFromChatMessage(message)
+            parseCompletionBody(text)
         } catch (error: IOException) {
             ModelResponse.Failure("Model request failed: ${error.message.orEmpty().ifBlank { error.javaClass.simpleName }}")
         } catch (error: Exception) {
@@ -131,6 +139,28 @@ class RemoteHttpGateway(
         } finally {
             connection.disconnect()
         }
+    }
+
+    private fun parseCompletionBody(text: String): ModelResponse {
+        val trimmed = text.trim()
+        if (trimmed.isEmpty()) return ModelResponse.Failure("Model returned an empty response")
+        val json = runCatching { JSONObject(trimmed) }.getOrNull()
+            ?: return JsonModelResponseParser().parse(trimmed)
+        val choice = json.optJSONArray("choices")?.optJSONObject(0)
+        val message = choice?.optJSONObject("message")
+            ?: choice?.optJSONObject("delta")
+        if (message != null) return responseFromChatMessage(message)
+        val textField = choice?.optString("text").orEmpty()
+        if (textField.isNotBlank()) return JsonModelResponseParser().parse(textField)
+        return JsonModelResponseParser().parse(trimmed)
+    }
+
+    private fun isEmptyContentFailure(message: String): Boolean {
+        val lower = message.lowercase()
+        return "empty response" in lower ||
+            "no usable message content" in lower ||
+            "did not contain content or tool" in lower ||
+            "no streamed message content" in lower
     }
 
     private fun openConnection(): HttpURLConnection? {
@@ -214,16 +244,28 @@ class RemoteHttpGateway(
     private fun responseFromChatMessage(message: JSONObject): ModelResponse {
         val calls = message.optJSONArray("tool_calls")
         if (calls != null && calls.length() > 0) {
-            val function = calls.optJSONObject(0)?.optJSONObject("function")
-                ?: return ModelResponse.Failure("Model returned a malformed tool call")
-            val name = function.optString("name")
+            val first = calls.optJSONObject(0)
+            val function = first?.optJSONObject("function") ?: first
+            val name = function?.optString("name").orEmpty()
             if (name.isBlank()) return ModelResponse.Failure("Model returned a tool call without a function name")
             return ModelResponse.ToolCall(
                 name,
-                function.optString("arguments", "{}"),
+                function?.optString("arguments", "{}") ?: "{}",
                 extractMessageText(message),
-                calls.optJSONObject(0)?.optString("id")
+                first?.optString("id")
             )
+        }
+        val legacy = message.optJSONObject("function_call")
+        if (legacy != null) {
+            val name = legacy.optString("name")
+            if (name.isNotBlank()) {
+                return ModelResponse.ToolCall(
+                    name,
+                    legacy.optString("arguments", "{}"),
+                    extractMessageText(message),
+                    message.optString("id").takeIf { it.isNotBlank() }
+                )
+            }
         }
         val content = extractMessageText(message)
         return if (content.isBlank()) {
@@ -297,6 +339,14 @@ class RemoteHttpGateway(
 
     private fun appendStreamDelta(delta: JSONObject, content: StringBuilder, toolCalls: MutableMap<Int, StreamToolCall>, onDelta: (String) -> Unit) {
         delta.optString("content").takeIf { it.isNotEmpty() }?.let {
+            content.append(it)
+            onDelta(it)
+        }
+        delta.optString("reasoning_content").takeIf { it.isNotEmpty() }?.let {
+            content.append(it)
+            onDelta(it)
+        }
+        delta.optString("text").takeIf { it.isNotEmpty() }?.let {
             content.append(it)
             onDelta(it)
         }

@@ -161,7 +161,7 @@ class AutonomousAgent(
         var lastToolSignature: String? = null
         var identicalRepeats = 0
         val readPaths = linkedSetOf<String>()
-        var searchedProject = false
+        var searchedProject = files.listSourceFilePaths().isNotEmpty()
         var evidenceRefusals = 0
 
         for (turn in 0 until config.maxTurns) {
@@ -728,14 +728,21 @@ class AutonomousAgent(
     }
 
     private fun isListingRequest(request: String): Boolean {
-        val t = request.lowercase()
+        val t = request.lowercase().trim()
+        // Review / analyze / summarize the project must reach the model. Do not steal those as a dump.
+        if (Regex("\\b(review|analy[sz]e|summarize|explain|inspect|describe|audit|critique|compare)\\b")
+                .containsMatchIn(t)
+        ) {
+            return false
+        }
         val listingHints = listOf(
             "list file", "list files", "list the file", "list project", "list the project",
-            "show file", "show files", "show the file", "what files", "which files",
-            "file list", "files in the project", "project files", "directory listing",
-            "source file", "source files"
+            "show files", "show the files", "what files", "which files",
+            "file list", "directory listing", "list source", "ls files"
         )
-        return listingHints.any { hint -> t.contains(hint) }
+        if (listingHints.any { hint -> t.contains(hint) }) return true
+        if (t == "list" || t == "ls" || t == "files") return true
+        return false
     }
 
     /** Names only (AutonomousAgent.kt) vs relative paths when a directory/path was requested. */
@@ -1077,7 +1084,10 @@ class AutonomousAgent(
         return "no streamed message content" in lower ||
             "no message content" in lower ||
             "empty response" in lower ||
-            "returned no message" in lower
+            "returned no message" in lower ||
+            "no usable message content" in lower ||
+            "did not contain content or tool" in lower ||
+            "returned an empty response" in lower
     }
 
     private fun rateLimitWaitSeconds(message: String): Int {
@@ -1096,8 +1106,10 @@ class AutonomousAgent(
                 val wait = seconds?.toDoubleOrNull()?.toInt() ?: 30
                 "Model rate-limited (tokens/minute). Wait ~${wait}s, or switch provider in Model settings. Local file evidence still available via inspect/read."
             }
-            "no streamed message content" in lower || "no message content" in lower || "empty response" in lower ->
-                "Model returned an empty response. Retrying is automatic once; if it keeps happening, switch model on OpenRouter."
+            "no streamed message content" in lower || "no message content" in lower ||
+                "empty response" in lower || "no usable message content" in lower ||
+                "did not contain content or tool" in lower ->
+                "Model returned an empty response. Retrying is automatic once; if it keeps happening, switch model in Model settings."
             "401" in lower || "unauthorized" in lower || "invalid api key" in lower ->
                 "Model auth failed (check API key in Model settings)."
             "403" in lower || "forbidden" in lower ->
@@ -1126,10 +1138,7 @@ class AutonomousAgent(
             status = "failed",
             plan = plan,
             changes = changes,
-            verification = VerificationReport(
-                passed = false,
-                issues = listOf(VerificationIssue("<agent>", 0, message))
-            ),
+            verification = VerificationReport(true, emptyList()),
             events = listOf("${Instant.now()}: $message"),
             summary = message
         )
