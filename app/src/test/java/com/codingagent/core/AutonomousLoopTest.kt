@@ -46,7 +46,8 @@ class AutonomousLoopTest {
             modelGateway = gateway
         )
         val agent = AutonomousAgent(root, runtime, knowledge, gateway, AutonomousAgentConfig(maxTurns = 6))
-        val events = agent.run("List the source files and summarize")
+        // Avoid bare listing phrases so direct-lane does not short-circuit before tools.
+        val events = agent.run("Summarize what is under the src directory after inspecting it")
         assertTrue(events.any { it is AutonomousAgentEvent.ToolFinished })
         assertTrue(events.last() is AutonomousAgentEvent.Completed)
     }
@@ -158,8 +159,9 @@ class AutonomousLoopTest {
     @Test
     fun listingRequestCompletesInsteadOfAborting() {
         val root = Files.createTempDirectory("agent-listing-complete").toFile()
-        root.resolve("a.txt").writeText("hello world content enough\n")
-        root.resolve("b.txt").writeText("second file\n")
+        // Use indexed extensions (txt is not on the indexer whitelist).
+        root.resolve("a.kt").writeText("fun a() = 1\n")
+        root.resolve("b.kt").writeText("fun b() = 2\n")
         val gateway = ScriptedGateway(
             List(6) { ModelResponse.ToolCall("list_files", "{}") }
         )
@@ -179,8 +181,10 @@ class AutonomousLoopTest {
         )
         val completed = events.last() as AutonomousAgentEvent.Completed
         assertTrue(
-            "summary should contain the file listing",
-            completed.task.summary.contains("a.txt") || completed.task.summary.contains("Project files")
+            "summary should contain the indexed listing",
+            completed.task.summary.contains("a.kt") ||
+                completed.task.summary.contains("Indexed source files") ||
+                completed.task.summary.contains("Project files")
         )
     }
 
