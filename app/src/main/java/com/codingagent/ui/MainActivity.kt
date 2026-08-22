@@ -304,6 +304,29 @@ private fun CodingAgentApp(privateDir: File) {
         }
     }
 
+
+    fun onChangeApplied(result: MutationApprovalResult.Applied) {
+        val paths = result.changeSet.changes.map { it.path }.distinct()
+        workspace?.let { ws ->
+            fileList = ws.summary().files.map { it.path }.sorted()
+        }
+        approvalCount = result.proposal.approvalCount
+        pendingApproval = false
+        pendingProposal = null
+        pendingProposalId = null
+        status = AgentStatus.READY
+        detail = "APPLIED ${paths.size} file(s): ${paths.joinToString().take(100)}"
+        store.recordChatMessage(
+            ChatMessage(
+                role = ChatRole.SYSTEM,
+                content = "APPLIED to disk after dual approval.\nFiles:\n" +
+                    paths.joinToString("\n") { "- $it" } +
+                    "\nRequest: ${result.proposal.request.take(200)}"
+            )
+        )
+        chatMessages = store.recentChatMessages().asReversed()
+    }
+
     fun stopAgent() {
         activeJob?.cancel()
         activeJob = null
@@ -548,7 +571,7 @@ private fun CodingAgentApp(privateDir: File) {
                             val coordinator = mutationCoordinator ?: return@ChatSurface
                             when (val result = coordinator.approve(id, ownerVerified = true, ownerLabel = "owner")) {
                                 is MutationApprovalResult.AwaitingSecond -> { approvalCount = result.proposal.approvalCount; detail = "Confirmation ${approvalCount}/2 recorded; transaction remains unapplied" }
-                                is MutationApprovalResult.Applied -> { approvalCount = result.proposal.approvalCount; pendingApproval = false; pendingProposal = null; pendingProposalId = null; status = AgentStatus.RUNNING; detail = "Approved transaction applied; verification required" }
+                                is MutationApprovalResult.Applied -> onChangeApplied(result)
                                 is MutationApprovalResult.Rejected -> { status = AgentStatus.STOPPED; detail = result.reason }
                             }
                         }
@@ -559,7 +582,7 @@ private fun CodingAgentApp(privateDir: File) {
                         val coordinator = mutationCoordinator ?: return@ReviewSurface
                         when (val result = coordinator.approve(id, ownerVerified = true, ownerLabel = "owner")) {
                             is MutationApprovalResult.AwaitingSecond -> { approvalCount = result.proposal.approvalCount; detail = "Confirmation ${approvalCount}/2 recorded" }
-                            is MutationApprovalResult.Applied -> { approvalCount = result.proposal.approvalCount; pendingApproval = false; pendingProposal = null; pendingProposalId = null; status = AgentStatus.RUNNING; detail = "Approved transaction applied" }
+                            is MutationApprovalResult.Applied -> onChangeApplied(result)
                             is MutationApprovalResult.Rejected -> { status = AgentStatus.STOPPED; detail = result.reason }
                         }
                     }, onReject = { pendingProposalId?.let { mutationCoordinator?.reject(it) }; pendingProposal = null; pendingApproval = false; pendingProposalId = null; approvalCount = 0; status = AgentStatus.STOPPED; detail = "Proposed changes rejected" })
