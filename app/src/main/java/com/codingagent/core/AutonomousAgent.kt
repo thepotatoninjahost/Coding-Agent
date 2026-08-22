@@ -591,33 +591,37 @@ class AutonomousAgent(
                     (header + brief.evidence).limitOutput()
                 }
                 "replace_text" -> {
+                    val path = arguments.getString("path")
                     val proposal = mutations.propose(
-                        request = "Autonomous model proposed replace_text",
+                        request = "replace_text $path",
                         operations = listOf(
                             TaskOperation(
                                 OperationKind.REPLACE,
-                                arguments.getString("path"),
+                                path,
                                 arguments.getString("oldText"),
                                 arguments.getString("newText")
                             )
                         ),
                         reason = arguments.optString("reason", "Autonomous model proposal")
                     )
-                    "PROPOSAL_READY id=${proposal.id} changes=${proposal.changeSet.changes.size} approval_required=2"
+                    "PROPOSAL_READY id=${proposal.id} path=$path changes=${proposal.changeSet.changes.size} approval_required=2 " +
+                        "Confirm twice in Review or chat to APPLY this change to disk."
                 }
                 "create_file" -> {
+                    val path = arguments.getString("path")
                     val proposal = mutations.propose(
-                        request = "Autonomous model proposed create_file",
+                        request = "create_file $path",
                         operations = listOf(
                             TaskOperation(
                                 OperationKind.CREATE_FILE,
-                                arguments.getString("path"),
+                                path,
                                 text = arguments.getString("content")
                             )
                         ),
                         reason = arguments.optString("reason", "Autonomous model proposal")
                     )
-                    "PROPOSAL_READY id=${proposal.id} changes=${proposal.changeSet.changes.size} approval_required=2"
+                    "PROPOSAL_READY id=${proposal.id} path=$path changes=${proposal.changeSet.changes.size} approval_required=2 " +
+                        "Confirm twice in Review or chat to APPLY this file to disk."
                 }
                 "run_command" -> {
                     val entry = terminal.execute(arguments.getString("command"))
