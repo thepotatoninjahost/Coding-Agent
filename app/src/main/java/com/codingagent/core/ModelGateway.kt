@@ -307,7 +307,7 @@ class JsonModelResponseParser {
                     thought = json.optString("thought")
                 )
                 json.optString("content").isNotBlank() -> ModelResponse.Text(json.getString("content"))
-                else -> ModelResponse.Failure("Model JSON did not contain content or tool")
+                else -> ModelResponse.Text(trimmed)
             }
         } catch (_: Exception) {
             ModelResponse.Text(trimmed)
