@@ -221,13 +221,59 @@ class RemoteHttpGateway(
             return ModelResponse.ToolCall(
                 name,
                 function.optString("arguments", "{}"),
-                message.optString("content"),
+                extractMessageText(message),
                 calls.optJSONObject(0)?.optString("id")
             )
         }
-        val content = message.optString("content")
-        return if (content.isBlank()) ModelResponse.Failure("Model returned no message content") else JsonModelResponseParser().parse(content)
+        val content = extractMessageText(message)
+        return if (content.isBlank()) {
+            ModelResponse.Failure(
+                "Model returned no usable message content " +
+                    "(checked content, content parts, reasoning_content). " +
+                    "Keys: ${message.keys().asSequence().toList().joinToString()}"
+            )
+        } else {
+            JsonModelResponseParser().parse(content)
+        }
     }
+
+    /**
+     * OpenAI-compatible providers differ: content may be a string, an array of parts,
+     * null with reasoning_content filled (reasoning models), or refusal text.
+     */
+    private fun extractMessageText(message: JSONObject): String {
+        val direct = message.opt("content")
+        when (direct) {
+            null, JSONObject.NULL -> Unit
+            is String -> if (direct.isNotBlank()) return direct.trim()
+            is JSONArray -> {
+                val parts = buildString {
+                    for (i in 0 until direct.length()) {
+                        val part = direct.opt(i) ?: continue
+                        when (part) {
+                            is String -> if (part.isNotBlank()) append(part)
+                            is JSONObject -> {
+                                val text = part.optString("text")
+                                    .ifBlank { part.optString("content") }
+                                if (text.isNotBlank()) append(text)
+                            }
+                        }
+                    }
+                }.trim()
+                if (parts.isNotBlank()) return parts
+            }
+            is JSONObject -> {
+                val text = direct.optString("text").ifBlank { direct.optString("content") }
+                if (text.isNotBlank()) return text.trim()
+            }
+        }
+        for (key in listOf("reasoning_content", "reasoning", "refusal", "output_text")) {
+            val v = message.optString(key)
+            if (v.isNotBlank()) return v.trim()
+        }
+        return ""
+    }
+
 
     private fun failure(connection: HttpURLConnection): ModelResponse.Failure {
         val body = connection.errorStream?.bufferedReader()?.use { it.readText() }.orEmpty()
@@ -307,6 +353,8 @@ class JsonModelResponseParser {
                     thought = json.optString("thought")
                 )
                 json.optString("content").isNotBlank() -> ModelResponse.Text(json.getString("content"))
+                json.optString("reasoning_content").isNotBlank() -> ModelResponse.Text(json.getString("reasoning_content"))
+                json.optString("text").isNotBlank() -> ModelResponse.Text(json.getString("text"))
                 else -> ModelResponse.Text(trimmed)
             }
         } catch (_: Exception) {
