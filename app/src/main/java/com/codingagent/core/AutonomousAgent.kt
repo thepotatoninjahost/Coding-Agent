@@ -1,12 +1,40 @@
-package com.codingagent.core
+package com.codingagent.agent
 
 import org.json.JSONObject
 import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
+import com.codingagent.intake.CodeSynthesisEngine
+import com.codingagent.intake.OperationKind
+import com.codingagent.intake.SynthesisResult
+import com.codingagent.intake.TaskIntake
+import com.codingagent.intake.TaskIntakeParser
+import com.codingagent.intake.TaskIntent
+import com.codingagent.intake.TaskOperation
+import com.codingagent.model.AgentModelProtocol
+import com.codingagent.model.ModelGateway
+import com.codingagent.model.ModelRequest
+import com.codingagent.model.ModelResponse
+import com.codingagent.research.DeepResearchProvider
+import com.codingagent.research.DurableDeepResearchProvider
+import com.codingagent.research.ResearchBriefBuilder
+import com.codingagent.research.ResearchMode
+import com.codingagent.research.ResearchModeDetector
+import com.codingagent.workspace.ChangeRecord
+import com.codingagent.workspace.ChangeSet
+import com.codingagent.workspace.MutationApprovalResult
+import com.codingagent.workspace.MutationCoordinator
+import com.codingagent.workspace.PendingChangeProposal
+import com.codingagent.workspace.ProjectFileService
+import com.codingagent.workspace.ProjectWorkspace
+import com.codingagent.workspace.TerminalSession
+import com.codingagent.workspace.VerificationIssue
+import com.codingagent.workspace.VerificationReport
+import com.codingagent.workspace.AgentTask
 
 /**
- * ONE JOB: Full evidence-driven tool-calling agent loop with dual-approval mutations.
+ * ONE JOB: Single agent execution spine — evidence-driven tool loop with dual-approval mutations.
+ * Local lanes (hello, list, status, read) and offline explicit/synthesis edits work without a model.
  */
 sealed class AutonomousAgentEvent {
     data class Started(val taskId: String, val request: String) : AutonomousAgentEvent()
@@ -32,9 +60,8 @@ data class AutonomousAgentConfig(
 
 class AutonomousAgent(
     private val root: java.io.File,
-    private val runtime: CodingAgentRuntime,
     private val knowledge: AgentKnowledge,
-    /** Null = local-only mode: greeting, list, status, explicit read still work; model turns require settings. */
+    /** Null = local-only mode: greeting, list, status, explicit read, offline explicit edits still work. */
     private val gateway: ModelGateway? = null,
     private val config: AutonomousAgentConfig = AutonomousAgentConfig(),
     private val research: DeepResearchProvider = DurableDeepResearchProvider(root.resolve(".coding-agent/research")),
@@ -86,7 +113,7 @@ class AutonomousAgent(
         emit(AutonomousAgentEvent.Phase("INTAKE", "Inspecting the request and repository"))
         // Strip chat-history wrapper so intent matches the current user line only.
         val focus = currentRequestFocus(normalized)
-        val intake = runtime.intake(focus)
+        val intake = TaskIntakeParser(root).parse(focus)
         val plan = AgentPlanner(workspace).plan(intake)
         emit(AutonomousAgentEvent.Phase("PLAN", plan.steps.joinToString(" → ") { it.phase }))
 
@@ -95,6 +122,27 @@ class AutonomousAgent(
             journal.record(task)
             emit(AutonomousAgentEvent.Completed(task))
             return events
+        }
+
+        // Offline edits before executionReady so create/replace with a clear target still stages without a model.
+        stageOfflineMutation(taskId, focus, intake, plan)?.let { offline ->
+            when (offline) {
+                is OfflineMutation.Approval -> {
+                    journal.record(offline.task)
+                    emit(AutonomousAgentEvent.ApprovalRequired(offline.task, offline.proposal))
+                    return events
+                }
+                is OfflineMutation.NeedsInput -> {
+                    journal.record(offline.task)
+                    emit(AutonomousAgentEvent.Completed(offline.task))
+                    return events
+                }
+                is OfflineMutation.Failed -> {
+                    journal.record(offline.task)
+                    emit(AutonomousAgentEvent.Failed(offline.task, offline.task.summary))
+                    return events
+                }
+            }
         }
 
         if (!intake.executionReady) {
@@ -111,12 +159,13 @@ class AutonomousAgent(
             return events
         }
 
-        // Model required only past direct lanes. Local ops must not depend on API keys.
+        // Model required only past direct lanes and offline explicit ops.
         val activeGateway = gateway
         if (activeGateway == null) {
             val msg =
-                "Model is not configured. Local commands still work: hello, list files, status, read <path>. " +
-                    "Open Model settings (base URL, model name, API key) for autonomous coding, research, and edits."
+                "Model is not configured. Local commands still work: hello, list files, status, read <path>, " +
+                    "and explicit replace/create when the operation is fully specified. " +
+                    "Open Model settings (base URL, model name, API key) for autonomous coding and research."
             val task = AgentTask(
                 taskId, focus, "needs-input", plan, emptyList(),
                 VerificationReport(true, emptyList()),
@@ -151,7 +200,7 @@ class AutonomousAgent(
             emit(AutonomousAgentEvent.Phase("RESEARCH", "Skipped — local project is enough for this request"))
         }
 
-        val transcript = mutableListOf<com.codingagent.core.ModelMessage>()
+        val transcript = mutableListOf<com.codingagent.model.ModelMessage>()
         var lastEvidence = buildString {
             append(repoMapSummary())
             append("\nCall list_files or search_project before read_file. Do not invent paths.")
@@ -230,8 +279,8 @@ class AutonomousAgent(
                             journal.record(task)
                             return events
                         }
-                        transcript += com.codingagent.core.ModelMessage("assistant", response.content.take(1_200))
-                        transcript += com.codingagent.core.ModelMessage(
+                        transcript += com.codingagent.model.ModelMessage("assistant", response.content.take(1_200))
+                        transcript += com.codingagent.model.ModelMessage(
                             "user",
                             "SYSTEM CONSTRAINT: $missing You must call the read_file tool on the target path before any final report. Do not invent file contents."
                         )
@@ -302,7 +351,7 @@ class AutonomousAgent(
                             if ((response.name == "list_files" || response.name == "search_project") &&
                                 lastEvidence.isNotBlank() && !lastEvidence.startsWith("ERROR:")
                             ) {
-                                transcript += com.codingagent.core.ModelMessage(
+                                transcript += com.codingagent.model.ModelMessage(
                                     "user",
                                     "SYSTEM: ${response.name} already returned evidence. " +
                                         "Do NOT call it again. Write a clear final answer to the user using that evidence."
@@ -326,8 +375,8 @@ class AutonomousAgent(
                     if (cancelled.get()) return stopNow(taskId, normalized, plan, events) { emit(it) }
                     val toolResult = executeTool(response.name, response.arguments)
                     lastEvidence = toolResult
-                    transcript += com.codingagent.core.ModelMessage("assistant", response.thought.ifBlank { "Calling ${response.name}" }, response.callId, response.name, response.arguments)
-                    transcript += com.codingagent.core.ModelMessage("tool", "${response.name}: $toolResult", response.callId)
+                    transcript += com.codingagent.model.ModelMessage("assistant", response.thought.ifBlank { "Calling ${response.name}" }, response.callId, response.name, response.arguments)
+                    transcript += com.codingagent.model.ModelMessage("tool", "${response.name}: $toolResult", response.callId)
                     val success = !toolResult.startsWith("ERROR:")
                     if (success) {
                         when (response.name) {
@@ -382,7 +431,7 @@ class AutonomousAgent(
                                 emit(AutonomousAgentEvent.Completed(task))
                                 return events
                             }
-                            transcript += com.codingagent.core.ModelMessage(
+                            transcript += com.codingagent.model.ModelMessage(
                                 "user",
                                 "SYSTEM: ${response.name} already returned the result above. " +
                                     "Use that result to answer the user. Do NOT call ${response.name} again with the same arguments."
@@ -760,6 +809,74 @@ class AutonomousAgent(
         return if (idx >= 0) request.substring(idx + marker.length).trim().ifBlank { request } else request
     }
 
+    private sealed class OfflineMutation {
+        data class Approval(val task: AgentTask, val proposal: PendingChangeProposal) : OfflineMutation()
+        data class NeedsInput(val task: AgentTask) : OfflineMutation()
+        data class Failed(val task: AgentTask) : OfflineMutation()
+    }
+
+    /**
+     * Stage dual-approval proposals for explicit replace/create (and offline synthesis)
+     * without calling the model. Returns null when this path does not apply.
+     */
+    private fun stageOfflineMutation(
+        taskId: String,
+        request: String,
+        intake: TaskIntake,
+        plan: AgentPlan
+    ): OfflineMutation? {
+        val hasExplicit = intake.operation.kind != OperationKind.NONE
+        val wantsEdit = hasExplicit ||
+            intake.intent == TaskIntent.CHANGE ||
+            intake.intent == TaskIntent.CREATE ||
+            intake.intent == TaskIntent.REFACTOR
+        if (!wantsEdit) return null
+        // With a model configured, leave non-explicit edit intent to the tool loop.
+        if (!hasExplicit && gateway != null) return null
+
+        val staged: Pair<List<TaskOperation>, String> = if (hasExplicit) {
+            listOf(intake.operation) to "Offline explicit ${intake.operation.kind.name.lowercase()} from request"
+        } else {
+            when (val synthesis = CodeSynthesisEngine(workspace.projectRoot(), knowledge).synthesize(intake)) {
+                is SynthesisResult.Ready ->
+                    synthesis.proposal.operations to "Offline synthesis: ${synthesis.proposal.rationale}"
+                is SynthesisResult.NeedsInput -> {
+                    val question = synthesis.question +
+                        " Load a coding model, or specify an exact replace/create/append/remove operation."
+                    val task = AgentTask(
+                        taskId, request, "needs-input", plan, emptyList(),
+                        VerificationReport(true, emptyList()),
+                        listOf("${Instant.now()}: offline staging needs input"),
+                        question
+                    )
+                    return OfflineMutation.NeedsInput(task)
+                }
+            }
+        }
+        val operations = staged.first
+        val reason = staged.second
+
+        return try {
+            val proposal = mutations.propose(request, operations, reason)
+            val task = AgentTask(
+                taskId, request, "needs-approval", plan, proposal.changeSet.changes,
+                VerificationReport(true, emptyList()),
+                listOf("${Instant.now()}: offline proposal ${proposal.id} staged; awaiting two owner approvals"),
+                "Review proposal ${proposal.id} and confirm twice before applying any code change."
+            )
+            OfflineMutation.Approval(task, proposal)
+        } catch (error: Exception) {
+            val message = "Offline mutation staging failed: ${error.message.orEmpty().ifBlank { error.javaClass.simpleName }}"
+            val task = AgentTask(
+                taskId, request, "failed", plan, emptyList(),
+                VerificationReport(false, emptyList()),
+                listOf("${Instant.now()}: $message"),
+                message
+            )
+            OfflineMutation.Failed(task)
+        }
+    }
+
     /**
      * Fast paths that must work without the model: greeting, status, indexed source listing,
      * explicit single-file read, named-file inspect. These give correct local evidence and
@@ -923,12 +1040,21 @@ class AutonomousAgent(
     }
 
     private fun isStatusRequest(t: String): Boolean {
-        val hints = listOf(
-            "status", "status report", "give me a status", "system status",
-            "are you ready", "what can you do", "help", "capabilities",
-            "project status", "how many files", "summary of the project"
+        // Word-boundary matches only — "Helper" must not match the hint "help".
+        val exact = setOf("status", "help", "capabilities")
+        if (t in exact) return true
+        val phrases = listOf(
+            "status report", "give me a status", "system status",
+            "are you ready", "what can you do", "project status",
+            "how many files", "summary of the project"
         )
-        return hints.any { t == it || t.contains(it) }
+        if (phrases.any { t == it || t.contains(it) }) return true
+        // Standalone "status" / "help" as whole words only.
+        if (Regex("""status""").containsMatchIn(t) && t.length <= 48) return true
+        if (Regex("""help""").containsMatchIn(t) && !Regex("""(helper|helpers)""").containsMatchIn(t) && t.length <= 32) {
+            return true
+        }
+        return false
     }
 
     private fun extractExplicitReadPath(request: String): String? {
