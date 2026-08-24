@@ -5,6 +5,15 @@ import java.nio.file.Files
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import com.codingagent.research.ArticleExtractor
+import com.codingagent.research.DurableDeepResearchProvider
+import com.codingagent.research.PersonalResearchProvider
+import com.codingagent.research.QueryLanes
+import com.codingagent.workspace.ResearchHit
+import com.codingagent.research.ResearchMode
+import com.codingagent.workspace.ResearchResult
+import com.codingagent.research.SourceQuality
+import com.codingagent.research.WebResearchProvider
 
 class DeepResearchTest {
     @Test fun expandsIntoFiveResearchLanes() {

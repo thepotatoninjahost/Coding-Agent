@@ -3,6 +3,14 @@ package com.codingagent.core
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import com.codingagent.agent.AgentConstitution
+import com.codingagent.workspace.ChangeDiff
+import com.codingagent.workspace.ChangeOperation
+import com.codingagent.workspace.ChangeRecord
+import com.codingagent.workspace.ChangeSet
+import com.codingagent.workspace.DiffLineKind
+import com.codingagent.workspace.PendingChangeProposal
+import com.codingagent.workspace.VerificationReport
 
 class ChangeDiffTest {
     @Test

@@ -7,6 +7,12 @@ import java.util.concurrent.atomic.AtomicReference
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import com.codingagent.agent.AgentTools
+import com.codingagent.workspace.CommandResult
+import com.codingagent.workspace.CommandRunner
+import com.codingagent.workspace.ProjectWorkspace
+import com.codingagent.workspace.TerminalEntry
+import com.codingagent.workspace.TerminalSession
 
 class TerminalCancelTest {
     @Test

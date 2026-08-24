@@ -5,6 +5,12 @@ import java.nio.file.Files
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import com.codingagent.agent.ToolInvocation
+import com.codingagent.agent.ToolKind
+import com.codingagent.agent.ToolSelectionLoop
+import com.codingagent.agent.ToolSelectionPlan
+import com.codingagent.agent.ToolSelector
+import com.codingagent.intake.TaskIntakeParser
 
 class ToolSelectionTest {
     @Test

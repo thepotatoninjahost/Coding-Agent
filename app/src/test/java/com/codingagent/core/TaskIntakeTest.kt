@@ -5,6 +5,9 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.nio.file.Files
+import com.codingagent.intake.OperationKind
+import com.codingagent.intake.TaskIntakeParser
+import com.codingagent.intake.TaskIntent
 
 class TaskIntakeTest {
     @Test fun replaceRequestIsExecutionReadyAndClassified() {

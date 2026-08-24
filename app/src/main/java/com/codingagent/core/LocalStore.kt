@@ -3,6 +3,12 @@ package com.codingagent.core
 import android.content.Context
 import org.json.JSONObject
 import java.io.File
+import com.codingagent.agent.ChatMessage
+import com.codingagent.agent.ChatMessageStore
+import com.codingagent.agent.ChatRole
+import com.codingagent.model.ModelSettings
+import com.codingagent.workspace.Lesson
+import com.codingagent.workspace.TaskRecord
 
 /**
  * ONE JOB: Persist small JSON settings and state on device.

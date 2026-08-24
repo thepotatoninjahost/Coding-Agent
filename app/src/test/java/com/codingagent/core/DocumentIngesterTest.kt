@@ -5,6 +5,8 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import com.codingagent.knowledge.DocumentIngester
+import com.codingagent.knowledge.KnowledgeIndex
 
 class DocumentIngesterTest {
     @Test
@@ -13,7 +15,7 @@ class DocumentIngesterTest {
         assertTrue(DocumentIngester.isSupportedFileName("Main.kt"))
         assertTrue(DocumentIngester.isSupportedFileName("README"))
         assertFalse(DocumentIngester.isSupportedFileName("photo.png"))
-        assertFalse(DocumentIngester.isSupportedFileName("model.nexa"))
+        assertFalse(DocumentIngester.isSupportedFileName("model.bin"))
     }
 
     @Test

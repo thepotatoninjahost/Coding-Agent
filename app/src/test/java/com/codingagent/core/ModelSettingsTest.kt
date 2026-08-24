@@ -5,6 +5,8 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import com.codingagent.model.ModelBackend
+import com.codingagent.model.ModelSettings
 
 class ModelSettingsTest {
     @Test
@@ -66,8 +68,9 @@ class ModelSettingsTest {
     }
 
     @Test
-    fun legacyLocalNexaJsonMapsToRemote() {
-        val legacy = """{"backend":"LOCAL_NEXA","baseUrl":"","apiKey":"","modelName":"","onboarded":false}"""
+    fun legacyNonRemoteBackendJsonMapsToRemote() {
+        // Old installs may still have a discarded local-backend label in JSON; always load as REMOTE.
+        val legacy = """{"backend":"LOCAL_LEGACY","baseUrl":"","apiKey":"","modelName":"","onboarded":false}"""
         val restored = ModelSettings.fromJson(legacy)
         assertEquals(ModelBackend.REMOTE, restored.backend)
         assertFalse(restored.isRemoteConfigured())

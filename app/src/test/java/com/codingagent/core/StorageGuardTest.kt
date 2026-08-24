@@ -4,6 +4,8 @@ import java.nio.file.Files
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import com.codingagent.workspace.InsufficientStorageException
+import com.codingagent.workspace.StorageGuard
 
 class StorageGuardTest {
     @Test

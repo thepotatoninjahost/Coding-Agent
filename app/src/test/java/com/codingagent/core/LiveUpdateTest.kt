@@ -5,6 +5,15 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 import java.nio.file.Files
+import com.codingagent.agent.AgentAction
+import com.codingagent.agent.AgentActionCategory
+import com.codingagent.workspace.KnowledgeHit
+import com.codingagent.knowledge.KnowledgeProvider
+import com.codingagent.model.LiveModelRouter
+import com.codingagent.model.LiveModelStore
+import com.codingagent.model.ModelInstallResult
+import com.codingagent.workspace.ProjectWorkspace
+import com.codingagent.workspace.VerificationReport
 
 class LiveUpdateTest {
     @Test
@@ -27,15 +36,17 @@ class LiveUpdateTest {
     }
 
     @Test
-    fun `nexa package validator accepts manifest-declared shards`() {
-        val root = Files.createTempDirectory("coding-agent-nexa").toFile()
+    fun `model package validator accepts manifest and payload files`() {
+        val root = Files.createTempDirectory("coding-agent-model-pack").toFile()
         val packageDir = root.resolve("package").apply { mkdirs() }
-        packageDir.resolve("nexa.manifest").writeText("{\"ModelName\":\"qwen3-4b\",\"PluginId\":\"npu\"}")
-        packageDir.resolve("files-1-2.nexa").writeBytes(byteArrayOf(1))
-        packageDir.resolve("weights-1-1.nexa").writeBytes(byteArrayOf(2))
+        packageDir.resolve("model.manifest").writeText(
+            """{"name":"demo-model","files":[{"name":"weights.bin"},{"name":"config.json"}]}"""
+        )
+        packageDir.resolve("weights.bin").writeBytes(byteArrayOf(1))
+        packageDir.resolve("config.json").writeBytes(byteArrayOf(2))
         val store = LiveModelStore(root)
         val action = AgentAction("install-package", AgentActionCategory.CODE_CHANGE, ownerVerified = true, approvalCount = 2)
-        val result = store.installPackage(packageDir, "qwen3-4b", "nexa-npu", action, VerificationReport(true, emptyList()))
+        val result = store.installPackage(packageDir, "demo-model", "generic", action, VerificationReport(true, emptyList()))
         assertTrue(result is ModelInstallResult.Installed)
         assertEquals(2L, store.active()?.sizeBytes)
     }

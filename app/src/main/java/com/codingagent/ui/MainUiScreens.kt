@@ -57,16 +57,16 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.codingagent.core.AgentTools
-import com.codingagent.core.ChatMessage
-import com.codingagent.core.ChatRole
-import com.codingagent.core.DeepResearchProgress
-import com.codingagent.core.EditorDocument
-import com.codingagent.core.ModelDownloadProgress
-import com.codingagent.core.MutationCoordinator
-import com.codingagent.core.ResearchDisplayState
-import com.codingagent.core.ResearchHit
-import com.codingagent.core.TerminalEntry
+import com.codingagent.agent.AgentTools
+import com.codingagent.agent.ChatMessage
+import com.codingagent.agent.ChatRole
+import com.codingagent.workspace.DeepResearchProgress
+import com.codingagent.workspace.EditorDocument
+import com.codingagent.model.ModelDownloadProgress
+import com.codingagent.workspace.MutationCoordinator
+import com.codingagent.research.ResearchDisplayState
+import com.codingagent.workspace.ResearchHit
+import com.codingagent.workspace.TerminalEntry
 
 @Composable
 internal fun CompactStatusBar(

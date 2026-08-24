@@ -4,6 +4,14 @@ import android.content.Context
 import java.io.File
 import java.security.MessageDigest
 import java.util.UUID
+import com.codingagent.agent.AgentAction
+import com.codingagent.agent.AgentActionCategory
+import com.codingagent.agent.AgentConstitution
+import com.codingagent.knowledge.KnowledgeProvider
+import com.codingagent.workspace.ChangeRecord
+import com.codingagent.workspace.MutationCoordinator
+import com.codingagent.workspace.ProjectWorkspace
+import com.codingagent.workspace.VerificationReport
 
 /**
  * ONE JOB: Install and swap live code modules with checksum verification.

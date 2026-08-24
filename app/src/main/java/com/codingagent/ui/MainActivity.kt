@@ -67,37 +67,37 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.documentfile.provider.DocumentFile
-import com.codingagent.core.AgentJournal
-import com.codingagent.core.AgentKnowledge
-import com.codingagent.core.AgentTools
-import com.codingagent.core.AutonomousAgent
-import com.codingagent.core.ChatMessage
-import com.codingagent.core.ChatRole
-import com.codingagent.core.ChatWorkspace
-import com.codingagent.core.CodingAgentRuntime
-import com.codingagent.core.CompositeWebResearchProvider
-import com.codingagent.core.DeepResearchProgress
-import com.codingagent.core.DurableDeepResearchProvider
-import com.codingagent.core.EditorDocument
-import com.codingagent.core.KnowledgeBase
+import com.codingagent.agent.AgentKnowledge
+import com.codingagent.agent.AgentTools
+import com.codingagent.agent.AutonomousAgent
+import com.codingagent.agent.ChatMessage
+import com.codingagent.agent.ChatRole
+import com.codingagent.agent.ChatWorkspace
+import com.codingagent.workspace.DeepResearchProgress
+import com.codingagent.research.DurableDeepResearchProvider
+import com.codingagent.workspace.EditorDocument
+import com.codingagent.knowledge.KnowledgeBase
 import com.codingagent.core.LocalStore
-import com.codingagent.core.ModelBackend
-import com.codingagent.core.ModelDownloadProgress
-import com.codingagent.core.ModelGateway
-import com.codingagent.core.ModelSettings
-import com.codingagent.core.MutationApprovalResult
-import com.codingagent.core.MutationCoordinator
-import com.codingagent.core.PendingChangeProposal
-import com.codingagent.core.ProjectWorkspace
-import com.codingagent.core.ResearchDisplayState
-import com.codingagent.core.ResearchHit
-import com.codingagent.core.ResearchModeDetector
-import com.codingagent.core.TerminalEntry
+import com.codingagent.model.ModelBackend
+import com.codingagent.model.ModelDownloadProgress
+import com.codingagent.model.ModelGateway
+import com.codingagent.model.ModelSettings
+import com.codingagent.workspace.MutationApprovalResult
+import com.codingagent.workspace.MutationCoordinator
+import com.codingagent.workspace.PendingChangeProposal
+import com.codingagent.workspace.ProjectWorkspace
+import com.codingagent.research.ResearchDisplayState
+import com.codingagent.workspace.ResearchHit
+import com.codingagent.research.ResearchModeDetector
+import com.codingagent.workspace.TerminalEntry
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import com.codingagent.agent.AgentRuntimeResult
+import com.codingagent.model.ModelConnectionProbe
+import com.codingagent.model.ProbeResult
 
 /**
  * ONE JOB: Host activity and system entry for the coding workbench.
@@ -217,25 +217,13 @@ private fun CodingAgentApp(privateDir: File) {
     }
 
     val tools = remember(workspace) { workspace?.let(::AgentTools) }
-    // Agent is created whenever a project is mounted. Model gateway is optional:
-    // local lanes (hello, list files, status, read) work without a model; model turns require settings.
+    // Single spine: AutonomousAgent only. Model gateway is optional for local lanes and offline edits.
     val agent = remember(workspace, modelGateway) {
         workspace?.let { current ->
             val gateway = modelGateway
-            val runtime = CodingAgentRuntime(
-                current,
-                object : AgentKnowledge {
-                    override fun search(query: String, limit: Int) = knowledgeBase.search(query, limit)
-                },
-                AgentJournal(current.projectRoot()),
-                research = CompositeWebResearchProvider(),
-                deepResearch = DurableDeepResearchProvider(current.projectRoot().resolve(".coding-agent/research")),
-                modelGateway = gateway,
-                mutationCoordinator = mutationCoordinator ?: MutationCoordinator(current)
-            )
             AutonomousAgent(
-                current.projectRoot(),
-                object : AgentKnowledge {
+                root = current.projectRoot(),
+                knowledge = object : AgentKnowledge {
                     override fun search(query: String, limit: Int) = knowledgeBase.search(query, limit)
                 },
                 gateway = gateway,
@@ -480,7 +468,7 @@ private fun CodingAgentApp(privateDir: File) {
                 chatMessages = currentChat.history()
                 val proposal = it.result?.let { result ->
                     when (result) {
-                        is com.codingagent.core.AgentRuntimeResult.NeedsApproval -> agent?.pendingProposals()?.firstOrNull { pending -> pending.id == result.proposalId }
+                        is com.codingagent.agent.AgentRuntimeResult.NeedsApproval -> agent?.pendingProposals()?.firstOrNull { pending -> pending.id == result.proposalId }
                         else -> null
                     }
                 }
@@ -490,15 +478,15 @@ private fun CodingAgentApp(privateDir: File) {
                 approvalCount = proposal?.approvalCount ?: 0
                 pendingReason = proposal?.request ?: pendingReason
                 status = when (it.result) {
-                    is com.codingagent.core.AgentRuntimeResult.NeedsApproval -> AgentStatus.APPROVAL
-                    is com.codingagent.core.AgentRuntimeResult.NeedsInput -> AgentStatus.STOPPED
-                    is com.codingagent.core.AgentRuntimeResult.Failed -> AgentStatus.FAILED
+                    is com.codingagent.agent.AgentRuntimeResult.NeedsApproval -> AgentStatus.APPROVAL
+                    is com.codingagent.agent.AgentRuntimeResult.NeedsInput -> AgentStatus.STOPPED
+                    is com.codingagent.agent.AgentRuntimeResult.Failed -> AgentStatus.FAILED
                     else -> AgentStatus.READY
                 }
                 detail = when (it.result) {
-                    is com.codingagent.core.AgentRuntimeResult.Failed ->
+                    is com.codingagent.agent.AgentRuntimeResult.Failed ->
                         "Agent failed: ${it.response.content.lineSequence().firstOrNull().orEmpty().take(140)}"
-                    is com.codingagent.core.AgentRuntimeResult.NeedsApproval ->
+                    is com.codingagent.agent.AgentRuntimeResult.NeedsApproval ->
                         "Waiting for two owner approvals before any file write"
                     else ->
                         it.response.content.lineSequence().firstOrNull().orEmpty().take(120)
@@ -692,11 +680,11 @@ private fun CodingAgentApp(privateDir: File) {
                                         extraHeaders = draftExtraHeaders,
                                         onboarded = true
                                     )
-                                    val result = com.codingagent.core.ModelConnectionProbe.probe(candidate)
+                                    val result = com.codingagent.model.ModelConnectionProbe.probe(candidate)
                                     withContext(Dispatchers.Main) {
                                         probeMessage = when (result) {
-                                            is com.codingagent.core.ProbeResult.Ok -> result.detail
-                                            is com.codingagent.core.ProbeResult.Failed -> "Probe failed: ${result.reason}"
+                                            is com.codingagent.model.ProbeResult.Ok -> result.detail
+                                            is com.codingagent.model.ProbeResult.Failed -> "Probe failed: ${result.reason}"
                                         }
                                     }
                                 }

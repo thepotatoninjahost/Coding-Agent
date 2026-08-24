@@ -3,6 +3,9 @@ package com.codingagent.core
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import com.codingagent.research.QueryLanes
+import com.codingagent.research.ResearchMode
+import com.codingagent.research.SourceQuality
 
 class ResearchModeTest {
     @Test fun researchLanesCoverTheoryExperimentAndEmpiricalEvidence() {

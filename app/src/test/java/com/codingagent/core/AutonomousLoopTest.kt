@@ -4,6 +4,18 @@ import java.nio.file.Files
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import com.codingagent.agent.AgentKnowledge
+import com.codingagent.agent.AutonomousAgent
+import com.codingagent.agent.AutonomousAgentConfig
+import com.codingagent.agent.AutonomousAgentEvent
+import com.codingagent.agent.DegenerateOutput
+import com.codingagent.agent.SelfEvolution
+import com.codingagent.workspace.KnowledgeHit
+import com.codingagent.model.AgentModelProtocol
+import com.codingagent.model.ModelGateway
+import com.codingagent.model.ModelRequest
+import com.codingagent.model.ModelResponse
+import com.codingagent.workspace.ProjectWorkspace
 
 class AutonomousLoopTest {
     @Test
@@ -39,13 +51,8 @@ class AutonomousLoopTest {
         val knowledge = object : AgentKnowledge {
             override fun search(query: String, limit: Int) = emptyList<KnowledgeHit>()
         }
-        val runtime = CodingAgentRuntime(
-            workspace,
-            knowledge,
-            AgentJournal(root),
-            modelGateway = gateway
-        )
-        val agent = AutonomousAgent(root, knowledge, gateway, AutonomousAgentConfig(maxTurns = 6))
+        val agent = AutonomousAgent(
+            root, knowledge, gateway, AutonomousAgentConfig(maxTurns = 6))
         // Avoid bare listing phrases so direct-lane does not short-circuit before tools.
         val events = agent.run("Summarize what is under the src directory after inspecting it")
         assertTrue(events.any { it is AutonomousAgentEvent.ToolFinished })
@@ -67,7 +74,6 @@ class AutonomousLoopTest {
         val knowledge = object : AgentKnowledge {
             override fun search(query: String, limit: Int) = emptyList<KnowledgeHit>()
         }
-        val runtime = CodingAgentRuntime(workspace, knowledge, AgentJournal(root), modelGateway = gateway)
         val agent = AutonomousAgent(
             root, knowledge, gateway,
             AutonomousAgentConfig(maxTurns = 8, maxIdenticalToolRepeats = 99)
@@ -99,8 +105,8 @@ class AutonomousLoopTest {
         val knowledge = object : AgentKnowledge {
             override fun search(query: String, limit: Int) = emptyList<KnowledgeHit>()
         }
-        val runtime = CodingAgentRuntime(workspace, knowledge, AgentJournal(root), modelGateway = gateway)
-        val agent = AutonomousAgent(root, knowledge, gateway, AutonomousAgentConfig(maxTurns = 8))
+        val agent = AutonomousAgent(
+            root, knowledge, gateway, AutonomousAgentConfig(maxTurns = 8))
         val events = agent.run("Analyze the file SelfEvolution.kt then write a report about the file")
         assertTrue(
             "expected an EVIDENCE phase before completion",
@@ -120,8 +126,8 @@ class AutonomousLoopTest {
         val knowledge = object : AgentKnowledge {
             override fun search(query: String, limit: Int) = emptyList<KnowledgeHit>()
         }
-        val runtime = CodingAgentRuntime(workspace, knowledge, AgentJournal(root), modelGateway = gateway)
-        val agent = AutonomousAgent(root, knowledge, gateway, AutonomousAgentConfig(maxTurns = 4))
+        val agent = AutonomousAgent(
+            root, knowledge, gateway, AutonomousAgentConfig(maxTurns = 4))
         val events = agent.run("analyze Report.kt for errors")
         assertTrue(events.last() is AutonomousAgentEvent.Completed)
         val summary = (events.last() as AutonomousAgentEvent.Completed).task.summary
@@ -139,7 +145,6 @@ class AutonomousLoopTest {
         val knowledge = object : AgentKnowledge {
             override fun search(query: String, limit: Int) = emptyList<KnowledgeHit>()
         }
-        val runtime = CodingAgentRuntime(workspace, knowledge, AgentJournal(root), modelGateway = gateway)
         val agent = AutonomousAgent(
             root, knowledge, gateway,
             AutonomousAgentConfig(maxTurns = 10, maxEvidenceRefusals = 2)
@@ -169,7 +174,6 @@ class AutonomousLoopTest {
         val knowledge = object : AgentKnowledge {
             override fun search(query: String, limit: Int) = emptyList<KnowledgeHit>()
         }
-        val runtime = CodingAgentRuntime(workspace, knowledge, AgentJournal(root), modelGateway = gateway)
         val agent = AutonomousAgent(
             root, knowledge, gateway,
             AutonomousAgentConfig(maxTurns = 10, maxIdenticalToolRepeats = 3)
@@ -203,7 +207,6 @@ class AutonomousLoopTest {
         val knowledge = object : AgentKnowledge {
             override fun search(query: String, limit: Int) = emptyList<KnowledgeHit>()
         }
-        val runtime = CodingAgentRuntime(workspace, knowledge, AgentJournal(root), modelGateway = gateway)
         val agent = AutonomousAgent(
             root, knowledge, gateway,
             AutonomousAgentConfig(maxTurns = 10, maxIdenticalToolRepeats = 3)

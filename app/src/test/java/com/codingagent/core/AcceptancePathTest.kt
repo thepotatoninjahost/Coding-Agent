@@ -5,6 +5,17 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import com.codingagent.intake.OperationKind
+import com.codingagent.intake.TaskOperation
+import com.codingagent.knowledge.KnowledgeIndex
+import com.codingagent.model.AgentModelProtocol
+import com.codingagent.model.ModelBackend
+import com.codingagent.model.ModelSettings
+import com.codingagent.model.RemoteHttpGateway
+import com.codingagent.workspace.ChangeDiff
+import com.codingagent.workspace.MutationApprovalResult
+import com.codingagent.workspace.MutationCoordinator
+import com.codingagent.workspace.ProjectWorkspace
 
 /**
  * Path A acceptance: offline explicit create/replace → dual approve → disk changed.

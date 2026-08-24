@@ -3,6 +3,10 @@ package com.codingagent.core
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import com.codingagent.agent.AgentPlan
+import com.codingagent.agent.AgentStep
+import com.codingagent.agent.PlanStepStatus
+import com.codingagent.agent.PlanningLoop
 
 class PlanningLoopTest {
     private fun plan(vararg phases: String) = AgentPlan(

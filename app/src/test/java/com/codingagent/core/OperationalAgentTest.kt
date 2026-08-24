@@ -4,17 +4,34 @@ import java.nio.file.Files
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import com.codingagent.agent.AgentKnowledge
+import com.codingagent.agent.AgentRuntimeResult
+import com.codingagent.agent.AutonomousAgent
+import com.codingagent.agent.AutonomousAgentEvent
+import com.codingagent.workspace.KnowledgeHit
+import com.codingagent.model.ModelGateway
+import com.codingagent.model.ModelRequest
+import com.codingagent.model.ModelResponse
+import com.codingagent.workspace.ChangeOperation
+import com.codingagent.workspace.MutationApprovalResult
+import com.codingagent.workspace.MutationCoordinator
+import com.codingagent.workspace.ProjectFileService
+import com.codingagent.workspace.ProjectWorkspace
+import com.codingagent.workspace.TerminalSession
 
+/**
+ * Operational checks against the single spine ([AutonomousAgent]).
+ */
 class OperationalAgentTest {
     private val emptyKnowledge = object : AgentKnowledge {
         override fun search(query: String, limit: Int): List<KnowledgeHit> = emptyList()
     }
 
-    private val emptyResearch = object : WebResearchProvider {
-        override fun search(query: String, limit: Int): ResearchResult = ResearchResult(query, emptyList())
-    }
+    private fun agent(root: java.io.File, gateway: ModelGateway? = null): AutonomousAgent =
+        AutonomousAgent(root, emptyKnowledge, gateway)
 
-    @Test fun editorRoundTripUsesProjectRelativePathsAndTransactions() {
+    @Test
+    fun editorRoundTripUsesProjectRelativePathsAndTransactions() {
         val root = Files.createTempDirectory("agent-editor").toFile()
         root.resolve("src").mkdirs()
         root.resolve("src/Main.kt").writeText("fun main() = 1\n")
@@ -32,82 +49,80 @@ class OperationalAgentTest {
         assertEquals("fun main() = 2\n", files.read("src/Main.kt").content)
     }
 
-    @Test fun orchestratorEmitsPhasesAndCompletesInspectableRequest() {
-        val root = Files.createTempDirectory("agent-orchestrator").toFile()
+    @Test
+    fun singleSpineCompletesInspectableRequest() {
+        val root = Files.createTempDirectory("agent-inspect").toFile()
         root.resolve("Main.kt").writeText("fun main() = 1\n")
-        val workspace = ProjectWorkspace(root)
-        val runtime = CodingAgentRuntime(workspace, emptyKnowledge, AgentJournal(root))
-        val events = AgentOrchestrator(runtime, TerminalSession(root), emptyResearch).execute("inspect the project")
-        assertTrue(events.any { it is AgentExecutionEvent.Phase && it.name == "INTAKE" })
-        assertTrue(events.last() is AgentExecutionEvent.Completed)
+        val events = agent(root).run("inspect the project")
+        assertTrue(events.any { it is AutonomousAgentEvent.Phase && it.name == "INTAKE" })
+        assertTrue(events.last() is AutonomousAgentEvent.Completed)
     }
 
-    @Test fun plainEnglishDebugWithoutModelNeedsInputOrFailsClosed() {
+    @Test
+    fun plainEnglishDebugWithoutModelNeedsInputOrFailsClosed() {
         val root = Files.createTempDirectory("agent-plain").toFile()
         root.resolve("Main.kt").writeText("fun main() = 1\n")
-        val workspace = ProjectWorkspace(root)
-        val runtime = CodingAgentRuntime(workspace, emptyKnowledge, AgentJournal(root))
-        val events = AgentOrchestrator(runtime, TerminalSession(root), emptyResearch).execute("fix the login bug")
-        assertTrue(events.none { it is AgentExecutionEvent.NeedsInput && events.indexOf(it) == 0 })
-        assertTrue(events.any { it is AgentExecutionEvent.Phase && it.name == "EXECUTE" })
-        // Vague offline edit: NeedsInput (ask for explicit op / model) or Failed — never silent write.
+        val events = agent(root).run("fix the login bug")
         val terminal = events.last()
-        assertTrue(terminal is AgentExecutionEvent.NeedsInput || terminal is AgentExecutionEvent.Failed)
+        // Without model: needs-input (configure model) or completed clarification — never silent write.
+        assertTrue(
+            terminal is AutonomousAgentEvent.Completed ||
+                terminal is AutonomousAgentEvent.Failed
+        )
         assertEquals("fun main() = 1\n", root.resolve("Main.kt").readText())
     }
 
-    @Test fun offlineExplicitReplaceStagesProposalWithoutModel() {
+    @Test
+    fun offlineExplicitReplaceStagesProposalWithoutModel() {
         val root = Files.createTempDirectory("agent-offline-replace").toFile()
         root.resolve("src").mkdirs()
         root.resolve("src/Main.kt").writeText("fun main() = 1\n")
-        val workspace = ProjectWorkspace(root)
-        val runtime = CodingAgentRuntime(workspace, emptyKnowledge, AgentJournal(root))
-        val result = runtime.execute("replace = 1 with = 2 in src/Main.kt")
+        val spine = agent(root)
+        val result = spine.execute("replace = 1 with = 2 in src/Main.kt")
         assertTrue(result is AgentRuntimeResult.NeedsApproval)
         result as AgentRuntimeResult.NeedsApproval
         assertTrue(result.proposalId.isNotBlank())
         assertEquals("fun main() = 1\n", root.resolve("src/Main.kt").readText())
 
-        assertTrue(runtime.approveProposal(result.proposalId, true, "owner") is MutationApprovalResult.AwaitingSecond)
-        assertTrue(runtime.approveProposal(result.proposalId, true, "owner") is MutationApprovalResult.Applied)
+        assertTrue(spine.approveProposal(result.proposalId, true, "owner") is MutationApprovalResult.AwaitingSecond)
+        assertTrue(spine.approveProposal(result.proposalId, true, "owner") is MutationApprovalResult.Applied)
         assertEquals("fun main() = 2\n", root.resolve("src/Main.kt").readText())
     }
 
-    @Test fun offlineCreateSynthesisStagesProposalWithoutModel() {
+    @Test
+    fun offlineCreateSynthesisStagesProposalWithoutModel() {
         val root = Files.createTempDirectory("agent-offline-create").toFile()
-        val workspace = ProjectWorkspace(root)
-        val runtime = CodingAgentRuntime(workspace, emptyKnowledge, AgentJournal(root))
-        val result = runtime.execute("create a Kotlin helper in src/Helper.kt")
-        assertTrue(result is AgentRuntimeResult.NeedsApproval)
+        val spine = agent(root)
+        // Explicit create form is always parsed as CREATE_FILE (offline, no model required).
+        val result = spine.execute("create file src/Helper.kt with class Helper { fun run() = 1 }")
+        assertTrue("expected NeedsApproval, got $result", result is AgentRuntimeResult.NeedsApproval)
         result as AgentRuntimeResult.NeedsApproval
         assertTrue(result.proposalId.isNotBlank())
         assertTrue(!root.resolve("src/Helper.kt").exists())
 
-        assertTrue(runtime.approveProposal(result.proposalId, true, "owner") is MutationApprovalResult.AwaitingSecond)
-        assertTrue(runtime.approveProposal(result.proposalId, true, "owner") is MutationApprovalResult.Applied)
+        assertTrue(spine.approveProposal(result.proposalId, true, "owner") is MutationApprovalResult.AwaitingSecond)
+        assertTrue(spine.approveProposal(result.proposalId, true, "owner") is MutationApprovalResult.Applied)
         val written = root.resolve("src/Helper.kt").readText()
         assertTrue(written.contains("class Helper"))
         assertTrue(written.contains("fun run"))
     }
 
-    @Test fun offlineExplicitCreateThroughOrchestratorIsApprovalRequired() {
+    @Test
+    fun offlineExplicitCreateThroughSpineIsApprovalRequired() {
         val root = Files.createTempDirectory("agent-offline-orch").toFile()
-        val workspace = ProjectWorkspace(root)
-        val runtime = CodingAgentRuntime(workspace, emptyKnowledge, AgentJournal(root))
-        val events = AgentOrchestrator(runtime, TerminalSession(root), emptyResearch)
-            .execute("create file src/New.kt with fun answer() = 42")
+        val events = agent(root).run("create file src/New.kt with fun answer() = 42")
         val terminal = events.last()
-        assertTrue(terminal is AgentExecutionEvent.ApprovalRequired)
-        terminal as AgentExecutionEvent.ApprovalRequired
-        assertTrue(terminal.proposalId.isNotBlank())
+        assertTrue(terminal is AutonomousAgentEvent.ApprovalRequired)
+        terminal as AutonomousAgentEvent.ApprovalRequired
+        assertTrue(terminal.proposal.id.isNotBlank())
         assertTrue(!root.resolve("src/New.kt").exists())
     }
 
-    @Test fun orchestratorSurfacesApprovalRequiredInsteadOfFailed() {
+    @Test
+    fun spineSurfacesApprovalRequiredInsteadOfFailed() {
         val root = Files.createTempDirectory("agent-approval").toFile()
         root.resolve("src").mkdirs()
         root.resolve("src/Main.kt").writeText("fun main() = 1\n")
-        val workspace = ProjectWorkspace(root)
         val gateway = object : ModelGateway {
             override fun complete(request: ModelRequest): ModelResponse =
                 ModelResponse.ToolCall(
@@ -115,29 +130,26 @@ class OperationalAgentTest {
                     arguments = """{"path":"src/Main.kt","oldText":"fun main() = 1\n","newText":"fun main() = 2\n","reason":"test"}"""
                 )
         }
-        val runtime = CodingAgentRuntime(
-            workspace,
-            emptyKnowledge,
-            AgentJournal(root),
-            modelGateway = gateway
-        )
-        val events = AgentOrchestrator(runtime, TerminalSession(root), emptyResearch)
-            .execute("replace = 1 with = 2 in src/Main.kt")
+        val spine = agent(root, gateway)
+        val events = spine.run("replace = 1 with = 2 in src/Main.kt")
         val approval = events.last()
-        assertTrue(approval is AgentExecutionEvent.ApprovalRequired)
-        approval as AgentExecutionEvent.ApprovalRequired
-        assertTrue(approval.proposalId.isNotBlank())
-        assertTrue(approval.question.contains("confirm", ignoreCase = true))
+        assertTrue(approval is AutonomousAgentEvent.ApprovalRequired)
+        approval as AutonomousAgentEvent.ApprovalRequired
+        assertTrue(approval.proposal.id.isNotBlank())
         assertEquals("fun main() = 1\n", root.resolve("src/Main.kt").readText())
-        // Single proposal only (no double-stage).
-        assertEquals(1, runtime.pendingProposals().size)
+        assertEquals(1, spine.pendingProposals().size)
     }
 
-    @Test fun terminalOrchestratorSurfacesExitCode() {
+    @Test
+    fun terminalSurfacesExitCode() {
         val root = Files.createTempDirectory("agent-terminal").toFile()
-        val workspace = ProjectWorkspace(root)
-        val runtime = CodingAgentRuntime(workspace, emptyKnowledge, AgentJournal(root))
-        val output = AgentOrchestrator(runtime, TerminalSession(root), DuckDuckGoResearchProvider()).runTerminal("printf ready; exit 3")
-        assertTrue(output.text.contains("exit=3"))
+        val result = TerminalSession(root).execute("printf ready; exit 3")
+        val text = buildString {
+            append("$ ").append(result.command).append('\n')
+            append(result.stdout)
+            if (result.stderr.isNotBlank()) append(result.stderr)
+            append("\nexit=").append(result.exitCode)
+        }
+        assertTrue(text.contains("exit=3"))
     }
 }

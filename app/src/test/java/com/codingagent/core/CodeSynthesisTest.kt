@@ -4,6 +4,12 @@ import java.nio.file.Files
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import com.codingagent.agent.AgentKnowledge
+import com.codingagent.intake.CodeSynthesisEngine
+import com.codingagent.intake.OperationKind
+import com.codingagent.intake.SynthesisResult
+import com.codingagent.intake.TaskIntakeParser
+import com.codingagent.workspace.KnowledgeHit
 
 class CodeSynthesisTest {
     private val knowledge = object : AgentKnowledge {

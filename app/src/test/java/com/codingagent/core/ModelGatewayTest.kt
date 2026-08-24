@@ -4,6 +4,10 @@ import java.net.HttpURLConnection
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import com.codingagent.model.ModelRequest
+import com.codingagent.model.ModelResponse
+import com.codingagent.model.ModelToolDefinition
+import com.codingagent.model.RemoteHttpGateway
 
 class ModelGatewayTest {
     @Test

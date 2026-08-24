@@ -5,6 +5,10 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.nio.file.Files
+import com.codingagent.workspace.ChangeOperation
+import com.codingagent.workspace.CommandRunner
+import com.codingagent.workspace.ProjectWorkspace
+import com.codingagent.workspace.TerminalSession
 
 class ProjectWorkspaceTest {
     @Test fun replacementIsUniqueAndBackedUp() {

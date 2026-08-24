@@ -3,6 +3,8 @@ package com.codingagent.core
 import java.nio.file.Files
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import com.codingagent.workspace.ProjectWorkspace
+import com.codingagent.workspace.RollbackResult
 
 class RepairCycleTest {
     @Test fun failedVerificationRevertsChanges() {
