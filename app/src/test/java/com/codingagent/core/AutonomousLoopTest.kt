@@ -45,7 +45,7 @@ class AutonomousLoopTest {
             AgentJournal(root),
             modelGateway = gateway
         )
-        val agent = AutonomousAgent(root, runtime, knowledge, gateway, AutonomousAgentConfig(maxTurns = 6))
+        val agent = AutonomousAgent(root, knowledge, gateway, AutonomousAgentConfig(maxTurns = 6))
         // Avoid bare listing phrases so direct-lane does not short-circuit before tools.
         val events = agent.run("Summarize what is under the src directory after inspecting it")
         assertTrue(events.any { it is AutonomousAgentEvent.ToolFinished })
@@ -69,7 +69,7 @@ class AutonomousLoopTest {
         }
         val runtime = CodingAgentRuntime(workspace, knowledge, AgentJournal(root), modelGateway = gateway)
         val agent = AutonomousAgent(
-            root, runtime, knowledge, gateway,
+            root, knowledge, gateway,
             AutonomousAgentConfig(maxTurns = 8, maxIdenticalToolRepeats = 99)
         )
         var turns = 0
@@ -100,7 +100,7 @@ class AutonomousLoopTest {
             override fun search(query: String, limit: Int) = emptyList<KnowledgeHit>()
         }
         val runtime = CodingAgentRuntime(workspace, knowledge, AgentJournal(root), modelGateway = gateway)
-        val agent = AutonomousAgent(root, runtime, knowledge, gateway, AutonomousAgentConfig(maxTurns = 8))
+        val agent = AutonomousAgent(root, knowledge, gateway, AutonomousAgentConfig(maxTurns = 8))
         val events = agent.run("Analyze the file SelfEvolution.kt then write a report about the file")
         assertTrue(
             "expected an EVIDENCE phase before completion",
@@ -121,7 +121,7 @@ class AutonomousLoopTest {
             override fun search(query: String, limit: Int) = emptyList<KnowledgeHit>()
         }
         val runtime = CodingAgentRuntime(workspace, knowledge, AgentJournal(root), modelGateway = gateway)
-        val agent = AutonomousAgent(root, runtime, knowledge, gateway, AutonomousAgentConfig(maxTurns = 4))
+        val agent = AutonomousAgent(root, knowledge, gateway, AutonomousAgentConfig(maxTurns = 4))
         val events = agent.run("analyze Report.kt for errors")
         assertTrue(events.last() is AutonomousAgentEvent.Completed)
         val summary = (events.last() as AutonomousAgentEvent.Completed).task.summary
@@ -141,7 +141,7 @@ class AutonomousLoopTest {
         }
         val runtime = CodingAgentRuntime(workspace, knowledge, AgentJournal(root), modelGateway = gateway)
         val agent = AutonomousAgent(
-            root, runtime, knowledge, gateway,
+            root, knowledge, gateway,
             AutonomousAgentConfig(maxTurns = 10, maxEvidenceRefusals = 2)
         )
         // Must NOT match the local inspect lane (analyze/inspect/check <file>).
@@ -171,7 +171,7 @@ class AutonomousLoopTest {
         }
         val runtime = CodingAgentRuntime(workspace, knowledge, AgentJournal(root), modelGateway = gateway)
         val agent = AutonomousAgent(
-            root, runtime, knowledge, gateway,
+            root, knowledge, gateway,
             AutonomousAgentConfig(maxTurns = 10, maxIdenticalToolRepeats = 3)
         )
         val events = agent.run("list project files")
@@ -205,7 +205,7 @@ class AutonomousLoopTest {
         }
         val runtime = CodingAgentRuntime(workspace, knowledge, AgentJournal(root), modelGateway = gateway)
         val agent = AutonomousAgent(
-            root, runtime, knowledge, gateway,
+            root, knowledge, gateway,
             AutonomousAgentConfig(maxTurns = 10, maxIdenticalToolRepeats = 3)
         )
         // Request deliberately avoids listing keywords so isListingRequest is false
