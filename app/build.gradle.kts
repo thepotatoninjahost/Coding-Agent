@@ -28,6 +28,9 @@ android {
     }
     kotlinOptions { jvmTarget = "17" }
     buildFeatures { compose = true }
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+    }
     packaging {
         jniLibs.useLegacyPackaging = true
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
@@ -48,6 +51,7 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
 
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
     testImplementation("org.robolectric:robolectric:4.14.1")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
