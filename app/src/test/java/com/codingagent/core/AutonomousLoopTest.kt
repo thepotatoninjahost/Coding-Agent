@@ -195,17 +195,22 @@ class AutonomousLoopTest {
     /**
      * Identical non-listing tool calls must not hard-abort.
      * After the repeat cap the spine forces a final answer from evidence already gathered.
+     *
+     * Use read_file (not run_command): successful reads mark evidence so the inspect gate
+     * cannot swallow the scripted final text. Do not name the file in an analyze/inspect
+     * phrase or the local inspect lane will skip the model loop.
      */
     @Test
     fun identicalNonListingToolLoopCompletesFromEvidence() {
         val root = Files.createTempDirectory("agent-loop-repeat").toFile()
-        root.resolve("a.txt").writeText("hello world content enough\n")
+        root.resolve("LoopFile.kt").writeText("class LoopFile { fun marker() = \"LOOP_EVIDENCE_OK\" }\n")
+        val readCall = ModelResponse.ToolCall("read_file", """{"path":"LoopFile.kt"}""")
         val gateway = ScriptedGateway(
             listOf(
-                ModelResponse.ToolCall("run_command", """{"command":"echo hi"}"""),
-                ModelResponse.ToolCall("run_command", """{"command":"echo hi"}"""),
-                ModelResponse.ToolCall("run_command", """{"command":"echo hi"}"""),
-                ModelResponse.Text("Diagnostic finished. echo hi succeeded.")
+                readCall,
+                readCall,
+                readCall,
+                ModelResponse.Text("LOOP_FINAL_FROM_EVIDENCE: LoopFile marker is LOOP_EVIDENCE_OK")
             )
         )
         val workspace = ProjectWorkspace(root)
@@ -216,14 +221,20 @@ class AutonomousLoopTest {
             root, knowledge, gateway,
             AutonomousAgentConfig(maxTurns = 10, maxIdenticalToolRepeats = 3)
         )
-        val events = agent.run("Run the same diagnostic command until you understand the state")
+        val events = agent.run("Write a deep technical report on how LoopFile works end to end")
         assertTrue(
-            "identical tool loop must complete from evidence, not hard-abort",
+            "identical tool loop must complete from evidence, not hard-abort. events=${events.map { it::class.simpleName }}",
             events.last() is AutonomousAgentEvent.Completed
         )
         assertTrue(events.none { it is AutonomousAgentEvent.Failed })
+        assertTrue(events.any { it is AutonomousAgentEvent.ToolFinished && it.name == "read_file" && it.success })
         val summary = (events.last() as AutonomousAgentEvent.Completed).task.summary
-        assertTrue(summary.contains("Diagnostic finished") || summary.contains("echo hi"))
+        assertTrue(
+            "summary must come from gathered file evidence or the forced final answer: $summary",
+            summary.contains("LOOP_FINAL_FROM_EVIDENCE") ||
+                summary.contains("LOOP_EVIDENCE_OK") ||
+                summary.contains("LoopFile")
+        )
     }
 }
 
