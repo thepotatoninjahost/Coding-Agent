@@ -193,15 +193,20 @@ class AutonomousLoopTest {
     }
 
     /**
-     * Non-listing identical tool loops must still abort so the agent cannot spin forever
-     * on the same tool call when the request is not a pure listing.
+     * Identical non-listing tool calls must not hard-abort.
+     * After the repeat cap the spine forces a final answer from evidence already gathered.
      */
     @Test
-    fun identicalNonListingToolLoopAborts() {
+    fun identicalNonListingToolLoopCompletesFromEvidence() {
         val root = Files.createTempDirectory("agent-loop-repeat").toFile()
         root.resolve("a.txt").writeText("hello world content enough\n")
         val gateway = ScriptedGateway(
-            List(6) { ModelResponse.ToolCall("run_command", """{"command":"echo hi"}""") }
+            listOf(
+                ModelResponse.ToolCall("run_command", """{"command":"echo hi"}"""),
+                ModelResponse.ToolCall("run_command", """{"command":"echo hi"}"""),
+                ModelResponse.ToolCall("run_command", """{"command":"echo hi"}"""),
+                ModelResponse.Text("Diagnostic finished. echo hi succeeded.")
+            )
         )
         val workspace = ProjectWorkspace(root)
         val knowledge = object : AgentKnowledge {
@@ -211,10 +216,14 @@ class AutonomousLoopTest {
             root, knowledge, gateway,
             AutonomousAgentConfig(maxTurns = 10, maxIdenticalToolRepeats = 3)
         )
-        // Request deliberately avoids listing keywords so isListingRequest is false
         val events = agent.run("Run the same diagnostic command until you understand the state")
-        assertTrue(events.last() is AutonomousAgentEvent.Failed)
-        assertTrue((events.last() as AutonomousAgentEvent.Failed).message.contains("repeated"))
+        assertTrue(
+            "identical tool loop must complete from evidence, not hard-abort",
+            events.last() is AutonomousAgentEvent.Completed
+        )
+        assertTrue(events.none { it is AutonomousAgentEvent.Failed })
+        val summary = (events.last() as AutonomousAgentEvent.Completed).task.summary
+        assertTrue(summary.contains("Diagnostic finished") || summary.contains("echo hi"))
     }
 }
 
