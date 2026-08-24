@@ -235,7 +235,6 @@ private fun CodingAgentApp(privateDir: File) {
             )
             AutonomousAgent(
                 current.projectRoot(),
-                runtime,
                 object : AgentKnowledge {
                     override fun search(query: String, limit: Int) = knowledgeBase.search(query, limit)
                 },
