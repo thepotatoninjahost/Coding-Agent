@@ -189,6 +189,11 @@ class ChatWorkspace(
         ) {
             return text.take(12_000)
         }
+        if (text.contains("<tool_call", ignoreCase = true) ||
+            text.contains("<function=", ignoreCase = true)
+        ) {
+            return "The model printed a raw tool call instead of a review. That is not an answer."
+        }
         if (DegenerateOutput.isDegenerate(text)) {
             return DegenerateOutput.sanitize(text) + " Rely on the verification section above for the real findings."
         }
