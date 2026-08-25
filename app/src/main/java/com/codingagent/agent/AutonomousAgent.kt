@@ -413,7 +413,10 @@ class AutonomousAgent(
                     emit(AutonomousAgentEvent.ToolStarted(response.name, response.arguments))
                     if (cancelled.get()) return stopNow(taskId, normalized, plan, events) { emit(it) }
                     val toolResult = executeTool(response.name, response.arguments)
-                    lastEvidence = toolResult
+                    // Never wipe gathered context with an empty tool body.
+                    if (toolResult.isNotBlank() && toolResult != "(no files)") {
+                        lastEvidence = toolResult
+                    }
                     transcript += com.codingagent.model.ModelMessage("assistant", response.thought.ifBlank { "Calling ${response.name}" }, response.callId, response.name, response.arguments)
                     transcript += com.codingagent.model.ModelMessage("tool", "${response.name}: $toolResult", response.callId)
                     val success = !toolResult.startsWith("ERROR:")
