@@ -236,6 +236,40 @@ class AutonomousLoopTest {
                 summary.contains("LoopFile")
         )
     }
+
+    /**
+     * Review/analyze of the whole project used to burn maxTurns on tools then fail
+     * with "exceeded the autonomous turn budget". If any evidence exists (repo map
+     * is always seeded), the spine must Complete instead of Failed.
+     */
+    @Test
+    fun turnBudgetExhaustionCompletesFromRepoMapEvidence() {
+        val root = Files.createTempDirectory("agent-budget").toFile()
+        root.resolve("ImproveMe.kt").writeText("class ImproveMe\n")
+        val gateway = ScriptedGateway(
+            List(8) { i -> ModelResponse.ToolCall("search_project", """{"query":"ImproveMe$i"}""") }
+        )
+        val knowledge = object : AgentKnowledge {
+            override fun search(query: String, limit: Int) = emptyList<KnowledgeHit>()
+        }
+        val agent = AutonomousAgent(
+            root, knowledge, gateway,
+            AutonomousAgentConfig(maxTurns = 4, maxIdenticalToolRepeats = 99)
+        )
+        val events = agent.run("review and analyze the project and tell me how it can be improved")
+        assertTrue(
+            "turn budget must complete from evidence, not Failed. last=${events.last()::class.simpleName}",
+            events.last() is AutonomousAgentEvent.Completed
+        )
+        assertTrue(events.none { it is AutonomousAgentEvent.Failed })
+        val summary = (events.last() as AutonomousAgentEvent.Completed).task.summary
+        assertTrue(
+            "summary should mention budget or gathered evidence: $summary",
+            summary.contains("Turn budget reached") ||
+                summary.contains("ImproveMe") ||
+                summary.contains("Repo map")
+        )
+    }
 }
 
 /** Deterministic gateway that returns scripted responses in order. */
