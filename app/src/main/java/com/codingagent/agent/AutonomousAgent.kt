@@ -212,24 +212,28 @@ class AutonomousAgent(
         val readPaths = linkedSetOf<String>()
         var searchedProject = false
         var evidenceRefusals = 0
+        var successfulGathers = 0
+        var writeNowRefusals = 0
+        val reviewJob = isWholeProjectReview(focus)
 
         for (turn in 0 until config.maxTurns) {
             if (cancelled.get()) return stopNow(taskId, normalized, plan, events) { emit(it) }
             emit(AutonomousAgentEvent.Phase("MODEL", "Decision turn ${turn + 1}/${config.maxTurns}"))
-            // Last two turns: demand a written answer. Tool-only loops were burning the whole budget
-            // then failing with "exceeded the autonomous turn budget" on review/analyze requests.
-            if (turn >= (config.maxTurns - 2).coerceAtLeast(0)) {
+            // Upgrade: after enough evidence (or last two turns), tools come off so the model must write.
+            val writeNow = turn >= (config.maxTurns - 2).coerceAtLeast(0) ||
+                (reviewJob && successfulGathers >= 2)
+            if (writeNow) {
                 transcript += com.codingagent.model.ModelMessage(
                     "user",
-                    "SYSTEM: Turn ${turn + 1}/${config.maxTurns}. Do NOT call any tool. " +
-                        "Write the final answer now from evidence already gathered."
+                    "SYSTEM: You already have project evidence. Do NOT call any tool. " +
+                        "Write the full review now: architecture, risks, and concrete improvements."
                 )
             }
             var response = activeGateway.complete(
                 ModelRequest(
                     AgentModelProtocol.SYSTEM,
                     buildPrompt(normalized, intake, lastEvidence),
-                    AgentModelProtocol.tools(),
+                    if (writeNow) emptyList() else AgentModelProtocol.tools(),
                     transcript.toList(),
                     researchRequired = false
                 )
@@ -337,6 +341,28 @@ class AutonomousAgent(
                     return events
                 }
                 is ModelResponse.ToolCall -> {
+                    if (writeNow) {
+                        writeNowRefusals++
+                        if (writeNowRefusals >= 2) {
+                            val report = workspace.verify()
+                            val summary = synthesizeFromEvidence(normalized, lastEvidence, report)
+                            val task = AgentTask(
+                                taskId, normalized, "completed-with-warning", plan,
+                                changeSets.flatMap { it.changes }, report,
+                                listOf("${Instant.now()}: model kept requesting tools after close; finished from evidence"),
+                                summary
+                            )
+                            journal.record(task)
+                            emit(AutonomousAgentEvent.Completed(task))
+                            return events
+                        }
+                        transcript += com.codingagent.model.ModelMessage(
+                            "user",
+                            "SYSTEM: Tools are closed. Your last reply was a tool call (${response.name}). " +
+                                "Write the review in plain text now."
+                        )
+                        continue
+                    }
                     val signature = "${response.name}|${response.arguments.trim()}"
                     if (signature == lastToolSignature) {
                         identicalRepeats++
@@ -397,8 +423,13 @@ class AutonomousAgent(
                                 val path = runCatching { JSONObject(response.arguments).getString("path") }.getOrNull()
                                 if (!path.isNullOrBlank()) readPaths += path.trim().trimStart('/')
                             }
-                            "search_project", "list_files" -> searchedProject = true
+                            "search_project", "list_files" -> {
+                                searchedProject = true
+                                successfulGathers++
+                            }
+                            "verify" -> successfulGathers++
                         }
+                        if (response.name == "read_file") successfulGathers++
                     }
                     emit(AutonomousAgentEvent.ToolFinished(response.name, toolResult, success))
                     if (success) {
@@ -480,14 +511,7 @@ class AutonomousAgent(
         val report = workspace.verify()
         val usableEvidence = lastEvidence.isNotBlank() && !lastEvidence.startsWith("ERROR:")
         val summary = if (usableEvidence) {
-            buildString {
-                append("Turn budget reached after ${config.maxTurns} model turns. ")
-                append("The model kept calling tools instead of writing a final answer. ")
-                append("Below is what was already gathered.\n\n")
-                append(lastEvidence.take(config.maxOutputCharacters))
-                append("\n\nVerification: ")
-                append(if (report.passed) "passed (static unfinished-work marker scan)" else "FAILED (${report.issues.size} issue(s))")
-            }
+            synthesizeFromEvidence(normalized, lastEvidence, report)
         } else {
             "The model used ${config.maxTurns} turns without producing a final answer or usable tool evidence. " +
                 "Retry with a narrower request (one file or one question), or switch model in Model settings."
@@ -615,6 +639,10 @@ class AutonomousAgent(
         appendLine("5. Call verify after changes or when hunting bugs. Never report a fake pass.")
         appendLine("6. Use research_web when the task needs current docs, APIs, or practices.")
         appendLine("7. Persist until the goal is met. Only stop early for a specific missing user input.")
+        appendLine("8. After you have a repo map or a file listing, WRITE THE ANSWER. Do not keep listing.")
+        if (isWholeProjectReview(request)) {
+            appendLine("9. This is a whole-project review. Two tool calls max, then a written review with concrete improvements.")
+        }
         appendLine()
         appendLine("Evidence so far:")
         append(evidence.take(config.maxOutputCharacters.coerceAtMost(6_000)))
@@ -810,6 +838,41 @@ class AutonomousAgent(
                     append(issue.message)
                 }
             }
+        }
+    }
+
+    /**
+     * Whole-project review/improve — still uses the model loop.
+     * After two successful gathers, tools are removed so the model must write.
+     */
+    private fun isWholeProjectReview(request: String): Boolean {
+        val t = request.lowercase()
+        if (extractInspectTarget(request) != null) return false
+        if (extractExplicitReadPath(request) != null) return false
+        val review = Regex("""\b(review|analy[sz]e|audit|critique|improv)""")
+        val scope = Regex("""\b(project|codebase|repo|repository|codebase|app)\b""")
+        return review.containsMatchIn(t) && (scope.containsMatchIn(t) || t.length <= 90)
+    }
+
+    /**
+     * Fallback only after the model had tools, then refused to write.
+     * Uses gathered tool evidence — not a substitute for a model review when the model writes.
+     */
+    private fun synthesizeFromEvidence(request: String, evidence: String, report: VerificationReport): String {
+        return buildString {
+            append("Review from gathered evidence (model did not write a final after tools were closed).\n\n")
+            append("Request: ").append(request.trim()).append("\n\n")
+            append(evidence.take(config.maxOutputCharacters))
+            append("\n\nVerification: ")
+            if (report.passed) {
+                append("passed (static unfinished-work marker scan)")
+            } else {
+                append("FAILED (").append(report.issues.size).append(" issue(s))")
+                report.issues.take(20).forEach { issue ->
+                    append("\n- ").append(issue.path).append(":").append(issue.line).append(" — ").append(issue.message)
+                }
+            }
+            append("\n\nIf this is thinner than you wanted, retry once. The next run starts with this evidence already in context.")
         }
     }
 
