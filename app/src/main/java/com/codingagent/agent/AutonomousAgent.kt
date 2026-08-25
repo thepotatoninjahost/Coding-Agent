@@ -214,15 +214,18 @@ class AutonomousAgent(
         var evidenceRefusals = 0
         var successfulGathers = 0
         var writeNowRefusals = 0
+        var writeNowAnnounced = false
         val reviewJob = isWholeProjectReview(focus)
 
         for (turn in 0 until config.maxTurns) {
             if (cancelled.get()) return stopNow(taskId, normalized, plan, events) { emit(it) }
             emit(AutonomousAgentEvent.Phase("MODEL", "Decision turn ${turn + 1}/${config.maxTurns}"))
-            // Upgrade: after enough evidence (or last two turns), tools come off so the model must write.
+            // After enough non-empty gathers (or last two turns), tools come off so the model must write.
             val writeNow = turn >= (config.maxTurns - 2).coerceAtLeast(0) ||
                 (reviewJob && successfulGathers >= 2)
-            if (writeNow) {
+            val toolsThisTurn = if (writeNow) emptyList() else AgentModelProtocol.tools()
+            if (writeNow && !writeNowAnnounced) {
+                writeNowAnnounced = true
                 transcript += com.codingagent.model.ModelMessage(
                     "user",
                     "SYSTEM: You already have project evidence. Do NOT call any tool. " +
@@ -233,12 +236,13 @@ class AutonomousAgent(
                 ModelRequest(
                     AgentModelProtocol.SYSTEM,
                     buildPrompt(normalized, intake, lastEvidence),
-                    if (writeNow) emptyList() else AgentModelProtocol.tools(),
+                    toolsThisTurn,
                     transcript.toList(),
                     researchRequired = false
                 )
             )
-            // One automatic wait+retry on provider rate limit (TPM).
+            // One automatic wait+retry on provider rate limit (TPM) or empty response.
+            // Retry must keep the same tool policy as this turn — do not re-open tools after writeNow.
             if (response is ModelResponse.Failure && (isRateLimitFailure(response.message) || isEmptyModelFailure(response.message))) {
                 if (isRateLimitFailure(response.message)) {
                     val waitSec = rateLimitWaitSeconds(response.message).coerceIn(1, 45)
@@ -256,7 +260,7 @@ class AutonomousAgent(
                     ModelRequest(
                         AgentModelProtocol.SYSTEM,
                         buildPrompt(normalized, intake, lastEvidence),
-                        AgentModelProtocol.tools(),
+                        toolsThisTurn,
                         transcript.toList(),
                         researchRequired = false
                     )
@@ -426,13 +430,19 @@ class AutonomousAgent(
                                 val path = runCatching { JSONObject(response.arguments).getString("path") }.getOrNull()
                                 if (!path.isNullOrBlank()) readPaths += path.trim().trimStart('/')
                             }
-                            "search_project", "list_files" -> {
-                                searchedProject = true
-                                successfulGathers++
-                            }
-                            "verify" -> successfulGathers++
+                            "search_project", "list_files" -> searchedProject = true
                         }
-                        if (response.name == "read_file") successfulGathers++
+                        // Only non-empty tool bodies count toward review writeNow. Empty searches
+                        // must not close tools after two misses and force a thin dump.
+                        val usefulBody = toolResult.isNotBlank() &&
+                            toolResult != "(no files)" &&
+                            !toolResult.equals("(no matches)", ignoreCase = true)
+                        if (usefulBody && response.name in setOf(
+                                "read_file", "search_project", "list_files", "verify"
+                            )
+                        ) {
+                            successfulGathers++
+                        }
                     }
                     emit(AutonomousAgentEvent.ToolFinished(response.name, toolResult, success))
                     if (success) {
