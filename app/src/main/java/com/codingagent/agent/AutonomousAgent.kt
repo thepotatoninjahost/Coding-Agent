@@ -220,16 +220,23 @@ class AutonomousAgent(
         for (turn in 0 until config.maxTurns) {
             if (cancelled.get()) return stopNow(taskId, normalized, plan, events) { emit(it) }
             emit(AutonomousAgentEvent.Phase("MODEL", "Decision turn ${turn + 1}/${config.maxTurns}"))
-            // After enough non-empty gathers (or last two turns), tools come off so the model must write.
-            val writeNow = turn >= (config.maxTurns - 2).coerceAtLeast(0) ||
-                (reviewJob && successfulGathers >= 2)
-            val toolsThisTurn = if (writeNow) emptyList() else AgentModelProtocol.tools()
+            val decision = LoopControl.decide(
+                turn = turn,
+                maxTurns = config.maxTurns,
+                usefulGathers = successfulGathers,
+                writeRefusals = writeNowRefusals,
+                intent = intake.intent,
+                wholeProjectReview = reviewJob
+            )
+            val writeNow = decision.demandWrite
+            val toolsThisTurn = if (decision.toolsOpen) AgentModelProtocol.tools() else emptyList()
             if (writeNow && !writeNowAnnounced) {
                 writeNowAnnounced = true
                 transcript += com.codingagent.model.ModelMessage(
                     "user",
                     "SYSTEM: You already have project evidence. Do NOT call any tool. " +
-                        "Write the full review now: architecture, risks, and concrete improvements."
+                        "If the request is a change, stage replace_text or create_file. " +
+                        "Otherwise write the answer now from evidence already gathered."
                 )
             }
             var response = activeGateway.complete(
@@ -347,7 +354,7 @@ class AutonomousAgent(
                 is ModelResponse.ToolCall -> {
                     if (writeNow) {
                         writeNowRefusals++
-                        if (writeNowRefusals >= 2) {
+                        if (decision.synthesizeFromEvidence || writeNowRefusals >= 2) {
                             val report = workspace.verify()
                             val summary = synthesizeFromEvidence(normalized, lastEvidence, report)
                             val task = AgentTask(
