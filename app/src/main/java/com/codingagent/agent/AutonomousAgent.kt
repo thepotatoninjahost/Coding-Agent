@@ -178,12 +178,13 @@ class AutonomousAgent(
         }
 
         var researchEvidence = ""
-        if (shouldResearch(normalized, intake)) {
+        val wantsResearch = shouldResearch(normalized, intake)
+        if (wantsResearch) {
             if (cancelled.get()) return stopNow(taskId, normalized, plan, events) { emit(it) }
-            emit(AutonomousAgentEvent.Phase("RESEARCH", "Gathering a small set of sources (optional path)"))
+            emit(AutonomousAgentEvent.Phase("RESEARCH", "Looking up external sources"))
             val mode = ResearchModeDetector.detect(normalized)
             val session = runCatching {
-                research.deepResearch(normalized, 6, mode) { progress ->
+                research.deepResearch(normalized, 8, mode) { progress ->
                     if (cancelled.get()) return@deepResearch
                     emit(AutonomousAgentEvent.Phase("RESEARCH", "${progress.stage}: ${progress.completed}/${progress.total}; learned ${progress.successful}, failed ${progress.failed}"))
                 }
@@ -194,7 +195,10 @@ class AutonomousAgent(
                 researchEvidence = "\n\nResearch brief:\n${brief.evidence}"
                 emit(AutonomousAgentEvent.Phase("RESEARCH", "Learned ${brief.sourceCount} sources (${brief.wordCount} words)"))
             } else {
-                emit(AutonomousAgentEvent.Phase("RESEARCH", "Skipped or empty; continuing with local project only"))
+                researchEvidence =
+                    "\n\nResearch ran but returned no usable sources. Do not invent external docs or APIs. " +
+                        "Prefer local project evidence, or call research_web with a tighter technical query."
+                emit(AutonomousAgentEvent.Phase("RESEARCH", "No usable sources — model must not invent external facts"))
             }
         } else {
             emit(AutonomousAgentEvent.Phase("RESEARCH", "Skipped — local project is enough for this request"))
@@ -439,15 +443,13 @@ class AutonomousAgent(
                             }
                             "search_project", "list_files" -> searchedProject = true
                         }
-                        // Only non-empty tool bodies count toward review writeNow. Empty searches
-                        // must not close tools after two misses and force a thin dump.
+                        // Only substantive local evidence closes the gather window.
+                        // list_files alone must not lock out research_web.
+                        // research_web / search_knowledge stay available until last turns.
                         val usefulBody = toolResult.isNotBlank() &&
                             toolResult != "(no files)" &&
                             !toolResult.equals("(no matches)", ignoreCase = true)
-                        if (usefulBody && response.name in setOf(
-                                "read_file", "search_project", "list_files", "verify"
-                            )
-                        ) {
+                        if (usefulBody && response.name in setOf("read_file", "search_project")) {
                             successfulGathers++
                         }
                     }
@@ -602,13 +604,42 @@ class AutonomousAgent(
         return null
     }
 
+    /**
+     * Research is how the agent gets smarter on things not in the project.
+     * Run when the user asks for it, or when the task needs external knowledge.
+     */
     private fun shouldResearch(request: String, intake: TaskIntake): Boolean {
         val lower = request.lowercase()
-        if (Regex("\\b(research|look up|search the web|google|documentation|docs online|best practice|how does .+ work online|what is the current|latest version)\\b").containsMatchIn(lower)) return true
-        if (Regex("\\b(android|kotlin|gradle|compose|retrofit|okhttp|room|hilt|coroutine)\\b").containsMatchIn(lower) &&
-            Regex("\\b(how|latest|current|docs|documentation|api|migrate|deprecated)\\b").containsMatchIn(lower)
-        ) return true
-        if (intake.intent == TaskIntent.EXPLAIN && Regex("\\b(library|framework|api|sdk|package|crate|npm|pip)\\b").containsMatchIn(lower)) return true
+        // User demanded research.
+        if (Regex("""\b(research|look up|search the web|google|web search|find out|look into|investigate|docs online|documentation)\b""")
+                .containsMatchIn(lower)
+        ) {
+            return true
+        }
+        if (Regex("""\b(best practice|latest version|what is the current|how does .+ work online)\b""")
+                .containsMatchIn(lower)
+        ) {
+            return true
+        }
+        // External platform / library knowledge the project alone cannot answer.
+        if (Regex("""\b(android|kotlin|gradle|compose|jetpack|retrofit|okhttp|room|hilt|coroutine|material|swift|react|python)\b""")
+                .containsMatchIn(lower) &&
+            Regex("""\b(how|latest|current|docs|documentation|api|migrate|deprecated|error|exception|crash|tutorial|example)\b""")
+                .containsMatchIn(lower)
+        ) {
+            return true
+        }
+        if (intake.intent == TaskIntent.EXPLAIN &&
+            Regex("""\b(library|framework|api|sdk|package|crate|npm|pip|dependency)\b""").containsMatchIn(lower)
+        ) {
+            return true
+        }
+        // Debug often needs external error docs.
+        if (intake.intent == TaskIntent.DEBUG &&
+            Regex("""\b(error|exception|stack.?trace|crash|cannot resolve|unresolved|not found)\b""").containsMatchIn(lower)
+        ) {
+            return true
+        }
         return false
     }
 
@@ -657,11 +688,12 @@ class AutonomousAgent(
         appendLine("3. Exactly one tool call this turn. Observe the full result before the next step.")
         appendLine("4. Code changes only stage a proposal. Dual owner approval is required.")
         appendLine("5. Call verify after changes or when hunting bugs. Never report a fake pass.")
-        appendLine("6. Use research_web when the task needs current docs, APIs, or practices.")
+        appendLine("6. Use research_web when you lack current docs, APIs, errors, or practices not in the project.")
         appendLine("7. Persist until the goal is met. Only stop early for a specific missing user input.")
-        appendLine("8. After you have a repo map or a file listing, WRITE THE ANSWER. Do not keep listing.")
+        appendLine("8. After real file reads or project search hits, WRITE THE ANSWER. Do not keep listing.")
+        appendLine("9. Prefer research_web over guessing external APIs. Prefer project files over inventing local paths.")
         if (isWholeProjectReview(request)) {
-            appendLine("9. This is a whole-project review. Two tool calls max, then a written review with concrete improvements.")
+            appendLine("10. This is a whole-project review. After real evidence, write concrete improvements.")
         }
         appendLine()
         appendLine("Evidence so far:")
@@ -711,11 +743,20 @@ class AutonomousAgent(
                     val mode = runCatching {
                         ResearchMode.valueOf(arguments.optString("mode", "BROAD").uppercase())
                     }.getOrDefault(ResearchModeDetector.detect(query))
-                    val sources = arguments.optInt("sources", 6).coerceIn(1, 12)
-                    val session = research.deepResearch(query, sources, mode) { progress ->
-                        lastResearchProgress =
-                            "${progress.stage}: ${progress.completed}/${progress.total}; " +
-                                "learned ${progress.successful}, failed ${progress.failed}"
+                    val sources = arguments.optInt("sources", 8).coerceIn(1, 12)
+                    val session = runCatching {
+                        research.deepResearch(query, sources, mode) { progress ->
+                            lastResearchProgress =
+                                "${progress.stage}: ${progress.completed}/${progress.total}; " +
+                                    "learned ${progress.successful}, failed ${progress.failed}"
+                        }
+                    }.getOrElse { err ->
+                        return@executeTool "ERROR: research_web failed: ${err.message ?: err.javaClass.simpleName}"
+                    }
+                    if (session.sources.isEmpty()) {
+                        return@executeTool
+                            "ERROR: research_web found no usable sources for \"$query\". " +
+                                "Try a tighter technical query (library + API + error text). Do not invent docs."
                     }
                     val brief = ResearchBriefBuilder.build(session)
                     val header =
