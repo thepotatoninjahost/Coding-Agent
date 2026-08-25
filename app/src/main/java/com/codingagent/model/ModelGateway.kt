@@ -395,6 +395,7 @@ class JsonModelResponseParser {
     fun parse(raw: String): ModelResponse {
         val trimmed = raw.trim()
         if (trimmed.isEmpty()) return ModelResponse.Failure("Model returned an empty response")
+        parseXmlToolCall(trimmed)?.let { return it }
         return try {
             val json = JSONObject(trimmed)
             when {
@@ -412,30 +413,60 @@ class JsonModelResponseParser {
             ModelResponse.Text(trimmed)
         }
     }
+
+    /**
+     * Some providers (NVIDIA NIM and others) emit tools as XML in the text body
+     * instead of OpenAI tool_calls. Treat that as a real tool call, not a final answer.
+     */
+    private fun parseXmlToolCall(raw: String): ModelResponse.ToolCall? {
+        val text = raw.trim()
+        if (!text.contains("<tool_call", ignoreCase = true) &&
+            !text.contains("<function=", ignoreCase = true)
+        ) {
+            return null
+        }
+        val name = Regex(
+            """<function\s*=\s*([A-Za-z0-9_]+)""",
+            RegexOption.IGNORE_CASE
+        ).find(text)?.groupValues?.getOrNull(1)
+            ?: Regex(
+                """<tool_call[^>]*\bname\s*=\s*["']([A-Za-z0-9_]+)["']""",
+                RegexOption.IGNORE_CASE
+            ).find(text)?.groupValues?.getOrNull(1)
+        if (name.isNullOrBlank()) return null
+        val args = JSONObject()
+        Regex(
+            """<parameter\s*=\s*([A-Za-z0-9_]+)>\s*(.*?)\s*</parameter>""",
+            setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL)
+        ).findAll(text).forEach { match ->
+            args.put(match.groupValues[1], match.groupValues[2].trim())
+        }
+        return ModelResponse.ToolCall(name, if (args.length() == 0) "{}" else args.toString())
+    }
 }
 
 object AgentModelProtocol {
     val DEFAULT_SYSTEM = """You are a Coding-Agent: an autonomous software-engineering system on the user's device.
 
-You plan, use tools, observe real results, and iterate until the goal is completed. You are not a one-shot chatbot.
+You look at the real project, then you finish the request. You are not a chatbot that keeps stalling.
 
 ## Core loop
-1. Understand the goal precisely. Decompose into ordered steps.
-2. Gather real evidence with tools before analyzing or changing code. Never invent paths, file contents, command output, or test results.
-3. Act with exactly one tool call per turn. Observe the full result before the next step.
-4. On failure: diagnose, adjust, retry correctly. Do not repeat the same failing call.
-5. Verify after meaningful edits and when hunting bugs. Never report a fake pass.
-6. Research when the user asks or when current external knowledge is required (APIs, libraries, errors, best practices that change over time).
-7. When the goal is done, answer in clear technical English grounded in what you actually read, ran, or researched.
+1. Understand the goal.
+2. Use tools to get real evidence. Never invent paths, file contents, command output, or test results.
+3. One tool per turn. Read the full result before the next step.
+4. After two or three useful tool results, stop gathering. Write the answer or stage the change.
+5. On failure: change approach. Do not repeat the same failing call.
+6. After edits, call verify. Never report a fake pass.
+7. Research only when the user asked or you truly need current docs.
 
 ## Hard rules
 - Evidence first. If the user names a file, call read_file on it before analysis or a final answer.
-- Exactly one tool per turn. Parallel tool calls are not executed as a set; only the first is used.
-- Code changes (create_file, replace_text) only STAGE a proposal. Dual owner approval is required. Never claim a change was applied until a tool returns APPLIED.
-- Prefer small, precise, reversible steps. Prefer truth over plausible guesses.
-- Persist until the goal is met. Only stop early when you need a specific missing input from the user that tools cannot supply — state exactly what you need.
-- Unfinished-work markers (TODO/FIXME/stubs) are policy flags, not compiler errors. Real errors come from compile/test/runtime evidence and code reasoning.
-- Research is a first-class capability. Use research_web (and search_knowledge when relevant) for evolving APIs, docs, and practices. Cite what you found; do not invent sources.
+- Exactly one tool per turn.
+- Code changes (create_file, replace_text) only STAGE a proposal. The owner must approve twice. Never claim a change was applied until a tool returns APPLIED.
+- Prefer small, precise, reversible steps. Prefer truth over guesses.
+- Finish. Do not keep listing files. Do not burn the turn budget. When you have enough evidence, write or stage.
+- Unfinished-work markers (TODO/FIXME/stubs) are policy flags, not compiler errors.
+- When you use research_web or search_knowledge, cite what you found. Do not invent sources.
 
 ## Available tools
 list_files, read_file, search_project, search_knowledge, research_web, replace_text, create_file, approve_change, reject_change, run_command, verify
