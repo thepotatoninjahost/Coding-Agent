@@ -15,6 +15,7 @@ import com.codingagent.model.AgentModelProtocol
 import com.codingagent.model.ModelGateway
 import com.codingagent.model.ModelRequest
 import com.codingagent.model.ModelResponse
+import com.codingagent.model.JsonModelResponseParser
 import com.codingagent.research.DeepResearchProvider
 import com.codingagent.research.DurableDeepResearchProvider
 import com.codingagent.research.ResearchBriefBuilder
@@ -295,6 +296,61 @@ class AutonomousAgent(
                     return events
                 }
                 is ModelResponse.Text -> {
+                    // Last-ditch: XML tool markup that slipped past the parser is not a review.
+                    val recovered = JsonModelResponseParser().parse(response.content)
+                    if (recovered is ModelResponse.ToolCall) {
+                        response = recovered
+                        // Fall through by re-entering the when via continue after rewriting is messy;
+                        // handle like a tool call below by jumping to the tool path with a labeled block.
+                    }
+                    if (response is ModelResponse.Text && looksLikeRawToolMarkup(response.content)) {
+                        transcript += com.codingagent.model.ModelMessage("assistant", response.content.take(800))
+                        transcript += com.codingagent.model.ModelMessage(
+                            "user",
+                            "SYSTEM: That was a raw tool dump, not an answer. " +
+                                "Write the review in plain English from evidence already gathered. No XML. No tool tags."
+                        )
+                        continue
+                    }
+                    if (response !is ModelResponse.Text) {
+                        // recovered tool call: run the existing tool-call arm by looping with it
+                        // Store on a local and fall through — handled after this if by checking type again.
+                    }
+                    if (response is ModelResponse.ToolCall) {
+                        // Reuse tool path: set and don't complete as text.
+                        // Jump by assigning and using a goto-equivalent: copy is too large.
+                        // Instead enqueue as next model result by handling here minimally:
+                        val recoveredCall = response
+                        emit(AutonomousAgentEvent.ToolStarted(recoveredCall.name, recoveredCall.arguments))
+                        val toolResult = executeTool(recoveredCall.name, recoveredCall.arguments)
+                        if (toolResult.isNotBlank() && toolResult != "(no files)") {
+                            lastEvidence = toolResult
+                        }
+                        val success = !toolResult.startsWith("ERROR:")
+                        emit(AutonomousAgentEvent.ToolFinished(recoveredCall.name, toolResult, success))
+                        transcript += com.codingagent.model.ModelMessage(
+                            "assistant",
+                            recoveredCall.thought.ifBlank { "Calling ${recoveredCall.name}" },
+                            recoveredCall.callId,
+                            recoveredCall.name,
+                            recoveredCall.arguments
+                        )
+                        transcript += com.codingagent.model.ModelMessage(
+                            "tool",
+                            "${recoveredCall.name}: $toolResult",
+                            recoveredCall.callId
+                        )
+                        if (success && recoveredCall.name in setOf("read_file", "search_project")) {
+                            successfulGathers++
+                            if (recoveredCall.name == "read_file") {
+                                val path = runCatching { JSONObject(recoveredCall.arguments).getString("path") }.getOrNull()
+                                if (!path.isNullOrBlank()) readPaths += path.trim().trimStart('/')
+                            } else {
+                                searchedProject = true
+                            }
+                        }
+                        continue
+                    }
                     emit(AutonomousAgentEvent.ModelMessage(response.content))
                     val missing = missingEvidenceMessage(intake, readPaths, searchedProject)
                     if (missing != null) {
@@ -854,6 +910,11 @@ class AutonomousAgent(
     private fun String.limitOutput(): String = take(config.maxOutputCharacters)
 
     private fun isDegenerate(text: String): Boolean = DegenerateOutput.isDegenerate(text)
+
+    private fun looksLikeRawToolMarkup(text: String): Boolean {
+        val t = text.lowercase()
+        return t.contains("<tool_call") || t.contains("<function=") || t.contains("</tool_call>")
+    }
 
     private fun sanitizeModelText(text: String, report: VerificationReport): String {
         if (!isDegenerate(text)) {
