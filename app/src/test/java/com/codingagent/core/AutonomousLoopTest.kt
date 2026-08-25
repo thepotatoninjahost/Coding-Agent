@@ -7,6 +7,7 @@ import org.junit.Test
 import com.codingagent.agent.AgentKnowledge
 import com.codingagent.agent.AutonomousAgent
 import com.codingagent.agent.AutonomousAgentConfig
+import com.codingagent.agent.LoopControl
 import com.codingagent.agent.AutonomousAgentEvent
 import com.codingagent.agent.DegenerateOutput
 import com.codingagent.agent.SelfEvolution
@@ -16,6 +17,7 @@ import com.codingagent.model.ModelGateway
 import com.codingagent.model.ModelRequest
 import com.codingagent.model.ModelResponse
 import com.codingagent.workspace.ProjectWorkspace
+import com.codingagent.intake.TaskIntent
 
 class AutonomousLoopTest {
     @Test
@@ -271,6 +273,21 @@ class AutonomousLoopTest {
                 summary.contains("Verification")
         )
     }
+    @Test
+    fun loopControlClosesToolsAfterInspectGathers() {
+        val open = LoopControl.decide(0, 24, 0, 0, TaskIntent.INSPECT, true)
+        assertTrue(open.toolsOpen)
+        val closed = LoopControl.decide(2, 24, 2, 0, TaskIntent.INSPECT, true)
+        assertTrue(!closed.toolsOpen)
+        assertTrue(closed.demandWrite)
+        val synthesize = LoopControl.decide(3, 24, 2, 2, TaskIntent.INSPECT, true)
+        assertTrue(synthesize.synthesizeFromEvidence)
+        val changeStillOpen = LoopControl.decide(1, 24, 2, 0, TaskIntent.CHANGE, false)
+        assertTrue(changeStillOpen.toolsOpen)
+        val changeClosed = LoopControl.decide(1, 24, 3, 0, TaskIntent.CHANGE, false)
+        assertTrue(!changeClosed.toolsOpen)
+    }
+
 }
 
 /** Deterministic gateway that returns scripted responses in order. */
