@@ -238,9 +238,8 @@ class AutonomousLoopTest {
     }
 
     /**
-     * Review/analyze of the whole project used to burn maxTurns on tools then fail
-     * with "exceeded the autonomous turn budget". If any evidence exists (repo map
-     * is always seeded), the spine must Complete instead of Failed.
+     * Whole-project review: model may keep emitting tools. After two gathers the
+     * spine closes tools and must Complete from evidence — never Failed turn-budget.
      */
     @Test
     fun turnBudgetExhaustionCompletesFromRepoMapEvidence() {
@@ -263,11 +262,13 @@ class AutonomousLoopTest {
         )
         assertTrue(events.none { it is AutonomousAgentEvent.Failed })
         val summary = (events.last() as AutonomousAgentEvent.Completed).task.summary
+        assertTrue(events.any { it is AutonomousAgentEvent.ToolFinished && it.name == "search_project" })
         assertTrue(
-            "summary should mention budget or gathered evidence: $summary",
-            summary.contains("Turn budget reached") ||
+            "summary must be synthesized from gathered evidence, not a turn-budget fail: $summary",
+            summary.contains("Review from gathered evidence") ||
                 summary.contains("ImproveMe") ||
-                summary.contains("Repo map")
+                summary.contains("Repo map") ||
+                summary.contains("Verification")
         )
     }
 }
