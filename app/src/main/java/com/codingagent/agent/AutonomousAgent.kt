@@ -216,6 +216,15 @@ class AutonomousAgent(
         for (turn in 0 until config.maxTurns) {
             if (cancelled.get()) return stopNow(taskId, normalized, plan, events) { emit(it) }
             emit(AutonomousAgentEvent.Phase("MODEL", "Decision turn ${turn + 1}/${config.maxTurns}"))
+            // Last two turns: demand a written answer. Tool-only loops were burning the whole budget
+            // then failing with "exceeded the autonomous turn budget" on review/analyze requests.
+            if (turn >= (config.maxTurns - 2).coerceAtLeast(0)) {
+                transcript += com.codingagent.model.ModelMessage(
+                    "user",
+                    "SYSTEM: Turn ${turn + 1}/${config.maxTurns}. Do NOT call any tool. " +
+                        "Write the final answer now from evidence already gathered."
+                )
+            }
             var response = activeGateway.complete(
                 ModelRequest(
                     AgentModelProtocol.SYSTEM,
@@ -468,9 +477,33 @@ class AutonomousAgent(
                 }
             }
         }
-        val task = failedTask(taskId, normalized, plan, "The model exceeded the autonomous turn budget", changeSets.flatMap { it.changes })
-        emit(AutonomousAgentEvent.Failed(task, task.summary))
+        val report = workspace.verify()
+        val usableEvidence = lastEvidence.isNotBlank() && !lastEvidence.startsWith("ERROR:")
+        val summary = if (usableEvidence) {
+            buildString {
+                append("Turn budget reached after ${config.maxTurns} model turns. ")
+                append("The model kept calling tools instead of writing a final answer. ")
+                append("Below is what was already gathered.\n\n")
+                append(lastEvidence.take(config.maxOutputCharacters))
+                append("\n\nVerification: ")
+                append(if (report.passed) "passed (static unfinished-work marker scan)" else "FAILED (${report.issues.size} issue(s))")
+            }
+        } else {
+            "The model used ${config.maxTurns} turns without producing a final answer or usable tool evidence. " +
+                "Retry with a narrower request (one file or one question), or switch model in Model settings."
+        }
+        val task = AgentTask(
+            taskId, normalized, if (usableEvidence) "completed-with-warning" else "failed", plan,
+            changeSets.flatMap { it.changes }, report,
+            listOf("${Instant.now()}: turn budget exhausted; evidence=${if (usableEvidence) "yes" else "no"}"),
+            summary
+        )
         journal.record(task)
+        if (usableEvidence) {
+            emit(AutonomousAgentEvent.Completed(task))
+        } else {
+            emit(AutonomousAgentEvent.Failed(task, summary))
+        }
         return events
     }
 
