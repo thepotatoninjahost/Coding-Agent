@@ -744,26 +744,31 @@ class AutonomousAgent(
                         ResearchMode.valueOf(arguments.optString("mode", "BROAD").uppercase())
                     }.getOrDefault(ResearchModeDetector.detect(query))
                     val sources = arguments.optInt("sources", 8).coerceIn(1, 12)
-                    val session = runCatching {
+                    val sessionResult = runCatching {
                         research.deepResearch(query, sources, mode) { progress ->
                             lastResearchProgress =
                                 "${progress.stage}: ${progress.completed}/${progress.total}; " +
                                     "learned ${progress.successful}, failed ${progress.failed}"
                         }
-                    }.getOrElse { err ->
-                        return@executeTool "ERROR: research_web failed: ${err.message ?: err.javaClass.simpleName}"
                     }
-                    if (session.sources.isEmpty()) {
-                        return@executeTool
+                    val session = sessionResult.getOrNull()
+                    when {
+                        sessionResult.isFailure -> {
+                            val err = sessionResult.exceptionOrNull()
+                            "ERROR: research_web failed: ${err?.message ?: err?.javaClass?.simpleName ?: "unknown"}"
+                        }
+                        session == null || session.sources.isEmpty() ->
                             "ERROR: research_web found no usable sources for \"$query\". " +
                                 "Try a tighter technical query (library + API + error text). Do not invent docs."
+                        else -> {
+                            val brief = ResearchBriefBuilder.build(session)
+                            val header =
+                                "Learned ${brief.sourceCount} distinct full sources across ${brief.laneCount} lanes, " +
+                                    "${brief.wordCount} words, ${brief.codeExampleCount} code examples.\n" +
+                                    "Progress: $lastResearchProgress\n"
+                            (header + brief.evidence).limitOutput()
+                        }
                     }
-                    val brief = ResearchBriefBuilder.build(session)
-                    val header =
-                        "Learned ${brief.sourceCount} distinct full sources across ${brief.laneCount} lanes, " +
-                            "${brief.wordCount} words, ${brief.codeExampleCount} code examples.\n" +
-                            "Progress: $lastResearchProgress\n"
-                    (header + brief.evidence).limitOutput()
                 }
                 "replace_text" -> {
                     val path = arguments.getString("path")
