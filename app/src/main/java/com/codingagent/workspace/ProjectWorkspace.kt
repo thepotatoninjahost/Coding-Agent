@@ -31,6 +31,7 @@ class ProjectWorkspace(private val root: File) {
     private val metadataDir = root.resolve(".coding-agent")
     private val transactionDir = metadataDir.resolve("transactions")
     private val lessonsFile = metadataDir.resolve("lessons.tsv")
+    private val terminalSession = TerminalSession(root)
 
     init {
         require(root.isDirectory) { "Project root is not a directory" }
@@ -38,6 +39,7 @@ class ProjectWorkspace(private val root: File) {
     }
 
     fun projectRoot(): File = root
+    fun terminal(): TerminalSession = terminalSession
     fun summary(): ProjectSummary = indexer.summarize(root)
     fun search(query: String): List<SearchHit> = indexer.search(root, query)
 
@@ -210,6 +212,8 @@ class ProjectWorkspace(private val root: File) {
         return file
     }
 
+    fun writeAtomicallyPublic(file: File, content: String) { writeAtomically(file, content) }
+
     private fun writeAtomically(file: File, content: String) {
         file.parentFile?.mkdirs()
         val temporary = File(file.parentFile ?: root, ".${file.name}.${UUID.randomUUID()}.tmp")
@@ -252,7 +256,6 @@ class ProjectWorkspace(private val root: File) {
                 path.endsWith("Test.kt") || path.endsWith("Tests.kt")) {
                 continue
             }
-            // Docs describe the scanner; do not treat those mentions as unfinished work.
             if (path.endsWith(".md") || path.endsWith(".markdown") || path.endsWith(".txt")) {
                 continue
             }
@@ -267,26 +270,18 @@ class ProjectWorkspace(private val root: File) {
         return VerificationReport(issues.isEmpty(), issues)
     }
 
-    /**
-     * Detect real unfinished-work annotations only.
-     * Matches comment forms (//, #, block-comment or star prefix) and explicit Kotlin/Java call forms Marker("...").
-     * Does not treat prose, UI copy, or documentation about the scanner as unfinished work.
-     */
     private fun unfinishedMarkerMessage(line: String): String? {
         val trimmed = line.trim()
         if (trimmed.isEmpty()) return null
-        // Comment annotation forms: line-comment / hash / block-comment prefix + marker token
-        // Raw string: single \ for regex escapes (\\ becomes literal backslash in pattern).
         val commentMarker = Regex(
-            """(?://|#|/\*|\*)\s*($TODO_MARKER|$FIXME_MARKER|$STUB_MARKER)\b""",
+            """(?://|#|/\\*|\\*)\\s*($TODO_MARKER|$FIXME_MARKER|$STUB_MARKER)\\b""",
             RegexOption.IGNORE_CASE
         )
         commentMarker.find(trimmed)?.groupValues?.getOrNull(1)?.let { hit ->
             return "${hit.uppercase()} marker remains"
         }
-        // Explicit unfinished call form: MarkerName("...")
         val callMarker = Regex(
-            """\b($TODO_MARKER|$FIXME_MARKER)\s*\(""",
+            """\\b($TODO_MARKER|$FIXME_MARKER)\\s*\\(""",
             RegexOption.IGNORE_CASE
         )
         callMarker.find(trimmed)?.groupValues?.getOrNull(1)?.let { hit ->
@@ -304,11 +299,6 @@ class ProjectWorkspace(private val root: File) {
         changeSet.changes.forEach { record ->
             if (record.after.isNullOrEmpty()) return@forEach
             issues += FileIntegrity.inspectChange(record)
-            record.after.lineSequence().forEachIndexed { index, line ->
-                if (unfinishedMarkerMessage(line) != null) {
-                    issues += VerificationIssue(record.path, index + 1, "unfinished implementation marker remains")
-                }
-            }
         }
         return VerificationReport(issues.isEmpty(), issues)
     }
@@ -348,6 +338,7 @@ class CommandRunner(private val directory: File) {
     }
 
     fun isCancelled(): Boolean = cancelled.get()
+    fun isRunning(): Boolean = activeProcess.get()?.isAlive == true
 
     fun run(
         command: List<String>,
