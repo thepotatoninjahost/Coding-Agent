@@ -51,7 +51,7 @@ class ChatWorkspace(
         val result = if (agent == null) {
             null
         } else {
-            val events = agent.run(withConversationContext(trimmed)) { event ->
+            val events = agent.run(trimmed) { event ->
                 when (event) {
                     is AutonomousAgentEvent.Phase -> progressListener?.onProgress(event.name, event.detail)
                     is AutonomousAgentEvent.ToolStarted -> progressListener?.onProgress("TOOL", "${event.name}: ${event.arguments.take(80)}")
@@ -89,7 +89,7 @@ class ChatWorkspace(
                             summary = terminal.message
                         )
                     )
-                else -> agent.execute(withConversationContext(trimmed))
+                else -> agent.execute(trimmed)
             }
         }
         val response = when (result) {
@@ -103,22 +103,12 @@ class ChatWorkspace(
         return ChatTurn(response, result)
     }
 
-    private fun withConversationContext(request: String): String {
-        // SYSTEM messages are UI gate text ("show active", "choose a project folder").
-        // Feeding them into GoalInterpreter flipped intent to INSPECT via the word "show".
-        val prior = history(12)
-            .filter { it.role == ChatRole.USER || it.role == ChatRole.AGENT }
-            .joinToString("\n") { "${it.role.name.lowercase()}: ${it.content.take(400)}" }
-        return if (prior.isBlank()) request else "Conversation context:\n$prior\n\nCurrent request:\n$request"
-    }
-
     private fun formatTask(task: AgentTask): String = buildString {
         val summary = sanitizeSummary(task.summary)
         if (task.status == "failed" || task.status == "stopped") {
             append(summary)
             return@buildString
         }
-        // Lead with the answer. Verification theater must not bury tool results or greetings.
         val isDirect =
             task.status == "needs-input" ||
                 summary.startsWith("Hello.") ||
@@ -177,7 +167,6 @@ class ChatWorkspace(
 
     private fun sanitizeSummary(text: String): String {
         if (text.isBlank()) return "(empty)"
-        // Tool evidence and direct-lane answers are not model prose — never replace them.
         val head = text.trimStart()
         if (head.startsWith("Project files:") ||
             head.startsWith("Source files:") ||
@@ -215,7 +204,6 @@ class ChatWorkspace(
         if (streak > 2) deduped += "… (repeated ${streak - 2} more times)"
         return deduped.joinToString("\n").take(2_000)
     }
-
 }
 
 data class ChatTurn(
