@@ -33,8 +33,10 @@ object LoopControl {
         } else {
             4
         }
+        // Change work must keep tools open so replace_text/create_file can run.
+        // demandWrite is advisory only; AutonomousAgent still executes mutation tools.
         val toolsOpen = !lastTurns && (changeWork || usefulGathers < gatherCap)
-        val demandWrite = !toolsOpen || (changeWork && usefulGathers >= 2)
+        val demandWrite = !toolsOpen
         val synthesize = !changeWork && demandWrite && writeRefusals >= 2
         return LoopDecision(
             toolsOpen = toolsOpen,
