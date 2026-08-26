@@ -24,14 +24,18 @@ object LoopControl {
         wholeProjectReview: Boolean
     ): LoopDecision {
         val lastTurns = turn >= (maxTurns - 2).coerceAtLeast(0)
+        val changeWork = intent == TaskIntent.CHANGE ||
+            intent == TaskIntent.CREATE ||
+            intent == TaskIntent.REFACTOR ||
+            intent == TaskIntent.DEBUG
         val gatherCap = if (wholeProjectReview || intent == TaskIntent.INSPECT || intent == TaskIntent.EXPLAIN) {
             2
         } else {
-            3
+            4
         }
-        val toolsOpen = !lastTurns && usefulGathers < gatherCap
-        val demandWrite = !toolsOpen
-        val synthesize = demandWrite && writeRefusals >= 2
+        val toolsOpen = !lastTurns && (changeWork || usefulGathers < gatherCap)
+        val demandWrite = !toolsOpen || (changeWork && usefulGathers >= 2)
+        val synthesize = !changeWork && demandWrite && writeRefusals >= 2
         return LoopDecision(
             toolsOpen = toolsOpen,
             demandWrite = demandWrite,

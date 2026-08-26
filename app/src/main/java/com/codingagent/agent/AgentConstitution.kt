@@ -47,7 +47,7 @@ data class ConstitutionViolation(
 )
 
 object AgentConstitution {
-    const val APPROVAL_EXPIRATION_MS = 2 * 60 * 1000L
+    const val APPROVAL_EXPIRATION_MS = 30 * 60 * 1000L
 
     private val doubleConfirmationCategories = setOf(
         AgentActionCategory.CODE_CHANGE,
