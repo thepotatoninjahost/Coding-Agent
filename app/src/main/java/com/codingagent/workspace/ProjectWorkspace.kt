@@ -212,8 +212,6 @@ class ProjectWorkspace(private val root: File) {
         return file
     }
 
-    fun writeAtomicallyPublic(file: File, content: String) { writeAtomically(file, content) }
-
     private fun writeAtomically(file: File, content: String) {
         file.parentFile?.mkdirs()
         val temporary = File(file.parentFile ?: root, ".${file.name}.${UUID.randomUUID()}.tmp")
@@ -270,6 +268,11 @@ class ProjectWorkspace(private val root: File) {
         return VerificationReport(issues.isEmpty(), issues)
     }
 
+    /**
+     * Detect real unfinished-work annotations only.
+     * Matches comment forms (//, #, block-comment or star prefix) and explicit Kotlin/Java call forms Marker("...").
+     * Does not treat prose, UI copy, or documentation about the scanner as unfinished work.
+     */
     private fun unfinishedMarkerMessage(line: String): String? {
         val trimmed = line.trim()
         if (trimmed.isEmpty()) return null
