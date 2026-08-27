@@ -58,8 +58,7 @@ class ProjectWorkspace(private val root: File) {
     fun replace(path: String, oldText: String, newText: String, reason: String): ChangeSet = transaction(reason) { replace(path, oldText, newText) }
     fun create(path: String, text: String, reason: String): ChangeSet = transaction(reason) { create(path, text) }
     fun append(path: String, text: String, reason: String): ChangeSet = transaction(reason) { append(path, text) }
-    fun remove(path: String, oldText: String, reason: String): ChangeSet = transaction(reason) { remove(path, oldText)
-    }
+    fun remove(path: String, oldText: String, reason: String): ChangeSet = transaction(reason) { remove(path, oldText) }
 
     fun preview(operations: List<TaskOperation>, reason: String): ChangeSet {
         require(operations.isNotEmpty()) { "At least one operation is required" }
@@ -278,7 +277,7 @@ class ProjectWorkspace(private val root: File) {
         val trimmed = line.trim()
         if (trimmed.isEmpty()) return null
         val commentMarker = Regex(
-            "(?://|#|/\\*|\\*|<!--)?\\s*(" + TODO_MARKER + "|" + FIXME_MARKER + "|" + STUB_MARKER + ")\\b",
+            "(?://|#|/\\*|\\*|<!--)\\s*(" + TODO_MARKER + "|" + FIXME_MARKER + "|" + STUB_MARKER + ")\\b",
             RegexOption.IGNORE_CASE
         )
         commentMarker.find(trimmed)?.groupValues?.getOrNull(1)?.let { hit ->
