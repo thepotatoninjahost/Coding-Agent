@@ -28,14 +28,14 @@ object LoopControl {
             intent == TaskIntent.CREATE ||
             intent == TaskIntent.REFACTOR ||
             intent == TaskIntent.DEBUG
-        val gatherCap = if (wholeProjectReview || intent == TaskIntent.INSPECT || intent == TaskIntent.EXPLAIN) {
-            2
-        } else {
-            4
+        // Inspect/explain/whole-project: tight gather budget then write.
+        // Change work: higher budget so mutations can run after reads; closes at 3 gathers.
+        val gatherCap = when {
+            wholeProjectReview || intent == TaskIntent.INSPECT || intent == TaskIntent.EXPLAIN -> 2
+            changeWork -> 3
+            else -> 4
         }
-        // Change work must keep tools open so replace_text/create_file can run.
-        // demandWrite is advisory only; AutonomousAgent still executes mutation tools.
-        val toolsOpen = !lastTurns && (changeWork || usefulGathers < gatherCap)
+        val toolsOpen = !lastTurns && usefulGathers < gatherCap
         val demandWrite = !toolsOpen
         val synthesize = !changeWork && demandWrite && writeRefusals >= 2
         return LoopDecision(
