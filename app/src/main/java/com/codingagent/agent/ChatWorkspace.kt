@@ -127,22 +127,36 @@ class ChatWorkspace(
                 summary.startsWith("Directory listing:") ||
                 summary.startsWith("File:") ||
                 summary.startsWith("APPLIED") ||
-                summary.startsWith("First approval") ||
-                summary.startsWith("No pending proposal")
-
+                summary.startsWith("First approval")
         if (isDirect) {
             append(summary)
             return@buildString
         }
-
         append("Status: ")
         append(task.status)
         append("\n\nVerification: ")
         append(if (task.verification.passed) "passed" else "FAILED")
         append("; ")
         append(task.verification.issues.size)
-        append(" issue(s)\n\nSummary:\n")
+        append(" issue(s)")
+        if (task.verification.issues.isEmpty()) {
+            append("\n- Static scan found no unfinished-work markers in production sources.")
+        } else {
+            task.verification.issues.forEach { issue ->
+                append("\n- ")
+                append(issue.path)
+                append(":")
+                append(issue.line)
+                append(" — ")
+                append(issue.message)
+            }
+        }
+        append("\n\nSummary:\n")
         append(summary)
+        if (task.events.isNotEmpty()) {
+            append("\n\nActivity log:\n")
+            append(task.events.map { sanitizeSummary(it) }.distinct().take(40).joinToString("\n"))
+        }
     }
 
     private fun sanitizeSummary(text: String): String {
