@@ -1,8 +1,6 @@
 package com.codingagent.agent
 
 import java.util.UUID
-import com.codingagent.intake.GoalInterpreter
-import com.codingagent.model.ModelMessage
 import com.codingagent.workspace.VerificationReport
 import com.codingagent.workspace.AgentTask
 
@@ -28,7 +26,6 @@ fun interface CodingAgentExecutor {
     fun execute(request: String): AgentRuntimeResult
 }
 
-/** Optional progress sink used by the UI to show real phases instead of a fake "Researching" label. */
 fun interface AgentProgressListener {
     fun onProgress(phase: String, detail: String)
 }
@@ -37,7 +34,6 @@ class ChatWorkspace(
     private val store: ChatMessageStore,
     private val unavailableMessageProvider: () -> String = { "Model unavailable. Finish model setup before sending coding requests." },
     private val progressListener: AgentProgressListener? = null,
-    /** Single spine provider — only [AutonomousAgent]. */
     private val runtimeProvider: () -> AutonomousAgent?
 ) {
     fun history(limit: Int = 100): List<ChatMessage> = store.recentChatMessages(limit).asReversed()
@@ -47,6 +43,18 @@ class ChatWorkspace(
         require(trimmed.isNotEmpty()) { "A message is required" }
         store.recordChatMessage(ChatMessage(role = ChatRole.USER, content = trimmed))
         val agent = runtimeProvider()
+        val approval = agent?.let { ChatApproval.tryApprove(it, trimmed) }
+        if (approval != null) {
+            progressListener?.onProgress("APPROVAL", approval.toString().take(80))
+            val response = when (approval) {
+                is AgentRuntimeResult.Completed -> ChatMessage(role = ChatRole.AGENT, content = formatTask(approval.task), taskId = approval.task.id)
+                is AgentRuntimeResult.NeedsApproval -> ChatMessage(role = ChatRole.AGENT, content = approval.question, taskId = approval.task.id)
+                is AgentRuntimeResult.NeedsInput -> ChatMessage(role = ChatRole.AGENT, content = approval.question, taskId = approval.task.id)
+                is AgentRuntimeResult.Failed -> ChatMessage(role = ChatRole.AGENT, content = formatTask(approval.task), taskId = approval.task.id)
+            }
+            store.recordChatMessage(response)
+            return ChatTurn(response, approval)
+        }
         progressListener?.onProgress("PLANNING", "Starting request")
         val result = if (agent == null) {
             null
@@ -117,23 +125,13 @@ class ChatWorkspace(
                 summary.startsWith("Source files:") ||
                 summary.startsWith("Indexed source files") ||
                 summary.startsWith("Directory listing:") ||
-                summary.startsWith("File:")
+                summary.startsWith("File:") ||
+                summary.startsWith("APPLIED") ||
+                summary.startsWith("First approval") ||
+                summary.startsWith("No pending proposal")
 
         if (isDirect) {
             append(summary)
-            if (task.status != "needs-input" && !task.verification.passed) {
-                append("\n\nVerification: FAILED; ")
-                append(task.verification.issues.size)
-                append(" issue(s)")
-                task.verification.issues.take(10).forEach { issue ->
-                    append("\n- ")
-                    append(issue.path)
-                    append(":")
-                    append(issue.line)
-                    append(" — ")
-                    append(issue.message)
-                }
-            }
             return@buildString
         }
 
@@ -143,26 +141,8 @@ class ChatWorkspace(
         append(if (task.verification.passed) "passed" else "FAILED")
         append("; ")
         append(task.verification.issues.size)
-        append(" issue(s)")
-        if (task.verification.issues.isEmpty()) {
-            append("\n- Static scan found no unfinished-work markers in production sources.")
-        } else {
-            task.verification.issues.forEach { issue ->
-                append("\n- ")
-                append(issue.path)
-                append(":")
-                append(issue.line)
-                append(" — ")
-                append(issue.message)
-            }
-        }
-        append("\n\nSummary:\n")
+        append(" issue(s)\n\nSummary:\n")
         append(summary)
-        if (task.events.isNotEmpty()) {
-            append("\n\nActivity log:\n")
-            val cleaned = task.events.map { sanitizeSummary(it) }.distinct().take(40)
-            append(cleaned.joinToString("\n"))
-        }
     }
 
     private fun sanitizeSummary(text: String): String {
@@ -174,35 +154,18 @@ class ChatWorkspace(
             head.startsWith("Directory listing:") ||
             head.startsWith("File:") ||
             head.startsWith("Hello.") ||
-            head.startsWith("Status report")
+            head.startsWith("Status report") ||
+            head.startsWith("APPLIED")
         ) {
             return text.take(12_000)
         }
-        if (text.contains("<tool_call", ignoreCase = true) ||
-            text.contains("<function=", ignoreCase = true)
-        ) {
+        if (text.contains("<tool_call", ignoreCase = true) || text.contains("<function=", ignoreCase = true)) {
             return "The model printed a raw tool call instead of a review. That is not an answer."
         }
         if (DegenerateOutput.isDegenerate(text)) {
             return DegenerateOutput.sanitize(text) + " Rely on the verification section above for the real findings."
         }
-        val lines = text.lineSequence().map { it.trim() }.filter { it.isNotEmpty() }.toList()
-        val deduped = mutableListOf<String>()
-        var prev: String? = null
-        var streak = 0
-        for (line in lines) {
-            if (line == prev) {
-                streak++
-                if (streak <= 2) deduped += line
-            } else {
-                if (streak > 2) deduped += "… (repeated ${streak - 2} more times)"
-                deduped += line
-                prev = line
-                streak = 1
-            }
-        }
-        if (streak > 2) deduped += "… (repeated ${streak - 2} more times)"
-        return deduped.joinToString("\n").take(2_000)
+        return text.take(2_000)
     }
 }
 
