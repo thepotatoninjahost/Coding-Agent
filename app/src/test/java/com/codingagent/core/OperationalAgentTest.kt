@@ -1,6 +1,5 @@
 package com.codingagent.core
 
-import com.codingagent.agent.ApprovalChannel
 import java.nio.file.Files
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -45,8 +44,8 @@ class OperationalAgentTest {
         val proposal = files.save("src/Main.kt", "fun main() = 2\n", coordinator)
         assertEquals(ChangeOperation.REPLACE, proposal.changeSet.changes.single().operation)
         assertEquals("fun main() = 1\n", files.read("src/Main.kt").content)
-        assertTrue(coordinator.approve(proposal.id, true, "test", ApprovalChannel.BIOMETRIC) is MutationApprovalResult.AwaitingSecond)
-        assertTrue(coordinator.approve(proposal.id, true, "test", ApprovalChannel.SPOKEN_PASSWORD) is MutationApprovalResult.Applied)
+        assertTrue(coordinator.approve(proposal.id, true, "test") is MutationApprovalResult.AwaitingSecond)
+        assertTrue(coordinator.approve(proposal.id, true, "test") is MutationApprovalResult.Applied)
         assertEquals("fun main() = 2\n", files.read("src/Main.kt").content)
     }
 
@@ -65,6 +64,7 @@ class OperationalAgentTest {
         root.resolve("Main.kt").writeText("fun main() = 1\n")
         val events = agent(root).run("fix the login bug")
         val terminal = events.last()
+        // Without model: needs-input (configure model) or completed clarification — never silent write.
         assertTrue(
             terminal is AutonomousAgentEvent.Completed ||
                 terminal is AutonomousAgentEvent.Failed
@@ -84,8 +84,8 @@ class OperationalAgentTest {
         assertTrue(result.proposalId.isNotBlank())
         assertEquals("fun main() = 1\n", root.resolve("src/Main.kt").readText())
 
-        assertTrue(spine.approveProposal(result.proposalId, true, "owner", ApprovalChannel.BIOMETRIC) is MutationApprovalResult.AwaitingSecond)
-        assertTrue(spine.approveProposal(result.proposalId, true, "owner", ApprovalChannel.SPOKEN_PASSWORD) is MutationApprovalResult.Applied)
+        assertTrue(spine.approveProposal(result.proposalId, true, "owner") is MutationApprovalResult.AwaitingSecond)
+        assertTrue(spine.approveProposal(result.proposalId, true, "owner") is MutationApprovalResult.Applied)
         assertEquals("fun main() = 2\n", root.resolve("src/Main.kt").readText())
     }
 
@@ -93,14 +93,15 @@ class OperationalAgentTest {
     fun offlineCreateSynthesisStagesProposalWithoutModel() {
         val root = Files.createTempDirectory("agent-offline-create").toFile()
         val spine = agent(root)
+        // Explicit create form is always parsed as CREATE_FILE (offline, no model required).
         val result = spine.execute("create file src/Helper.kt with class Helper { fun run() = 1 }")
         assertTrue("expected NeedsApproval, got $result", result is AgentRuntimeResult.NeedsApproval)
         result as AgentRuntimeResult.NeedsApproval
         assertTrue(result.proposalId.isNotBlank())
         assertTrue(!root.resolve("src/Helper.kt").exists())
 
-        assertTrue(spine.approveProposal(result.proposalId, true, "owner", ApprovalChannel.BIOMETRIC) is MutationApprovalResult.AwaitingSecond)
-        assertTrue(spine.approveProposal(result.proposalId, true, "owner", ApprovalChannel.SPOKEN_PASSWORD) is MutationApprovalResult.Applied)
+        assertTrue(spine.approveProposal(result.proposalId, true, "owner") is MutationApprovalResult.AwaitingSecond)
+        assertTrue(spine.approveProposal(result.proposalId, true, "owner") is MutationApprovalResult.Applied)
         val written = root.resolve("src/Helper.kt").readText()
         assertTrue(written.contains("class Helper"))
         assertTrue(written.contains("fun run"))

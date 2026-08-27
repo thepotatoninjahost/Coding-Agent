@@ -6,12 +6,29 @@ import com.codingagent.agent.AgentKnowledge
 import com.codingagent.workspace.KnowledgeHit
 
 /**
- * ONE JOB: Persist and query offline knowledge documents the owner imports.
- * No bundled copyrighted books. Owner chooses every document.
+ * ONE JOB: Persist and query offline knowledge documents.
+ * Bundled example assets and user-imported references share one searchable index.
  */
 class KnowledgeBase(context: Context) : KnowledgeProvider, AgentKnowledge {
     private val root = File(context.filesDir, "coding-agent/knowledge").apply { mkdirs() }
     private val index = KnowledgeIndex(root)
+    private val flagFile = File(root, "bundled.flag")
+
+    /** Ensure the example reference is present once without wiping user imports. */
+    fun ensureBundledExample(context: Context, assetPath: String = "knowledge/coding-for-dummies.txt"): Int {
+        if (flagFile.isFile) return 0
+        return runCatching {
+            val text = context.assets.open(assetPath).bufferedReader().use { it.readText() }
+            val result = index.indexText("Coding For Dummies (example)", "asset:$assetPath", text)
+            flagFile.writeText("1")
+            result.chunkCount
+        }.getOrDefault(0)
+    }
+
+    fun importAsset(context: Context, assetPath: String, document: String): Int {
+        val text = context.assets.open(assetPath).bufferedReader().use { it.readText() }
+        return index.indexText(document, "asset:$assetPath", text).chunkCount
+    }
 
     fun ingest(request: IngestRequest): IngestResult = index.indexRequest(request)
 
@@ -20,12 +37,6 @@ class KnowledgeBase(context: Context) : KnowledgeProvider, AgentKnowledge {
 
     fun ingestText(documentName: String, source: String, text: String): IngestResult =
         index.indexText(documentName, source, text)
-
-    /** Optional: import a plain asset the owner ships intentionally (never a default book). */
-    fun importAsset(context: Context, assetPath: String, document: String): Int {
-        val text = context.assets.open(assetPath).bufferedReader().use { it.readText() }
-        return index.indexText(document, "asset:$assetPath", text).chunkCount
-    }
 
     fun listDocuments(): List<IndexedDocument> = index.listDocuments()
 

@@ -103,7 +103,10 @@ data class TerminalEntry(
     val stdout: String,
     val stderr: String,
     val exitCode: Int,
-    val timedOut: Boolean
+    val timedOut: Boolean,
+    val durationMs: Long = 0,
+    val cancelled: Boolean = false,
+    val shell: String = "sh"
 )
 
 data class EditorDocument(

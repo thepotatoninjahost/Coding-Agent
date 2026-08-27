@@ -7,7 +7,7 @@ import com.codingagent.workspace.VerificationReport
 
 /**
  * ONE JOB: Apply a pending mutation when the user types an explicit approval word.
- * First phrase uses BIOMETRIC; second uses SPOKEN_PASSWORD.
+ * Returns null when this turn is not an approval, so chat continues normally.
  */
 object ChatApproval {
     private val phrases = setOf("approve", "confirm", "apply")
@@ -17,36 +17,16 @@ object ChatApproval {
     fun tryApprove(agent: AutonomousAgent, text: String): AgentRuntimeResult? {
         if (!isApprovalPhrase(text)) return null
         val pending = agent.pendingProposals().firstOrNull() ?: return null
-        val used = pending.approvals.map { it.channel }.toSet()
-        val channel = when {
-            ApprovalChannel.BIOMETRIC !in used -> ApprovalChannel.BIOMETRIC
-            ApprovalChannel.SPOKEN_PASSWORD !in used -> ApprovalChannel.SPOKEN_PASSWORD
-            else -> return AgentRuntimeResult.Failed(
-                AgentTask(
-                    id = UUID.randomUUID().toString(),
-                    request = text,
-                    status = "failed",
-                    plan = AgentPlan(text, emptyList(), emptyList()),
-                    changes = emptyList(),
-                    verification = VerificationReport(false, emptyList()),
-                    events = emptyList(),
-                    summary = "Both approval channels already recorded."
-                )
-            )
-        }
-        return when (
-            val result = agent.approveProposal(pending.id, ownerVerified = true, ownerLabel = "owner", channel = channel)
-        ) {
+        return when (val result = agent.approveProposal(pending.id, ownerVerified = true, ownerLabel = "owner")) {
             is MutationApprovalResult.AwaitingSecond ->
                 AgentRuntimeResult.NeedsApproval(
                     task(
                         request = text,
-                        summary = "Channel ${channel.name} recorded (${result.proposal.approvalCount}/2). " +
-                            "Other channel still required. Still in sandbox.",
+                        summary = "First approval recorded. Type approve or confirm once more to write the files.",
                         status = "waiting-approval",
                         proposalId = pending.id
                     ),
-                    "Channel ${channel.name} recorded. Other channel still required before apply.",
+                    "First approval recorded. Type approve or confirm once more to write the files.",
                     pending.id
                 )
             is MutationApprovalResult.Applied -> {
@@ -59,8 +39,8 @@ object ChatApproval {
                         plan = AgentPlan(text, emptyList(), emptyList()),
                         changes = result.changeSet.changes,
                         verification = VerificationReport(true, emptyList()),
-                        events = listOf("applied " + pending.id),
-                        summary = "APPLIED to disk after dual-channel approval.\nFiles:\n" +
+                        events = listOf("applied ${pending.id}"),
+                        summary = "APPLIED to disk after dual approval.\nFiles:\n" +
                             paths.joinToString("\n") { "- $it" }
                     )
                 )

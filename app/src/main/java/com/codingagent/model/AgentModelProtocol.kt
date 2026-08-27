@@ -1,5 +1,11 @@
 package com.codingagent.model
 
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.IOException
+import java.net.HttpURLConnection
+import java.net.URL
+import java.nio.charset.StandardCharsets
 import com.codingagent.intake.TaskIntent
 
 object AgentModelProtocol {
@@ -35,57 +41,57 @@ list_files, read_file, search_project, search_knowledge, research_web, replace_t
         ModelToolDefinition(
             "list_files",
             "List files and directories under a project-relative path. Use an empty path for the project root. Prefer this before guessing paths.",
-            """{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\",\"description\":\"Project-relative directory path (empty or '.' for root)\"}},\"required\":[]}"""
+            """{"type":"object","properties":{"path":{"type":"string","description":"Project-relative directory path (empty or '.' for root)"}},"required":[]}"""
         ),
         ModelToolDefinition(
             "read_file",
             "Read the full content of one project file. Required before analyzing or modifying any named file.",
-            """{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\",\"description\":\"Project-relative file path\"}},\"required\":[\"path\"]}"""
+            """{"type":"object","properties":{"path":{"type":"string","description":"Project-relative file path"}},"required":["path"]}"""
         ),
         ModelToolDefinition(
             "search_project",
             "Search the project source for a text or regex-like query. Returns matching lines with paths.",
-            """{\"type\":\"object\",\"properties\":{\"query\":{\"type\":\"string\",\"description\":\"Search query\"}},\"required\":[\"query\"]}"""
+            """{"type":"object","properties":{"query":{"type":"string","description":"Search query"}},"required":["query"]}"""
         ),
         ModelToolDefinition(
             "search_knowledge",
             "Search the local offline knowledge base (reference material imported into the agent).",
-            """{\"type\":\"object\",\"properties\":{\"query\":{\"type\":\"string\",\"description\":\"Search query\"}},\"required\":[\"query\"]}"""
+            """{"type":"object","properties":{"query":{"type":"string","description":"Search query"}},"required":["query"]}"""
         ),
         ModelToolDefinition(
             "research_web",
             "Research the web for technical information. Use for APIs, errors, and external facts not in the project.",
-            """{\"type\":\"object\",\"properties\":{\"query\":{\"type\":\"string\",\"description\":\"Research query\"},\"mode\":{\"type\":\"string\",\"description\":\"BROAD or DEEP\"},\"sources\":{\"type\":\"integer\",\"description\":\"Max sources to gather\"}},\"required\":[\"query\"]}"""
+            """{"type":"object","properties":{"query":{"type":"string","description":"Research query"},"mode":{"type":"string","description":"BROAD or DEEP"},"sources":{"type":"integer","description":"Max sources to gather"}},"required":["query"]}"""
         ),
         ModelToolDefinition(
             "replace_text",
             "Stage an exact text replacement. Dual owner approval is required before it is applied.",
-            """{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"},\"oldText\":{\"type\":\"string\"},\"newText\":{\"type\":\"string\"},\"reason\":{\"type\":\"string\"}},\"required\":[\"path\",\"oldText\",\"newText\"]}"""
+            """{"type":"object","properties":{"path":{"type":"string"},"oldText":{"type":"string"},"newText":{"type":"string"},"reason":{"type":"string"}},"required":["path","oldText","newText"]}"""
         ),
         ModelToolDefinition(
             "create_file",
             "Stage a new file. Dual owner approval is required before it is written.",
-            """{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"},\"content\":{\"type\":\"string\"},\"reason\":{\"type\":\"string\"}},\"required\":[\"path\",\"content\"]}"""
+            """{"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"},"reason":{"type":"string"}},"required":["path","content"]}"""
         ),
         ModelToolDefinition(
             "approve_change",
             "Record one owner approval for a pending proposal (two approvals required).",
-            """{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"string\"},\"ownerVerified\":{\"type\":\"boolean\"},\"ownerLabel\":{\"type\":\"string\"}},\"required\":[\"id\",\"ownerVerified\",\"ownerLabel\"]}"""
+            """{"type":"object","properties":{"id":{"type":"string"},"ownerVerified":{"type":"boolean"},"ownerLabel":{"type":"string"}},"required":["id","ownerVerified","ownerLabel"]}"""
         ),
         ModelToolDefinition(
             "reject_change",
             "Reject a pending change proposal.",
-            """{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"string\"}},\"required\":[\"id\"]}"""
+            """{"type":"object","properties":{"id":{"type":"string"}},"required":["id"]}"""
         ),
         ModelToolDefinition(
             "run_command",
             "Run a shell command in the project root and return stdout/stderr/exit code.",
-            """{\"type\":\"object\",\"properties\":{\"command\":{\"type\":\"string\"}},\"required\":[\"command\"]}"""
+            """{"type":"object","properties":{"command":{"type":"string"}},"required":["command"]}"""
         ),
         ModelToolDefinition(
             "verify",
             "Run static verification (unfinished-work marker scan). Never reports a fake pass.",
-            """{\"type\":\"object\",\"properties\":{},\"required\":[]}"""
+            """{"type":"object","properties":{},"required":[]}"""
         )
     )
 

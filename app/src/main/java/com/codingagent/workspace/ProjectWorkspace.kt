@@ -254,6 +254,7 @@ class ProjectWorkspace(private val root: File) {
                 path.endsWith("Test.kt") || path.endsWith("Tests.kt")) {
                 continue
             }
+            // Docs describe the scanner; do not treat those mentions as unfinished work.
             if (path.endsWith(".md") || path.endsWith(".markdown") || path.endsWith(".txt")) {
                 continue
             }
@@ -276,15 +277,18 @@ class ProjectWorkspace(private val root: File) {
     private fun unfinishedMarkerMessage(line: String): String? {
         val trimmed = line.trim()
         if (trimmed.isEmpty()) return null
+        // Comment annotation forms: line-comment / hash / block-comment prefix + marker token
+        // Raw string: single \ for regex escapes (\\ becomes literal backslash in pattern).
         val commentMarker = Regex(
-            "(?://|#|/\\*|\\*|<!--)\\s*(" + TODO_MARKER + "|" + FIXME_MARKER + "|" + STUB_MARKER + ")\\b",
+            """(?://|#|/\*|\*)\s*($TODO_MARKER|$FIXME_MARKER|$STUB_MARKER)\b""",
             RegexOption.IGNORE_CASE
         )
         commentMarker.find(trimmed)?.groupValues?.getOrNull(1)?.let { hit ->
             return "${hit.uppercase()} marker remains"
         }
+        // Explicit unfinished call form: MarkerName("...")
         val callMarker = Regex(
-            "\\b(" + TODO_MARKER + "|" + FIXME_MARKER + ")\\s*\\(",
+            """\b($TODO_MARKER|$FIXME_MARKER)\s*\(""",
             RegexOption.IGNORE_CASE
         )
         callMarker.find(trimmed)?.groupValues?.getOrNull(1)?.let { hit ->
@@ -341,6 +345,7 @@ class CommandRunner(private val directory: File) {
     }
 
     fun isCancelled(): Boolean = cancelled.get()
+
     fun isRunning(): Boolean = activeProcess.get()?.isAlive == true
 
     fun run(

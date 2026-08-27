@@ -86,4 +86,47 @@ class TerminalCancelTest {
         assertEquals(0, result.exitCode)
         assertTrue(chunks.toString().contains("hello") || result.stdout.contains("hello"))
     }
+
+    @Test
+    fun isBusyIsFalseWhenIdleAndTrueWhileRunning() {
+        val root = Files.createTempDirectory("term-busy").toFile()
+        val session = TerminalSession(root, timeoutSeconds = 60)
+        assertTrue(!session.isBusy())
+        val started = CountDownLatch(1)
+        val thread = Thread {
+            started.countDown()
+            session.execute("sleep 20")
+        }
+        thread.start()
+        assertTrue(started.await(2, TimeUnit.SECONDS))
+        Thread.sleep(150)
+        assertTrue(session.isBusy())
+        session.cancel("busy-check")
+        thread.join(5_000)
+        assertTrue(!session.isBusy())
+    }
+
+    @Test
+    fun rawCommandKeepsQuotedArguments() {
+        val root = Files.createTempDirectory("term-quote").toFile()
+        val session = TerminalSession(root)
+        val entry = session.execute("printf '%s' 'hello world'")
+        assertEquals(0, entry.exitCode)
+        assertEquals("hello world", entry.stdout)
+        assertTrue(entry.durationMs >= 0)
+        assertTrue(session.shellPath.isNotBlank())
+    }
+
+    @Test
+    fun workspaceSharesOneSessionWithAgentTools() {
+        val root = Files.createTempDirectory("term-share").toFile()
+        root.resolve("README.md").writeText("demo\n")
+        val workspace = ProjectWorkspace(root)
+        val tools = AgentTools(workspace)
+        tools.runTerminal("printf shared")
+        val history = workspace.terminal().history()
+        assertEquals(1, history.size)
+        assertEquals("shared", history[0].stdout)
+        assertTrue(tools.terminalHistory()[0].stdout == "shared")
+    }
 }

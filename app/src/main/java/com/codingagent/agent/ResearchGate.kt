@@ -9,30 +9,26 @@ import com.codingagent.intake.TaskIntent
 object ResearchGate {
     fun shouldAutoResearch(focus: String, intake: TaskIntake): Boolean {
         val lower = focus.lowercase()
-        if (Regex("\\b(research|look up|search the web|google|web search|find out|look into|investigate|docs online|documentation)\\b")
-                .containsMatchIn(lower)
-        ) {
-            return true
-        }
-        if (Regex("\\b(best practice|latest version|what is the current|how does .+ work online)\\b")
-                .containsMatchIn(lower)
-        ) {
-            return true
-        }
-        if (Regex("\\b(android|kotlin|gradle|compose|jetpack|retrofit|okhttp|room|hilt|coroutine|material|swift|react|python)\\b")
-                .containsMatchIn(lower) &&
-            Regex("\\b(how|latest|current|docs|documentation|api|migrate|deprecated|error|exception|crash|tutorial|example)\\b")
+        if (Regex("""\b(research|look up|search the web|google|web search|docs online)\b""")
                 .containsMatchIn(lower)
         ) {
             return true
         }
         if (intake.intent == TaskIntent.EXPLAIN &&
-            Regex("\\b(library|framework|api|sdk|package|crate|npm|pip|dependency)\\b").containsMatchIn(lower)
+            Regex("""\b(look into|investigate|documentation)\b""").containsMatchIn(lower)
+        ) {
+            return true
+        }
+        if (Regex("""\b(android|kotlin|gradle|compose|jetpack|retrofit|okhttp|room|hilt|coroutine|material)\b""")
+                .containsMatchIn(lower) &&
+            Regex("""\b(how|latest|current|docs|documentation|api|migrate|deprecated|error|exception|crash)\b""")
+                .containsMatchIn(lower)
         ) {
             return true
         }
         if (intake.intent == TaskIntent.DEBUG &&
-            Regex("\\b(error|exception|stack.?trace|crash|cannot resolve|unresolved|not found)\\b").containsMatchIn(lower)
+            Regex("""\b(error|exception|stack.?trace|crash|cannot resolve|unresolved|not found)\b""")
+                .containsMatchIn(lower)
         ) {
             return true
         }

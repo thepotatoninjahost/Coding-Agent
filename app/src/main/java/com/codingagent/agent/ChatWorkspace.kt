@@ -26,6 +26,7 @@ fun interface CodingAgentExecutor {
     fun execute(request: String): AgentRuntimeResult
 }
 
+/** Optional progress sink used by the UI to show real phases instead of a fake "Researching" label. */
 fun interface AgentProgressListener {
     fun onProgress(phase: String, detail: String)
 }
@@ -34,6 +35,7 @@ class ChatWorkspace(
     private val store: ChatMessageStore,
     private val unavailableMessageProvider: () -> String = { "Model unavailable. Finish model setup before sending coding requests." },
     private val progressListener: AgentProgressListener? = null,
+    /** Single spine provider — only [AutonomousAgent]. */
     private val runtimeProvider: () -> AutonomousAgent?
 ) {
     fun history(limit: Int = 100): List<ChatMessage> = store.recentChatMessages(limit).asReversed()
@@ -117,6 +119,7 @@ class ChatWorkspace(
             append(summary)
             return@buildString
         }
+        // Lead with the answer. Verification theater must not bury tool results or greetings.
         val isDirect =
             task.status == "needs-input" ||
                 summary.startsWith("Hello.") ||
@@ -127,11 +130,27 @@ class ChatWorkspace(
                 summary.startsWith("Directory listing:") ||
                 summary.startsWith("File:") ||
                 summary.startsWith("APPLIED") ||
-                summary.startsWith("First approval")
+                summary.startsWith("First approval") ||
+                summary.startsWith("No pending proposal")
+
         if (isDirect) {
             append(summary)
+            if (task.status != "needs-input" && !task.verification.passed) {
+                append("\n\nVerification: FAILED; ")
+                append(task.verification.issues.size)
+                append(" issue(s)")
+                task.verification.issues.take(10).forEach { issue ->
+                    append("\n- ")
+                    append(issue.path)
+                    append(":")
+                    append(issue.line)
+                    append(" — ")
+                    append(issue.message)
+                }
+            }
             return@buildString
         }
+
         append("Status: ")
         append(task.status)
         append("\n\nVerification: ")
@@ -155,12 +174,14 @@ class ChatWorkspace(
         append(summary)
         if (task.events.isNotEmpty()) {
             append("\n\nActivity log:\n")
-            append(task.events.map { sanitizeSummary(it) }.distinct().take(40).joinToString("\n"))
+            val cleaned = task.events.map { sanitizeSummary(it) }.distinct().take(40)
+            append(cleaned.joinToString("\n"))
         }
     }
 
     private fun sanitizeSummary(text: String): String {
         if (text.isBlank()) return "(empty)"
+        // Tool evidence and direct-lane answers are not model prose — never replace them.
         val head = text.trimStart()
         if (head.startsWith("Project files:") ||
             head.startsWith("Source files:") ||
@@ -173,14 +194,33 @@ class ChatWorkspace(
         ) {
             return text.take(12_000)
         }
-        if (text.contains("<tool_call", ignoreCase = true) || text.contains("<function=", ignoreCase = true)) {
+        if (text.contains("<tool_call", ignoreCase = true) ||
+            text.contains("<function=", ignoreCase = true)
+        ) {
             return "The model printed a raw tool call instead of a review. That is not an answer."
         }
         if (DegenerateOutput.isDegenerate(text)) {
             return DegenerateOutput.sanitize(text) + " Rely on the verification section above for the real findings."
         }
-        return text.take(2_000)
+        val lines = text.lineSequence().map { it.trim() }.filter { it.isNotEmpty() }.toList()
+        val deduped = mutableListOf<String>()
+        var prev: String? = null
+        var streak = 0
+        for (line in lines) {
+            if (line == prev) {
+                streak++
+                if (streak <= 2) deduped += line
+            } else {
+                if (streak > 2) deduped += "… (repeated ${streak - 2} more times)"
+                deduped += line
+                prev = line
+                streak = 1
+            }
+        }
+        if (streak > 2) deduped += "… (repeated ${streak - 2} more times)"
+        return deduped.joinToString("\n").take(2_000)
     }
+
 }
 
 data class ChatTurn(

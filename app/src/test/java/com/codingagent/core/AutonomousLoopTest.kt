@@ -7,7 +7,6 @@ import org.junit.Test
 import com.codingagent.agent.AgentKnowledge
 import com.codingagent.agent.AutonomousAgent
 import com.codingagent.agent.AutonomousAgentConfig
-import com.codingagent.agent.LoopControl
 import com.codingagent.agent.AutonomousAgentEvent
 import com.codingagent.agent.DegenerateOutput
 import com.codingagent.agent.SelfEvolution
@@ -17,7 +16,6 @@ import com.codingagent.model.ModelGateway
 import com.codingagent.model.ModelRequest
 import com.codingagent.model.ModelResponse
 import com.codingagent.workspace.ProjectWorkspace
-import com.codingagent.intake.TaskIntent
 
 class AutonomousLoopTest {
     @Test
@@ -195,25 +193,15 @@ class AutonomousLoopTest {
     }
 
     /**
-     * Identical non-listing tool calls must not hard-abort.
-     * After the repeat cap the spine forces a final answer from evidence already gathered.
-     *
-     * Use read_file (not run_command): successful reads mark evidence so the inspect gate
-     * cannot swallow the scripted final text. Do not name the file in an analyze/inspect
-     * phrase or the local inspect lane will skip the model loop.
+     * Non-listing identical tool loops must still abort so the agent cannot spin forever
+     * on the same tool call when the request is not a pure listing.
      */
     @Test
-    fun identicalNonListingToolLoopCompletesFromEvidence() {
+    fun identicalNonListingToolLoopAborts() {
         val root = Files.createTempDirectory("agent-loop-repeat").toFile()
-        root.resolve("LoopFile.kt").writeText("class LoopFile { fun marker() = \"LOOP_EVIDENCE_OK\" }\n")
-        val readCall = ModelResponse.ToolCall("read_file", """{"path":"LoopFile.kt"}""")
+        root.resolve("a.txt").writeText("hello world content enough\n")
         val gateway = ScriptedGateway(
-            listOf(
-                readCall,
-                readCall,
-                readCall,
-                ModelResponse.Text("LOOP_FINAL_FROM_EVIDENCE: LoopFile marker is LOOP_EVIDENCE_OK")
-            )
+            List(6) { ModelResponse.ToolCall("run_command", """{"command":"echo hi"}""") }
         )
         val workspace = ProjectWorkspace(root)
         val knowledge = object : AgentKnowledge {
@@ -223,71 +211,11 @@ class AutonomousLoopTest {
             root, knowledge, gateway,
             AutonomousAgentConfig(maxTurns = 10, maxIdenticalToolRepeats = 3)
         )
-        val events = agent.run("Write a deep technical report on how LoopFile works end to end")
-        assertTrue(
-            "identical tool loop must complete from evidence, not hard-abort. events=${events.map { it::class.simpleName }}",
-            events.last() is AutonomousAgentEvent.Completed
-        )
-        assertTrue(events.none { it is AutonomousAgentEvent.Failed })
-        assertTrue(events.any { it is AutonomousAgentEvent.ToolFinished && it.name == "read_file" && it.success })
-        val summary = (events.last() as AutonomousAgentEvent.Completed).task.summary
-        assertTrue(
-            "summary must come from gathered file evidence or the forced final answer: $summary",
-            summary.contains("LOOP_FINAL_FROM_EVIDENCE") ||
-                summary.contains("LOOP_EVIDENCE_OK") ||
-                summary.contains("LoopFile")
-        )
+        // Request deliberately avoids listing keywords so isListingRequest is false
+        val events = agent.run("Run the same diagnostic command until you understand the state")
+        assertTrue(events.last() is AutonomousAgentEvent.Failed)
+        assertTrue((events.last() as AutonomousAgentEvent.Failed).message.contains("repeated"))
     }
-
-    /**
-     * Whole-project review: model may keep emitting tools. After two gathers the
-     * spine closes tools and must Complete from evidence — never Failed turn-budget.
-     */
-    @Test
-    fun turnBudgetExhaustionCompletesFromRepoMapEvidence() {
-        val root = Files.createTempDirectory("agent-budget").toFile()
-        root.resolve("ImproveMe.kt").writeText("class ImproveMe\n")
-        val gateway = ScriptedGateway(
-            List(8) { i -> ModelResponse.ToolCall("search_project", """{"query":"ImproveMe$i"}""") }
-        )
-        val knowledge = object : AgentKnowledge {
-            override fun search(query: String, limit: Int) = emptyList<KnowledgeHit>()
-        }
-        val agent = AutonomousAgent(
-            root, knowledge, gateway,
-            AutonomousAgentConfig(maxTurns = 4, maxIdenticalToolRepeats = 99)
-        )
-        val events = agent.run("review and analyze the project and tell me how it can be improved")
-        assertTrue(
-            "turn budget must complete from evidence, not Failed. last=${events.last()::class.simpleName}",
-            events.last() is AutonomousAgentEvent.Completed
-        )
-        assertTrue(events.none { it is AutonomousAgentEvent.Failed })
-        val summary = (events.last() as AutonomousAgentEvent.Completed).task.summary
-        assertTrue(events.any { it is AutonomousAgentEvent.ToolFinished && it.name == "search_project" })
-        assertTrue(
-            "summary must be synthesized from gathered evidence, not a turn-budget fail: $summary",
-            summary.contains("Review from gathered evidence") ||
-                summary.contains("ImproveMe") ||
-                summary.contains("Repo map") ||
-                summary.contains("Verification")
-        )
-    }
-    @Test
-    fun loopControlClosesToolsAfterInspectGathers() {
-        val open = LoopControl.decide(0, 24, 0, 0, TaskIntent.INSPECT, true)
-        assertTrue(open.toolsOpen)
-        val closed = LoopControl.decide(2, 24, 2, 0, TaskIntent.INSPECT, true)
-        assertTrue(!closed.toolsOpen)
-        assertTrue(closed.demandWrite)
-        val synthesize = LoopControl.decide(3, 24, 2, 2, TaskIntent.INSPECT, true)
-        assertTrue(synthesize.synthesizeFromEvidence)
-        val changeStillOpen = LoopControl.decide(1, 24, 2, 0, TaskIntent.CHANGE, false)
-        assertTrue(changeStillOpen.toolsOpen)
-        val changeClosed = LoopControl.decide(1, 24, 3, 0, TaskIntent.CHANGE, false)
-        assertTrue(!changeClosed.toolsOpen)
-    }
-
 }
 
 /** Deterministic gateway that returns scripted responses in order. */

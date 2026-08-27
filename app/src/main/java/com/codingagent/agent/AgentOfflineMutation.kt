@@ -41,6 +41,7 @@ object AgentOfflineStager {
             intake.intent == TaskIntent.REFACTOR
         if (!wantsEdit) return null
         if (!hasExplicit && gateway != null) return null
+
         val staged: Pair<List<TaskOperation>, String> = if (hasExplicit) {
             listOf(intake.operation) to "Offline explicit ${intake.operation.kind.name.lowercase()} from request"
         } else {

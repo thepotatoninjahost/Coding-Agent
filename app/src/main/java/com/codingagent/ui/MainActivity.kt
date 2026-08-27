@@ -452,6 +452,33 @@ private fun CodingAgentApp(privateDir: File) {
             return
         }
 
+        val approvalWords = setOf("approve", "confirm", "yes", "apply", "ok")
+        if (pendingApproval && pendingProposalId != null && lower in approvalWords) {
+            store.recordChatMessage(ChatMessage(role = ChatRole.USER, content = request))
+            val coordinator = mutationCoordinator
+            val id = pendingProposalId
+            if (coordinator == null || id == null) {
+                store.recordChatMessage(ChatMessage(role = ChatRole.AGENT, content = "No pending proposal to approve."))
+                chatMessages = store.recentChatMessages().asReversed()
+                return
+            }
+            when (val result = coordinator.approve(id, ownerVerified = true, ownerLabel = "owner")) {
+                is MutationApprovalResult.AwaitingSecond -> {
+                    approvalCount = result.proposal.approvalCount
+                    detail = "Confirmation ${approvalCount}/2 recorded; tap Approve or type approve again"
+                    store.recordChatMessage(ChatMessage(role = ChatRole.AGENT, content = "First approval recorded. Confirm once more to write the files."))
+                }
+                is MutationApprovalResult.Applied -> onChangeApplied(result)
+                is MutationApprovalResult.Rejected -> {
+                    status = AgentStatus.STOPPED
+                    detail = result.reason
+                    store.recordChatMessage(ChatMessage(role = ChatRole.AGENT, content = "Approval rejected: ${result.reason}"))
+                }
+            }
+            chatMessages = store.recentChatMessages().asReversed()
+            return
+        }
+
         val currentChat = chat ?: return
         if (activeJob != null) {
             messageQueue = messageQueue + request
@@ -475,6 +502,7 @@ private fun CodingAgentApp(privateDir: File) {
                 pendingProposal = proposal
                 pendingProposalId = proposal?.id
                 pendingApproval = proposal != null
+                if (proposal != null) tab = SurfaceTab.REVIEW
                 approvalCount = proposal?.approvalCount ?: 0
                 pendingReason = proposal?.request ?: pendingReason
                 status = when (it.result) {
@@ -576,12 +604,18 @@ private fun CodingAgentApp(privateDir: File) {
                     SurfaceTab.TERMINAL -> TerminalSurface(terminalCommand, { terminalCommand = it }, terminalHistory, tools != null, onRun = { command -> activeJob = scope.launch(Dispatchers.IO) { status = AgentStatus.RUNNING; tools?.terminal(command.trim().split(Regex("\\s+")).filter(String::isNotBlank))?.let { terminalHistory = (terminalHistory + it).takeLast(40) }; status = AgentStatus.READY; detail = "Terminal finished" } }, onStop = ::stopAgent)
                     SurfaceTab.RESEARCH -> ResearchSurface(researchQuery, { researchQuery = it }, researchHits, researchError, researchState, onSearch = { query ->
                         store.saveLastResearchQuery(query)
-                        activeJob = scope.launch(Dispatchers.IO) {
+                        activeJob = scope.launch {
                             status = AgentStatus.RESEARCHING
                             detail = "Reading distinct full sources"
                             val researchRoot = workspace?.projectRoot()?.resolve(".coding-agent/research") ?: privateDir.resolve(".coding-agent/research")
-                            val provider = DurableDeepResearchProvider(researchRoot)
-                            val result = runCatching { provider.deepResearch(query, 12, ResearchModeDetector.detect(query)) { progress -> researchState = progress.toDisplayState() } }
+                            val result = withContext(Dispatchers.IO) {
+                                val provider = DurableDeepResearchProvider(researchRoot)
+                                runCatching {
+                                    provider.deepResearch(query, 12, ResearchModeDetector.detect(query)) { progress ->
+                                        scope.launch(Dispatchers.Main.immediate) { researchState = progress.toDisplayState() }
+                                    }
+                                }
+                            }
                             result.onSuccess { session ->
                                 researchHits = session.sources.map { source -> ResearchHit(source.title, source.url, source.content.take(600)) }
                                 researchState = researchState.copy(phase = "learned", completed = session.sources.size, total = session.sources.size, fullSources = session.sources.size, laneCount = session.sources.map { it.lane }.distinct().size, wordCount = session.sources.sumOf { it.wordCount }, codeExamples = session.sources.sumOf { it.codeExamples.size }, canSend = true)

@@ -8,7 +8,7 @@ import java.net.URL
 import java.nio.charset.StandardCharsets
 
 /**
- * ONE JOB: HTTP OpenAI-compatible /chat/completions (blocking and SSE stream).
+ * ONE JOB: HTTP OpenAI-compatible /chat/completions.
  */
 class RemoteHttpGateway(
     private val endpoint: String,
@@ -18,33 +18,7 @@ class RemoteHttpGateway(
     private val connectionFactory: (String) -> HttpURLConnection = { URL(it).openConnection() as HttpURLConnection },
     private val extraHeaders: Map<String, String> = emptyMap()
 ) : ModelGateway {
-
-    override fun stream(request: ModelRequest, onDelta: (String) -> Unit): ModelResponse {
-        val connection = openConnection()
-            ?: return ModelResponse.Failure("Model gateway configuration is incomplete")
-        return try {
-            configure(connection)
-            val body = requestBody(request).put("stream", true)
-            connection.outputStream.use { out ->
-                out.write(body.toString().toByteArray(StandardCharsets.UTF_8))
-                out.flush()
-            }
-            val code = connection.responseCode
-            if (code !in 200..299) return failure(connection)
-            val raw = connection.inputStream.bufferedReader(StandardCharsets.UTF_8).use { it.readText() }
-            accumulateStream(raw, onDelta)
-        } catch (error: IOException) {
-            ModelResponse.Failure(
-                "Model request failed: ${error.message.orEmpty().ifBlank { error.javaClass.simpleName }}"
-            )
-        } catch (error: Exception) {
-            ModelResponse.Failure(
-                "Model response could not be processed: ${error.message.orEmpty().ifBlank { error.javaClass.simpleName }}"
-            )
-        } finally {
-            connection.disconnect()
-        }
-    }
+    override fun stream(request: ModelRequest, onDelta: (String) -> Unit): ModelResponse = complete(request)
 
     override fun complete(request: ModelRequest): ModelResponse {
         val first = completeOnce(request)
@@ -55,106 +29,19 @@ class RemoteHttpGateway(
     }
 
     private fun completeOnce(request: ModelRequest): ModelResponse {
-        val connection = openConnection()
-            ?: return ModelResponse.Failure("Model gateway configuration is incomplete")
+        val connection = openConnection() ?: return ModelResponse.Failure("Model gateway configuration is incomplete")
         return try {
             configure(connection)
-            connection.outputStream.use { out ->
-                out.write(requestBody(request).toString().toByteArray(StandardCharsets.UTF_8))
-                out.flush()
-            }
+            connection.outputStream.use { it.write(requestBody(request).toString().toByteArray(StandardCharsets.UTF_8)) }
             if (connection.responseCode !in 200..299) return failure(connection)
-            val raw = connection.inputStream.bufferedReader(StandardCharsets.UTF_8).use { it.readText() }
-            val trimmed = raw.trim()
-            if (trimmed.startsWith("data:") || trimmed.contains("\ndata:")) {
-                return accumulateStream(trimmed) {}
-            }
-            parseCompletionBody(trimmed)
+            parseCompletionBody(connection.inputStream.bufferedReader().use { it.readText() })
         } catch (error: IOException) {
-            ModelResponse.Failure(
-                "Model request failed: ${error.message.orEmpty().ifBlank { error.javaClass.simpleName }}"
-            )
+            ModelResponse.Failure("Model request failed: ${error.message.orEmpty().ifBlank { error.javaClass.simpleName }}")
         } catch (error: Exception) {
-            ModelResponse.Failure(
-                "Model response could not be processed: ${error.message.orEmpty().ifBlank { error.javaClass.simpleName }}"
-            )
+            ModelResponse.Failure("Model response could not be processed: ${error.message.orEmpty().ifBlank { error.javaClass.simpleName }}")
         } finally {
             connection.disconnect()
         }
-    }
-
-    /**
-     * Fold OpenAI-compatible SSE (`data: {...}`) into one ModelResponse.
-     * Argument fragments on the same tool index are concatenated in order.
-     */
-    private fun accumulateStream(raw: String, onDelta: (String) -> Unit): ModelResponse {
-        val trimmed = raw.trim()
-        if (trimmed.isEmpty()) return ModelResponse.Failure("Model returned an empty response")
-        if (trimmed.startsWith("{") && !trimmed.startsWith("data:")) {
-            return parseCompletionBody(trimmed)
-        }
-
-        class ToolAcc {
-            var id: String? = null
-            var name: String = ""
-            val arguments = StringBuilder()
-        }
-
-        val tools = linkedMapOf<Int, ToolAcc>()
-        val content = StringBuilder()
-
-        for (line in trimmed.lineSequence()) {
-            val t = line.trim()
-            if (!t.startsWith("data:")) continue
-            val payload = t.removePrefix("data:").trim()
-            if (payload.isEmpty() || payload == "[DONE]") continue
-
-            val json = runCatching { JSONObject(payload) }.getOrNull() ?: continue
-            val choice = json.optJSONArray("choices")?.optJSONObject(0) ?: continue
-            val delta = choice.optJSONObject("delta") ?: continue
-
-            val contentPiece = delta.optString("content", "")
-            if (delta.has("content") && contentPiece.isNotEmpty()) {
-                content.append(contentPiece)
-                onDelta(contentPiece)
-            }
-
-            val calls = delta.optJSONArray("tool_calls") ?: continue
-            for (i in 0 until calls.length()) {
-                val call = calls.optJSONObject(i) ?: continue
-                val index = if (call.has("index")) call.optInt("index") else i
-                val acc = tools.getOrPut(index) { ToolAcc() }
-
-                if (call.has("id")) {
-                    val id = call.optString("id")
-                    if (id.isNotBlank()) acc.id = id
-                }
-
-                val function = call.optJSONObject("function") ?: continue
-                if (function.has("name")) {
-                    val name = function.optString("name")
-                    if (name.isNotBlank()) acc.name = name
-                }
-                if (function.has("arguments")) {
-                    acc.arguments.append(function.optString("arguments"))
-                }
-            }
-        }
-
-        val firstTool = tools.values.firstOrNull { it.name.isNotBlank() }
-        if (firstTool != null) {
-            val args = firstTool.arguments.toString().ifBlank { "{}" }
-            return ModelResponse.ToolCall(
-                name = firstTool.name,
-                arguments = args,
-                thought = content.toString(),
-                callId = firstTool.id
-            )
-        }
-        if (content.isNotBlank()) {
-            return JsonModelResponseParser().parse(content.toString())
-        }
-        return ModelResponse.Failure("Model returned no streamed message content")
     }
 
     private fun parseCompletionBody(text: String): ModelResponse {
@@ -180,12 +67,7 @@ class RemoteHttpGateway(
 
     private fun openConnection(): HttpURLConnection? {
         if (endpoint.isBlank() || model.isBlank()) return null
-        if (apiKey.isBlank() &&
-            !endpoint.startsWith("http://127.0.0.1") &&
-            !endpoint.startsWith("http://localhost")
-        ) {
-            return null
-        }
+        if (apiKey.isBlank() && !endpoint.startsWith("http://127.0.0.1") && !endpoint.startsWith("http://localhost")) return null
         return connectionFactory(endpoint.trimEnd('/') + "/chat/completions")
     }
 
@@ -224,9 +106,7 @@ class RemoteHttpGateway(
                             .put("type", "function")
                             .put(
                                 "function",
-                                JSONObject()
-                                    .put("name", message.toolName)
-                                    .put("arguments", message.toolArguments ?: "{}")
+                                JSONObject().put("name", message.toolName).put("arguments", message.toolArguments ?: "{}")
                             )
                     )
                 )
@@ -244,24 +124,17 @@ class RemoteHttpGateway(
             .put("stream", false)
         if (request.tools.isNotEmpty()) {
             body.put("tool_choice", "auto")
-            body.put(
-                "tools",
-                JSONArray().apply {
-                    request.tools.forEach { tool ->
-                        val parameters = runCatching { JSONObject(tool.inputSchema) }
-                            .getOrElse { JSONObject().put("type", "object") }
-                        put(
-                            JSONObject().put("type", "function").put(
-                                "function",
-                                JSONObject()
-                                    .put("name", tool.name)
-                                    .put("description", tool.description)
-                                    .put("parameters", parameters)
-                            )
+            body.put("tools", JSONArray().apply {
+                request.tools.forEach { tool ->
+                    val parameters = runCatching { JSONObject(tool.inputSchema) }.getOrElse { JSONObject().put("type", "object") }
+                    put(
+                        JSONObject().put("type", "function").put(
+                            "function",
+                            JSONObject().put("name", tool.name).put("description", tool.description).put("parameters", parameters)
                         )
-                    }
+                    )
                 }
-            )
+            })
         }
         return body
     }
@@ -272,14 +145,12 @@ class RemoteHttpGateway(
             val first = calls.optJSONObject(0)
             val function = first?.optJSONObject("function") ?: first
             val name = function?.optString("name").orEmpty()
-            if (name.isBlank()) {
-                return ModelResponse.Failure("Model returned a tool call without a function name")
-            }
+            if (name.isBlank()) return ModelResponse.Failure("Model returned a tool call without a function name")
             return ModelResponse.ToolCall(
                 name,
                 function?.optString("arguments", "{}") ?: "{}",
                 extractMessageText(message),
-                first?.optString("id")?.takeIf { it.isNotBlank() }
+                first?.optString("id")
             )
         }
         val legacy = message.optJSONObject("function_call")
@@ -338,9 +209,7 @@ class RemoteHttpGateway(
         val body = connection.errorStream?.bufferedReader()?.use { it.readText() }.orEmpty()
             .ifBlank { connection.inputStream?.bufferedReader()?.use { it.readText() }.orEmpty() }
         val snippet = body.replace("\\s+".toRegex(), " ").trim().take(600)
-        return ModelResponse.Failure(
-            "Model HTTP ${connection.responseCode}: ${snippet.ifBlank { "(empty body)" }}"
-        )
+        return ModelResponse.Failure("Model HTTP ${connection.responseCode}: ${snippet.ifBlank { "(empty body)" }}")
     }
 
     companion object {

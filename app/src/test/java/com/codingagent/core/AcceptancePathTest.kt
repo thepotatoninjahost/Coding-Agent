@@ -1,6 +1,5 @@
 package com.codingagent.core
 
-import com.codingagent.agent.ApprovalChannel
 import java.nio.file.Files
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -47,11 +46,11 @@ class AcceptancePathTest {
         assertEquals("fun a() = 1\n", root.resolve("src/A.kt").readText())
         assertEquals("fun b() = 1\n", root.resolve("src/B.kt").readText())
 
-        val first = coordinator.approve(proposal.id, ownerVerified = true, ownerLabel = "owner", channel = ApprovalChannel.BIOMETRIC)
+        val first = coordinator.approve(proposal.id, ownerVerified = true, ownerLabel = "owner")
         assertTrue(first is MutationApprovalResult.AwaitingSecond)
         assertEquals("fun a() = 1\n", root.resolve("src/A.kt").readText())
 
-        val second = coordinator.approve(proposal.id, ownerVerified = true, ownerLabel = "owner", channel = ApprovalChannel.SPOKEN_PASSWORD)
+        val second = coordinator.approve(proposal.id, ownerVerified = true, ownerLabel = "owner")
         assertTrue(second is MutationApprovalResult.Applied)
         assertEquals("fun a() = 2\n", root.resolve("src/A.kt").readText())
         assertEquals("fun b() = 2\n", root.resolve("src/B.kt").readText())
@@ -83,9 +82,9 @@ class AcceptancePathTest {
             listOf(TaskOperation(OperationKind.CREATE_FILE, "src/New.kt", text = "class New\n"))
         )
         assertFalse(root.resolve("src/New.kt").exists())
-        coordinator.approve(proposal.id, true, "owner", ApprovalChannel.BIOMETRIC)
+        coordinator.approve(proposal.id, true, "owner")
         assertFalse(root.resolve("src/New.kt").exists())
-        val applied = coordinator.approve(proposal.id, true, "owner", ApprovalChannel.SPOKEN_PASSWORD)
+        val applied = coordinator.approve(proposal.id, true, "owner")
         assertTrue(applied is MutationApprovalResult.Applied)
         assertEquals("class New\n", root.resolve("src/New.kt").readText())
     }

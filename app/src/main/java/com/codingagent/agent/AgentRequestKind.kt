@@ -23,7 +23,7 @@ object AgentRequestKind {
     fun isSourceFileList(request: String): Boolean {
         val t = request.lowercase()
         if (t.contains("source file") || t.contains("source files") || t.contains("project source")) return true
-        if (Regex("""\\b(in|under|path|directory|folder)\\b""").containsMatchIn(t)) return false
+        if (Regex("""\b(in|under|path|directory|folder)\b""").containsMatchIn(t)) return false
         if (t.contains("/") || t.contains("app/") || t.contains("src/")) return false
         return true
     }
@@ -47,8 +47,8 @@ object AgentRequestKind {
             "how many files", "summary of the project"
         )
         if (phrases.any { t == it || t.contains(it) }) return true
-        if (Regex("""\\bstatus\\b""").containsMatchIn(t) && t.length <= 48) return true
-        if (Regex("""\\bhelp\\b""").containsMatchIn(t) && !Regex("""\\b(helper|helpers)\\b""").containsMatchIn(t) && t.length <= 32) {
+        if (Regex("""\bstatus\b""").containsMatchIn(t) && t.length <= 48) return true
+        if (Regex("""\bhelp\b""").containsMatchIn(t) && !Regex("""\b(helper|helpers)\b""").containsMatchIn(t) && t.length <= 32) {
             return true
         }
         return false
@@ -58,20 +58,20 @@ object AgentRequestKind {
         val t = request.lowercase()
         if (explicitReadPath(request) != null) return false
         if (inspectTarget(request) != null) return false
-        val review = Regex("""\\b(review|analy[sz]e|audit|critique|improv)""")
-        val scope = Regex("""\\b(project|codebase|repo|repository|app)\\b""")
+        val review = Regex("""\b(review|analy[sz]e|audit|critique|improv)""")
+        val scope = Regex("""\b(project|codebase|repo|repository|app)\b""")
         return review.containsMatchIn(t) && (scope.containsMatchIn(t) || t.length <= 90)
     }
 
     fun isAgentMeta(t: String): Boolean {
         if (t.length > 120) return false
-        val aboutAgent = Regex("""\\b(why|what)\\b.*\\b(abort|aborted|stop|stopped|fail|failed|repeat|repeated|loop|tool)\\b""")
-        val shortWhy = Regex("""^why\\s+(would|did|does|is|was)\\b""")
+        val aboutAgent = Regex("""\b(why|what)\b.*\b(abort|aborted|stop|stopped|fail|failed|repeat|repeated|loop|tool)\b""")
+        val shortWhy = Regex("""^why\s+(would|did|does|is|was)\b""")
         return aboutAgent.containsMatchIn(t) || (shortWhy.containsMatchIn(t) && t.length < 60)
     }
 
     fun metaAnswer(t: String): String {
-        val aboutRepeat = Regex("""\\b(repeat|repeated|identically|loop|same\\s+tool|read_file)\\b""").containsMatchIn(t)
+        val aboutRepeat = Regex("""\b(repeat|repeated|identically|loop|same\s+tool|read_file)\b""").containsMatchIn(t)
         return if (aboutRepeat || t.contains("abort") || t.contains("stop")) {
             "The agent stopped a tool loop: the model called the same tool with the same arguments " +
                 "several times in a row. That used to hard-abort the task. It now forces a final answer " +
@@ -85,9 +85,9 @@ object AgentRequestKind {
 
     fun explicitReadPath(request: String): String? {
         val patterns = listOf(
-            Regex("(?is)^\\s*read(?:\\s+file)?\\s+[`'\"]?([A-Za-z0-9_./\\-]+\\.[A-Za-z0-9]+)[`'\"]?\\s*$"),
-            Regex("(?is)^\\s*show(?:\\s+me)?(?:\\s+the)?(?:\\s+contents?(?:\\s+of)?)?\\s+[`'\"]?([A-Za-z0-9_./\\-]+\\.[A-Za-z0-9]+)[`'\"]?\\s*$"),
-            Regex("(?is)^\\s*open\\s+[`'\"]?([A-Za-z0-9_./\\-]+\\.[A-Za-z0-9]+)[`'\"]?\\s*$")
+            Regex("""(?is)^\s*read(?:\s+file)?\s+[`'"]?([A-Za-z0-9_./\\-]+\.[A-Za-z0-9]+)[`'"]?\s*$"""),
+            Regex("""(?is)^\s*show(?:\s+me)?(?:\s+the)?(?:\s+contents?(?:\s+of)?)?\s+[`'"]?([A-Za-z0-9_./\\-]+\.[A-Za-z0-9]+)[`'"]?\s*$"""),
+            Regex("""(?is)^\s*open\s+[`'"]?([A-Za-z0-9_./\\-]+\.[A-Za-z0-9]+)[`'"]?\s*$""")
         )
         for (re in patterns) {
             val m = re.matchEntire(request.trim()) ?: continue
@@ -99,9 +99,9 @@ object AgentRequestKind {
 
     fun inspectTarget(request: String): String? {
         val patterns = listOf(
-            Regex("(?is)\\b(?:analyze|inspect|check|review)\\s+(?:the\\s+)?[`'\"]?([A-Za-z0-9_./\\-]+\\.[A-Za-z0-9]+)[`'\"]?"),
-            Regex("(?is)\\b(?:errors?|bugs?|issues?)\\s+in\\s+[`'\"]?([A-Za-z0-9_./\\-]+\\.[A-Za-z0-9]+)[`'\"]?"),
-            Regex("(?is)[`'\"]?([A-Za-z0-9_./\\-]+\\.[A-Za-z0-9]+)[`'\"]?\\s+for\\s+errors?")
+            Regex("""(?is)\b(?:analyze|inspect|check|review)\s+(?:the\s+)?[`'"]?([A-Za-z0-9_./\\-]+\.[A-Za-z0-9]+)[`'"]?"""),
+            Regex("""(?is)\b(?:errors?|bugs?|issues?)\s+in\s+[`'"]?([A-Za-z0-9_./\\-]+\.[A-Za-z0-9]+)[`'"]?"""),
+            Regex("""(?is)[`'"]?([A-Za-z0-9_./\\-]+\.[A-Za-z0-9]+)[`'"]?\s+for\s+errors?""")
         )
         for (re in patterns) {
             val m = re.find(request.trim()) ?: continue

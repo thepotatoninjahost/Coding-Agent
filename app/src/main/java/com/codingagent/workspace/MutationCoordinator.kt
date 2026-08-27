@@ -4,15 +4,13 @@ import java.util.UUID
 import com.codingagent.agent.AgentAction
 import com.codingagent.agent.AgentActionCategory
 import com.codingagent.agent.AgentConstitution
-import com.codingagent.agent.ApprovalChannel
 import com.codingagent.agent.ApprovalLedger
 import com.codingagent.agent.ApprovalRecord
 import com.codingagent.agent.ConstitutionRule
 import com.codingagent.intake.TaskOperation
 
 /**
- * ONE JOB: Dual-channel approval staging, constitution checks, and apply/reject.
- * Nothing leaves the sandbox until BIOMETRIC + SPOKEN_PASSWORD both approve.
+ * ONE JOB: Dual-approval staging, constitution checks, and apply/reject of code changes.
  */
 sealed class MutationApprovalResult {
     data class AwaitingSecond(val proposal: PendingChangeProposal, val approval: ApprovalRecord) : MutationApprovalResult()
@@ -30,7 +28,6 @@ data class PendingChangeProposal(
     val approvals: List<ApprovalRecord> = emptyList()
 ) {
     val approvalCount: Int get() = approvals.size
-    val distinctChannels: Int get() = approvals.map { it.channel }.toSet().size
 }
 
 class MutationCoordinator(
@@ -47,9 +44,7 @@ class MutationCoordinator(
         val changeSet = workspace.preview(operations, reason)
         require(changeSet.changes.isNotEmpty()) { "Mutation proposal contains no changes" }
         val verification = workspace.verifyProposal(changeSet)
-        require(verification.passed) {
-            "Mutation proposal failed verification: ${verification.issues.joinToString { it.message }}"
-        }
+        require(verification.passed) { "Mutation proposal failed verification: ${verification.issues.joinToString { it.message }}" }
         val timestamp = now()
         val proposal = PendingChangeProposal(
             id = UUID.randomUUID().toString(),
@@ -66,54 +61,29 @@ class MutationCoordinator(
     @Synchronized
     fun get(id: String): PendingChangeProposal? = pending[id]
 
-    /**
-     * @param channel BIOMETRIC (fingerprint) or SPOKEN_PASSWORD — must differ on the second approval.
-     */
     @Synchronized
-    fun approve(
-        id: String,
-        ownerVerified: Boolean,
-        ownerLabel: String,
-        channel: ApprovalChannel
-    ): MutationApprovalResult {
+    fun approve(id: String, ownerVerified: Boolean, ownerLabel: String): MutationApprovalResult {
         val proposal = pending[id] ?: return MutationApprovalResult.Rejected("Change proposal does not exist")
         val timestamp = now()
         if (timestamp > proposal.expiresAt) {
             pending.remove(id)
             return MutationApprovalResult.Rejected("Change proposal approval expired")
         }
-        if (!ownerVerified) {
-            return MutationApprovalResult.Rejected("Owner verification is required for every approval")
-        }
-        if (proposal.approvals.any { it.channel == channel }) {
-            return MutationApprovalResult.Rejected(
-                "Channel ${channel.name} already used. Second approval must be the other channel " +
-                    "(BIOMETRIC fingerprint vs SPOKEN_PASSWORD)."
-            )
-        }
-        val approval = ledger.record(id, ownerLabel, channel, timestamp)
+        if (!ownerVerified) return MutationApprovalResult.Rejected("Owner verification is required for every approval")
+        val approval = ledger.record(id, ownerLabel, timestamp)
         val candidate = proposal.copy(approvals = proposal.approvals + approval)
         val action = AgentAction(
             description = proposal.request,
             category = AgentActionCategory.CODE_CHANGE,
-            silent = false,
             ownerVerified = ownerVerified,
             approvalCount = candidate.approvalCount,
-            distinctChannels = candidate.distinctChannels,
             sandboxPassed = proposal.verification.passed,
             clearPermission = true
         )
         val violations = AgentConstitution.check(action, timestamp, proposal.createdAt)
         if (violations.isNotEmpty()) {
             pending[id] = candidate
-            val onlyWaitingOnSecond = candidate.approvalCount < 2 &&
-                candidate.distinctChannels < 2 &&
-                violations.none {
-                    it.rule == ConstitutionRule.OWNER_LOCK ||
-                        it.rule == ConstitutionRule.SANDBOX_FIRST ||
-                        it.rule == ConstitutionRule.PERMISSION_EXPIRATION
-                }
-            return if (onlyWaitingOnSecond) {
+            return if (candidate.approvalCount < 2 && violations.none { it.rule == ConstitutionRule.OWNER_LOCK || it.rule == ConstitutionRule.SANDBOX_FIRST || it.rule == ConstitutionRule.PERMISSION_EXPIRATION }) {
                 MutationApprovalResult.AwaitingSecond(candidate, approval)
             } else {
                 MutationApprovalResult.Rejected(violations.joinToString("; ") { "${it.rule}: ${it.message}" })

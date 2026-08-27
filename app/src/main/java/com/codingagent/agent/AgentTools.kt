@@ -9,13 +9,12 @@ import com.codingagent.workspace.MutationCoordinator
 import com.codingagent.workspace.PendingChangeProposal
 import com.codingagent.workspace.ProjectWorkspace
 import com.codingagent.workspace.TerminalEntry
-import com.codingagent.workspace.TerminalSession
 
 /**
  * ONE JOB: Shared tool implementations used by autonomous and offline paths.
  */
 class AgentTools(private val workspace: ProjectWorkspace) {
-    private val terminalSession = TerminalSession(workspace.projectRoot())
+    private val terminalSession = workspace.terminal()
 
     fun read(path: String): EditorDocument {
         val file = resolveExistingFile(path)

@@ -4,7 +4,7 @@ import com.codingagent.workspace.AgentTask
 import com.codingagent.workspace.PendingChangeProposal
 
 /**
- * ONE JOB: Event vocabulary for one agent run (UI + journal observers).
+ * ONE JOB: Event vocabulary for one agent run.
  */
 sealed class AutonomousAgentEvent {
     data class Started(val taskId: String, val request: String) : AutonomousAgentEvent()

@@ -33,7 +33,9 @@ The current APK supports:
 Remaining product polish (not blockers for basic use):
 - Multi-file diff staging UI refinements
 - Broader document ingestion beyond the example asset
-- Extended physical-device verification of terminal cancellation and long streaming sessions
+- Extended physical-device verification of long streaming sessions
+
+Terminal behavior and limits are documented in **Terminal limitations**.
 
 ## Recommended remote provider (as of 2026-08)
 
@@ -47,19 +49,35 @@ Any other OpenAI-compatible endpoint works the same way.
 
 ## Architecture
 
-The core execution path is modular:
+There is one execution spine: `AutonomousAgent` (`com.codingagent.agent`). Offline local lanes (hello, list, status, read, explicit synthesis edits) and the model-driven tool loop both run through that class. `AgentRuntime` holds shared result types only. There is no second orchestrator.
+
+Production source is split by job under `app/src/main/java/com/codingagent/`:
+
+| Package | Job |
+|---|---|
+| `agent` | Single spine (`AutonomousAgent`), constitution, tool selection, planning (`PlanningLoop` / `AgentPlanner`), repair (`CompilerTestRepairCycle`), chat workspace, journal |
+| `intake` | Free text → typed goal (`TaskIntakeParser`, `GoalInterpreter`, `CodeSynthesisEngine`) |
+| `workspace` | Project import, index (`ProjectIndexer`), files, diffs, dual-approval mutations, terminal, verification, checksum rollback (`ProjectWorkspace`) |
+| `model` | User-configured OpenAI-compatible HTTP gateway (`RemoteHttpGateway`), settings, streamed SSE tool calls. No vendor is hardcoded. |
+| `research` | Web evidence (`WebResearchProvider`, `DurableDeepResearchProvider`, `PersonalResearchProvider`, `SourceQuality`, `QueryLanes`) |
+| `knowledge` | Local searchable chunks behind `AgentKnowledge` / `KnowledgeProvider` |
+| `ui` | Compose workbench (`MainActivity`, screens, theme) |
+| `core` | Residual device persistence (`LocalStore`). Not the agent loop. |
+
+Execution path:
 
 1. `TaskIntakeParser` interprets a request into a typed goal contract and operation.
-2. `AgentPlanner` creates the execution plan.
-3. `ProjectIndexer` inventories project files, languages, imports, symbols, and checksums.
-4. `AgentKnowledge` supplies local evidence while `WebResearchProvider` supplies mandatory internet evidence for non-trivial runtime work.
-5. `CodeSynthesisEngine` creates a proposal when the request does not contain an explicit operation.
-6. `ProjectWorkspace` applies edits through typed transactions.
-7. `VerificationReport` records static and command-check evidence.
-8. `CompilerTestRepairCycle` diagnoses failures, applies bounded repair attempts, and rolls back failed work.
-9. `AgentJournal`, lessons, and local stores preserve task evidence for later work.
+2. `AutonomousAgent` owns the loop: gather evidence, plan, one tool per turn (queue extras), observe, verify, hand over.
+3. `AgentPlanner` / `PlanningLoop` produce and revise the plan from evidence.
+4. `ProjectIndexer` inventories project files, languages, imports, symbols, and checksums.
+5. `AgentKnowledge` supplies local evidence. `WebResearchProvider` / deep-research providers supply internet evidence when the request requires it. Empty research fails closed.
+6. `CodeSynthesisEngine` creates a proposal when the request does not contain an explicit operation.
+7. `ProjectWorkspace` + `MutationCoordinator` apply edits through typed transactions. Dual owner approval is required before a write hits disk.
+8. `VerificationReport` records static unfinished-work scans and command-check evidence. Verification never reports a fake pass.
+9. `CompilerTestRepairCycle` diagnoses failures, applies bounded repair attempts, and rolls back failed work.
+10. `AgentJournal`, lessons, and `LocalStore` persist task evidence and chat for later work.
 
-The main production modules are under `app/src/main/java/com/codingagent/core/`. Unit tests are under `app/src/test/java/com/codingagent/core/`.
+Unit tests currently live under `app/src/test/java/com/codingagent/core/` even though production code is package-split as above.
 
 ## Current capabilities
 
@@ -113,6 +131,19 @@ Each `ChangeRecord` stores:
 - SHA-256 checksum after the change
 
 Rollback is fail-closed. It returns `RollbackResult.Restored` only when every affected file still matches the expected after-checksum. If a file was changed externally, rollback returns `RollbackResult.Rejected` and leaves the conflicting file untouched.
+
+## Terminal limitations
+
+The Terminal tab and the agent `run_command` tool use the same runner:
+
+- Command: `sh -c <your text>`
+- Working directory: the imported project copy in app-private storage
+- Timeout: 180 seconds (Stop sends `destroy` / `destroyForcibly`)
+- Output: stdout and stderr, each capture capped at 256 KiB
+
+This is the stock Android `sh` (toybox/toolbox on current devices). It is not bash, not a login shell, and not Termux. Typical available commands are basic Unix utilities already on the device (`ls`, `pwd`, `cat`, `echo`, limited `grep`). There is usually **no** JDK, **no** Gradle, **no** `git`, and **no** package manager. A command such as `./gradlew testDebugUnitTest` will fail on a normal phone unless those binaries are already on `PATH`.
+
+A passing shell command is not a file write. Source mutations still go through dual owner approval and checksum-backed transactions.
 
 ## Local development
 

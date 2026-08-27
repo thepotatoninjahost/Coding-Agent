@@ -1,7 +1,7 @@
 package com.codingagent.agent
 
 /**
- * ONE JOB: Tunable limits for one agent run.
+ * ONE JOB: Turn-budget and output limits for one agent run.
  */
 data class AutonomousAgentConfig(
     val maxTurns: Int = 24,

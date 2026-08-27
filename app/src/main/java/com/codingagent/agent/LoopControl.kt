@@ -28,15 +28,13 @@ object LoopControl {
             intent == TaskIntent.CREATE ||
             intent == TaskIntent.REFACTOR ||
             intent == TaskIntent.DEBUG
-        // Inspect/explain/whole-project: tight gather budget then write.
-        // Change work: higher budget so mutations can run after reads; closes at 3 gathers.
-        val gatherCap = when {
-            wholeProjectReview || intent == TaskIntent.INSPECT || intent == TaskIntent.EXPLAIN -> 2
-            changeWork -> 3
-            else -> 4
+        val gatherCap = if (wholeProjectReview || intent == TaskIntent.INSPECT || intent == TaskIntent.EXPLAIN) {
+            2
+        } else {
+            4
         }
-        val toolsOpen = !lastTurns && usefulGathers < gatherCap
-        val demandWrite = !toolsOpen
+        val toolsOpen = !lastTurns && (changeWork || usefulGathers < gatherCap)
+        val demandWrite = !toolsOpen || (changeWork && usefulGathers >= 2)
         val synthesize = !changeWork && demandWrite && writeRefusals >= 2
         return LoopDecision(
             toolsOpen = toolsOpen,
