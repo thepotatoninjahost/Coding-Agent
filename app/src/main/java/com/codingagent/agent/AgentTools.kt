@@ -52,6 +52,16 @@ class AgentTools(private val workspace: ProjectWorkspace) {
 
     fun terminalHistory(limit: Int = 50): List<TerminalEntry> = terminalSession.history(limit)
 
+    fun terminalWorkingDirectory(): File = terminalSession.workingDirectory()
+
+    val terminalShellPath: String get() = terminalSession.shellPath
+
+    fun terminalTimeoutSeconds(): Long = terminalSession.timeoutSeconds()
+
+    fun isTerminalBusy(): Boolean = terminalSession.isBusy()
+
+    fun clearTerminalHistory() = terminalSession.clearHistory()
+
     private fun resolveExistingFile(path: String): File {
         val root = workspace.projectRoot().canonicalFile
         val direct = root.resolve(path).canonicalFile

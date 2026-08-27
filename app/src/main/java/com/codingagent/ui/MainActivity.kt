@@ -135,6 +135,8 @@ private fun CodingAgentApp(privateDir: File) {
     var fileList by remember { mutableStateOf(emptyList<String>()) }
     var terminalCommand by remember { mutableStateOf("") }
     var terminalHistory by remember { mutableStateOf(emptyList<TerminalEntry>()) }
+    var terminalLiveOutput by remember { mutableStateOf("") }
+    var terminalRunning by remember { mutableStateOf(false) }
     var activeJob by remember { mutableStateOf<Job?>(null) }
     var pendingApproval by remember { mutableStateOf(false) }
     var approvalCount by remember { mutableStateOf(0) }
@@ -601,7 +603,41 @@ private fun CodingAgentApp(privateDir: File) {
                             is MutationApprovalResult.Rejected -> { status = AgentStatus.STOPPED; detail = result.reason }
                         }
                     }, onReject = { pendingProposalId?.let { mutationCoordinator?.reject(it) }; pendingProposal = null; pendingApproval = false; pendingProposalId = null; approvalCount = 0; status = AgentStatus.STOPPED; detail = "Proposed changes rejected" })
-                    SurfaceTab.TERMINAL -> TerminalSurface(terminalCommand, { terminalCommand = it }, terminalHistory, tools != null, onRun = { command -> activeJob = scope.launch(Dispatchers.IO) { status = AgentStatus.RUNNING; tools?.terminal(command.trim().split(Regex("\\s+")).filter(String::isNotBlank))?.let { terminalHistory = (terminalHistory + it).takeLast(40) }; status = AgentStatus.READY; detail = "Terminal finished" } }, onStop = ::stopAgent)
+                    SurfaceTab.TERMINAL -> TerminalSurface(
+                        command = terminalCommand,
+                        onCommand = { terminalCommand = it },
+                        history = terminalHistory,
+                        liveOutput = terminalLiveOutput,
+                        cwd = tools?.terminalWorkingDirectory()?.absolutePath ?: "(no project mounted)",
+                        shell = tools?.terminalShellPath ?: "(unavailable)",
+                        timeoutSeconds = tools?.terminalTimeoutSeconds() ?: 180L,
+                        running = terminalRunning,
+                        enabled = tools != null,
+                        onRun = { command ->
+                            terminalLiveOutput = ""
+                            terminalRunning = true
+                            activeJob = scope.launch(Dispatchers.IO) {
+                                status = AgentStatus.RUNNING
+                                val entry = tools?.terminal(
+                                    command.trim().split(Regex("\\s+")).filter(String::isNotBlank),
+                                    onStdout = { line -> scope.launch(Dispatchers.Main.immediate) { terminalLiveOutput += line + "\n" } },
+                                    onStderr = { line -> scope.launch(Dispatchers.Main.immediate) { terminalLiveOutput += line + "\n" } }
+                                )
+                                withContext(Dispatchers.Main.immediate) {
+                                    entry?.let { terminalHistory = (terminalHistory + it).takeLast(40) }
+                                    terminalRunning = false
+                                    status = AgentStatus.READY
+                                    detail = "Terminal finished"
+                                }
+                            }
+                        },
+                        onStop = ::stopAgent,
+                        onClear = {
+                            tools?.clearTerminalHistory()
+                            terminalHistory = emptyList()
+                            terminalLiveOutput = ""
+                        }
+                    )
                     SurfaceTab.RESEARCH -> ResearchSurface(researchQuery, { researchQuery = it }, researchHits, researchError, researchState, onSearch = { query ->
                         store.saveLastResearchQuery(query)
                         activeJob = scope.launch {
