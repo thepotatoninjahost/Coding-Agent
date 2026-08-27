@@ -6,26 +6,43 @@ import com.codingagent.workspace.MutationApprovalResult
 import com.codingagent.workspace.VerificationReport
 
 /**
- * ONE JOB: Treat chat phrases approve/confirm/yes/apply/ok as a dual-approval tap.
+ * ONE JOB: Apply a pending mutation when the user types an explicit approval word.
+ * Returns null when this turn is not an approval, so chat continues normally.
  */
 object ChatApproval {
-    private val phrases = setOf("approve", "confirm", "yes", "apply", "ok")
+    private val phrases = setOf("approve", "confirm", "apply")
 
     fun isApprovalPhrase(text: String): Boolean = text.lowercase().trim() in phrases
 
     fun tryApprove(agent: AutonomousAgent, text: String): AgentRuntimeResult? {
         if (!isApprovalPhrase(text)) return null
-        val pending = agent.pendingProposals().firstOrNull()
-            ?: return done("No pending proposal to approve.")
+        val pending = agent.pendingProposals().firstOrNull() ?: return null
         return when (val result = agent.approveProposal(pending.id, ownerVerified = true, ownerLabel = "owner")) {
             is MutationApprovalResult.AwaitingSecond ->
-                done("First approval recorded. Confirm once more to write the files.", pending.id)
+                AgentRuntimeResult.NeedsApproval(
+                    task(
+                        request = text,
+                        summary = "First approval recorded. Type approve or confirm once more to write the files.",
+                        status = "waiting-approval",
+                        proposalId = pending.id
+                    ),
+                    "First approval recorded. Type approve or confirm once more to write the files.",
+                    pending.id
+                )
             is MutationApprovalResult.Applied -> {
                 val paths = result.changeSet.changes.map { it.path }.distinct()
-                done(
-                    "APPLIED to disk after dual approval.\nFiles:\n" +
-                        paths.joinToString("\n") { "- $it" },
-                    pending.id
+                AgentRuntimeResult.Completed(
+                    AgentTask(
+                        id = UUID.randomUUID().toString(),
+                        request = text,
+                        status = "completed",
+                        plan = AgentPlan(text, emptyList(), emptyList()),
+                        changes = result.changeSet.changes,
+                        verification = VerificationReport(true, emptyList()),
+                        events = listOf("applied " + pending.id),
+                        summary = "APPLIED to disk after dual approval.\nFiles:\n" +
+                            paths.joinToString("\n") { "- $it" }
+                    )
                 )
             }
             is MutationApprovalResult.Rejected ->
@@ -44,21 +61,19 @@ object ChatApproval {
         }
     }
 
-    private fun done(summary: String, proposalId: String? = null): AgentRuntimeResult {
-        val task = AgentTask(
-            id = UUID.randomUUID().toString(),
-            request = "approve",
-            status = "completed",
-            plan = AgentPlan("approve", emptyList(), emptyList()),
-            changes = emptyList(),
-            verification = VerificationReport(true, emptyList()),
-            events = emptyList(),
-            summary = summary
-        )
-        return if (summary.startsWith("First approval")) {
-            AgentRuntimeResult.NeedsApproval(task, summary, proposalId.orEmpty())
-        } else {
-            AgentRuntimeResult.Completed(task)
-        }
-    }
+    private fun task(
+        request: String,
+        summary: String,
+        status: String,
+        proposalId: String
+    ): AgentTask = AgentTask(
+        id = UUID.randomUUID().toString(),
+        request = request,
+        status = status,
+        plan = AgentPlan(request, emptyList(), emptyList()),
+        changes = emptyList(),
+        verification = VerificationReport(true, emptyList()),
+        events = listOf(proposalId),
+        summary = summary
+    )
 }
