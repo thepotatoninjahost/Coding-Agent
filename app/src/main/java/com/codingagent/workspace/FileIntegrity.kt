@@ -143,14 +143,17 @@ object FileIntegrity {
     private fun balance(content: String, open: Char, close: Char): Int {
         var n = 0
         var i = 0
+        var inTripleString = false
         var inString = false
         var inChar = false
         var inLineComment = false
         var inBlockComment = false
         var escape = false
-        while (i < content.length) {
+        val len = content.length
+        while (i < len) {
             val c = content[i]
-            val next = if (i + 1 < content.length) content[i + 1] else '\u0000'
+            val next = if (i + 1 < len) content[i + 1] else '\u0000'
+            val next2 = if (i + 2 < len) content[i + 2] else '\u0000'
             if (inLineComment) {
                 if (c == '\n') inLineComment = false
                 i++
@@ -160,6 +163,19 @@ object FileIntegrity {
                 if (c == '*' && next == '/') {
                     inBlockComment = false
                     i += 2
+                    continue
+                }
+                i++
+                continue
+            }
+            // Kotlin raw/triple-quoted strings ("""...""") do not process backslash
+            // escapes and can legally contain lone " or ' characters (e.g. regex
+            // literals like ["']). They must be tracked as their own state so an
+            // embedded quote can't be mistaken for the string terminator.
+            if (inTripleString) {
+                if (c == '"' && next == '"' && next2 == '"') {
+                    inTripleString = false
+                    i += 3
                     continue
                 }
                 i++
@@ -189,6 +205,11 @@ object FileIntegrity {
             if (c == '/' && next == '*') {
                 inBlockComment = true
                 i += 2
+                continue
+            }
+            if (c == '"' && next == '"' && next2 == '"') {
+                inTripleString = true
+                i += 3
                 continue
             }
             if (c == '"') {
@@ -210,14 +231,17 @@ object FileIntegrity {
 
     private fun unclosedString(content: String): Boolean {
         var i = 0
+        var inTripleString = false
         var inString = false
         var inChar = false
         var inLineComment = false
         var inBlockComment = false
         var escape = false
-        while (i < content.length) {
+        val len = content.length
+        while (i < len) {
             val c = content[i]
-            val next = if (i + 1 < content.length) content[i + 1] else '\u0000'
+            val next = if (i + 1 < len) content[i + 1] else '\u0000'
+            val next2 = if (i + 2 < len) content[i + 2] else '\u0000'
             if (inLineComment) {
                 if (c == '\n') inLineComment = false
                 i++
@@ -227,6 +251,15 @@ object FileIntegrity {
                 if (c == '*' && next == '/') {
                     inBlockComment = false
                     i += 2
+                    continue
+                }
+                i++
+                continue
+            }
+            if (inTripleString) {
+                if (c == '"' && next == '"' && next2 == '"') {
+                    inTripleString = false
+                    i += 3
                     continue
                 }
                 i++
@@ -258,6 +291,11 @@ object FileIntegrity {
                 i += 2
                 continue
             }
+            if (c == '"' && next == '"' && next2 == '"') {
+                inTripleString = true
+                i += 3
+                continue
+            }
             if (c == '"') {
                 inString = true
                 i++
@@ -270,6 +308,6 @@ object FileIntegrity {
             }
             i++
         }
-        return inString || inChar || inBlockComment
+        return inString || inChar || inBlockComment || inTripleString
     }
 }
