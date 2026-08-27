@@ -18,7 +18,91 @@ class RemoteHttpGateway(
     private val connectionFactory: (String) -> HttpURLConnection = { URL(it).openConnection() as HttpURLConnection },
     private val extraHeaders: Map<String, String> = emptyMap()
 ) : ModelGateway {
-    override fun stream(request: ModelRequest, onDelta: (String) -> Unit): ModelResponse = complete(request)
+    override fun stream(request: ModelRequest, onDelta: (String) -> Unit): ModelResponse {
+        val first = streamOnce(request, onDelta)
+        if (first is ModelResponse.Failure && isEmptyContentFailure(first.message) && request.tools.isNotEmpty()) {
+            return streamOnce(request.copy(tools = emptyList()), onDelta)
+        }
+        return first
+    }
+
+    private fun streamOnce(request: ModelRequest, onDelta: (String) -> Unit): ModelResponse {
+        val connection = openConnection() ?: return ModelResponse.Failure("Model gateway configuration is incomplete")
+        return try {
+            configure(connection)
+            val body = requestBody(request)
+            body.put("stream", true)
+            connection.outputStream.use { it.write(body.toString().toByteArray(StandardCharsets.UTF_8)) }
+            if (connection.responseCode !in 200..299) return failure(connection)
+            parseStreamedBody(connection.inputStream, onDelta)
+        } catch (error: IOException) {
+            ModelResponse.Failure("Model request failed: ${error.message.orEmpty().ifBlank { error.javaClass.simpleName }}")
+        } catch (error: Exception) {
+            ModelResponse.Failure("Model response could not be processed: ${error.message.orEmpty().ifBlank { error.javaClass.simpleName }}")
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    /**
+     * Reconstructs a single OpenAI-style chat message from Server-Sent-Events deltas by
+     * accumulating text content and tool-call arguments (which arrive split across many
+     * chunks, keyed by index) into one merged JSONObject, then reuses the exact same
+     * responseFromChatMessage() path that non-streaming responses already go through.
+     * This avoids a second, divergent parsing implementation for the streamed case.
+     */
+    private fun parseStreamedBody(input: java.io.InputStream, onDelta: (String) -> Unit): ModelResponse {
+        val mergedContent = StringBuilder()
+        var toolCallId: String? = null
+        var toolCallName: String? = null
+        val toolCallArguments = StringBuilder()
+        var sawToolCall = false
+
+        input.bufferedReader(StandardCharsets.UTF_8).useLines { lines ->
+            for (rawLine in lines) {
+                val line = rawLine.trim()
+                if (!line.startsWith("data:")) continue
+                val payload = line.removePrefix("data:").trim()
+                if (payload.isEmpty()) continue
+                if (payload == "[DONE]") break
+                val chunk = runCatching { JSONObject(payload) }.getOrNull() ?: continue
+                val delta = chunk.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("delta") ?: continue
+
+                val textPiece = delta.optString("content")
+                if (textPiece.isNotEmpty()) {
+                    mergedContent.append(textPiece)
+                    onDelta(textPiece)
+                }
+
+                val calls = delta.optJSONArray("tool_calls")
+                if (calls != null) {
+                    for (i in 0 until calls.length()) {
+                        val call = calls.optJSONObject(i) ?: continue
+                        if (call.optInt("index", 0) != 0) continue // this app acts on one tool call at a time
+                        sawToolCall = true
+                        call.optString("id").takeIf { it.isNotBlank() }?.let { toolCallId = it }
+                        val function = call.optJSONObject("function")
+                        function?.optString("name")?.takeIf { it.isNotBlank() }?.let { toolCallName = it }
+                        function?.optString("arguments")?.let { toolCallArguments.append(it) }
+                    }
+                }
+            }
+        }
+
+        val merged = JSONObject().put("role", "assistant")
+        if (mergedContent.isNotEmpty()) merged.put("content", mergedContent.toString())
+        if (sawToolCall && !toolCallName.isNullOrBlank()) {
+            merged.put(
+                "tool_calls",
+                JSONArray().put(
+                    JSONObject()
+                        .put("id", toolCallId ?: JSONObject.NULL)
+                        .put("function", JSONObject().put("name", toolCallName).put("arguments", toolCallArguments.toString()))
+                )
+            )
+        }
+        return responseFromChatMessage(merged)
+    }
 
     override fun complete(request: ModelRequest): ModelResponse {
         val first = completeOnce(request)

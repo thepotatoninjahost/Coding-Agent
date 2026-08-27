@@ -203,6 +203,7 @@ class AutonomousAgent(
         var consecutiveFailures = 0
         var lastToolSignature: String? = null
         var identicalRepeats = 0
+        var repeatResetCount = 0
         val readPaths = linkedSetOf<String>()
         var searchedProject = false
         var evidenceRefusals = 0
@@ -468,6 +469,25 @@ class AutonomousAgent(
                                 )
                                 journal.record(task)
                                 emit(AutonomousAgentEvent.Completed(task))
+                                return events
+                            }
+                            repeatResetCount++
+                            if (repeatResetCount >= 2) {
+                                // Already nudged once and told the model to stop; it repeated the
+                                // identical call again anyway. Do not keep burning turns on a nudge
+                                // that has already proven ineffective — abort now, clearly.
+                                val report = workspace.verify()
+                                val msg = "Aborted: ${response.name} was called identically and repeatedly " +
+                                    "even after being told to stop. The model is not responding to correction, " +
+                                    "so continuing would only waste the remaining turn budget."
+                                val task = AgentTask(
+                                    taskId, normalized, "failed", plan,
+                                    changeSets.flatMap { it.changes }, report,
+                                    listOf("${Instant.now()}: aborted after repeated identical ${response.name} calls survived a prior warning"),
+                                    msg
+                                )
+                                journal.record(task)
+                                emit(AutonomousAgentEvent.Failed(task, msg))
                                 return events
                             }
                             // Any tool with usable evidence: force a final answer. Do not abort the task.

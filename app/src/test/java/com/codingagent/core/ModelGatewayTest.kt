@@ -29,7 +29,7 @@ class ModelGatewayTest {
     @Test
     fun `streamed tool call arguments are accumulated instead of treated as text`() {
         val gateway = RemoteHttpGateway("http://127.0.0.1:8080/v1", "", "local", connectionFactory = { _ ->
-            fakeConnection("""data: {"choices":[{"delta":{"tool_calls":[{"id":"call_1","index":0,"function":{"name":"read_file","arguments":"{\"path\":\"src/"}}}]}}]}
+            fakeConnection("""data: {"choices":[{"delta":{"tool_calls":[{"id":"call_1","index":0,"function":{"name":"read_file","arguments":"{\"path\":\"src/"}}]}}]}
 data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"Main.kt\"}"}}]}}]}
 data: [DONE]
 """.trimIndent())
