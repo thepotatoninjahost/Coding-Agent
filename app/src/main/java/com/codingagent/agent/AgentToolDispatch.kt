@@ -75,7 +75,7 @@ class AgentToolDispatch(
                         reason = arguments.optString("reason", "Autonomous model proposal")
                     )
                     "PROPOSAL_READY id=${proposal.id} path=$path changes=${proposal.changeSet.changes.size} approval_required=2 " +
-                        "Confirm twice in Review or chat to APPLY this change to disk."
+                        "Fingerprint + spoken password required in Review before APPLY."
                 }
                 "create_file" -> {
                     val path = arguments.getString("path")
@@ -91,7 +91,7 @@ class AgentToolDispatch(
                         reason = arguments.optString("reason", "Autonomous model proposal")
                     )
                     "PROPOSAL_READY id=${proposal.id} path=$path changes=${proposal.changeSet.changes.size} approval_required=2 " +
-                        "Confirm twice in Review or chat to APPLY this file to disk."
+                        "Fingerprint + spoken password required in Review before APPLY."
                 }
                 "run_command" -> {
                     val entry = terminal.execute(arguments.getString("command"))
@@ -148,14 +148,19 @@ class AgentToolDispatch(
     }
 
     private fun approveChange(arguments: JSONObject): String {
+        val channelName = arguments.optString("channel", "").uppercase()
+        val channel = runCatching { ApprovalChannel.valueOf(channelName) }.getOrNull()
+            ?: return "ERROR: approve_change requires channel=BIOMETRIC or channel=SPOKEN_PASSWORD"
         val result = mutations.approve(
             id = arguments.getString("id"),
             ownerVerified = arguments.optBoolean("ownerVerified", false),
-            ownerLabel = arguments.optString("ownerLabel", "owner")
+            ownerLabel = arguments.optString("ownerLabel", "owner"),
+            channel = channel
         )
         return when (result) {
             is MutationApprovalResult.AwaitingSecond ->
-                "AWAITING_SECOND_APPROVAL id=${result.proposal.id} approvals=${result.proposal.approvalCount}"
+                "AWAITING_SECOND_APPROVAL id=${result.proposal.id} approvals=${result.proposal.approvalCount} " +
+                    "channel=${result.approval.channel.name}"
             is MutationApprovalResult.Applied -> {
                 onChangeApplied(result.changeSet)
                 "APPLIED id=${result.proposal.id} changes=${result.changeSet.changes.size}"
