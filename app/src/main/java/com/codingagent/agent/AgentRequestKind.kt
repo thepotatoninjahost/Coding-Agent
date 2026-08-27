@@ -83,8 +83,34 @@ object AgentRequestKind {
         }
     }
 
-    fun explicitReadPath(request: String): String? = null
-    fun inspectTarget(request: String): String? = null
+    fun explicitReadPath(request: String): String? {
+        val patterns = listOf(
+            Regex("(?is)^\\s*read(?:\\s+file)?\\s+[`'\"]?([A-Za-z0-9_./\\-]+\\.[A-Za-z0-9]+)[`'\"]?\\s*$"),
+            Regex("(?is)^\\s*show(?:\\s+me)?(?:\\s+the)?(?:\\s+contents?(?:\\s+of)?)?\\s+[`'\"]?([A-Za-z0-9_./\\-]+\\.[A-Za-z0-9]+)[`'\"]?\\s*$"),
+            Regex("(?is)^\\s*open\\s+[`'\"]?([A-Za-z0-9_./\\-]+\\.[A-Za-z0-9]+)[`'\"]?\\s*$")
+        )
+        for (re in patterns) {
+            val m = re.matchEntire(request.trim()) ?: continue
+            val path = m.groupValues[1].trim().trimStart('/')
+            if (path.isNotBlank()) return path
+        }
+        return null
+    }
+
+    fun inspectTarget(request: String): String? {
+        val patterns = listOf(
+            Regex("(?is)\\b(?:analyze|inspect|check|review)\\s+(?:the\\s+)?[`'\"]?([A-Za-z0-9_./\\-]+\\.[A-Za-z0-9]+)[`'\"]?"),
+            Regex("(?is)\\b(?:errors?|bugs?|issues?)\\s+in\\s+[`'\"]?([A-Za-z0-9_./\\-]+\\.[A-Za-z0-9]+)[`'\"]?"),
+            Regex("(?is)[`'\"]?([A-Za-z0-9_./\\-]+\\.[A-Za-z0-9]+)[`'\"]?\\s+for\\s+errors?")
+        )
+        for (re in patterns) {
+            val m = re.find(request.trim()) ?: continue
+            val path = m.groupValues[1].trim().trimStart('/')
+            if (path.isNotBlank()) return path
+        }
+        return null
+    }
+
     fun isMarkerOnly(request: String): Boolean {
         val lower = request.lowercase()
         val markerWords = listOf("todo", "fixme", "stub", "placeholder", "unfinished", "marker")
