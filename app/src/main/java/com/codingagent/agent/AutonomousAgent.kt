@@ -259,9 +259,9 @@ class AutonomousAgent(
             )
             // One automatic wait+retry on provider rate limit (TPM) or empty response.
             // Retry must keep the same tool policy as this turn — do not re-open tools after writeNow.
-            if (response is ModelResponse.Failure && (isRateLimitFailure(response.message) || isEmptyModelFailure(response.message))) {
-                if (isRateLimitFailure(response.message)) {
-                    val waitSec = rateLimitWaitSeconds(response.message).coerceIn(1, 45)
+            if (response is ModelResponse.Failure && (ModelFailure.isRateLimit(response.message) || ModelFailure.isEmpty(response.message))) {
+                if (ModelFailure.isRateLimit(response.message)) {
+                    val waitSec = ModelFailure.waitSeconds(response.message).coerceIn(1, 45)
                     emit(AutonomousAgentEvent.Phase("MODEL", "Rate limited — waiting ${waitSec}s then retrying once"))
                     try {
                         Thread.sleep(waitSec * 1000L)
@@ -285,7 +285,7 @@ class AutonomousAgent(
             if (cancelled.get()) return stopNow(taskId, normalized, plan, events) { emit(it) }
             when (response) {
                 is ModelResponse.Failure -> {
-                    val friendly = humanizeModelFailure(response.message)
+                    val friendly = ModelFailure.humanize(response.message)
                     val named = extractInspectTarget(normalized) ?: extractExplicitReadPath(normalized)
                     val localExtra = named?.let { buildLocalFileReport(it) }
                         ?.asUserText(includePolicy = true, includeStructure = true)
@@ -775,129 +775,6 @@ class AutonomousAgent(
 
     private fun executeTool(name: String, rawArguments: String): String {
         return tools.execute(name, rawArguments)
-    }
-    private fun executeToolUnused(name: String, rawArguments: String): String {
-        return try {
-            val arguments = JSONObject(rawArguments)
-            when (name) {
-                "list_files" -> {
-                    // Empty / "." / "/" → indexed source paths (extension whitelist).
-                    // Real subdirectory path → immediate children of that directory.
-                    // Never fall back to root dir names labeled as "source files".
-                    val rawPath = arguments.optString("path").trim()
-                    val pathArg = when {
-                        rawPath.isEmpty() || rawPath == "." || rawPath == "./" || rawPath == "/" -> ""
-                        else -> rawPath
-                    }
-                    val listed = if (pathArg.isEmpty()) {
-                        files.listSourceFilePaths().ifEmpty { files.listSourceFileNames() }
-                    } else {
-                        files.list(pathArg)
-                    }
-                    val result = if (listed.isEmpty()) {
-                        "(no files)"
-                    } else {
-                        listed.joinToString("\n")
-                    }
-                    result.limitOutput()
-                }
-                "read_file" -> {
-                    files.read(arguments.getString("path")).content.limitOutput()
-                }
-                "search_project" -> {
-                    workspace.search(arguments.getString("query"))
-                        .joinToString("\n") { hit -> "${hit.path}:${hit.line}: ${hit.text}" }
-                        .limitOutput()
-                }
-                "search_knowledge" -> {
-                    knowledge.search(arguments.getString("query"))
-                        .joinToString("\n") { hit -> "${hit.document}/${hit.section}: ${hit.excerpt}" }
-                        .limitOutput()
-                }
-                "research_web" -> {
-                    val query = arguments.getString("query")
-                    val mode = runCatching {
-                        ResearchMode.valueOf(arguments.optString("mode", "BROAD").uppercase())
-                    }.getOrDefault(ResearchModeDetector.detect(query))
-                    val sources = arguments.optInt("sources", 8).coerceIn(1, 12)
-                    val sessionResult = runCatching {
-                        research.deepResearch(query, sources, mode) { progress ->
-                            lastResearchProgress =
-                                "${progress.stage}: ${progress.completed}/${progress.total}; " +
-                                    "learned ${progress.successful}, failed ${progress.failed}"
-                        }
-                    }
-                    val session = sessionResult.getOrNull()
-                    when {
-                        sessionResult.isFailure -> {
-                            val err = sessionResult.exceptionOrNull()
-                            "ERROR: research_web failed: ${err?.message ?: err?.javaClass?.simpleName ?: "unknown"}"
-                        }
-                        session == null || session.sources.isEmpty() ->
-                            "ERROR: research_web found no usable sources for \"$query\". " +
-                                "Try a tighter technical query (library + API + error text). Do not invent docs."
-                        else -> {
-                            val brief = ResearchBriefBuilder.build(session)
-                            val header =
-                                "Learned ${brief.sourceCount} distinct full sources across ${brief.laneCount} lanes, " +
-                                    "${brief.wordCount} words, ${brief.codeExampleCount} code examples.\n" +
-                                    "Progress: $lastResearchProgress\n"
-                            (header + brief.evidence).limitOutput()
-                        }
-                    }
-                }
-                "replace_text" -> {
-                    val path = arguments.getString("path")
-                    val proposal = mutations.propose(
-                        request = "replace_text $path",
-                        operations = listOf(
-                            TaskOperation(
-                                OperationKind.REPLACE,
-                                path,
-                                arguments.getString("oldText"),
-                                arguments.getString("newText")
-                            )
-                        ),
-                        reason = arguments.optString("reason", "Autonomous model proposal")
-                    )
-                    "PROPOSAL_READY id=${proposal.id} path=$path changes=${proposal.changeSet.changes.size} approval_required=2 " +
-                        "Confirm twice in Review or chat to APPLY this change to disk."
-                }
-                "create_file" -> {
-                    val path = arguments.getString("path")
-                    val proposal = mutations.propose(
-                        request = "create_file $path",
-                        operations = listOf(
-                            TaskOperation(
-                                OperationKind.CREATE_FILE,
-                                path,
-                                text = arguments.getString("content")
-                            )
-                        ),
-                        reason = arguments.optString("reason", "Autonomous model proposal")
-                    )
-                    "PROPOSAL_READY id=${proposal.id} path=$path changes=${proposal.changeSet.changes.size} approval_required=2 " +
-                        "Confirm twice in Review or chat to APPLY this file to disk."
-                }
-                "run_command" -> {
-                    val entry = terminal.execute(arguments.getString("command"))
-                    ("exit=${entry.exitCode} timeout=${entry.timedOut}\n${entry.stdout}\n${entry.stderr}")
-                        .limitOutput()
-                }
-                "verify" -> {
-                    val report = workspace.verify()
-                    val issues = report.issues.joinToString("\n") { issue ->
-                        "${issue.path}:${issue.line}: ${issue.message}"
-                    }
-                    "passed=${report.passed}\n$issues".limitOutput()
-                }
-                "approve_change" -> approveChange(arguments)
-                "reject_change" -> rejectChange(arguments)
-                else -> "ERROR: Unknown tool '$name'"
-            }
-        } catch (error: Exception) {
-            "ERROR: ${error.message ?: error.javaClass.simpleName}"
-        }
     }
 
     private fun approveChange(arguments: JSONObject): String {
@@ -1478,58 +1355,6 @@ class AutonomousAgent(
     /**
      * Classify provider failures into one actionable line instead of raw HTTP/JSON walls.
      */
-
-    private fun isRateLimitFailure(message: String): Boolean {
-        val lower = message.lowercase()
-        return "rate_limit" in lower || "rate limit" in lower ||
-            "tokens per minute" in lower || "tpm" in lower || "429" in lower
-    }
-
-    private fun isEmptyModelFailure(message: String): Boolean {
-        val lower = message.lowercase()
-        return "no streamed message content" in lower ||
-            "no message content" in lower ||
-            "empty response" in lower ||
-            "returned no message" in lower ||
-            "no usable message content" in lower ||
-            "did not contain content or tool" in lower ||
-            "returned an empty response" in lower
-    }
-
-    private fun rateLimitWaitSeconds(message: String): Int {
-        val match = Regex("try again in ([0-9.]+)", RegexOption.IGNORE_CASE).find(message)
-        val sec = match?.groupValues?.getOrNull(1)?.toDoubleOrNull()?.toInt()
-        return sec ?: 20
-    }
-
-    private fun humanizeModelFailure(message: String): String {
-        val lower = message.lowercase()
-        return when {
-            "rate_limit" in lower || "rate limit" in lower ||
-                "tokens per minute" in lower || "tpm" in lower ||
-                "429" in lower -> {
-                val seconds = Regex("try again in ([0-9.]+)").find(lower)?.groupValues?.getOrNull(1)
-                val wait = seconds?.toDoubleOrNull()?.toInt() ?: 30
-                "Model rate-limited (tokens/minute). Wait ~${wait}s, or switch provider in Model settings. Local file evidence still available via inspect/read."
-            }
-            "no streamed message content" in lower || "no message content" in lower ||
-                "empty response" in lower || "no usable message content" in lower ||
-                "did not contain content or tool" in lower ->
-                "Model returned an empty response. Retrying is automatic once; if it keeps happening, switch model in Model settings."
-            "401" in lower || "unauthorized" in lower || "invalid api key" in lower ->
-                "Model auth failed (check API key in Model settings)."
-            "403" in lower || "forbidden" in lower ->
-                "Model request forbidden (provider rejected the key or model)."
-            "timeout" in lower || "timed out" in lower ->
-                "Model request timed out. Retry once; if it keeps happening, shorten the request or switch provider."
-            "connection" in lower || "unreachable" in lower || "unknownhost" in lower ->
-                "Could not reach the model endpoint (network)."
-            "no streamed message content" in lower || "no message content" in lower ->
-                "Model returned an empty response. Retry once, or switch provider in Model settings."
-            message.length > 280 -> message.take(280) + "…"
-            else -> message
-        }
-    }
 
     private fun failedTask(
         id: String,
