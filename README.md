@@ -55,7 +55,7 @@ Production source is split by job under `app/src/main/java/com/codingagent/`:
 
 | Package | Job |
 |---|---|
-| `agent` | Single spine (`AutonomousAgent`), constitution, tool selection, planning (`PlanningLoop` / `AgentPlanner`), repair (`CompilerTestRepairCycle`), chat workspace, journal |
+| `agent` | Single spine (`AutonomousAgent`), constitution, tool dispatch (`AgentToolDispatch`), planning (`AgentPlanner`), chat workspace, journal |
 | `intake` | Free text → typed goal (`TaskIntakeParser`, `GoalInterpreter`, `CodeSynthesisEngine`) |
 | `workspace` | Project import, index (`ProjectIndexer`), files, diffs, dual-approval mutations, terminal, verification, checksum rollback (`ProjectWorkspace`) |
 | `model` | User-configured OpenAI-compatible HTTP gateway (`RemoteHttpGateway`), settings, streamed SSE tool calls. No vendor is hardcoded. |
@@ -68,13 +68,13 @@ Execution path:
 
 1. `TaskIntakeParser` interprets a request into a typed goal contract and operation.
 2. `AutonomousAgent` owns the loop: gather evidence, plan, one tool per turn (queue extras), observe, verify, hand over.
-3. `AgentPlanner` / `PlanningLoop` produce and revise the plan from evidence.
+3. `AgentPlanner` produces and revises the plan from evidence.
 4. `ProjectIndexer` inventories project files, languages, imports, symbols, and checksums.
 5. `AgentKnowledge` supplies local evidence. `WebResearchProvider` / deep-research providers supply internet evidence when the request requires it. Empty research fails closed.
 6. `CodeSynthesisEngine` creates a proposal when the request does not contain an explicit operation.
 7. `ProjectWorkspace` + `MutationCoordinator` apply edits through typed transactions. Dual owner approval is required before a write hits disk.
 8. `VerificationReport` records static unfinished-work scans and command-check evidence. Verification never reports a fake pass.
-9. `CompilerTestRepairCycle` diagnoses failures, applies bounded repair attempts, and rolls back failed work.
+9. Not currently wired: `CompilerTestRepairCycle` (diagnose/repair/rollback on failed verification) exists but nothing calls it — an applied change that fails verification is not auto-repaired or rolled back today.
 10. `AgentJournal`, lessons, and `LocalStore` persist task evidence and chat for later work.
 
 Unit tests currently live under `app/src/test/java/com/codingagent/core/` even though production code is package-split as above.
@@ -170,10 +170,8 @@ The project currently verifies:
 
 - Goal interpretation and task intake
 - Code-synthesis proposals
-- Planning and tool-selection loops
 - Project indexing and exact mutation behavior
-- Typed transaction records and checksum-backed rollback
-- Repair-cycle rollback behavior
+- Typed transaction records and checksum-backed rollback (`ProjectWorkspace.rollback` — not `CompilerTestRepairCycle`, which is unwired; see execution path above)
 - Live module and live model updates
 - Android lint
 - Debug APK assembly
