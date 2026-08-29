@@ -50,7 +50,48 @@ object DegenerateOutput {
         val importLike = lines.filter { it.startsWith("import ") }
         if (importLike.size >= 12 && importLike.size * 2 >= lines.size) return true
 
+        // The checks above only catch REPETITIVE spam. A model can also produce non-repeating
+        // garbage — corrupted encoding, or "token soup" that isn't a real answer in any
+        // language — that would otherwise sail through and get reported as a clean "completed"
+        // task. Catch those two shapes without touching the repetition logic above.
+        if (hasCorruptedEncoding(trimmed)) return true
+        if (looksLikeTokenSoup(tokens)) return true
+
         return false
+    }
+
+    /** Replacement characters / control bytes indicate a mangled response, not prose. */
+    private fun hasCorruptedEncoding(text: String): Boolean {
+        if (text.length < 20) return false
+        var bad = 0
+        for (c in text) {
+            if (c == '\uFFFD') bad++
+            else if (c.code < 32 && c != '\n' && c != '\t' && c != '\r') bad++
+        }
+        return bad.toDouble() / text.length > 0.02
+    }
+
+    /**
+     * Non-repeating gibberish: a long run of tokens that mostly don't look like real words,
+     * identifiers, numbers, or paths. Deliberately conservative (long tokens only, majority
+     * vote, requires a reasonable sample size) so normal prose or code is never misflagged —
+     * this only fires on the kind of run-on nonsense that has no vowels, no digits, no path
+     * separators, and no punctuation structure at all.
+     */
+    private fun looksLikeTokenSoup(tokens: List<String>): Boolean {
+        if (tokens.size < 12) return false
+        val judged = tokens.filter { it.trim { c -> !c.isLetterOrDigit() }.length > 5 }
+        if (judged.size < 10) return false
+        fun isPlausible(token: String): Boolean {
+            val core = token.trim { c -> !c.isLetterOrDigit() }
+            if (core.any { it.isDigit() }) return true
+            if (token.contains('/') || token.contains('\\') || token.contains('.') ||
+                token.contains('_') || token.contains('-')
+            ) return true
+            return core.any { it.lowercaseChar() in "aeiou" }
+        }
+        val implausible = judged.count { !isPlausible(it) }
+        return implausible * 2 >= judged.size
     }
 
     fun sanitize(text: String, fallbackPrefix: String = "Model output was degenerate"): String {

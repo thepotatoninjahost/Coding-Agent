@@ -1,4 +1,6 @@
 package com.codingagent.agent
+import com.codingagent.workspace.AgentPlan
+import com.codingagent.workspace.AgentStep
 
 /**
  * ONE JOB: Advance and track ordered plan steps through execution.

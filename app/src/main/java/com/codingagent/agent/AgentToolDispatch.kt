@@ -28,6 +28,14 @@ class AgentToolDispatch(
     private val onResearchProgress: (String) -> Unit,
     private val onApplied: (ChangeSet) -> Unit
 ) {
+    // Wired in: was previously dead code. Every disk write that clears the full dual-owner
+    // approval gate below also gets staged and promoted through SelfEvolution, so successful
+    // changes are recorded for later sessions. This reuses the SAME approval already granted
+    // for the write (ownerVerified + approvalCount>=2 + sandboxPassed, all enforced above by
+    // MutationCoordinator via AgentConstitution) — it does not grant any new authority, and
+    // AgentConstitution.check runs again inside promoteSource as a second, independent gate.
+    private val evolution = SelfEvolution(workspace.projectRoot())
+
     fun execute(name: String, rawArguments: String): String {
         return try {
             val arguments = JSONObject(rawArguments)
@@ -64,6 +72,28 @@ class AgentToolDispatch(
             }
         } catch (error: Exception) {
             "ERROR: ${error.message ?: error.javaClass.simpleName}"
+        }
+    }
+
+    // Best-effort: promotion failing must never affect the write that already succeeded above.
+    private fun promoteAppliedChanges(result: MutationApprovalResult.Applied) {
+        runCatching {
+            val proposal = result.proposal
+            val latestApproval = proposal.approvals.maxOfOrNull { it.approvedAt }
+            result.changeSet.changes.forEach { change ->
+                val file = workspace.projectRoot().resolve(change.path)
+                if (!file.isFile) return@forEach
+                val staged = evolution.stageSource(file, kind = change.operation.name)
+                val action = AgentAction(
+                    description = proposal.request,
+                    category = AgentActionCategory.CODE_CHANGE,
+                    ownerVerified = true,
+                    approvalCount = proposal.approvalCount,
+                    sandboxPassed = proposal.verification.passed,
+                    clearPermission = true
+                )
+                evolution.promoteSource(staged, change.operation.name, proposal.verification, action, latestApproval)
+            }
         }
     }
 
@@ -163,6 +193,7 @@ class AgentToolDispatch(
                 "AWAITING_SECOND_APPROVAL id=${result.proposal.id} approvals=${result.proposal.approvalCount}"
             is MutationApprovalResult.Applied -> {
                 onApplied(result.changeSet)
+                promoteAppliedChanges(result)
                 "APPLIED id=${result.proposal.id} changes=${result.changeSet.changes.size}"
             }
             is MutationApprovalResult.Rejected -> "ERROR: ${result.reason}"

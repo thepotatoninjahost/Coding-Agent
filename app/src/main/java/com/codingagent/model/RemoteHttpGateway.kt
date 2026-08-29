@@ -180,13 +180,22 @@ class RemoteHttpGateway(
         val messages = JSONArray().put(JSONObject().put("role", "system").put("content", request.system))
         request.transcript.forEach { message ->
             val serialized = JSONObject().put("role", message.role)
+            // Same fallback for both branches below: an assistant tool_calls[].id and the
+            // following tool message's tool_call_id MUST be byte-identical or a strict
+            // OpenAI-compatible provider rejects the request on the very next turn. The old
+            // code derived them independently ("call_$toolName" here, "" on the tool message),
+            // which silently broke every turn after the first tool call whenever
+            // message.toolCallId was null (recovered XML calls, providers that omit ids, etc.).
+            // A tool-role ModelMessage never carries toolName, so the fallback can't be
+            // reconstructed per-message — it must be a fixed sentinel shared by both sides.
+            val resolvedToolCallId = message.toolCallId?.takeIf { it.isNotBlank() } ?: "call_unmatched"
             if (message.role == "assistant" && message.toolName != null) {
                 serialized.put("content", JSONObject.NULL)
                 serialized.put(
                     "tool_calls",
                     JSONArray().put(
                         JSONObject()
-                            .put("id", message.toolCallId ?: "call_${message.toolName}")
+                            .put("id", resolvedToolCallId)
                             .put("type", "function")
                             .put(
                                 "function",
@@ -196,7 +205,7 @@ class RemoteHttpGateway(
                 )
             } else {
                 serialized.put("content", message.content)
-                if (message.role == "tool") serialized.put("tool_call_id", message.toolCallId ?: "")
+                if (message.role == "tool") serialized.put("tool_call_id", resolvedToolCallId)
             }
             messages.put(serialized)
         }
