@@ -9,7 +9,6 @@ import com.codingagent.agent.AutonomousAgent
 import com.codingagent.agent.AutonomousAgentConfig
 import com.codingagent.agent.AutonomousAgentEvent
 import com.codingagent.agent.DegenerateOutput
-import com.codingagent.agent.SelfEvolution
 import com.codingagent.workspace.KnowledgeHit
 import com.codingagent.model.AgentModelProtocol
 import com.codingagent.model.ModelGateway
