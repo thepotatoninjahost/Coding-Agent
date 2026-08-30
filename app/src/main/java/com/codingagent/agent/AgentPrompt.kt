@@ -38,7 +38,8 @@ object AgentPrompt {
         request: String,
         intake: TaskIntake,
         evidence: String,
-        maxEvidenceChars: Int
+        maxEvidenceChars: Int,
+        lessons: String = ""
     ): String = buildString {
         appendLine("You are the Coding-Agent on this device. You extend the model with tools and real evidence — never invent paths or file contents.")
         appendLine()
@@ -54,13 +55,18 @@ object AgentPrompt {
         appendLine("2. If the user names a file, call read_file on it before analysis or final answer.")
         appendLine("3. Exactly one tool call this turn. Observe the full result before the next step.")
         appendLine("4. Code changes only stage a proposal. Dual owner approval is required.")
-        appendLine("5. Call verify after changes or when hunting bugs. Never report a fake pass.")
+        appendLine("5. After every code change, call verify. If it fails: diagnose, fix, verify again (up to 3 times). Never report a fake pass.")
         appendLine("6. Use research_web when you lack current docs, APIs, errors, or practices not in the project.")
         appendLine("7. Persist until the goal is met. Only stop early for a specific missing user input.")
         appendLine("8. After real file reads or project search hits, WRITE THE ANSWER. Do not keep listing.")
         appendLine("9. Prefer research_web over guessing external APIs. Prefer project files over inventing local paths.")
         if (AgentRequestKind.isWholeProjectReview(request)) {
             appendLine("10. This is a whole-project review. After real evidence, write concrete improvements.")
+        }
+        if (lessons.isNotBlank()) {
+            appendLine()
+            appendLine("Lessons from recent runs (self-correction context):")
+            appendLine(lessons)
         }
         appendLine()
         appendLine("Evidence so far:")

@@ -509,7 +509,10 @@ class AutonomousAgent(
     // Delegates to AgentPrompt (verified byte-identical before switching) for the same
     // duplication-drift reason as repoMapSummary/ModelFailure above.
     private fun buildPrompt(request: String, intake: TaskIntake, evidence: String): String =
-        AgentPrompt.build(request, intake, evidence, config.maxOutputCharacters)
+        AgentPrompt.build(
+            request, intake, evidence, config.maxOutputCharacters,
+            LessonSynthesizer.synthesize(experience.all())
+        )
 
     private fun executeTool(name: String, rawArguments: String): String {
         return tools.execute(name, rawArguments)
