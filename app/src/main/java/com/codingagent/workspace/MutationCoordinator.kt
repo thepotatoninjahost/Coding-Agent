@@ -12,6 +12,11 @@ import com.codingagent.intake.TaskOperation
 /**
  * ONE JOB: Dual-approval staging, constitution checks, and apply/reject of code changes.
  */
+sealed class MutationProposeResult {
+    data class Proposed(val proposal: PendingChangeProposal) : MutationProposeResult()
+    data class Rejected(val reason: String) : MutationProposeResult()
+}
+
 sealed class MutationApprovalResult {
     data class AwaitingSecond(val proposal: PendingChangeProposal, val approval: ApprovalRecord) : MutationApprovalResult()
     data class Applied(val proposal: PendingChangeProposal, val changeSet: ChangeSet) : MutationApprovalResult()
@@ -31,20 +36,48 @@ data class PendingChangeProposal(
 }
 
 class MutationCoordinator(
-    private val workspace: ProjectWorkspace,
+    // internal so AutonomousAgent can derive its own workspace reference from the shared instance.
+    internal val workspace: ProjectWorkspace,
     private val ledger: ApprovalLedger = ApprovalLedger(),
     private val now: () -> Long = { System.currentTimeMillis() }
 ) {
     private val pending = linkedMapOf<String, PendingChangeProposal>()
 
+    /**
+     * Stage a mutation for dual approval.
+     * Returns [MutationProposeResult.Rejected] on any validation failure — never throws.
+     */
     @Synchronized
-    fun propose(request: String, operations: List<TaskOperation>, reason: String = request): PendingChangeProposal {
-        require(request.isNotBlank()) { "A mutation request is required" }
-        require(operations.isNotEmpty()) { "At least one mutation operation is required" }
-        val changeSet = workspace.preview(operations, reason)
-        require(changeSet.changes.isNotEmpty()) { "Mutation proposal contains no changes" }
-        val verification = workspace.verifyProposal(changeSet)
-        require(verification.passed) { "Mutation proposal failed verification: ${verification.issues.joinToString { it.message }}" }
+    fun propose(
+        request: String,
+        operations: List<TaskOperation>,
+        reason: String = request
+    ): MutationProposeResult {
+        if (request.isBlank()) return MutationProposeResult.Rejected("A mutation request is required")
+        if (operations.isEmpty()) return MutationProposeResult.Rejected("At least one mutation operation is required")
+
+        val changeSet = runCatching { workspace.preview(operations, reason) }
+            .getOrElse { ex ->
+                return MutationProposeResult.Rejected(
+                    "Preview failed: ${ex.message.orEmpty().ifBlank { ex.javaClass.simpleName }}"
+                )
+            }
+
+        if (changeSet.changes.isEmpty()) return MutationProposeResult.Rejected("Mutation proposal contains no changes")
+
+        val verification = runCatching { workspace.verifyProposal(changeSet) }
+            .getOrElse { ex ->
+                return MutationProposeResult.Rejected(
+                    "Verification failed: ${ex.message.orEmpty().ifBlank { ex.javaClass.simpleName }}"
+                )
+            }
+
+        if (!verification.passed) {
+            return MutationProposeResult.Rejected(
+                "Mutation proposal failed verification: ${verification.issues.joinToString { it.message }}"
+            )
+        }
+
         val timestamp = now()
         val proposal = PendingChangeProposal(
             id = UUID.randomUUID().toString(),
@@ -55,7 +88,7 @@ class MutationCoordinator(
             expiresAt = timestamp + AgentConstitution.APPROVAL_EXPIRATION_MS
         )
         pending[proposal.id] = proposal
-        return proposal
+        return MutationProposeResult.Proposed(proposal)
     }
 
     @Synchronized
@@ -83,7 +116,12 @@ class MutationCoordinator(
         val violations = AgentConstitution.check(action, timestamp, proposal.createdAt)
         if (violations.isNotEmpty()) {
             pending[id] = candidate
-            return if (candidate.approvalCount < 2 && violations.none { it.rule == ConstitutionRule.OWNER_LOCK || it.rule == ConstitutionRule.SANDBOX_FIRST || it.rule == ConstitutionRule.PERMISSION_EXPIRATION }) {
+            return if (candidate.approvalCount < 2 && violations.none {
+                    it.rule == ConstitutionRule.OWNER_LOCK ||
+                        it.rule == ConstitutionRule.SANDBOX_FIRST ||
+                        it.rule == ConstitutionRule.PERMISSION_EXPIRATION
+                }
+            ) {
                 MutationApprovalResult.AwaitingSecond(candidate, approval)
             } else {
                 MutationApprovalResult.Rejected(violations.joinToString("; ") { "${it.rule}: ${it.message}" })
