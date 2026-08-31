@@ -64,6 +64,7 @@ import com.codingagent.workspace.DeepResearchProgress
 import com.codingagent.workspace.EditorDocument
 import com.codingagent.model.ModelDownloadProgress
 import com.codingagent.workspace.MutationCoordinator
+import com.codingagent.workspace.MutationProposeResult
 import com.codingagent.research.ResearchDisplayState
 import com.codingagent.workspace.ResearchHit
 import com.codingagent.workspace.TerminalEntry
@@ -251,8 +252,13 @@ internal fun FilesSurface(
                     onClick = {
                         runCatching {
                             val coordinator = mutationCoordinator ?: error("Project mutation coordinator is unavailable")
-                            val proposal = tools?.proposeSave(path, content, coordinator) ?: error("Project tools are unavailable")
-                            onStatus(AgentStatus.APPROVAL to "Save proposed; confirm twice in Review (${proposal.id.take(8)})")
+                            val result = tools?.proposeSave(path, content, coordinator) ?: error("Project tools are unavailable")
+                            when (result) {
+                                is MutationProposeResult.Proposed ->
+                                    onStatus(AgentStatus.APPROVAL to "Save proposed; confirm twice in Review (${result.proposal.id.take(8)})")
+                                is MutationProposeResult.Rejected ->
+                                    onStatus(AgentStatus.STOPPED to "Save proposal rejected: ${result.reason}")
+                            }
                         }.onFailure { onStatus(AgentStatus.STOPPED to (it.message ?: "Save proposal failed")) }
                     },
                     enabled = document != null && document.content != content && mutationCoordinator != null,
