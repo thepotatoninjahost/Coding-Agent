@@ -43,9 +43,9 @@ class AutonomousAgent(
     private val gateway: ModelGateway? = null,
     private val config: AutonomousAgentConfig = AutonomousAgentConfig(),
     private val research: DeepResearchProvider = DurableDeepResearchProvider(root.resolve(".coding-agent/research")),
-    private val mutations: MutationCoordinator = MutationCoordinator(ProjectWorkspace(root))
+    private val workspace: ProjectWorkspace = ProjectWorkspace(root),
+    private val mutations: MutationCoordinator = MutationCoordinator(workspace)
 ) : CodingAgentExecutor {
-    private val workspace = ProjectWorkspace(root)
     private val files = ProjectFileService(workspace)
     private val terminal = TerminalSession(root, config.commandTimeoutSeconds)
     private val journal = AgentJournal(root)
