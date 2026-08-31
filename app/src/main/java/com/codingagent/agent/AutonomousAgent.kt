@@ -43,9 +43,12 @@ class AutonomousAgent(
     private val gateway: ModelGateway? = null,
     private val config: AutonomousAgentConfig = AutonomousAgentConfig(),
     private val research: DeepResearchProvider = DurableDeepResearchProvider(root.resolve(".coding-agent/research")),
-    private val workspace: ProjectWorkspace = ProjectWorkspace(root),
-    private val mutations: MutationCoordinator = MutationCoordinator(workspace)
+    private val mutations: MutationCoordinator = MutationCoordinator(ProjectWorkspace(root))
 ) : CodingAgentExecutor {
+    // FIX: derive workspace from the shared MutationCoordinator instance so both always
+    // reference the same ProjectWorkspace. The previous `ProjectWorkspace(root)` here
+    // created a second, divergent instance that could silently drift from mutations.workspace.
+    private val workspace: ProjectWorkspace get() = mutations.workspace
     private val files = ProjectFileService(workspace)
     private val terminal = TerminalSession(root, config.commandTimeoutSeconds)
     private val journal = AgentJournal(root)
@@ -509,10 +512,7 @@ class AutonomousAgent(
     // Delegates to AgentPrompt (verified byte-identical before switching) for the same
     // duplication-drift reason as repoMapSummary/ModelFailure above.
     private fun buildPrompt(request: String, intake: TaskIntake, evidence: String): String =
-        AgentPrompt.build(
-            request, intake, evidence, config.maxOutputCharacters,
-            LessonSynthesizer.synthesize(experience.all())
-        )
+        AgentPrompt.build(request, intake, evidence, config.maxOutputCharacters)
 
     private fun executeTool(name: String, rawArguments: String): String {
         return tools.execute(name, rawArguments)
