@@ -10,6 +10,7 @@ import com.codingagent.intake.TaskOperation
 import com.codingagent.model.ModelGateway
 import com.codingagent.workspace.AgentTask
 import com.codingagent.workspace.MutationCoordinator
+import com.codingagent.workspace.MutationProposeResult
 import com.codingagent.workspace.PendingChangeProposal
 import com.codingagent.workspace.ProjectWorkspace
 import com.codingagent.workspace.VerificationReport
@@ -61,24 +62,29 @@ object AgentOfflineStager {
                 }
             }
         }
-        return try {
-            val proposal = mutations.propose(request, staged.first, staged.second)
-            val task = AgentTask(
-                taskId, request, "needs-approval", plan, proposal.changeSet.changes,
-                VerificationReport(true, emptyList()),
-                listOf("${Instant.now()}: offline proposal ${proposal.id} staged; awaiting two owner approvals"),
-                "Review proposal ${proposal.id} and confirm twice before applying any code change."
-            )
-            AgentOfflineMutation.Approval(task, proposal)
-        } catch (error: Exception) {
-            val message = "Offline mutation staging failed: ${error.message.orEmpty().ifBlank { error.javaClass.simpleName }}"
-            val task = AgentTask(
-                taskId, request, "failed", plan, emptyList(),
-                VerificationReport(false, emptyList()),
-                listOf("${Instant.now()}: $message"),
-                message
-            )
-            AgentOfflineMutation.Failed(task)
+
+        // propose() returns a sealed result — never throws.
+        return when (val proposeResult = mutations.propose(request, staged.first, staged.second)) {
+            is MutationProposeResult.Proposed -> {
+                val proposal = proposeResult.proposal
+                val task = AgentTask(
+                    taskId, request, "needs-approval", plan, proposal.changeSet.changes,
+                    VerificationReport(true, emptyList()),
+                    listOf("${Instant.now()}: offline proposal ${proposal.id} staged; awaiting two owner approvals"),
+                    "Review proposal ${proposal.id} and confirm twice before applying any code change."
+                )
+                AgentOfflineMutation.Approval(task, proposal)
+            }
+            is MutationProposeResult.Rejected -> {
+                val message = "Offline mutation staging failed: ${proposeResult.reason}"
+                val task = AgentTask(
+                    taskId, request, "failed", plan, emptyList(),
+                    VerificationReport(false, emptyList()),
+                    listOf("${Instant.now()}: $message"),
+                    message
+                )
+                AgentOfflineMutation.Failed(task)
+            }
         }
     }
 }
