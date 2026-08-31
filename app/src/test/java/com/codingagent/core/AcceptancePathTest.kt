@@ -15,6 +15,7 @@ import com.codingagent.model.RemoteHttpGateway
 import com.codingagent.workspace.ChangeDiff
 import com.codingagent.workspace.MutationApprovalResult
 import com.codingagent.workspace.MutationCoordinator
+import com.codingagent.workspace.MutationProposeResult
 import com.codingagent.workspace.ProjectWorkspace
 
 /**
@@ -31,7 +32,7 @@ class AcceptancePathTest {
         val workspace = ProjectWorkspace(root)
         val coordinator = MutationCoordinator(workspace)
 
-        val proposal = coordinator.propose(
+        val proposeResult = coordinator.propose(
             request = "Bump both helpers",
             operations = listOf(
                 TaskOperation(OperationKind.REPLACE, "src/A.kt", "fun a() = 1\n", "fun a() = 2\n"),
@@ -39,6 +40,9 @@ class AcceptancePathTest {
             ),
             reason = "acceptance multi-file"
         )
+        assertTrue("Proposal should succeed", proposeResult is MutationProposeResult.Proposed)
+        val proposal = (proposeResult as MutationProposeResult.Proposed).proposal
+
         assertEquals(2, proposal.changeSet.changes.size)
         val view = ChangeDiff.summarize(proposal)
         assertEquals(listOf("src/A.kt", "src/B.kt"), view.files.map { it.path })
@@ -62,10 +66,14 @@ class AcceptancePathTest {
         root.resolve("Main.kt").writeText("fun main() = 1\n")
         val workspace = ProjectWorkspace(root)
         val coordinator = MutationCoordinator(workspace)
-        val proposal = coordinator.propose(
+
+        val proposeResult = coordinator.propose(
             "risky edit",
             listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 99\n"))
         )
+        assertTrue("Proposal should succeed", proposeResult is MutationProposeResult.Proposed)
+        val proposal = (proposeResult as MutationProposeResult.Proposed).proposal
+
         assertTrue(coordinator.reject(proposal.id))
         assertEquals("fun main() = 1\n", root.resolve("Main.kt").readText())
         assertTrue(coordinator.pending().isEmpty())
@@ -77,16 +85,35 @@ class AcceptancePathTest {
         root.resolve("src").mkdirs()
         val workspace = ProjectWorkspace(root)
         val coordinator = MutationCoordinator(workspace)
-        val proposal = coordinator.propose(
+
+        val proposeResult = coordinator.propose(
             "add helper",
             listOf(TaskOperation(OperationKind.CREATE_FILE, "src/New.kt", text = "class New\n"))
         )
+        assertTrue("Proposal should succeed", proposeResult is MutationProposeResult.Proposed)
+        val proposal = (proposeResult as MutationProposeResult.Proposed).proposal
+
         assertFalse(root.resolve("src/New.kt").exists())
         coordinator.approve(proposal.id, true, "owner")
         assertFalse(root.resolve("src/New.kt").exists())
         val applied = coordinator.approve(proposal.id, true, "owner")
         assertTrue(applied is MutationApprovalResult.Applied)
         assertEquals("class New\n", root.resolve("src/New.kt").readText())
+    }
+
+    @Test
+    fun proposeRejectedWhenNoChanges() {
+        val root = Files.createTempDirectory("accept-reject-nochange").toFile()
+        root.resolve("Main.kt").writeText("fun main() = 1\n")
+        val workspace = ProjectWorkspace(root)
+        val coordinator = MutationCoordinator(workspace)
+
+        // Same old and new text → no changes → Rejected
+        val result = coordinator.propose(
+            "no-op edit",
+            listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 1\n"))
+        )
+        assertTrue("Propose should be rejected when content is identical", result is MutationProposeResult.Rejected)
     }
 
     @Test
