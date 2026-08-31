@@ -37,7 +37,7 @@ class ProjectFileService(private val workspace: ProjectWorkspace) {
 
     fun read(path: String): EditorDocument = AgentTools(workspace).read(path)
 
-    fun save(path: String, content: String, coordinator: MutationCoordinator): PendingChangeProposal =
+    fun save(path: String, content: String, coordinator: MutationCoordinator): MutationProposeResult =
         AgentTools(workspace).proposeSave(path, content, coordinator)
 
     private fun resolveDirectory(path: String): File {
