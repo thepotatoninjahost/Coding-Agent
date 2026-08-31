@@ -149,7 +149,10 @@ class ProjectWorkspace(private val root: File) {
 
         private fun commitInternal(write: Boolean): ChangeSet {
             check(!committed) { "Transaction already completed" }
-            val records = staged.values.map { it.toRecord() }
+            // Filter out no-op changes (where content before and after are identical)
+            val records = staged.values
+                .map { it.toRecord() }
+                .filter { it.beforeChecksum != it.afterChecksum }
             val changeSet = ChangeSet(UUID.randomUUID().toString(), records, System.currentTimeMillis(), reason)
             if (write) applyApproved(changeSet)
             committed = true
