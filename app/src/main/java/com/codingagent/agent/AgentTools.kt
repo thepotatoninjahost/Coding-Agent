@@ -6,7 +6,7 @@ import com.codingagent.intake.OperationKind
 import com.codingagent.intake.TaskOperation
 import com.codingagent.workspace.EditorDocument
 import com.codingagent.workspace.MutationCoordinator
-import com.codingagent.workspace.PendingChangeProposal
+import com.codingagent.workspace.MutationProposeResult
 import com.codingagent.workspace.ProjectWorkspace
 import com.codingagent.workspace.TerminalEntry
 
@@ -23,10 +23,23 @@ class AgentTools(private val workspace: ProjectWorkspace) {
         return EditorDocument(relative, content, checksum(content), false)
     }
 
-    fun proposeSave(path: String, content: String, coordinator: MutationCoordinator): PendingChangeProposal {
-        val current = read(path)
-        require(current.content != content) { "No changes to save" }
-        return coordinator.propose("Editor save: $path", listOf(TaskOperation(OperationKind.REPLACE, path, current.content, content)), "Editor save")
+    /**
+     * Stage a save for dual approval.
+     * Returns [MutationProposeResult] — never throws. Callers must handle both branches.
+     */
+    fun proposeSave(path: String, content: String, coordinator: MutationCoordinator): MutationProposeResult {
+        val current = runCatching { read(path) }
+            .getOrElse { ex ->
+                return MutationProposeResult.Rejected(
+                    "Could not read $path: ${ex.message.orEmpty().ifBlank { ex.javaClass.simpleName }}"
+                )
+            }
+        if (current.content == content) return MutationProposeResult.Rejected("No changes to save")
+        return coordinator.propose(
+            request = "Editor save: $path",
+            operations = listOf(TaskOperation(OperationKind.REPLACE, path, current.content, content)),
+            reason = "Editor save"
+        )
     }
 
     fun terminal(
