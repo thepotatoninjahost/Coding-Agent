@@ -15,6 +15,7 @@ import com.codingagent.model.ModelResponse
 import com.codingagent.workspace.ChangeOperation
 import com.codingagent.workspace.MutationApprovalResult
 import com.codingagent.workspace.MutationCoordinator
+import com.codingagent.workspace.MutationProposeResult
 import com.codingagent.workspace.ProjectFileService
 import com.codingagent.workspace.ProjectWorkspace
 import com.codingagent.workspace.TerminalSession
@@ -41,7 +42,9 @@ class OperationalAgentTest {
         val document = files.read("src/Main.kt")
         assertEquals("fun main() = 1\n", document.content)
         val coordinator = MutationCoordinator(workspace)
-        val proposal = files.save("src/Main.kt", "fun main() = 2\n", coordinator)
+        val saveResult = files.save("src/Main.kt", "fun main() = 2\n", coordinator)
+        assertTrue(saveResult is MutationProposeResult.Proposed)
+        val proposal = (saveResult as MutationProposeResult.Proposed).proposal
         assertEquals(ChangeOperation.REPLACE, proposal.changeSet.changes.single().operation)
         assertEquals("fun main() = 1\n", files.read("src/Main.kt").content)
         assertTrue(coordinator.approve(proposal.id, true, "test") is MutationApprovalResult.AwaitingSecond)
