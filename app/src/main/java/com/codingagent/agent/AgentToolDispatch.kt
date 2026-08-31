@@ -10,6 +10,7 @@ import com.codingagent.research.ResearchModeDetector
 import com.codingagent.workspace.ChangeSet
 import com.codingagent.workspace.MutationApprovalResult
 import com.codingagent.workspace.MutationCoordinator
+import com.codingagent.workspace.MutationProposeResult
 import com.codingagent.workspace.ProjectFileService
 import com.codingagent.workspace.ProjectWorkspace
 import com.codingagent.workspace.TerminalSession
@@ -149,7 +150,7 @@ class AgentToolDispatch(
 
     private fun replaceText(arguments: JSONObject): String {
         val path = arguments.getString("path")
-        val proposal = mutations.propose(
+        return when (val result = mutations.propose(
             request = "replace_text $path",
             operations = listOf(
                 TaskOperation(
@@ -160,14 +161,19 @@ class AgentToolDispatch(
                 )
             ),
             reason = arguments.optString("reason", "Autonomous model proposal")
-        )
-        return "PROPOSAL_READY id=${proposal.id} path=$path changes=${proposal.changeSet.changes.size} approval_required=2 " +
-            "Confirm twice in Review or chat to APPLY this change to disk."
+        )) {
+            is MutationProposeResult.Proposed ->
+                "PROPOSAL_READY id=${result.proposal.id} path=$path " +
+                    "changes=${result.proposal.changeSet.changes.size} approval_required=2 " +
+                    "Confirm twice in Review or chat to APPLY this change to disk."
+            is MutationProposeResult.Rejected ->
+                "ERROR: replace_text proposal rejected — ${result.reason}"
+        }
     }
 
     private fun createFile(arguments: JSONObject): String {
         val path = arguments.getString("path")
-        val proposal = mutations.propose(
+        return when (val result = mutations.propose(
             request = "create_file $path",
             operations = listOf(
                 TaskOperation(
@@ -177,9 +183,14 @@ class AgentToolDispatch(
                 )
             ),
             reason = arguments.optString("reason", "Autonomous model proposal")
-        )
-        return "PROPOSAL_READY id=${proposal.id} path=$path changes=${proposal.changeSet.changes.size} approval_required=2 " +
-            "Confirm twice in Review or chat to APPLY this file to disk."
+        )) {
+            is MutationProposeResult.Proposed ->
+                "PROPOSAL_READY id=${result.proposal.id} path=$path " +
+                    "changes=${result.proposal.changeSet.changes.size} approval_required=2 " +
+                    "Confirm twice in Review or chat to APPLY this file to disk."
+            is MutationProposeResult.Rejected ->
+                "ERROR: create_file proposal rejected — ${result.reason}"
+        }
     }
 
     private fun approveChange(arguments: JSONObject): String {
