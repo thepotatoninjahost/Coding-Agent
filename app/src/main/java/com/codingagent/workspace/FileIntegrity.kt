@@ -40,7 +40,7 @@ object FileIntegrity {
 
     /**
      * Inspect one file's content. Empty list = no integrity defects found.
-     * Does not scan TODO markers or other review tags (that is handled by ProjectWorkspace.verify).
+     * Does not scan TODO/FIXME (that is [ProjectWorkspace.verify]).
      */
     fun inspect(path: String, content: String, expectedChecksum: String? = null): List<VerificationIssue> {
         val issues = mutableListOf<VerificationIssue>()
