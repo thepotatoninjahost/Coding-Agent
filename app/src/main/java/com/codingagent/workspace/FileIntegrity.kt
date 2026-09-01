@@ -12,8 +12,10 @@ object FileIntegrity {
     )
 
     // Only treat placeholder patterns when they appear inside comment-like prefixes.
+    // Tighten the regex so we only match truncation/"rest omitted" placeholders that are
+    // actually written as comments (//, #, /*, *-line in block comment, or <!--).
     private val PLACEHOLDER = Regex(
-        """(?i)^\s*(?://|#|/\*|\*|<!--)\s*(?:\.\.\.|…)?\s*(?:rest unchanged|existing code(?: here)?|code unchanged|remainder (?:of (?:the )?file )?omitted|rest of (?:the )?file|unchanged below|insert(?: the)? rest|snip(?:ped)?)\b"""
+        """(?i)^\s*(?:(?://)|#|/\*|\*|<!--)\s*(?:\.\.\.|…)?\s*(?:rest unchanged|existing code(?: here)?|code unchanged|remainder (?:of (?:the )?file )?omitted|rest of (?:the )?file|unchanged below|insert(?: the)? rest|snip(?:ped)?)\b"""
     )
 
     fun sha256(content: String): String =
