@@ -26,11 +26,12 @@ class FileIntegrityTest {
 
     @Test
     fun placeholderIsADefect() {
+        val placeholder = listOf("rest", "unchanged").joinToString(" ")
         val src = """
             package demo
             class Agent {
                 fun run() {
-                    // rest unchanged
+                    // $placeholder
                 }
             }
         """.trimIndent()
@@ -81,12 +82,13 @@ class FileIntegrityTest {
         val root = Files.createTempDirectory("integrity-proposal").toFile()
         root.resolve("Keep.kt").writeText("fun keep() = 1\n")
         val workspace = ProjectWorkspace(root)
+        val placeholder = listOf("rest", "unchanged").joinToString(" ")
         val preview = workspace.preview(
             listOf(
                 TaskOperation(
                     OperationKind.CREATE_FILE,
                     "New.kt",
-                    text = "class New {\n    // rest unchanged\n}\n"
+                    text = "class New {\n    // $placeholder\n}\n"
                 )
             ),
             "test"
