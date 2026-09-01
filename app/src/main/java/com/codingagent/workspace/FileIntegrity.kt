@@ -13,9 +13,9 @@ object FileIntegrity {
 
     private val PLACEHOLDER = Regex(
         """(?i)^\s*(?://|#|/\*|\*|<!--)?\s*(?:\.\.\.|…)?\s*(?:""" +
-            """rest unchanged|existing code(?: here)?|code unchanged|""" +
-            """remainder (?:of (?:the )?file )?omitted|rest of (?:the )?file|""" +
-            """unchanged below|insert(?: the)? rest|snip(?:ped)?)\b"""
+            "rest unchanged|existing code(?: here)?|code unchanged|""" +
+            "remainder (?:of (?:the )?file )?omitted|rest of (?:the )?file|""" +
+            "unchanged below|insert(?: the)? rest|snip(?:ped)?)\b"""
     )
 
     fun sha256(content: String): String =
@@ -40,7 +40,7 @@ object FileIntegrity {
 
     /**
      * Inspect one file's content. Empty list = no integrity defects found.
-     * Does not scan TODO/FIXME (that is [ProjectWorkspace.verify]).
+     * Does not scan TODO markers or other review tags (that is handled by ProjectWorkspace.verify).
      */
     fun inspect(path: String, content: String, expectedChecksum: String? = null): List<VerificationIssue> {
         val issues = mutableListOf<VerificationIssue>()
