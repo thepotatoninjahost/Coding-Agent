@@ -11,8 +11,9 @@ object FileIntegrity {
         "kt", "kts", "java", "js", "ts", "tsx", "jsx", "py", "gradle"
     )
 
+    // Only treat placeholder patterns when they appear inside comment-like prefixes.
     private val PLACEHOLDER = Regex(
-        """(?i)^\s*(?://|#|/\*|\*|<!--)?\s*(?:\.\.\.|…)?\s*(?:rest unchanged|existing code(?: here)?|code unchanged|remainder (?:of (?:the )?file )?omitted|rest of (?:the )?file|unchanged below|insert(?: the)? rest|snip(?:ped)?)\b"""
+        """(?i)^\s*(?://|#|/\*|\*|<!--)\s*(?:\.\.\.|…)?\s*(?:rest unchanged|existing code(?: here)?|code unchanged|remainder (?:of (?:the )?file )?omitted|rest of (?:the )?file|unchanged below|insert(?: the)? rest|snip(?:ped)?)\b"""
     )
 
     fun sha256(content: String): String =
