@@ -76,9 +76,16 @@ class LiveModuleStore(private val root: File) {
         return next
     }
 
+    /**
+     * Point the active-module pointer at a previously installed module by id.
+     * Returns true when the module directory exists and the pointer was updated;
+     * false when the id is not found on disk (no write occurs in that case).
+     */
     fun rollback(id: String): Boolean {
-        val module = moduleRoot.resolve(id).resolve("module.json")
-        if (!module.isFile) return false
+        val moduleDir = moduleRoot.resolve(id)
+        if (!moduleDir.isDirectory) return false
+        val moduleFile = moduleDir.resolve("module.json")
+        if (!moduleFile.isFile) return false
         activeFile.writeText(id)
         return true
     }
@@ -101,7 +108,6 @@ class LiveModuleStore(private val root: File) {
 
     fun parse(source: String): ParsedModule {
         fun field(name: String, text: String): String {
-            // Match "name": "value" inside the module JSON-ish source.
             val pattern = Regex("\"$name\"\\s*:\\s*\"([^\"]*)\"")
             return pattern.find(text)?.groupValues?.get(1)
                 ?: error("Module field $name is missing")
