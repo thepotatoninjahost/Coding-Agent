@@ -1,7 +1,6 @@
 package com.codingagent.workspace
 
 import java.io.File
-import java.nio.charset.Charset
 import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
@@ -9,8 +8,6 @@ import java.nio.file.StandardOpenOption
 import java.security.MessageDigest
 import java.time.Instant
 import java.util.UUID
-import java.util.concurrent.TimeUnit
-import kotlin.math.min
 import com.codingagent.intake.OperationKind
 import com.codingagent.intake.TaskOperation
 
@@ -281,17 +278,17 @@ class ProjectWorkspace(private val root: File) {
         val trimmed = line.trim()
         if (trimmed.isEmpty()) return null
         // Comment annotation forms: line-comment / hash / block-comment prefix + marker token
-        // Raw string: single \ for regex escapes (\\ becomes literal backslash in pattern).
+        // Raw string: single \\ for regex escapes (\\\\ becomes literal backslash in pattern).
         val commentMarker = Regex(
-            """(?://|#|/\*|\*)\s*($TODO_MARKER|$FIXME_MARKER|$STUB_MARKER)\b""",
+            """(?://|#|/\\*|\\*)\\s*($TODO_MARKER|$FIXME_MARKER|$STUB_MARKER)\\b""",
             RegexOption.IGNORE_CASE
         )
         commentMarker.find(trimmed)?.groupValues?.getOrNull(1)?.let { hit ->
             return "${hit.uppercase()} marker remains"
         }
-        // Explicit unfinished call form: MarkerName("...")
+        // Explicit unfinished call form: MarkerName("..." )
         val callMarker = Regex(
-            """\b($TODO_MARKER|$FIXME_MARKER)\s*\(""",
+            """\\b($TODO_MARKER|$FIXME_MARKER)\\s*\\(""",
             RegexOption.IGNORE_CASE
         )
         callMarker.find(trimmed)?.groupValues?.getOrNull(1)?.let { hit ->
@@ -322,105 +319,13 @@ class ProjectWorkspace(private val root: File) {
 
     fun recordLesson(request: String, status: String, evidence: String) {
         lessonsFile.parentFile?.mkdirs()
-        lessonsFile.appendText("${Instant.now()}\t${status}\t${sanitize(request)}\t${sanitize(evidence)}\n")
+        lessonsFile.appendText("${Instant.now()}\\t${status}\\t${sanitize(request)}\\t${sanitize(evidence)}\\n")
     }
 
     fun lessons(): List<Lesson> = if (!lessonsFile.isFile) emptyList() else lessonsFile.readLines().mapNotNull { line ->
-        val parts = line.split('\t', limit = 4)
+        val parts = line.split('\\t', limit = 4)
         if (parts.size == 4) Lesson(parts[1], parts[2], parts[3], Instant.parse(parts[0]).toEpochMilli()) else null
     }
 
-    private fun sanitize(value: String): String = value.replace('\t', ' ').replace('\n', ' ').trim()
-}
-
-class CommandRunner(private val directory: File) {
-    private val activeProcess = java.util.concurrent.atomic.AtomicReference<Process?>(null)
-    private val cancelled = java.util.concurrent.atomic.AtomicBoolean(false)
-
-    fun cancel(reason: String = "cancelled") {
-        cancelled.set(true)
-        activeProcess.getAndSet(null)?.let { process ->
-            runCatching {
-                process.destroy()
-                if (!process.waitFor(2, TimeUnit.SECONDS)) process.destroyForcibly()
-            }
-        }
-    }
-
-    fun isCancelled(): Boolean = cancelled.get()
-
-    fun isRunning(): Boolean = activeProcess.get()?.isAlive == true
-
-    fun run(
-        command: List<String>,
-        timeoutSeconds: Long,
-        onStdout: ((String) -> Unit)? = null,
-        onStderr: ((String) -> Unit)? = null
-    ): CommandResult {
-        require(command.isNotEmpty()) { "Command cannot be empty" }
-        cancelled.set(false)
-        return try {
-            val process = ProcessBuilder(command).directory(directory).redirectErrorStream(false).start()
-            activeProcess.set(process)
-            val stdout = StringBuilder()
-            val stderr = StringBuilder()
-            val outThread = Thread { process.inputStream.use { input -> readLimited(input, stdout, onStdout) } }
-            val errThread = Thread { process.errorStream.use { input -> readLimited(input, stderr, onStderr) } }
-            outThread.start()
-            errThread.start()
-            var completed = false
-            val deadline = System.nanoTime() + timeoutSeconds * 1_000_000_000L
-            while (System.nanoTime() < deadline) {
-                if (cancelled.get()) break
-                if (!process.isAlive) { completed = true; break }
-                process.waitFor(200, TimeUnit.MILLISECONDS)
-            }
-            if (!completed) {
-                if (!cancelled.get() && !process.isAlive) completed = true
-            }
-            if (!completed) {
-                process.destroy()
-                if (!process.waitFor(2, TimeUnit.SECONDS)) process.destroyForcibly()
-            }
-            outThread.join(2_000)
-            errThread.join(2_000)
-            val timedOut = !completed && !cancelled.get()
-            val exit = when {
-                completed -> runCatching { process.exitValue() }.getOrDefault(-1)
-                cancelled.get() -> 130
-                else -> -1
-            }
-            val note = when {
-                cancelled.get() && stderr.isEmpty() -> "command cancelled"
-                else -> ""
-            }
-            CommandResult(
-                command.joinToString(" "),
-                exit,
-                stdout.toString().trimEnd('\n'),
-                (stderr.toString().trimEnd('\n') + if (note.isNotEmpty()) (if (stderr.isNotEmpty()) "\n" else "") + note else "").trimEnd('\n'),
-                timedOut
-            )
-        } catch (error: Exception) {
-            CommandResult(command.joinToString(" "), -1, "", error.message.orEmpty(), false)
-        } finally {
-            activeProcess.set(null)
-        }
-    }
-
-    private fun readLimited(input: java.io.InputStream, output: StringBuilder, onChunk: ((String) -> Unit)? = null) {
-        val buffer = ByteArray(8 * 1024)
-        while (true) {
-            val count = input.read(buffer)
-            if (count < 0) break
-            val chunk = String(buffer, 0, count, Charsets.UTF_8)
-            appendLimited(output, chunk)
-            onChunk?.invoke(chunk)
-        }
-    }
-
-    private fun appendLimited(output: StringBuilder, value: String) {
-        if (output.length >= 256 * 1024) return
-        output.append(value.take(256 * 1024 - output.length))
-    }
+    private fun sanitize(value: String): String = value.replace('\\t', ' ').replace('\\n', ' ').trim()
 }
