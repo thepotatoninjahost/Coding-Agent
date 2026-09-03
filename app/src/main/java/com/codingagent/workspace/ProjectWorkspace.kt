@@ -146,7 +146,6 @@ class ProjectWorkspace(private val root: File) {
 
         private fun commitInternal(write: Boolean): ChangeSet {
             check(!committed) { "Transaction already completed" }
-            // Filter out no-op changes (where content before and after are identical)
             val records = staged.values
                 .map { it.toRecord() }
                 .filter { it.beforeChecksum != it.afterChecksum }
@@ -254,7 +253,6 @@ class ProjectWorkspace(private val root: File) {
                 path.endsWith("Test.kt") || path.endsWith("Tests.kt")) {
                 continue
             }
-            // Docs describe the scanner; do not treat those mentions as unfinished work.
             if (path.endsWith(".md") || path.endsWith(".markdown") || path.endsWith(".txt")) {
                 continue
             }
@@ -269,16 +267,9 @@ class ProjectWorkspace(private val root: File) {
         return VerificationReport(issues.isEmpty(), issues)
     }
 
-    /**
-     * Detect real unfinished-work annotations only.
-     * Matches comment forms (//, #, block-comment or star prefix) and explicit Kotlin/Java call forms Marker("...").
-     * Does not treat prose, UI copy, or documentation about the scanner as unfinished work.
-     */
     private fun unfinishedMarkerMessage(line: String): String? {
         val trimmed = line.trim()
         if (trimmed.isEmpty()) return null
-        // Comment annotation forms: line-comment / hash / block-comment prefix + marker token
-        // Raw string: single \\ for regex escapes (\\\\ becomes literal backslash in pattern).
         val commentMarker = Regex(
             """(?://|#|/\\*|\\*)\\s*($TODO_MARKER|$FIXME_MARKER|$STUB_MARKER)\\b""",
             RegexOption.IGNORE_CASE
@@ -286,7 +277,6 @@ class ProjectWorkspace(private val root: File) {
         commentMarker.find(trimmed)?.groupValues?.getOrNull(1)?.let { hit ->
             return "${hit.uppercase()} marker remains"
         }
-        // Explicit unfinished call form: MarkerName("..." )
         val callMarker = Regex(
             """\\b($TODO_MARKER|$FIXME_MARKER)\\s*\\(""",
             RegexOption.IGNORE_CASE
@@ -319,13 +309,13 @@ class ProjectWorkspace(private val root: File) {
 
     fun recordLesson(request: String, status: String, evidence: String) {
         lessonsFile.parentFile?.mkdirs()
-        lessonsFile.appendText("${Instant.now()}\\t${status}\\t${sanitize(request)}\\t${sanitize(evidence)}\\n")
+        lessonsFile.appendText("${Instant.now()}\t${status}\t${sanitize(request)}\t${sanitize(evidence)}\n")
     }
 
     fun lessons(): List<Lesson> = if (!lessonsFile.isFile) emptyList() else lessonsFile.readLines().mapNotNull { line ->
-        val parts = line.split('\\t', limit = 4)
+        val parts = line.split('\t', limit = 4)
         if (parts.size == 4) Lesson(parts[1], parts[2], parts[3], Instant.parse(parts[0]).toEpochMilli()) else null
     }
 
-    private fun sanitize(value: String): String = value.replace('\\t', ' ').replace('\\n', ' ').trim()
+    private fun sanitize(value: String): String = value.replace('\t', ' ').replace('\n', ' ').trim()
 }
