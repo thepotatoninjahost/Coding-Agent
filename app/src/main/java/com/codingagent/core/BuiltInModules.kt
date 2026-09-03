@@ -6,9 +6,7 @@ import com.codingagent.agent.AgentActionCategory
 import com.codingagent.workspace.VerificationReport
 
 /**
- * ONE JOB: Install the default coding live-module for a fresh app-private store.
- * Extracted out of LiveModules.kt (storage in LiveModuleStore.kt, execution in
- * LiveModuleRuntime.kt).
+ * ONE JOB: Install the built-in default live module for a fresh app-private store.
  */
 class BuiltInModules(context: Context) {
     private val store = LiveModuleStore(context.filesDir)
