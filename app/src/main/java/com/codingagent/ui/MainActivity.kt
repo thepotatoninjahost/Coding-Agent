@@ -219,23 +219,30 @@ private fun CodingAgentApp(privateDir: File) {
     }
 
     val tools = remember(workspace) { workspace?.let(::AgentTools) }
-    // Single spine: AutonomousAgent only. Model gateway is optional for local lanes and offline edits.
-    val agent = remember(workspace, modelGateway) {
+    // Single spine: AutonomousAgent only. Created once per workspace so the MutationCoordinator
+    // (and its pending-proposal map) is never replaced while a proposal is in flight.
+    // Gateway changes are applied via updateGateway() below — no agent recreation needed.
+    val agent = remember(workspace) {
         workspace?.let { current ->
-            val gateway = modelGateway
+            val coordinator = mutationCoordinator ?: MutationCoordinator(current)
             AutonomousAgent(
                 root = current.projectRoot(),
                 knowledge = object : AgentKnowledge {
                     override fun search(query: String, limit: Int) = knowledgeBase.search(query, limit)
                 },
-                gateway = gateway,
+                gateway = modelGateway,
                 research = DurableDeepResearchProvider(current.projectRoot().resolve(".coding-agent/research")),
-                mutations = mutationCoordinator ?: MutationCoordinator(current)
+                mutations = coordinator
             )
         }
     }
+    // When the gateway changes (user saves model settings), update the existing agent in-place
+    // rather than recreating it. This preserves the MutationCoordinator and any pending proposals.
+    LaunchedEffect(modelGateway) {
+        agent?.updateGateway(modelGateway)
+    }
     val progressEpoch = remember { java.util.concurrent.atomic.AtomicInteger(0) }
-    val chat = remember(agent, workspace, modelLoadError) {
+    val chat = remember(agent, workspace) {
         ChatWorkspace(
             store = store,
             runtimeProvider = { agent },

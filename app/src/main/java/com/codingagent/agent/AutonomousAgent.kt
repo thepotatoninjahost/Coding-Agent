@@ -40,11 +40,17 @@ class AutonomousAgent(
     private val root: java.io.File,
     private val knowledge: AgentKnowledge,
     /** Null = local-only mode: greeting, list, status, explicit read, offline explicit edits still work. */
-    private val gateway: ModelGateway? = null,
+    gateway: ModelGateway? = null,
     private val config: AutonomousAgentConfig = AutonomousAgentConfig(),
     private val research: DeepResearchProvider = DurableDeepResearchProvider(root.resolve(".coding-agent/research")),
     private val mutations: MutationCoordinator = MutationCoordinator(ProjectWorkspace(root))
 ) : CodingAgentExecutor {
+    /**
+     * The active model gateway. Mutable so the UI can swap the gateway (e.g. after the user
+     * saves new model settings) without recreating the agent and losing pending proposals.
+     */
+    @Volatile
+    private var gateway: ModelGateway? = gateway
     // FIX: derive workspace from the shared MutationCoordinator instance so both always
     // reference the same ProjectWorkspace. The previous `ProjectWorkspace(root)` here
     // created a second, divergent instance that could silently drift from mutations.workspace.
@@ -80,6 +86,14 @@ class AutonomousAgent(
     }
 
     fun isCancelled(): Boolean = cancelled.get()
+
+    /**
+     * Replace the model gateway without recreating the agent. Safe to call from the UI thread
+     * between runs; volatile ensures the next run() call sees the updated reference.
+     */
+    fun updateGateway(newGateway: ModelGateway?) {
+        gateway = newGateway
+    }
 
     private fun recordTask(task: AgentTask) {
         journal.record(task)
