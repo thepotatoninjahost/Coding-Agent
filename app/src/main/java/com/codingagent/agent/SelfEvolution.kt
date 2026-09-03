@@ -20,9 +20,7 @@ data class EvolutionVersion(
 )
 
 /**
- * ONE JOB: Local learning from task outcomes for later sessions — stage and promote versioned
- * code snapshots. Experience logging (raw task-outcome TSV) is a different job; that lives in
- * ExperienceRecorder.kt.
+ * ONE JOB: Stage and promote versioned source snapshots for local self-improvement.
  */
 class SelfEvolution(private val root: File) {
     private val evolutionRoot = root.resolve(".coding-agent/evolution")
