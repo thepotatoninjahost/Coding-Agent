@@ -267,23 +267,62 @@ class ProjectWorkspace(private val root: File) {
         return VerificationReport(issues.isEmpty(), issues)
     }
 
+    /**
+     * Detect real unfinished-work annotations only.
+     * Comment forms (//, #, block comment, or star prefix) plus explicit Marker("...") calls.
+     * String scans only — never Regex — so verify cannot throw PatternSyntaxException.
+     */
     private fun unfinishedMarkerMessage(line: String): String? {
         val trimmed = line.trim()
         if (trimmed.isEmpty()) return null
-        val commentMarker = Regex(
-            """(?://|#|/\\*|\\*)\\s*($TODO_MARKER|$FIXME_MARKER|$STUB_MARKER)\\b""",
-            RegexOption.IGNORE_CASE
-        )
-        commentMarker.find(trimmed)?.groupValues?.getOrNull(1)?.let { hit ->
-            return "${hit.uppercase()} marker remains"
+
+        fun identChar(c: Char?): Boolean = c != null && (c.isLetterOrDigit() || c == '_')
+
+        fun markerAt(index: Int): String? {
+            for (marker in arrayOf(TODO_MARKER, FIXME_MARKER, STUB_MARKER)) {
+                if (trimmed.regionMatches(index, marker, 0, marker.length, ignoreCase = true) &&
+                    !identChar(trimmed.getOrNull(index + marker.length))
+                ) {
+                    return marker.uppercase() + " marker remains"
+                }
+            }
+            return null
         }
-        val callMarker = Regex(
-            """\\b($TODO_MARKER|$FIXME_MARKER)\\s*\\(""",
-            RegexOption.IGNORE_CASE
-        )
-        callMarker.find(trimmed)?.groupValues?.getOrNull(1)?.let { hit ->
-            return "${hit.uppercase()} marker remains"
+
+        fun skipSpaces(from: Int): Int {
+            var i = from
+            while (i < trimmed.length && trimmed[i].isWhitespace()) i++
+            return i
         }
+
+        var search = 0
+        while (search < trimmed.length) {
+            val slash = trimmed.indexOf("//", search)
+            val hash = trimmed.indexOf('#', search)
+            val block = trimmed.indexOf("/*", search)
+            val star = trimmed.indexOf('*', search)
+            val next = listOf(slash to 2, hash to 1, block to 2, star to 1)
+                .filter { it.first >= 0 }
+                .minByOrNull { it.first }
+            if (next == null) break
+            val (idx, len) = next
+            markerAt(skipSpaces(idx + len))?.let { return it }
+            search = idx + len
+        }
+
+        for (marker in arrayOf(TODO_MARKER, FIXME_MARKER)) {
+            var startIdx = 0
+            while (true) {
+                val hit = trimmed.indexOf(marker, startIdx, ignoreCase = true)
+                if (hit < 0) break
+                val after = skipSpaces(hit + marker.length)
+                if (!identChar(trimmed.getOrNull(hit - 1)) && trimmed.getOrNull(after) == '(') {
+                    return marker.uppercase() + " marker remains"
+                }
+                startIdx = hit + 1
+            }
+        }
+
         if (trimmed.contains(STUB_MARKER)) return "$STUB_MARKER marker remains"
         if (trimmed.contains(listOf("throw", "Not" + "ImplementedError").joinToString(" "))) {
             return "unimplemented code remains"
