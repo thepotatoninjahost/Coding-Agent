@@ -42,8 +42,6 @@ data class LiveModel(
 /**
  * ONE JOB: Store and checksum optional on-device model packages (vendor-neutral).
  * Not tied to any local inference vendor. Remote HTTP models do not use this store.
- * Loading the active model's bytes and routing to it is a different job — see
- * LiveModelRouter.kt.
  */
 class LiveModelStore(private val root: File) {
     private val modelRoot = root.resolve(".coding-agent/models")
