@@ -1,6 +1,8 @@
 package com.codingagent.core
 
 import android.content.Context
+import androidx.security.crypto.EncryptedSharedPreferences
+import androidx.security.crypto.MasterKey
 import org.json.JSONObject
 import java.io.File
 import com.codingagent.agent.ChatMessage
@@ -19,7 +21,27 @@ class LocalStore(context: Context) : ChatMessageStore {
     private val lessonsFile = File(root, "lessons.jsonl")
     private val docsFile = File(root, "documents.jsonl")
     private val chatFile = File(root, "chat.jsonl")
-    private val prefs = context.getSharedPreferences("coding_agent_session", Context.MODE_PRIVATE)
+
+    // SECURITY: model settings include the user's API key. Plain SharedPreferences is stored as
+    // unencrypted XML in app-private storage — recoverable on rooted/debuggable devices or from
+    // a backup. EncryptedSharedPreferences (Keystore-backed AES-256) closes that gap.
+    // Deliberately a NEW file name, not "coding_agent_session": the old plaintext file is a
+    // different on-disk format (plain XML) than EncryptedSharedPreferences expects, so re-using
+    // the old name would throw on first read on any existing install. Existing installs will see
+    // model settings (and project path / last research query) reset once — an acceptable
+    // one-time cost for removing a plaintext-secret-at-rest issue.
+    private val prefs = run {
+        val masterKey = MasterKey.Builder(context)
+            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+            .build()
+        EncryptedSharedPreferences.create(
+            context,
+            "coding_agent_session_encrypted_v1",
+            masterKey,
+            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+        )
+    }
 
     fun saveProjectPath(path: String?) {
         prefs.edit().putString(KEY_PROJECT_PATH, path).apply()
