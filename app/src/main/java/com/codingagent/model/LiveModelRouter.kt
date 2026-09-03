@@ -1,9 +1,7 @@
 package com.codingagent.model
 
 /**
- * ONE JOB: Load the active [LiveModel]'s bytes into memory and serve them until reload() is
- * called. Extracted out of LiveModelStore.kt — storing/checksumming model packages on disk and
- * routing to the currently loaded one are different jobs.
+ * ONE JOB: Load and expose the active on-device model from LiveModelStore.
  */
 class LiveModelRouter(private val store: LiveModelStore) {
     private var loaded: LoadedModel? = null
