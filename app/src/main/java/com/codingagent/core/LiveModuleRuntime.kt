@@ -7,6 +7,27 @@ import com.codingagent.workspace.ProjectWorkspace
 import com.codingagent.workspace.VerificationReport
 
 /**
+ * Result of one live-module execution pass. Lives here (not LiveModuleStore.kt) because
+ * it is an execution-time concern, matching this file's ONE JOB.
+ */
+data class ModuleExecution(
+    val module: LiveModule,
+    val output: List<String>,
+    val changes: List<ChangeRecord>,
+    val verification: VerificationReport,
+    val reloadedAt: Long
+)
+
+/**
+ * Result of an applyPatch() call: either the runtime switched to the patched module,
+ * or the patch was rejected and the previous module remains active.
+ */
+sealed class ModulePatchResult {
+    data class Switched(val module: LiveModule, val execution: ModuleExecution) : ModulePatchResult()
+    data class Rejected(val reason: String) : ModulePatchResult()
+}
+
+/**
  * ONE JOB: Execute live-module step sequences against the workspace.
  */
 class LiveModuleRuntime(
