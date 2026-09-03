@@ -42,6 +42,8 @@ data class LiveModel(
 /**
  * ONE JOB: Store and checksum optional on-device model packages (vendor-neutral).
  * Not tied to any local inference vendor. Remote HTTP models do not use this store.
+ * Loading the active model's bytes and routing to it is a different job — see
+ * LiveModelRouter.kt.
  */
 class LiveModelStore(private val root: File) {
     private val modelRoot = root.resolve(".coding-agent/models")
@@ -202,22 +204,4 @@ class LiveModelStore(private val root: File) {
     companion object {
         private const val MANIFEST_NAME = "model.manifest"
     }
-}
-
-class LiveModelRouter(private val store: LiveModelStore) {
-    private var loaded: LoadedModel? = null
-
-    @Synchronized
-    fun reload(): LiveModel? {
-        val active = store.active() ?: run { loaded = null; return null }
-        val bytes = store.modelBytes(active)
-        loaded = LoadedModel(active, bytes, System.currentTimeMillis())
-        return active
-    }
-
-    fun active(): LiveModel? = loaded?.model ?: reload()
-    fun loadedBytes(): Int = loaded?.bytes?.size ?: reload()?.let { loaded?.bytes?.size ?: 0 } ?: 0
-    fun loadedAt(): Long? = loaded?.loadedAt
-
-    private data class LoadedModel(val model: LiveModel, val bytes: ByteArray, val loadedAt: Long)
 }
