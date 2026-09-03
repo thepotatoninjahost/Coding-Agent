@@ -52,13 +52,6 @@ object FileIntegrity {
             .digest(content.toByteArray(Charsets.UTF_8))
             .joinToString("") { "%02x".format(it) }
 
-    // ── private checks ────────────────────────────────────────────────────────
-
-    /**
-     * Detect truncation placeholders left by models: comment lines whose content
-     * is (case-insensitively) "rest unchanged", "... rest of file unchanged", etc.
-     * Requires a comment prefix (// or #) so prose in string literals is ignored.
-     */
     private fun checkPlaceholder(path: String, content: String): VerificationIssue? {
         val placeholderPattern = Regex(
             """(?://|#)\s*(\.\.\.)?\s*(rest|remaining)\s+(of\s+(the\s+)?file\s+)?(unchanged|omitted|same|stays|as before)""",
@@ -76,19 +69,27 @@ object FileIntegrity {
     }
 
     /**
-     * Count `{` and `}` outside string literals and character literals.
-     * Reports an unclosed or extra brace only for Kotlin/Java/similar source.
+     * Count `{` and `}` outside comments, character literals, quoted strings,
+     * and Kotlin raw strings (`"""..."""`). Inner quotes in a raw string must not
+     * leave the scanner stuck in-string (that falsely reported JsonModelResponseParser.kt
+     * as having two unclosed braces).
      */
     private fun checkBraceBalance(path: String, content: String): VerificationIssue? {
         if (!looksLikeStructuredSource(path)) return null
 
         var depth = 0
         var inString = false
+        var inRawString = false
         var inChar = false
         var inLineComment = false
         var inBlockComment = false
         var escape = false
         var i = 0
+
+        fun isTripleQuote(at: Int): Boolean =
+            content.getOrNull(at) == '"' &&
+                content.getOrNull(at + 1) == '"' &&
+                content.getOrNull(at + 2) == '"'
 
         while (i < content.length) {
             val c = content[i]
@@ -108,6 +109,12 @@ object FileIntegrity {
                         '\'' -> inChar = false
                     }
                 }
+                inRawString -> {
+                    if (isTripleQuote(i)) {
+                        inRawString = false
+                        i += 2
+                    }
+                }
                 inString -> {
                     when (c) {
                         '\\' -> escape = true
@@ -116,6 +123,10 @@ object FileIntegrity {
                 }
                 c == '/' && next == '/' -> inLineComment = true
                 c == '/' && next == '*' -> { inBlockComment = true; i++ }
+                isTripleQuote(i) -> {
+                    inRawString = true
+                    i += 2
+                }
                 c == '"' -> inString = true
                 c == '\'' -> inChar = true
                 c == '{' -> depth++
@@ -131,10 +142,6 @@ object FileIntegrity {
         }
     }
 
-    /**
-     * Detect files that end mid-expression: last non-empty line ending with `=` or `.`
-     * is a sign the model truncated the output.
-     */
     private fun checkMidExpression(path: String, content: String): VerificationIssue? {
         if (!looksLikeStructuredSource(path)) return null
         val last = content.lineSequence()

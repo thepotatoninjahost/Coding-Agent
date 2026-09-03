@@ -63,6 +63,22 @@ class FileIntegrityTest {
     }
 
     @Test
+    fun rawStringQuotesDoNotFakeUnclosedBraces() {
+        val src = listOf(
+            "class Parser {",
+            "    fun parse() {",
+            "        val name = Regex(",
+            "            \"\"\"<tool_call[^>]*name=[\"']x[\"']\"\"\"",
+            "        ).find(\"\")?.value",
+            "        return if (name.isNullOrBlank()) \"{}\" else name",
+            "    }",
+            "}"
+        ).joinToString("\n")
+        val issues = FileIntegrity.inspect("Parser.kt", src)
+        assertTrue("raw-string quotes must not fake unclosed braces: $issues", issues.isEmpty())
+    }
+
+    @Test
     fun checksumMismatchIsADefect() {
         val src = "fun ok() = 1\n"
         val issues = FileIntegrity.inspect("Ok.kt", src, expectedChecksum = "deadbeef")
