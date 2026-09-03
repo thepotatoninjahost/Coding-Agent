@@ -2,12 +2,17 @@ package com.codingagent.workspace
 
 import java.io.File
 import com.codingagent.agent.AgentTools
-import com.codingagent.agent.AutonomousAgent
 
 /**
  * ONE JOB: Safe list/read of project files for agent tools.
  */
 class ProjectFileService(private val workspace: ProjectWorkspace) {
+    // Was constructing a fresh AgentTools(workspace) inside read() and save() on every call —
+    // both are hot-path (once per model tool turn via AgentToolDispatch; once per editor
+    // open/save in MainActivity). One shared instance scoped to this service's ProjectWorkspace
+    // is correct and avoids the repeated allocation.
+    private val tools = AgentTools(workspace)
+
     fun list(path: String = ""): List<String> {
         val directory = resolveDirectory(path)
         val root = workspace.projectRoot()
@@ -17,10 +22,6 @@ class ProjectFileService(private val workspace: ProjectWorkspace) {
             .orEmpty()
     }
 
-    /**
-     * Source-file **names only** (e.g. AutonomousAgent.kt), sorted unique.
-     * For "list project source files" style requests.
-     */
     fun listSourceFileNames(): List<String> {
         return workspace.summary().files
             .map { File(it.path).name }
@@ -28,17 +29,14 @@ class ProjectFileService(private val workspace: ProjectWorkspace) {
             .sortedBy { it.lowercase() }
     }
 
-    /**
-     * Source-file relative paths (e.g. app/src/main/java/.../AutonomousAgent.kt).
-     */
     fun listSourceFilePaths(): List<String> {
         return workspace.summary().files.map { it.path }.sorted()
     }
 
-    fun read(path: String): EditorDocument = AgentTools(workspace).read(path)
+    fun read(path: String): EditorDocument = tools.read(path)
 
     fun save(path: String, content: String, coordinator: MutationCoordinator): MutationProposeResult =
-        AgentTools(workspace).proposeSave(path, content, coordinator)
+        tools.proposeSave(path, content, coordinator)
 
     private fun resolveDirectory(path: String): File {
         val root = workspace.projectRoot().canonicalFile
