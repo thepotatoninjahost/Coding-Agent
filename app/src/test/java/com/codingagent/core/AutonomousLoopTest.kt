@@ -192,16 +192,25 @@ class AutonomousLoopTest {
     }
 
     /**
-     * Non-listing identical tool loops must still abort so the agent cannot spin forever
-     * on the same tool call when the request is not a pure listing.
+     * Non-listing identical tool loops must abort so the agent cannot spin forever.
+     *
+     * Uses a DEBUG-intent request so changeWork=true. This keeps tools open (run_command
+     * does not increment successfulGathers) and prevents the writeNow/synthesize path from
+     * intercepting before the repeat-abort fires. The repeat-abort triggers at
+     * repeatResetCount >= 2, which happens on the 6th identical tool call with
+     * maxIdenticalToolRepeats=3.
      */
     @Test
     fun identicalNonListingToolLoopAborts() {
         val root = Files.createTempDirectory("agent-loop-repeat").toFile()
-        root.resolve("a.txt").writeText("hello world content enough\n")
-        val gateway = ScriptedGateway(
-            List(10) { ModelResponse.ToolCall("run_command", """{"command":"echo hi"}""") }
-        )
+        root.resolve("a.kt").writeText("fun a() = 1\n")
+        // Always returns the same run_command tool call — guarantees abort path is reached.
+        val gateway = object : ModelGateway {
+            override fun complete(request: ModelRequest): ModelResponse =
+                ModelResponse.ToolCall("run_command", """{"command":"echo hi"}""")
+            override fun stream(request: ModelRequest, onDelta: (String) -> Unit): ModelResponse =
+                complete(request)
+        }
         val workspace = ProjectWorkspace(root)
         val knowledge = object : AgentKnowledge {
             override fun search(query: String, limit: Int) = emptyList<KnowledgeHit>()
@@ -210,8 +219,9 @@ class AutonomousLoopTest {
             root, knowledge, gateway,
             AutonomousAgentConfig(maxTurns = 10, maxIdenticalToolRepeats = 3)
         )
-        // Request deliberately avoids listing keywords so isListingRequest is false
-        val events = agent.run("Run the same diagnostic command until you understand the state")
+        // DEBUG intent (contains "bug"/"fix") → changeWork=true → writeNow stays false
+        // while successfulGathers < gatherCap, keeping tools open for the repeat-abort path.
+        val events = agent.run("Fix the bug by running the same diagnostic command repeatedly")
         assertTrue(events.last() is AutonomousAgentEvent.Failed)
         assertTrue((events.last() as AutonomousAgentEvent.Failed).message.contains("repeated"))
     }
