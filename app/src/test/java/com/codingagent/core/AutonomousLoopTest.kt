@@ -200,7 +200,7 @@ class AutonomousLoopTest {
         val root = Files.createTempDirectory("agent-loop-repeat").toFile()
         root.resolve("a.txt").writeText("hello world content enough\n")
         val gateway = ScriptedGateway(
-            List(6) { ModelResponse.ToolCall("run_command", """{"command":"echo hi"}""") }
+            List(10) { ModelResponse.ToolCall("run_command", """{"command":"echo hi"}""") }
         )
         val workspace = ProjectWorkspace(root)
         val knowledge = object : AgentKnowledge {
