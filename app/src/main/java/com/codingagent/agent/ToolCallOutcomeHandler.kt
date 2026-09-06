@@ -143,25 +143,27 @@ class ToolCallOutcomeHandler(
                     emit(AutonomousAgentEvent.Failed(task, msg))
                     return ToolTurnOutcome.Stop
                 }
-                // Any tool with usable evidence: force a final answer. Do not abort the task.
-                if (state.lastEvidence.isNotBlank() && !state.lastEvidence.startsWith("ERROR:")) {
-                    transcript += com.codingagent.model.ModelMessage(
-                        "user",
-                        "SYSTEM: Tool ${response.name} was called identically ${state.identicalRepeats} times. " +
-                            "Do NOT call any tool again. Write a clear final answer using only the evidence already returned."
-                    )
-                    state.lastEvidence = state.lastEvidence.take(config.maxOutputCharacters)
-                    state.lastToolSignature = ""
-                    state.identicalRepeats = 0
-                    return ToolTurnOutcome.Continue
+                // Build a specific redirect based on what the task actually needs next.
+                val redirectMsg = buildString {
+                    append("SYSTEM: ${response.name} was called with the same arguments ${state.identicalRepeats} times. Stop repeating it. ")
+                    if (changeWork) {
+                        if (state.readPaths.isNotEmpty()) {
+                            append("You already read: ${state.readPaths.joinToString()}. ")
+                        }
+                        if (state.lastEvidence.isNotBlank() && !state.lastEvidence.startsWith("ERROR:")) {
+                            append("You have enough evidence. ")
+                        }
+                        append("Call replace_text or create_file to make the change now. ")
+                        append("If you need one more file, call read_file on it. Do not search again.")
+                    } else {
+                        if (state.lastEvidence.isNotBlank() && !state.lastEvidence.startsWith("ERROR:")) {
+                            append("You have enough evidence from the project. Write your answer now. Do not call any more tools.")
+                        } else {
+                            append("Call read_file on a specific file you have not read yet, or write your answer. Do not repeat the same search.")
+                        }
+                    }
                 }
-                // No usable evidence: nudge a different tool instead of hard-aborting.
-                transcript += com.codingagent.model.ModelMessage(
-                    "user",
-                    "SYSTEM: ${response.name} repeated with the same arguments and returned nothing useful. " +
-                        "Call a different tool (list_files, search_project, or read_file on a different path) " +
-                        "or give a final answer stating what is missing. Do not repeat the same call."
-                )
+                transcript += com.codingagent.model.ModelMessage("user", redirectMsg)
                 state.lastToolSignature = ""
                 state.identicalRepeats = 0
                 return ToolTurnOutcome.Continue
