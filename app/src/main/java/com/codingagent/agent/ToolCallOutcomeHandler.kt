@@ -132,7 +132,9 @@ class ToolCallOutcomeHandler(
             if (resultChanged && toolResult.isNotBlank() && !toolResult.startsWith("ERROR:")) {
                 // Same tool call but different result — model is making real progress.
                 // This is normal for verification loops and iterative searches.
-                state.identicalRepeats = 1
+                // Reset completely since we have new information.
+                state.identicalRepeats = 0
+                state.repeatResetCount = 0
             } else {
                 state.identicalRepeats++
             }
