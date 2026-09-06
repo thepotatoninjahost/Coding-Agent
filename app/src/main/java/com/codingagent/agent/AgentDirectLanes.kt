@@ -36,8 +36,13 @@ class AgentDirectLanes(
         AgentRequestKind.explicitReadPath(request)?.let { path ->
             return readFile(taskId, request, plan, report, path)
         }
-        AgentRequestKind.inspectTarget(request)?.let { target ->
-            return inspect(taskId, request, plan, target)
+        // Only short-circuit to local inspect when the request names a specific file AND
+        // is NOT a whole-project review — those must go to the model loop so it can
+        // read multiple files and give a meaningful answer.
+        if (!AgentRequestKind.isWholeProjectReview(request)) {
+            AgentRequestKind.inspectTarget(request)?.let { target ->
+                return inspect(taskId, request, plan, target)
+            }
         }
         return null
     }
