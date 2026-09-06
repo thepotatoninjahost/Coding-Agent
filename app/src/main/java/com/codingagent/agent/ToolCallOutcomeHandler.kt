@@ -19,8 +19,10 @@ class ToolTurnState {
     var lastEvidence: String = ""
     var consecutiveFailures = 0
     var lastToolSignature: String? = null
+    var lastToolResult: String = ""
     var identicalRepeats = 0
     var repeatResetCount = 0
+    var mutationOccurred: Boolean = false
     val readPaths = linkedSetOf<String>()
     var searchedProject = false
     var successfulGathers = 0
@@ -34,11 +36,12 @@ sealed class ToolTurnOutcome {
 }
 
 /**
- * ONE JOB: Handle one model ToolCall response — writeNow refusal handling, identical-repeat
- * detection, tool execution, plan/tool-selection bookkeeping, success/failure outcomes, and
- * proposal-approval surfacing. Extracted verbatim out of AutonomousAgent.kt's turn loop; no
- * behavior change. All side effects (transcript, emit, recordTask) happen through the same
- * calls the inline version made — only the container changed.
+ * ONE JOB: Handle one model ToolCall response — scaffold the model toward success.
+ *
+ * The agent's job is to HELP the model do its work, not block it. When the model
+ * loops, the agent diagnoses why and redirects with specific actionable guidance.
+ * It only aborts when the model is truly spinning with zero new information and
+ * has ignored repeated specific guidance.
  */
 class ToolCallOutcomeHandler(
     private val config: AutonomousAgentConfig,
@@ -78,7 +81,7 @@ class ToolCallOutcomeHandler(
                 if (changeWork) {
                     transcript += com.codingagent.model.ModelMessage(
                         "user",
-                        "SYSTEM: This is a change task. Call replace_text or create_file. " +
+                        "SYSTEM: You have enough evidence. Call replace_text or create_file now. " +
                             "Do not call ${response.name}. A written review is not the work."
                     )
                     return ToolTurnOutcome.Continue
@@ -104,10 +107,38 @@ class ToolCallOutcomeHandler(
                 return ToolTurnOutcome.Continue
             }
         }
+
         val signature = "${response.name}|${response.arguments.trim()}"
-        if (signature == state.lastToolSignature) {
-            state.identicalRepeats++
+        val isIdenticalCall = signature == state.lastToolSignature
+
+        // Execute the tool first — we need the result to decide if this is
+        // a legitimate re-call (new/useful result) or a stuck loop (same result).
+        emit(AutonomousAgentEvent.ToolStarted(response.name, response.arguments))
+        if (isCancelled()) return ToolTurnOutcome.Stop
+        val toolResult = executeTool(response.name, response.arguments)
+
+        // After any successful mutation, reset the repeat counter completely.
+        // Re-reading the same file after changing it is legitimate verification,
+        // not a loop. The model is doing its job.
+        val isMutation = response.name == "replace_text" || response.name == "create_file"
+        if (isMutation && !toolResult.startsWith("ERROR:")) {
+            state.lastToolSignature = ""
+            state.identicalRepeats = 0
+            state.mutationOccurred = true
+        }
+
+        if (isIdenticalCall && !isMutation) {
+            val resultChanged = toolResult.trim() != state.lastToolResult.trim()
+            if (resultChanged && toolResult.isNotBlank() && !toolResult.startsWith("ERROR:")) {
+                // Same tool call but different result — model is making real progress.
+                // This is normal for verification loops and iterative searches.
+                state.identicalRepeats = 1
+            } else {
+                state.identicalRepeats++
+            }
+
             if (state.identicalRepeats >= config.maxIdenticalToolRepeats) {
+                // Listing requests with usable evidence: complete gracefully.
                 if ((response.name == "list_files" || response.name == "search_project") &&
                     state.lastEvidence.isNotBlank() && !state.lastEvidence.startsWith("ERROR:") &&
                     isListingRequest(currentRequestFocus(normalized))
@@ -124,73 +155,76 @@ class ToolCallOutcomeHandler(
                     emit(AutonomousAgentEvent.Completed(task))
                     return ToolTurnOutcome.Stop
                 }
+
                 state.repeatResetCount++
-                if (state.repeatResetCount >= 2) {
-                    // Already nudged once and told the model to stop; it repeated the
-                    // identical call again anyway. Do not keep burning turns on a nudge
-                    // that has already proven ineffective — abort now, clearly.
+                if (state.repeatResetCount >= 3) {
+                    // Tried redirecting twice with specific guidance, model still spinning.
+                    // Now abort — it's genuinely stuck and wasting turn budget.
                     val report = workspace.verify()
-                    val msg = "Aborted: ${response.name} was called identically and repeatedly " +
-                        "even after being told to stop. The model is not responding to correction, " +
-                        "so continuing would only waste the remaining turn budget."
+                    val msg = "Aborted: ${response.name} was called identically ${state.identicalRepeats} times " +
+                        "with no new results, even after specific guidance. The model cannot make progress on this path."
                     val task = AgentTask(
                         taskId, normalized, "failed", plan,
                         changes(), report,
-                        listOf("${Instant.now()}: aborted after repeated identical ${response.name} calls survived a prior warning"),
+                        listOf("${Instant.now()}: aborted after ${state.identicalRepeats} identical ${response.name} calls with no new info"),
                         msg
                     )
                     recordTask(task)
                     emit(AutonomousAgentEvent.Failed(task, msg))
                     return ToolTurnOutcome.Stop
                 }
-                // Build a specific redirect based on what the task actually needs next.
-                val redirectMsg = buildString {
-                    append("SYSTEM: ${response.name} was called with the same arguments ${state.identicalRepeats} times. Stop repeating it. ")
-                    if (changeWork) {
-                        if (state.readPaths.isNotEmpty()) {
-                            append("You already read: ${state.readPaths.joinToString()}. ")
-                        }
-                        if (state.lastEvidence.isNotBlank() && !state.lastEvidence.startsWith("ERROR:")) {
-                            append("You have enough evidence. ")
-                        }
-                        append("Call replace_text or create_file to make the change now. ")
-                        append("If you need one more file, call read_file on it. Do not search again.")
-                    } else {
-                        if (state.lastEvidence.isNotBlank() && !state.lastEvidence.startsWith("ERROR:")) {
-                            append("You have enough evidence from the project. Write your answer now. Do not call any more tools.")
-                        } else {
-                            append("Call read_file on a specific file you have not read yet, or write your answer. Do not repeat the same search.")
-                        }
-                    }
+
+                // Redirect with specific, actionable guidance rather than just "stop".
+                // Tell the model exactly what to do next based on what we know about the task.
+                val pendingProposals = mutations.pending()
+                val nextStep = when {
+                    pendingProposals.isNotEmpty() ->
+                        "You have a pending proposal (${pendingProposals.first().id.take(8)}). " +
+                            "Call approve_change with ownerVerified=true to apply it, then call verify."
+                    state.readPaths.isEmpty() ->
+                        "You have not read any project files yet. " +
+                            "Call read_file with the path of the first file you need to modify."
+                    state.mutationOccurred ->
+                        "You have already made changes. Call verify to check the result, " +
+                            "then read_file on the next file that needs changing."
+                    else ->
+                        "You have searched ${state.readPaths.size} file(s). " +
+                            "Call read_file on the next specific file you need to change, " +
+                            "or call replace_text if you have enough evidence to make the change."
                 }
-                transcript += com.codingagent.model.ModelMessage("user", redirectMsg)
+
+                transcript += com.codingagent.model.ModelMessage(
+                    "user",
+                    "SYSTEM: ${response.name} returned the same result ${state.identicalRepeats} times. " +
+                        "Do NOT call ${response.name} again with these arguments. " +
+                        "Next action: $nextStep"
+                )
                 state.lastToolSignature = ""
                 state.identicalRepeats = 0
+                // Update evidence even from a repeated call if we got something.
+                if (toolResult.isNotBlank() && toolResult != "(no files)") {
+                    state.lastEvidence = toolResult
+                }
+                state.lastToolResult = toolResult
                 return ToolTurnOutcome.Continue
             }
-        } else {
+        } else if (!isIdenticalCall) {
             state.lastToolSignature = signature
             state.identicalRepeats = 1
         }
-        emit(AutonomousAgentEvent.ToolStarted(response.name, response.arguments))
-        if (isCancelled()) return ToolTurnOutcome.Stop
-        val toolResult = executeTool(response.name, response.arguments)
-        // Never wipe gathered context with an empty tool body.
+
+        // Update evidence — never wipe gathered context with an empty tool body.
         if (toolResult.isNotBlank() && toolResult != "(no files)") {
             state.lastEvidence = toolResult
         }
-        // Some providers/paths (XML-recovered tool calls especially) never give us a
-        // call id. Generate a real one here so the assistant "tool_calls[].id" and the
-        // matching "tool" message's "tool_call_id" are always the exact same value —
-        // relying on two independently-computed fallbacks (as RemoteHttpGateway used
-        // to) risks the ids diverging and the provider rejecting the next turn outright.
+        state.lastToolResult = toolResult
+
         val toolCallId = response.callId ?: "call_${java.util.UUID.randomUUID()}"
         transcript += com.codingagent.model.ModelMessage("assistant", response.thought.ifBlank { "Calling ${response.name}" }, toolCallId, response.name, response.arguments)
         transcript += com.codingagent.model.ModelMessage("tool", "${response.name}: $toolResult", toolCallId)
+
         val success = !toolResult.startsWith("ERROR:")
-        // Advance the real dependency-tracked plan and, on repeated failure, feed
-        // its auto-generated diagnose/recover steps back to the model instead of
-        // just silently counting toward the abort threshold below.
+
         runCatching { planningLoop.next() }.getOrNull()?.let {
             if (success) {
                 runCatching { planningLoop.complete(toolResult.take(300)) }
@@ -217,6 +251,7 @@ class ToolCallOutcomeHandler(
                 runCatching { toolSelectionLoop.fail(toolResult.take(300)) }
             }
         }
+
         if (success) {
             when (response.name) {
                 "read_file" -> {
@@ -225,9 +260,6 @@ class ToolCallOutcomeHandler(
                 }
                 "search_project", "list_files" -> state.searchedProject = true
             }
-            // Only substantive local evidence closes the gather window.
-            // list_files alone must not lock out research_web.
-            // research_web / search_knowledge stay available until last turns.
             val usefulBody = toolResult.isNotBlank() &&
                 toolResult != "(no files)" &&
                 !toolResult.equals("(no matches)", ignoreCase = true)
@@ -235,7 +267,9 @@ class ToolCallOutcomeHandler(
                 state.successfulGathers++
             }
         }
+
         emit(AutonomousAgentEvent.ToolFinished(response.name, toolResult, success))
+
         if (success) {
             state.consecutiveFailures = 0
             if (response.name == "read_file") {
@@ -281,8 +315,8 @@ class ToolCallOutcomeHandler(
                 }
                 transcript += com.codingagent.model.ModelMessage(
                     "user",
-                    "SYSTEM: ${response.name} already returned the result above. " +
-                        "Use that result to answer the user. Do NOT call ${response.name} again with the same arguments."
+                    "SYSTEM: ${response.name} returned the result above. " +
+                        "Use that result to identify specific files, then call read_file on each one you need."
                 )
             }
         } else {
@@ -295,6 +329,7 @@ class ToolCallOutcomeHandler(
                 return ToolTurnOutcome.Stop
             }
         }
+
         val proposalId = toolResult.substringAfter("PROPOSAL_READY id=", "").substringBefore(' ').takeIf { it.isNotBlank() }
         if (proposalId != null) {
             val proposal = mutations.get(proposalId)
@@ -309,6 +344,7 @@ class ToolCallOutcomeHandler(
             }
             return ToolTurnOutcome.Stop
         }
+
         return ToolTurnOutcome.Continue
     }
 }
