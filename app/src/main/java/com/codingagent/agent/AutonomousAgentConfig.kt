@@ -8,6 +8,6 @@ data class AutonomousAgentConfig(
     val commandTimeoutSeconds: Long = 180,
     val maxOutputCharacters: Int = 6_000,
     val maxConsecutiveToolFailures: Int = 5,
-    val maxIdenticalToolRepeats: Int = 3,
+    val maxIdenticalToolRepeats: Int = 8,
     val maxEvidenceRefusals: Int = 3
 )
