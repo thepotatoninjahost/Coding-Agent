@@ -161,7 +161,7 @@ class ToolCallOutcomeHandler(
                     // Tried redirecting twice with specific guidance, model still spinning.
                     // Now abort — it's genuinely stuck and wasting turn budget.
                     val report = workspace.verify()
-                    val msg = "Aborted: ${response.name} was called identically ${state.identicalRepeats} times " +
+                    val msg = "Aborted: ${response.name} was repeated ${state.identicalRepeats} times " +
                         "with no new results, even after specific guidance. The model cannot make progress on this path."
                     val task = AgentTask(
                         taskId, normalized, "failed", plan,
