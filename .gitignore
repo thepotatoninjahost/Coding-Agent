@@ -8,3 +8,4 @@ local.properties
 .coding-agent/
 *.apk
 *.aab
+app/debug.keystore
