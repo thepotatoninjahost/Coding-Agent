@@ -159,9 +159,10 @@ class ToolCallOutcomeHandler(
                 }
 
                 state.repeatResetCount++
-                if (state.repeatResetCount >= 3) {
-                    // Tried redirecting twice with specific guidance, model still spinning.
-                    // Now abort — it's genuinely stuck and wasting turn budget.
+                // One redirect with specific next-action guidance, then abort.
+                // Two redirects (resetCount >= 3) needs 9 identical turns and loses
+                // to LoopControl lastTurns (maxTurns-2), so the loop never Failed.
+                if (state.repeatResetCount >= 2) {
                     val report = workspace.verify()
                     val msg = "Aborted: ${response.name} was repeated ${state.identicalRepeats} times " +
                         "with no new results, even after specific guidance. The model cannot make progress on this path."
