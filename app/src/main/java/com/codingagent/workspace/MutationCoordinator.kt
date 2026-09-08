@@ -36,17 +36,16 @@ data class PendingChangeProposal(
 }
 
 class MutationCoordinator(
-    // internal so AutonomousAgent can derive its own workspace reference from the shared instance.
     internal val workspace: ProjectWorkspace,
     private val ledger: ApprovalLedger = ApprovalLedger(),
     private val now: () -> Long = { System.currentTimeMillis() }
 ) {
     private val pending = linkedMapOf<String, PendingChangeProposal>()
 
-    /**
-     * Stage a mutation for dual approval.
-     * Returns [MutationProposeResult.Rejected] on any validation failure — never throws.
-     */
+    init {
+        PendingProposalStore.load(workspace.projectRoot()).forEach { pending[it.id] = it }
+    }
+
     @Synchronized
     fun propose(
         request: String,
@@ -88,6 +87,13 @@ class MutationCoordinator(
             expiresAt = timestamp + AgentConstitution.APPROVAL_EXPIRATION_MS
         )
         pending[proposal.id] = proposal
+        persist()
+        OpenJobStore.markWaiting(
+            workspace.projectRoot(),
+            proposal.id,
+            proposal.changeSet.changes.map { it.path }.distinct(),
+            request
+        )
         return MutationProposeResult.Proposed(proposal)
     }
 
@@ -99,8 +105,9 @@ class MutationCoordinator(
         val proposal = pending[id] ?: return MutationApprovalResult.Rejected("Change proposal does not exist")
         val timestamp = now()
         if (timestamp > proposal.expiresAt) {
-            pending.remove(id)
-            return MutationApprovalResult.Rejected("Change proposal approval expired")
+            return MutationApprovalResult.Rejected(
+                "Change proposal approval window expired. Open Review, reject, and the agent will restage the same files."
+            )
         }
         if (!ownerVerified) return MutationApprovalResult.Rejected("Owner verification is required for every approval")
         val approval = ledger.record(id, ownerLabel, timestamp)
@@ -116,6 +123,7 @@ class MutationCoordinator(
         val violations = AgentConstitution.check(action, timestamp, proposal.createdAt)
         if (violations.isNotEmpty()) {
             pending[id] = candidate
+            persist()
             return if (candidate.approvalCount < 2 && violations.none {
                     it.rule == ConstitutionRule.OWNER_LOCK ||
                         it.rule == ConstitutionRule.SANDBOX_FIRST ||
@@ -130,6 +138,8 @@ class MutationCoordinator(
         return try {
             val applied = workspace.applyApproved(proposal.changeSet)
             pending.remove(id)
+            persist()
+            OpenJobStore.markApplied(workspace.projectRoot())
             MutationApprovalResult.Applied(candidate, applied)
         } catch (error: Exception) {
             MutationApprovalResult.Rejected("Approved change could not be applied: ${error.message.orEmpty()}")
@@ -140,14 +150,34 @@ class MutationCoordinator(
     fun pending(): List<PendingChangeProposal> = pending.values.toList()
 
     @Synchronized
-    fun clear(id: String): Boolean = pending.remove(id) != null
+    fun clear(id: String): Boolean {
+        val gone = pending.remove(id) != null
+        if (gone) persist()
+        return gone
+    }
 
     @Synchronized
-    fun reject(id: String): Boolean = pending.remove(id) != null
+    fun reject(id: String): Boolean {
+        val gone = pending.remove(id) != null
+        if (gone) persist()
+        return gone
+    }
 
     @Synchronized
     fun clearExpired() {
-        val timestamp = now()
-        pending.entries.removeIf { timestamp > it.value.expiresAt }
+        // Expiration no longer deletes the Review card. Apply is still gated in approve().
+    }
+
+    @Synchronized
+    fun refreshExpiry(id: String): PendingChangeProposal? {
+        val current = pending[id] ?: return null
+        val refreshed = current.copy(expiresAt = now() + AgentConstitution.APPROVAL_EXPIRATION_MS)
+        pending[id] = refreshed
+        persist()
+        return refreshed
+    }
+
+    private fun persist() {
+        runCatching { PendingProposalStore.save(workspace.projectRoot(), pending.values.toList()) }
     }
 }
