@@ -31,10 +31,25 @@ data class OpenJob(
 }
 
 object OpenJobStore {
+    @Volatile
+    private var lastRoot: File? = null
+
     fun file(root: File): File = File(root, ".coding-agent/open-job.json")
 
     @Synchronized
+    fun bind(root: File) {
+        lastRoot = root
+    }
+
+    @Synchronized
+    fun boundRoot(): File? = lastRoot
+
+    @Synchronized
+    fun loadBound(): OpenJob? = lastRoot?.let { load(it) }
+
+    @Synchronized
     fun load(root: File): OpenJob? {
+        bind(root)
         val f = file(root)
         if (!f.isFile) return null
         return runCatching {
@@ -54,6 +69,7 @@ object OpenJobStore {
 
     @Synchronized
     fun save(root: File, job: OpenJob) {
+        bind(root)
         val f = file(root)
         f.parentFile?.mkdirs()
         val o = JSONObject()
@@ -70,6 +86,7 @@ object OpenJobStore {
 
     @Synchronized
     fun openOrKeep(root: File, goal: String): OpenJob {
+        bind(root)
         val existing = load(root)
         if (existing != null && existing.status != "applied" && existing.status != "abandoned") {
             return existing
@@ -88,6 +105,7 @@ object OpenJobStore {
 
     @Synchronized
     fun markWaiting(root: File, proposalId: String, paths: List<String>, goal: String?) {
+        bind(root)
         val current = load(root)
         val job = OpenJob(
             id = current?.id ?: UUID.randomUUID().toString(),
@@ -102,6 +120,7 @@ object OpenJobStore {
 
     @Synchronized
     fun markApplied(root: File) {
+        bind(root)
         val current = load(root) ?: return
         save(root, current.copy(status = "applied", updatedAt = System.currentTimeMillis()))
     }
