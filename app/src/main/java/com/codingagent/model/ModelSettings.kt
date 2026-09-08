@@ -141,11 +141,24 @@ object ModelConnectionProbe {
             when (response) {
                 is ModelResponse.Text -> ProbeResult.Ok("Reached model (${response.content.take(80).ifBlank { "empty body" }})")
                 is ModelResponse.ToolCall -> ProbeResult.Ok("Reached model (tool call path)")
-                is ModelResponse.Failure -> ProbeResult.Failed(response.message)
+                is ModelResponse.Failure -> ProbeResult.Failed(explainProviderError(settings.modelName, response.message))
             }
         } catch (error: Exception) {
             ProbeResult.Failed(error.message.orEmpty().ifBlank { error.javaClass.simpleName })
         }
+    }
+
+    fun explainProviderError(modelName: String, raw: String): String {
+        val lower = raw.lowercase()
+        if ("agentic harness" in lower || "gate free endpoints by agentic harness" in lower) {
+            val paid = modelName.removeSuffix(":free").removeSuffix(":Free")
+            return "OpenRouter blocked $modelName because that FREE endpoint is allowlisted " +
+                "to a short list of published harnesses (Claude Code, Codex, Hermes Agent, Cline, …). " +
+                "This app is a coding agent; OpenRouter still does not treat custom HTTP clients as that list. " +
+                "Use the paid id `$paid` (same model, billed), or pick another :free model that is not harness-gated " +
+                "(for example openrouter/free or qwen/qwen3-coder:free). See openrouter.ai/apps."
+        }
+        return raw
     }
 }
 
