@@ -1,8 +1,9 @@
 package com.codingagent.agent
 
 import java.util.UUID
-import com.codingagent.workspace.VerificationReport
+import com.codingagent.workspace.AgentPlan
 import com.codingagent.workspace.AgentTask
+import com.codingagent.workspace.VerificationReport
 
 /**
  * ONE JOB: Chat turn → agent execution → persisted history.
@@ -48,20 +49,20 @@ class ChatWorkspace(
         val approval = agent?.let { ChatApproval.tryApprove(it, trimmed) }
         if (approval != null) {
             progressListener?.onProgress("APPROVAL", approval.toString().take(80))
-            val response = when (approval) {
-                is AgentRuntimeResult.Completed -> ChatMessage(role = ChatRole.AGENT, content = formatTask(approval.task), taskId = approval.task.id)
-                is AgentRuntimeResult.NeedsApproval -> ChatMessage(role = ChatRole.AGENT, content = approval.question, taskId = approval.task.id)
-                is AgentRuntimeResult.NeedsInput -> ChatMessage(role = ChatRole.AGENT, content = approval.question, taskId = approval.task.id)
-                is AgentRuntimeResult.Failed -> ChatMessage(role = ChatRole.AGENT, content = formatTask(approval.task), taskId = approval.task.id)
-            }
-            store.recordChatMessage(response)
-            return ChatTurn(response, approval)
+            return persist(approval)
+        }
+        val lastAgent = store.recentChatMessages(20).firstOrNull { it.role == ChatRole.AGENT }?.content
+        val resumed = agent?.let { PendingWorkResume.tryResume(it, trimmed, lastAgent) }
+        if (resumed != null) {
+            progressListener?.onProgress("RESUME", "Local pending work / rate-limit gate")
+            return persist(resumed)
         }
         progressListener?.onProgress("PLANNING", "Starting request")
+        val packaged = packageWithMemory(trimmed)
         val result = if (agent == null) {
             null
         } else {
-            val events = agent.run(trimmed) { event ->
+            val events = agent.run(packaged) { event ->
                 when (event) {
                     is AutonomousAgentEvent.Phase -> progressListener?.onProgress(event.name, event.detail)
                     is AutonomousAgentEvent.ToolStarted -> progressListener?.onProgress("TOOL", "${event.name}: ${event.arguments.take(80)}")
@@ -99,9 +100,13 @@ class ChatWorkspace(
                             summary = terminal.message
                         )
                     )
-                else -> agent.execute(trimmed)
+                else -> agent.execute(packaged)
             }
         }
+        return persist(result)
+    }
+
+    private fun persist(result: AgentRuntimeResult?): ChatTurn {
         val response = when (result) {
             is AgentRuntimeResult.Completed -> ChatMessage(role = ChatRole.AGENT, content = formatTask(result.task), taskId = result.task.id)
             is AgentRuntimeResult.NeedsInput -> ChatMessage(role = ChatRole.AGENT, content = result.question, taskId = result.task.id)
@@ -111,6 +116,28 @@ class ChatWorkspace(
         }
         store.recordChatMessage(response)
         return ChatTurn(response, result)
+    }
+
+    /**
+     * The model loop used to see only the latest line. That is why the video model said
+     * "no prior task" after "create a autonomous agent". Pack the last few turns so the
+     * current request still classifies via "Current request:" but the model sees the job.
+     */
+    private fun packageWithMemory(current: String): String {
+        val prior = store.recentChatMessages(16)
+            .asReversed()
+            .filter { it.role == ChatRole.USER || it.role == ChatRole.AGENT }
+            .takeLast(10)
+        if (prior.size <= 1) return current
+        return buildString {
+            append("Conversation so far (oldest first). The last Current request is what to do now.\n")
+            for (msg in prior.dropLast(1)) {
+                val who = if (msg.role == ChatRole.USER) "OWNER" else "AGENT"
+                append(who).append(": ").append(msg.content.take(700)).append('\n')
+            }
+            append("Current request:\n")
+            append(current)
+        }
     }
 
     private fun formatTask(task: AgentTask): String = buildString {
@@ -132,7 +159,8 @@ class ChatWorkspace(
                 summary.startsWith("File:") ||
                 summary.startsWith("APPLIED") ||
                 summary.startsWith("First approval") ||
-                summary.startsWith("No pending proposal")
+                summary.startsWith("No pending proposal") ||
+                summary.startsWith("There is no pending")
 
         if (isDirect) {
             append(summary)
@@ -152,9 +180,35 @@ class ChatWorkspace(
             return@buildString
         }
 
+        // Do not lead with "Status: completed / Verification passed" when nothing was written.
+        // That wrapper is what made the video look like a fake agent finishing README chatter.
+        if (task.changes.isEmpty()) {
+            append(summary)
+            if (!task.verification.passed && task.verification.issues.isNotEmpty()) {
+                append("\n\nVerification FAILED; ")
+                append(task.verification.issues.size)
+                append(" issue(s)")
+                task.verification.issues.take(10).forEach { issue ->
+                    append("\n- ")
+                    append(issue.path)
+                    append(":")
+                    append(issue.line)
+                    append(" — ")
+                    append(issue.message)
+                }
+            }
+            return@buildString
+        }
+
         append("Status: ")
         append(task.status)
-        append("\n\nVerification: ")
+        append("\n\nProposed files:\n")
+        task.changes.distinctBy { it.path }.forEach { change ->
+            append("- ")
+            append(change.path)
+            append('\n')
+        }
+        append("\nVerification: ")
         append(if (task.verification.passed) "passed" else "FAILED")
         append("; ")
         append(task.verification.issues.size)
@@ -201,7 +255,7 @@ class ChatWorkspace(
             return "The model printed a raw tool call instead of a review. That is not an answer."
         }
         if (DegenerateOutput.isDegenerate(text)) {
-            return DegenerateOutput.sanitize(text) + " Rely on the verification section above for the real findings."
+            return DegenerateOutput.sanitize(text)
         }
         val lines = text.lineSequence().map { it.trim() }.filter { it.isNotEmpty() }.toList()
         val deduped = mutableListOf<String>()
@@ -221,7 +275,6 @@ class ChatWorkspace(
         if (streak > 2) deduped += "… (repeated ${streak - 2} more times)"
         return deduped.joinToString("\n").take(2_000)
     }
-
 }
 
 data class ChatTurn(
