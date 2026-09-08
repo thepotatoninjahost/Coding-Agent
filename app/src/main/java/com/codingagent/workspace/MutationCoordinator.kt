@@ -8,6 +8,7 @@ import com.codingagent.agent.ApprovalLedger
 import com.codingagent.agent.ApprovalRecord
 import com.codingagent.agent.ConstitutionRule
 import com.codingagent.agent.SelfEvolution
+import com.codingagent.agent.SelfRepair
 import com.codingagent.intake.TaskOperation
 
 /**
@@ -169,7 +170,6 @@ class MutationCoordinator(
 
     @Synchronized
     fun clearExpired() {
-        // Expiration no longer deletes the Review card. Apply is still gated in approve().
     }
 
     @Synchronized
@@ -184,7 +184,7 @@ class MutationCoordinator(
     private fun recordEvolution(proposal: PendingChangeProposal, changeSet: ChangeSet) {
         runCatching {
             val latestApproval = proposal.approvals.maxOfOrNull { it.approvedAt }
-            val kind = if (SelfRepairKind.isSelfRepair(proposal.request)) "self-repair" else "code-change"
+            val kind = if (SelfRepair.isRequest(proposal.request)) "self-repair" else "code-change"
             changeSet.changes.forEach { change ->
                 val file = workspace.projectRoot().resolve(change.path)
                 if (!file.isFile) return@forEach
@@ -204,13 +204,5 @@ class MutationCoordinator(
 
     private fun persist() {
         runCatching { PendingProposalStore.save(workspace.projectRoot(), pending.values.toList()) }
-    }
-}
-
-private object SelfRepairKind {
-    fun isSelfRepair(request: String): Boolean {
-        val t = request.lowercase()
-        return t.contains("fix yourself") || t.contains("self-repair") || t.contains("self repair") ||
-            t.contains("modify yourself") || t.contains("self-mod")
     }
 }
