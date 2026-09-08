@@ -3,6 +3,7 @@ package com.codingagent.agent
 import java.util.UUID
 import com.codingagent.workspace.AgentPlan
 import com.codingagent.workspace.AgentTask
+import com.codingagent.workspace.ChangeDiff
 import com.codingagent.workspace.OpenJobStore
 import com.codingagent.workspace.VerificationReport
 
@@ -84,10 +85,10 @@ class ChatWorkspace(
             when (val terminal = events.lastOrNull()) {
                 is AutonomousAgentEvent.ApprovalRequired -> AgentRuntimeResult.NeedsApproval(
                     terminal.task,
-                    com.codingagent.workspace.ChangeDiff.ownerReviewText(terminal.proposal),
+                    ChangeDiff.ownerReviewText(terminal.proposal),
                     terminal.proposal.id
                 )
-                is AutonomousAgentEvent.Completed -> AgentRuntimeResult.Completed(terminal.task)
+                is AutonomousAgentEvent.Completed -> asRuntime(agent, terminal.task)
                 is AutonomousAgentEvent.Stopped -> AgentRuntimeResult.Failed(terminal.task)
                 is AutonomousAgentEvent.Failed -> terminal.task?.let { AgentRuntimeResult.Failed(it) }
                     ?: AgentRuntimeResult.Failed(
@@ -102,10 +103,21 @@ class ChatWorkspace(
                             summary = terminal.message
                         )
                     )
-                else -> agent.execute(packaged)
+                else -> asRuntime(agent, null) ?: agent.execute(packaged)
             }
         }
         return persist(result)
+    }
+
+    private fun asRuntime(agent: AutonomousAgent, task: AgentTask?): AgentRuntimeResult? {
+        if (task == null) return null
+        if (task.status == "needs-approval" || task.status == "waiting-approval") {
+            val proposal = agent.pendingProposals().firstOrNull()
+            if (proposal != null) {
+                return AgentRuntimeResult.NeedsApproval(task, ChangeDiff.ownerReviewText(proposal), proposal.id)
+            }
+        }
+        return AgentRuntimeResult.Completed(task)
     }
 
     private fun persist(result: AgentRuntimeResult?): ChatTurn {
@@ -175,9 +187,12 @@ class ChatWorkspace(
             append(summary)
             return@buildString
         }
+        if (task.status == "needs-approval" || task.status == "waiting-approval") {
+            append(summary)
+            return@buildString
+        }
         val isDirect =
             task.status == "needs-input" ||
-                task.status == "waiting-approval" ||
                 summary.startsWith("PROPOSED CHANGES") ||
                 summary.startsWith("Hello.") ||
                 summary.startsWith("Status report") ||
@@ -203,19 +218,13 @@ class ChatWorkspace(
             return@buildString
         }
 
-        append("Status: ")
-        append(task.status)
-        append("\n\nProposed files:\n")
+        append("Proposed files:\n")
         task.changes.distinctBy { it.path }.forEach { change ->
             append("- ")
             append(change.path)
             append('\n')
         }
-        append("\nVerification: ")
-        append(if (task.verification.passed) "passed" else "FAILED")
-        append("; ")
-        append(task.verification.issues.size)
-        append(" issue(s)\n\nSummary:\n")
+        append("\n")
         append(summary)
     }
 
