@@ -91,13 +91,15 @@ class CodeSynthesisEngine(
         }
     }
 
-    private fun agentKotlin(className: String, goal: String): String = """
+    private fun agentKotlin(className: String, goal: String): String {
+        val dollar = "${'$'}"
+        return """
 /**
  * Goal: ${escape(goal.take(200))}
  * This is a staged starting spine, not a README and not a hello-world demo.
  */
 class $className(
-    private val tools: (String, String) -> String = { name, args -> "unsupported: $name $args" }
+    private val tools: (String, String) -> String = { toolName, toolArgs -> "unsupported: " + toolName + " " + toolArgs }
 ) {
     fun run(request: String): String {
         val plan = plan(request)
@@ -111,7 +113,7 @@ class $className(
         }
 
     private fun gather(plan: List<String>): String =
-        tools("list_files", "{}") + "\n" + plan.joinToString(",")
+        tools("list_files", "{}") + "\\n" + plan.joinToString(",")
 
     private fun decide(request: String, evidence: String): String {
         if (evidence.isBlank()) return "Need project evidence before changing files."
@@ -119,16 +121,6 @@ class $className(
     }
 }
 """.trimIndent() + "\n"
-
-    private fun language(path: String): String = when (path.substringAfterLast('.', "").lowercase()) {
-        "kt", "kts" -> "Kotlin"
-        "java" -> "Java"
-        "py" -> "Python"
-        "js", "mjs", "cjs" -> "JavaScript"
-        "ts", "tsx" -> "TypeScript"
-        "json" -> "JSON"
-        "md" -> "Markdown"
-        else -> "text"
     }
 
     private fun isSafePath(path: String): Boolean =
