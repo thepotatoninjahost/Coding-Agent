@@ -81,7 +81,7 @@ class ChatWorkspace(
             when (val terminal = events.lastOrNull()) {
                 is AutonomousAgentEvent.ApprovalRequired -> AgentRuntimeResult.NeedsApproval(
                     terminal.task,
-                    "Review proposal ${terminal.proposal.id} and confirm twice before applying any code change.",
+                    com.codingagent.workspace.ChangeDiff.ownerReviewText(terminal.proposal),
                     terminal.proposal.id
                 )
                 is AutonomousAgentEvent.Completed -> AgentRuntimeResult.Completed(terminal.task)
@@ -119,9 +119,10 @@ class ChatWorkspace(
             append(summary)
             return@buildString
         }
-        // Lead with the answer. Verification theater must not bury tool results or greetings.
         val isDirect =
             task.status == "needs-input" ||
+                task.status == "waiting-approval" ||
+                summary.startsWith("PROPOSED CHANGES") ||
                 summary.startsWith("Hello.") ||
                 summary.startsWith("Status report") ||
                 summary.startsWith("Project files:") ||
@@ -181,7 +182,6 @@ class ChatWorkspace(
 
     private fun sanitizeSummary(text: String): String {
         if (text.isBlank()) return "(empty)"
-        // Tool evidence and direct-lane answers are not model prose — never replace them.
         val head = text.trimStart()
         if (head.startsWith("Project files:") ||
             head.startsWith("Source files:") ||
@@ -190,7 +190,8 @@ class ChatWorkspace(
             head.startsWith("File:") ||
             head.startsWith("Hello.") ||
             head.startsWith("Status report") ||
-            head.startsWith("APPLIED")
+            head.startsWith("APPLIED") ||
+            head.startsWith("PROPOSED CHANGES")
         ) {
             return text.take(12_000)
         }
