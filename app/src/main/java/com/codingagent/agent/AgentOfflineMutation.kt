@@ -38,11 +38,19 @@ object AgentOfflineStager {
     ): AgentOfflineMutation? {
         val hasExplicit = intake.operation.kind != OperationKind.NONE
         val wantsEdit = hasExplicit ||
-            intake.intent == TaskIntent.CHANGE ||
             intake.intent == TaskIntent.CREATE ||
+            intake.intent == TaskIntent.CHANGE ||
             intake.intent == TaskIntent.REFACTOR
         if (!wantsEdit) return null
-        if (!hasExplicit && gateway != null) return null
+
+        // Old rule: if any model was configured, skip offline staging and hope the model
+        // writes files. On free/rate-limited models that became README-only "completed".
+        // Empty (or README-only) workspaces now stage locally first so a 429 cannot eat the job.
+        val onlyBoilerplate = workspace.summary().files.all { file ->
+            val n = file.path.lowercase()
+            n.endsWith("readme.md") || n.contains(".coding-agent/")
+        }
+        if (!hasExplicit && gateway != null && !onlyBoilerplate) return null
 
         val staged: Pair<List<TaskOperation>, String> = if (hasExplicit) {
             listOf(intake.operation) to "Offline explicit ${intake.operation.kind.name.lowercase()} from request"
@@ -51,8 +59,9 @@ object AgentOfflineStager {
                 is SynthesisResult.Ready ->
                     synthesis.proposal.operations to "Offline synthesis: ${synthesis.proposal.rationale}"
                 is SynthesisResult.NeedsInput -> {
+                    if (gateway != null && !onlyBoilerplate) return null
                     val question = synthesis.question +
-                        " Load a coding model, or specify an exact replace/create/append/remove operation."
+                        " Name the file to create (example: src/Agent.kt) or the exact replace."
                     val task = AgentTask(
                         taskId, request, "needs-input", plan, emptyList(),
                         VerificationReport(true, emptyList()),
@@ -64,7 +73,6 @@ object AgentOfflineStager {
             }
         }
 
-        // propose() returns a sealed result — never throws.
         return when (val proposeResult = mutations.propose(request, staged.first, staged.second)) {
             is MutationProposeResult.Proposed -> {
                 val proposal = proposeResult.proposal
