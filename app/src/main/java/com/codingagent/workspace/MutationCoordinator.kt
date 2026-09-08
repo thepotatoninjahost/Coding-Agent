@@ -43,6 +43,7 @@ class MutationCoordinator(
     private val pending = linkedMapOf<String, PendingChangeProposal>()
 
     init {
+        OpenJobStore.bind(workspace.projectRoot())
         PendingProposalStore.load(workspace.projectRoot()).forEach { pending[it.id] = it }
     }
 
