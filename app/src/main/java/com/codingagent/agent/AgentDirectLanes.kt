@@ -10,7 +10,7 @@ import com.codingagent.workspace.VerificationIssue
 import com.codingagent.workspace.VerificationReport
 
 /**
- * ONE JOB: Answer hello / list / status / read / inspect / agent-meta without the model.
+ * ONE JOB: Answer hello / list / status / read / inspect / self-repair / agent-meta without the model.
  */
 class AgentDirectLanes(
     private val workspace: ProjectWorkspace,
@@ -19,6 +19,9 @@ class AgentDirectLanes(
 ) {
     fun respond(taskId: String, request: String, intake: TaskIntake, plan: AgentPlan): AgentTask? {
         val t = request.lowercase().trim()
+        if (SelfRepair.isRequest(request)) {
+            return SelfRepair.handle(taskId, request, plan, workspace, files, mutations)
+        }
         if (AgentRequestKind.isAgentMeta(t)) {
             return AgentTask(
                 taskId, request, "completed", plan, emptyList(),
@@ -36,9 +39,6 @@ class AgentDirectLanes(
         AgentRequestKind.explicitReadPath(request)?.let { path ->
             return readFile(taskId, request, plan, report, path)
         }
-        // Only short-circuit to local inspect when the request names a specific file AND
-        // is NOT a whole-project review — those must go to the model loop so it can
-        // read multiple files and give a meaningful answer.
         if (!AgentRequestKind.isWholeProjectReview(request)) {
             AgentRequestKind.inspectTarget(request)?.let { target ->
                 return inspect(taskId, request, plan, target)
