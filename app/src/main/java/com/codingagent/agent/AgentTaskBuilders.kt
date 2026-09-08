@@ -3,6 +3,7 @@ package com.codingagent.agent
 import java.time.Instant
 import com.codingagent.workspace.AgentPlan
 import com.codingagent.workspace.AgentTask
+import com.codingagent.workspace.ChangeDiff
 import com.codingagent.workspace.ChangeRecord
 import com.codingagent.workspace.PendingChangeProposal
 import com.codingagent.workspace.VerificationReport
@@ -52,6 +53,6 @@ object AgentTaskBuilders {
         events = listOf(
             "${Instant.now()}: proposal ${proposal.id} staged; awaiting two owner approvals"
         ),
-        summary = "Review proposal ${proposal.id} and confirm twice before applying any code change"
+        summary = ChangeDiff.ownerReviewText(proposal)
     )
 }
