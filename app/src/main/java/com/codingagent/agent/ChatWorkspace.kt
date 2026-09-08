@@ -3,6 +3,7 @@ package com.codingagent.agent
 import java.util.UUID
 import com.codingagent.workspace.AgentPlan
 import com.codingagent.workspace.AgentTask
+import com.codingagent.workspace.OpenJobStore
 import com.codingagent.workspace.VerificationReport
 
 /**
@@ -27,7 +28,6 @@ fun interface CodingAgentExecutor {
     fun execute(request: String): AgentRuntimeResult
 }
 
-/** Optional progress sink used by the UI to show real phases instead of a fake "Researching" label. */
 fun interface AgentProgressListener {
     fun onProgress(phase: String, detail: String)
 }
@@ -36,7 +36,6 @@ class ChatWorkspace(
     private val store: ChatMessageStore,
     private val unavailableMessageProvider: () -> String = { "Model unavailable. Finish model setup before sending coding requests." },
     private val progressListener: AgentProgressListener? = null,
-    /** Single spine provider — only [AutonomousAgent]. */
     private val runtimeProvider: () -> AutonomousAgent?
 ) {
     fun history(limit: Int = 100): List<ChatMessage> = store.recentChatMessages(limit).asReversed()
@@ -46,16 +45,19 @@ class ChatWorkspace(
         require(trimmed.isNotEmpty()) { "A message is required" }
         store.recordChatMessage(ChatMessage(role = ChatRole.USER, content = trimmed))
         val agent = runtimeProvider()
+        if (agent != null && looksLikeNewGoal(trimmed)) {
+            OpenJobStore.boundRoot()?.let { OpenJobStore.openOrKeep(it, trimmed) }
+        }
         val approval = agent?.let { ChatApproval.tryApprove(it, trimmed) }
         if (approval != null) {
             progressListener?.onProgress("APPROVAL", approval.toString().take(80))
-            return persist(approval)
+            return persist(result = approval)
         }
         val lastAgent = store.recentChatMessages(20).firstOrNull { it.role == ChatRole.AGENT }?.content
         val resumed = agent?.let { PendingWorkResume.tryResume(it, trimmed, lastAgent) }
         if (resumed != null) {
             progressListener?.onProgress("RESUME", "Local pending work / rate-limit gate")
-            return persist(resumed)
+            return persist(result = resumed)
         }
         progressListener?.onProgress("PLANNING", "Starting request")
         val packaged = packageWithMemory(trimmed)
@@ -107,6 +109,23 @@ class ChatWorkspace(
     }
 
     private fun persist(result: AgentRuntimeResult?): ChatTurn {
+        val root = OpenJobStore.boundRoot()
+        if (root != null) {
+            when (result) {
+                is AgentRuntimeResult.NeedsApproval -> OpenJobStore.markWaiting(
+                    root,
+                    result.proposalId,
+                    result.task.changes.map { it.path }.distinct(),
+                    result.task.request
+                )
+                is AgentRuntimeResult.Completed -> {
+                    if (result.task.status.contains("applied", ignoreCase = true)) {
+                        OpenJobStore.markApplied(root)
+                    }
+                }
+                else -> Unit
+            }
+        }
         val response = when (result) {
             is AgentRuntimeResult.Completed -> ChatMessage(role = ChatRole.AGENT, content = formatTask(result.task), taskId = result.task.id)
             is AgentRuntimeResult.NeedsInput -> ChatMessage(role = ChatRole.AGENT, content = result.question, taskId = result.task.id)
@@ -118,22 +137,32 @@ class ChatWorkspace(
         return ChatTurn(response, result)
     }
 
-    /**
-     * The model loop used to see only the latest line. That is why the video model said
-     * "no prior task" after "create a autonomous agent". Pack the last few turns so the
-     * current request still classifies via "Current request:" but the model sees the job.
-     */
+    private fun looksLikeNewGoal(text: String): Boolean {
+        val t = text.lowercase()
+        if (PendingWorkResume.isResumeRequest(text)) return false
+        if (t.length <= 24 && t in setOf("hello", "hi", "status", "list", "list files")) return false
+        return t.contains("create") || t.contains("build") || t.contains("implement") ||
+            t.contains("fix") || t.contains("add") || t.contains("write")
+    }
+
     private fun packageWithMemory(current: String): String {
+        val job = OpenJobStore.loadBound()
         val prior = store.recentChatMessages(16)
             .asReversed()
             .filter { it.role == ChatRole.USER || it.role == ChatRole.AGENT }
             .takeLast(10)
-        if (prior.size <= 1) return current
+        if (prior.size <= 1 && job == null) return current
         return buildString {
-            append("Conversation so far (oldest first). The last Current request is what to do now.\n")
-            for (msg in prior.dropLast(1)) {
-                val who = if (msg.role == ChatRole.USER) "OWNER" else "AGENT"
-                append(who).append(": ").append(msg.content.take(700)).append('\n')
+            if (job != null && job.status != "applied") {
+                append(job.promptBlock())
+                append('\n')
+            }
+            if (prior.size > 1) {
+                append("Conversation so far (oldest first). The last Current request is what to do now.\n")
+                for (msg in prior.dropLast(1)) {
+                    val who = if (msg.role == ChatRole.USER) "OWNER" else "AGENT"
+                    append(who).append(": ").append(msg.content.take(700)).append('\n')
+                }
             }
             append("Current request:\n")
             append(current)
@@ -160,43 +189,17 @@ class ChatWorkspace(
                 summary.startsWith("APPLIED") ||
                 summary.startsWith("First approval") ||
                 summary.startsWith("No pending proposal") ||
-                summary.startsWith("There is no pending")
+                summary.startsWith("There is no pending") ||
+                summary.startsWith("OPEN JOB") ||
+                summary.startsWith("Open job is still")
 
         if (isDirect) {
             append(summary)
-            if (task.status != "needs-input" && !task.verification.passed) {
-                append("\n\nVerification: FAILED; ")
-                append(task.verification.issues.size)
-                append(" issue(s)")
-                task.verification.issues.take(10).forEach { issue ->
-                    append("\n- ")
-                    append(issue.path)
-                    append(":")
-                    append(issue.line)
-                    append(" — ")
-                    append(issue.message)
-                }
-            }
             return@buildString
         }
 
-        // Do not lead with "Status: completed / Verification passed" when nothing was written.
-        // That wrapper is what made the video look like a fake agent finishing README chatter.
         if (task.changes.isEmpty()) {
             append(summary)
-            if (!task.verification.passed && task.verification.issues.isNotEmpty()) {
-                append("\n\nVerification FAILED; ")
-                append(task.verification.issues.size)
-                append(" issue(s)")
-                task.verification.issues.take(10).forEach { issue ->
-                    append("\n- ")
-                    append(issue.path)
-                    append(":")
-                    append(issue.line)
-                    append(" — ")
-                    append(issue.message)
-                }
-            }
             return@buildString
         }
 
@@ -212,26 +215,8 @@ class ChatWorkspace(
         append(if (task.verification.passed) "passed" else "FAILED")
         append("; ")
         append(task.verification.issues.size)
-        append(" issue(s)")
-        if (task.verification.issues.isEmpty()) {
-            append("\n- Static scan found no unfinished-work markers in production sources.")
-        } else {
-            task.verification.issues.forEach { issue ->
-                append("\n- ")
-                append(issue.path)
-                append(":")
-                append(issue.line)
-                append(" — ")
-                append(issue.message)
-            }
-        }
-        append("\n\nSummary:\n")
+        append(" issue(s)\n\nSummary:\n")
         append(summary)
-        if (task.events.isNotEmpty()) {
-            append("\n\nActivity log:\n")
-            val cleaned = task.events.map { sanitizeSummary(it) }.distinct().take(40)
-            append(cleaned.joinToString("\n"))
-        }
     }
 
     private fun sanitizeSummary(text: String): String {
@@ -245,35 +230,19 @@ class ChatWorkspace(
             head.startsWith("Hello.") ||
             head.startsWith("Status report") ||
             head.startsWith("APPLIED") ||
-            head.startsWith("PROPOSED CHANGES")
+            head.startsWith("PROPOSED CHANGES") ||
+            head.startsWith("OPEN JOB") ||
+            head.startsWith("Open job is still")
         ) {
             return text.take(12_000)
         }
-        if (text.contains("<tool_call", ignoreCase = true) ||
-            text.contains("<function=", ignoreCase = true)
-        ) {
+        if (text.contains("<tool_call", ignoreCase = true) || text.contains("<function=", ignoreCase = true)) {
             return "The model printed a raw tool call instead of a review. That is not an answer."
         }
         if (DegenerateOutput.isDegenerate(text)) {
             return DegenerateOutput.sanitize(text)
         }
-        val lines = text.lineSequence().map { it.trim() }.filter { it.isNotEmpty() }.toList()
-        val deduped = mutableListOf<String>()
-        var prev: String? = null
-        var streak = 0
-        for (line in lines) {
-            if (line == prev) {
-                streak++
-                if (streak <= 2) deduped += line
-            } else {
-                if (streak > 2) deduped += "… (repeated ${streak - 2} more times)"
-                deduped += line
-                prev = line
-                streak = 1
-            }
-        }
-        if (streak > 2) deduped += "… (repeated ${streak - 2} more times)"
-        return deduped.joinToString("\n").take(2_000)
+        return text.take(2_000)
     }
 }
 
