@@ -9,6 +9,7 @@ import com.codingagent.intake.TaskIntent
 import com.codingagent.intake.TaskOperation
 import com.codingagent.model.ModelGateway
 import com.codingagent.workspace.AgentTask
+import com.codingagent.workspace.ChangeDiff
 import com.codingagent.workspace.MutationCoordinator
 import com.codingagent.workspace.MutationProposeResult
 import com.codingagent.workspace.PendingChangeProposal
@@ -71,7 +72,7 @@ object AgentOfflineStager {
                     taskId, request, "needs-approval", plan, proposal.changeSet.changes,
                     VerificationReport(true, emptyList()),
                     listOf("${Instant.now()}: offline proposal ${proposal.id} staged; awaiting two owner approvals"),
-                    "Review proposal ${proposal.id} and confirm twice before applying any code change."
+                    ChangeDiff.ownerReviewText(proposal)
                 )
                 AgentOfflineMutation.Approval(task, proposal)
             }
