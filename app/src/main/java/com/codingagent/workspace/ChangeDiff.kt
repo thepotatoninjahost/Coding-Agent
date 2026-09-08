@@ -41,6 +41,7 @@ data class ProposalDiffView(
 object ChangeDiff {
     private const val MAX_UNIFIED_LINES = 400
     private const val MAX_LINE_CHARS = 240
+    private const val MAX_OWNER_REVIEW_CHARS = 12_000
 
     fun summarize(proposal: PendingChangeProposal): ProposalDiffView =
         ProposalDiffView(
@@ -73,6 +74,26 @@ object ChangeDiff {
             afterChecksum = record.afterChecksum
         )
     }
+
+    /**
+     * Human-readable review body. Proposed files are not on disk until dual approval,
+     * so this text is the only way the owner can see what they are confirming.
+     */
+    fun ownerReviewText(proposal: PendingChangeProposal): String = buildString {
+        appendLine("PROPOSED CHANGES — not written to disk until you confirm twice.")
+        appendLine("Proposal ${shortId(proposal.id)} · ${proposal.changeSet.changes.size} file(s) · ${expiryLabel(proposal.expiresAt)}")
+        appendLine("Request: ${proposal.request.take(400)}")
+        if (proposal.changeSet.changes.isEmpty()) {
+            appendLine("No file records in this proposal.")
+        }
+        proposal.changeSet.changes.forEach { record ->
+            appendLine()
+            appendLine("=== ${record.operation} ${record.path} ===")
+            unified(record).forEach { line -> appendLine(line.text) }
+        }
+        appendLine()
+        appendLine("Open the Review tab to confirm or reject. Files tab only lists files already on disk.")
+    }.take(MAX_OWNER_REVIEW_CHARS)
 
     fun unified(record: ChangeRecord, maxLines: Int = MAX_UNIFIED_LINES): List<DiffLine> {
         val before = record.before?.lines().orEmpty()
