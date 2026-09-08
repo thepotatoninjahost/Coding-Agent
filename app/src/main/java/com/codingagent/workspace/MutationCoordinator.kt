@@ -7,6 +7,7 @@ import com.codingagent.agent.AgentConstitution
 import com.codingagent.agent.ApprovalLedger
 import com.codingagent.agent.ApprovalRecord
 import com.codingagent.agent.ConstitutionRule
+import com.codingagent.agent.SelfEvolution
 import com.codingagent.intake.TaskOperation
 
 /**
@@ -41,6 +42,7 @@ class MutationCoordinator(
     private val now: () -> Long = { System.currentTimeMillis() }
 ) {
     private val pending = linkedMapOf<String, PendingChangeProposal>()
+    private val evolution = SelfEvolution(workspace.projectRoot())
 
     init {
         OpenJobStore.bind(workspace.projectRoot())
@@ -141,6 +143,7 @@ class MutationCoordinator(
             pending.remove(id)
             persist()
             OpenJobStore.markApplied(workspace.projectRoot())
+            recordEvolution(candidate, applied)
             MutationApprovalResult.Applied(candidate, applied)
         } catch (error: Exception) {
             MutationApprovalResult.Rejected("Approved change could not be applied: ${error.message.orEmpty()}")
@@ -178,7 +181,36 @@ class MutationCoordinator(
         return refreshed
     }
 
+    private fun recordEvolution(proposal: PendingChangeProposal, changeSet: ChangeSet) {
+        runCatching {
+            val latestApproval = proposal.approvals.maxOfOrNull { it.approvedAt }
+            val kind = if (SelfRepairKind.isSelfRepair(proposal.request)) "self-repair" else "code-change"
+            changeSet.changes.forEach { change ->
+                val file = workspace.projectRoot().resolve(change.path)
+                if (!file.isFile) return@forEach
+                val staged = evolution.stageSource(file, kind)
+                val action = AgentAction(
+                    description = proposal.request,
+                    category = AgentActionCategory.CODE_CHANGE,
+                    ownerVerified = true,
+                    approvalCount = proposal.approvalCount,
+                    sandboxPassed = proposal.verification.passed,
+                    clearPermission = true
+                )
+                evolution.promoteSource(staged, kind, proposal.verification, action, latestApproval)
+            }
+        }
+    }
+
     private fun persist() {
         runCatching { PendingProposalStore.save(workspace.projectRoot(), pending.values.toList()) }
+    }
+}
+
+private object SelfRepairKind {
+    fun isSelfRepair(request: String): Boolean {
+        val t = request.lowercase()
+        return t.contains("fix yourself") || t.contains("self-repair") || t.contains("self repair") ||
+            t.contains("modify yourself") || t.contains("self-mod")
     }
 }
