@@ -4,7 +4,6 @@ import java.util.UUID
 import com.codingagent.workspace.AgentPlan
 import com.codingagent.workspace.AgentTask
 import com.codingagent.workspace.ChangeDiff
-import com.codingagent.workspace.OpenJobStore
 import com.codingagent.workspace.VerificationReport
 
 /**
@@ -35,43 +34,18 @@ object PendingWorkResume {
         if (!isResumeRequest(text)) return null
         val pending = agent.pendingProposals().firstOrNull()
         if (pending != null) {
-            agent.refreshProposalExpiry(pending.id)
-            val live = agent.pendingProposals().firstOrNull { it.id == pending.id } ?: pending
-            val body = ChangeDiff.ownerReviewText(live)
+            val body = ChangeDiff.ownerReviewText(pending)
             val task = AgentTask(
                 id = UUID.randomUUID().toString(),
                 request = text,
                 status = "waiting-approval",
                 plan = AgentPlan(text, emptyList(), emptyList()),
-                changes = live.changeSet.changes,
-                verification = live.verification,
-                events = listOf("resumed pending proposal ${live.id}"),
+                changes = pending.changeSet.changes,
+                verification = pending.verification,
+                events = listOf("resumed pending proposal ${pending.id}"),
                 summary = body
             )
-            return AgentRuntimeResult.NeedsApproval(task, body, live.id)
-        }
-        val job = OpenJobStore.load(agent.projectRoot())
-        if (job != null && job.status != "applied" && job.status != "abandoned") {
-            val paths = if (job.paths.isEmpty()) "(no files staged yet)" else job.paths.joinToString("\n") { "- $it" }
-            val summary = buildString {
-                append("Open job is still this, not a new empty project.\n")
-                append("Goal: ").append(job.goal).append('\n')
-                append("Status: ").append(job.status).append('\n')
-                if (!job.proposalId.isNullOrBlank()) append("Proposal: ").append(job.proposalId).append('\n')
-                append("Paths:\n").append(paths).append('\n')
-                append("The Review tab lists staged files. Files tab only lists applied disk files.\n")
-            }
-            val task = AgentTask(
-                id = job.id,
-                request = job.goal,
-                status = job.status,
-                plan = AgentPlan(job.goal, emptyList(), emptyList()),
-                changes = emptyList(),
-                verification = VerificationReport(false, emptyList()),
-                events = listOf("resumed open job ${job.id}"),
-                summary = summary
-            )
-            return AgentRuntimeResult.Failed(task)
+            return AgentRuntimeResult.NeedsApproval(task, body, pending.id)
         }
         if (recentAgentText != null && ModelFailure.isRateLimit(recentAgentText)) {
             return AgentRuntimeResult.Failed(
