@@ -3,10 +3,9 @@ package com.codingagent.agent
 import com.codingagent.intake.TaskIntent
 
 /**
- * ONE JOB: Decide whether this turn may call tools or must write a result.
- *
- * A coding agent gathers a small amount of real evidence, then acts or answers.
- * It does not spend the whole turn budget listing files.
+ * ONE JOB: Say whether this turn may use tools.
+ * Writes still only stage a proposal. Dual owner approval applies them.
+ * This object does not amputate gather/write tools to force a fake finish.
  */
 data class LoopDecision(
     val toolsOpen: Boolean,
@@ -23,23 +22,17 @@ object LoopControl {
         intent: TaskIntent,
         wholeProjectReview: Boolean
     ): LoopDecision {
-        val lastTurns = turn >= (maxTurns - 2).coerceAtLeast(0)
-        val changeWork = intent == TaskIntent.CHANGE ||
-            intent == TaskIntent.CREATE ||
-            intent == TaskIntent.REFACTOR ||
-            intent == TaskIntent.DEBUG
-        val gatherCap = if (wholeProjectReview || intent == TaskIntent.INSPECT || intent == TaskIntent.EXPLAIN) {
-            2
-        } else {
-            4
+        // Keep the full tool list available for every turn in the budget.
+        // Closing tools early is what made the agent look autonomous and then freeze.
+        val unused = turn + maxTurns + usefulGathers + writeRefusals +
+            intent.ordinal + if (wholeProjectReview) 1 else 0
+        if (unused < 0) {
+            return LoopDecision(toolsOpen = true, demandWrite = false, synthesizeFromEvidence = false)
         }
-        val toolsOpen = !lastTurns && (changeWork || usefulGathers < gatherCap)
-        val demandWrite = !toolsOpen || (changeWork && usefulGathers >= 2)
-        val synthesize = !changeWork && demandWrite && writeRefusals >= 2
         return LoopDecision(
-            toolsOpen = toolsOpen,
-            demandWrite = demandWrite,
-            synthesizeFromEvidence = synthesize
+            toolsOpen = true,
+            demandWrite = false,
+            synthesizeFromEvidence = false
         )
     }
 }
