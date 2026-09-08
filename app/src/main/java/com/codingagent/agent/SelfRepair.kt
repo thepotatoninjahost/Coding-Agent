@@ -4,7 +4,6 @@ import java.time.Instant
 import com.codingagent.intake.OperationKind
 import com.codingagent.intake.TaskOperation
 import com.codingagent.workspace.AgentTask
-import com.codingagent.workspace.ChangeDiff
 import com.codingagent.workspace.MutationCoordinator
 import com.codingagent.workspace.MutationProposeResult
 import com.codingagent.workspace.ProjectFileService
@@ -12,20 +11,54 @@ import com.codingagent.workspace.ProjectWorkspace
 import com.codingagent.workspace.VerificationReport
 
 /**
- * ONE JOB: Turn "fix yourself" into a staged file change the owner can approve.
+ * ONE JOB: Detect and stage self-repair requests — mutations to the agent's own source tree.
  */
 object SelfRepair {
-    fun isRequest(request: String): Boolean {
-        val t = request.lowercase()
-        val phrases = listOf(
-            "fix yourself", "fix itself", "fix this agent", "repair yourself",
-            "modify yourself", "modify itself", "self-fix", "self fix",
-            "self-mod", "self modification", "self-modification",
-            "heal yourself", "patch yourself"
+
+    private val PHRASES = Regex(
+        """\b(fix yourself|modify yourself|self[\-\s]?repair|repair yourself|update yourself|improve yourself)\b""",
+        RegexOption.IGNORE_CASE
+    )
+
+    /** Returns true when [text] is a self-repair request. */
+    fun isRequest(text: String): Boolean = PHRASES.containsMatchIn(text)
+
+    /**
+     * Choose the best repair operation for the current workspace state.
+     * Priority: well-known agent files that lack the contract stamp.
+     */
+    fun chooseOperation(
+        workspace: ProjectWorkspace,
+        files: ProjectFileService,
+        verification: VerificationReport
+    ): TaskOperation? {
+        val priority = listOf(
+            "ChatWorkspace.kt",
+            "AutonomousAgent.kt",
+            "AgentConstitution.kt",
+            "ToolCallOutcomeHandler.kt"
         )
-        return phrases.any { t.contains(it) }
+        val indexed = workspace.summary().files
+        for (candidate in priority) {
+            val found = indexed.firstOrNull { it.path == candidate || it.path.endsWith("/$candidate") }
+                ?: continue
+            val content = runCatching { files.read(found.path).content }.getOrNull() ?: continue
+            if (content.contains("SELF_REPAIR_CONTRACT")) continue
+            val stamped = content.trimEnd() + "\n// SELF_REPAIR_CONTRACT: agent-reviewed\n"
+            return TaskOperation(
+                kind = OperationKind.REPLACE,
+                path = found.path,
+                oldText = content,
+                newText = stamped
+            )
+        }
+        return null
     }
 
+    /**
+     * Stage a self-repair proposal for dual-owner approval.
+     * Always targets src/SelfRepair.kt so the agent can evolve its own repair logic.
+     */
     fun handle(
         taskId: String,
         request: String,
@@ -34,127 +67,52 @@ object SelfRepair {
         files: ProjectFileService,
         mutations: MutationCoordinator
     ): AgentTask {
-        val report = workspace.verify()
-        val operation = chooseOperation(workspace, files, report)
-            ?: return AgentTask(
-                taskId, request, "needs-input", plan, emptyList(),
-                report,
-                listOf("${Instant.now()}: self-repair needs a mounted source tree"),
-                "Self-repair needs a mounted project with source files. " +
-                    "Import the Coding-Agent folder (or any project you want repaired), then say fix yourself again."
-            )
-        return when (val proposed = mutations.propose(request, listOf(operation), "self-repair")) {
+        val selfRepairSource = buildString {
+            appendLine("package com.codingagent.agent")
+            appendLine()
+            appendLine("/**")
+            appendLine(" * ONE JOB: Detect and stage self-repair mutations for the agent source tree.")
+            appendLine(" */")
+            appendLine("object SelfRepair {")
+            appendLine("    private val PHRASES = Regex(")
+            appendLine("        \"\"\"\\\\b(fix yourself|modify yourself|self[\\\\-\\\\s]?repair)\\\\b\"\"\",")
+            appendLine("        RegexOption.IGNORE_CASE")
+            appendLine("    )")
+            appendLine()
+            appendLine("    fun isRequest(text: String): Boolean = PHRASES.containsMatchIn(text)")
+            appendLine("}")
+        }
+
+        val op = TaskOperation(
+            kind = OperationKind.CREATE_FILE,
+            path = "src/SelfRepair.kt",
+            text = selfRepairSource
+        )
+
+        return when (val result = mutations.propose(request, listOf(op), "Self-repair: stage src/SelfRepair.kt")) {
             is MutationProposeResult.Proposed -> {
-                val proposal = proposed.proposal
+                val proposal = result.proposal
                 AgentTask(
-                    taskId, request, "needs-approval", plan, proposal.changeSet.changes,
-                    proposal.verification,
-                    listOf("${Instant.now()}: self-repair staged ${proposal.id} -> ${operation.path}"),
-                    ChangeDiff.ownerReviewText(proposal)
+                    id = taskId,
+                    request = request,
+                    status = "needs-approval",
+                    plan = plan,
+                    changes = proposal.changeSet.changes,
+                    verification = proposal.verification,
+                    events = listOf("${Instant.now()}: self-repair proposal ${proposal.id} staged; awaiting dual approval"),
+                    summary = "Self-repair proposal staged. Confirm twice to apply src/SelfRepair.kt."
                 )
             }
             is MutationProposeResult.Rejected -> AgentTask(
-                taskId, request, "failed", plan, emptyList(),
-                VerificationReport(false, emptyList()),
-                listOf("${Instant.now()}: self-repair propose rejected"),
-                "Self-repair could not stage a change: ${proposed.reason}"
+                id = taskId,
+                request = request,
+                status = "failed",
+                plan = plan,
+                changes = emptyList(),
+                verification = VerificationReport(false, emptyList()),
+                events = listOf("${Instant.now()}: self-repair proposal rejected: ${result.reason}"),
+                summary = "Self-repair staging failed: ${result.reason}"
             )
         }
     }
-
-    internal fun chooseOperation(
-        workspace: ProjectWorkspace,
-        files: ProjectFileService,
-        report: VerificationReport
-    ): TaskOperation? {
-        val marker = report.issues.firstOrNull {
-            val m = it.message.lowercase()
-            m.contains("todo") || m.contains("fixme") || m.contains("stub") || m.contains("placeholder")
-        }
-        if (marker != null) {
-            val current = runCatching { files.read(marker.path).content }.getOrNull() ?: return null
-            val lines = current.lineSequence().toList()
-            val idx = (marker.line - 1).coerceIn(0, lines.lastIndex.coerceAtLeast(0))
-            val rebuilt = lines.toMutableList()
-            if (rebuilt.isNotEmpty()) {
-                rebuilt[idx] = rebuilt[idx]
-                    .replace(Regex("TODO|FIXME|STUB|placeholder", RegexOption.IGNORE_CASE), "DONE")
-            }
-            val next = rebuilt.joinToString("\n").let { if (current.endsWith("\n")) "$it\n" else it }
-            if (next != current) {
-                return TaskOperation(
-                    OperationKind.REPLACE,
-                    path = marker.path,
-                    oldText = current,
-                    newText = next
-                )
-            }
-        }
-
-        val paths = files.listSourceFilePaths()
-        val agentFile = paths.firstOrNull { path ->
-            val n = path.substringAfterLast('/').lowercase()
-            n == "selfrepair.kt" || n == "pendingworkresume.kt" || n == "chatworkspace.kt" ||
-                n == "opjobstore.kt" || n == "openjobstore.kt" || n == "autonomousagent.kt"
-        }
-        if (agentFile != null) {
-            val current = runCatching { files.read(agentFile).content }.getOrNull() ?: return null
-            if (current.contains("SELF_REPAIR_CONTRACT")) {
-                return appendContractTouch(agentFile, current)
-            }
-            val stamp = "\n// SELF_REPAIR_CONTRACT: dual-approve staged edits; never claim applied until Review confirms.\n"
-            return TaskOperation(
-                OperationKind.REPLACE,
-                path = agentFile,
-                oldText = current,
-                newText = current.trimEnd() + stamp
-            )
-        }
-
-        if (paths.isEmpty()) {
-            return TaskOperation(
-                OperationKind.CREATE_FILE,
-                path = "src/SelfRepair.kt",
-                text = spine()
-            )
-        }
-        val first = paths.first()
-        val current = runCatching { files.read(first).content }.getOrNull() ?: return null
-        if (current.contains("SELF_REPAIR_CONTRACT")) return appendContractTouch(first, current)
-        return TaskOperation(
-            OperationKind.REPLACE,
-            path = first,
-            oldText = current,
-            newText = current.trimEnd() +
-                "\n// SELF_REPAIR_CONTRACT: owner dual-approves every self-repair write.\n"
-        )
-    }
-
-    private fun appendContractTouch(path: String, current: String): TaskOperation {
-        val line = "\n// SELF_REPAIR_TOUCH ${System.currentTimeMillis()}\n"
-        return TaskOperation(OperationKind.REPLACE, path = path, oldText = current, newText = current.trimEnd() + line)
-    }
-
-    private fun spine(): String = """
-package com.codingagent.repair
-
-/**
- * Local self-repair spine. Staged by the agent; applied only after two owner approvals.
- */
-class SelfRepairLoop(
-    private val maxAttempts: Int = 3
-) {
-    fun run(diagnose: () -> String, apply: (String) -> Boolean, verify: () -> Boolean): Boolean {
-        var attempt = 0
-        while (attempt < maxAttempts) {
-            val problem = diagnose()
-            if (problem.isBlank() && verify()) return true
-            if (!apply(problem)) return false
-            if (verify()) return true
-            attempt++
-        }
-        return false
-    }
-}
-""".trimIndent() + "\n"
 }
