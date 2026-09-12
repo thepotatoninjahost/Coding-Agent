@@ -62,13 +62,21 @@ class ChatWorkspace(
         }
         progressListener?.onProgress("PLANNING", "Starting request")
         val packaged = packageWithMemory(trimmed)
+        val workLog = mutableListOf<String>()
         val result = if (agent == null) {
             null
         } else {
             val events = agent.run(packaged) { event ->
                 when (event) {
-                    is AutonomousAgentEvent.Phase -> progressListener?.onProgress(event.name, event.detail)
-                    is AutonomousAgentEvent.ToolStarted -> progressListener?.onProgress("TOOL", "${event.name}: ${event.arguments.take(80)}")
+                    is AutonomousAgentEvent.Phase -> {
+                        if (event.name == "PURPOSE" && event.detail.isNotBlank()) workLog += event.detail
+                        progressListener?.onProgress(event.name, event.detail)
+                    }
+                    is AutonomousAgentEvent.ToolStarted -> {
+                        val purpose = event.purpose.ifBlank { "${event.name}: ${event.arguments.take(80)}" }
+                        workLog += purpose
+                        progressListener?.onProgress("TOOL", purpose.take(120))
+                    }
                     is AutonomousAgentEvent.ToolFinished -> progressListener?.onProgress(
                         "TOOL",
                         if (event.success) "${event.name} ok" else "${event.name} failed"
@@ -106,7 +114,7 @@ class ChatWorkspace(
                 else -> asRuntime(agent, null) ?: agent.execute(packaged)
             }
         }
-        return persist(result)
+        return persist(result, workLog)
     }
 
     private fun asRuntime(agent: AutonomousAgent, task: AgentTask?): AgentRuntimeResult? {
@@ -120,7 +128,7 @@ class ChatWorkspace(
         return AgentRuntimeResult.Completed(task)
     }
 
-    private fun persist(result: AgentRuntimeResult?): ChatTurn {
+    private fun persist(result: AgentRuntimeResult?, workLog: List<String> = emptyList()): ChatTurn {
         val root = OpenJobStore.boundRoot()
         if (root != null) {
             when (result) {
@@ -139,10 +147,10 @@ class ChatWorkspace(
             }
         }
         val response = when (result) {
-            is AgentRuntimeResult.Completed -> ChatMessage(role = ChatRole.AGENT, content = formatTask(result.task), taskId = result.task.id)
+            is AgentRuntimeResult.Completed -> ChatMessage(role = ChatRole.AGENT, content = formatTask(result.task, workLog), taskId = result.task.id)
             is AgentRuntimeResult.NeedsInput -> ChatMessage(role = ChatRole.AGENT, content = result.question, taskId = result.task.id)
             is AgentRuntimeResult.NeedsApproval -> ChatMessage(role = ChatRole.AGENT, content = result.question, taskId = result.task.id)
-            is AgentRuntimeResult.Failed -> ChatMessage(role = ChatRole.AGENT, content = formatTask(result.task), taskId = result.task.id)
+            is AgentRuntimeResult.Failed -> ChatMessage(role = ChatRole.AGENT, content = formatTask(result.task, workLog), taskId = result.task.id)
             null -> ChatMessage(role = ChatRole.SYSTEM, content = unavailableMessageProvider())
         }
         store.recordChatMessage(response)
@@ -154,7 +162,8 @@ class ChatWorkspace(
         if (PendingWorkResume.isResumeRequest(text)) return false
         if (t.length <= 24 && t in setOf("hello", "hi", "status", "list", "list files")) return false
         return t.contains("create") || t.contains("build") || t.contains("implement") ||
-            t.contains("fix") || t.contains("add") || t.contains("write")
+            t.contains("fix") || t.contains("add") || t.contains("write") ||
+            t.contains("improve") || t.contains("change") || t.contains("edit")
     }
 
     private fun packageWithMemory(current: String): String {
@@ -181,7 +190,17 @@ class ChatWorkspace(
         }
     }
 
-    private fun formatTask(task: AgentTask): String = buildString {
+    private fun formatTask(task: AgentTask, workLog: List<String> = emptyList()): String = buildString {
+        if (workLog.isNotEmpty()) {
+            append("Work:\n")
+            workLog.distinct().take(16).forEach { line ->
+                append("- ")
+                append(line)
+                append('\n')
+            }
+            append('\n')
+        }
+
         val summary = sanitizeSummary(task.summary)
         if (task.status == "failed" || task.status == "stopped") {
             append(summary)
@@ -251,7 +270,7 @@ class ChatWorkspace(
         if (DegenerateOutput.isDegenerate(text)) {
             return DegenerateOutput.sanitize(text)
         }
-        return text.take(2_000)
+        return text.take(12_000)
     }
 }
 
