@@ -111,15 +111,11 @@ class ToolCallOutcomeHandler(
         val signature = "${response.name}|${response.arguments.trim()}"
         val isIdenticalCall = signature == state.lastToolSignature
 
-        // Execute the tool first — we need the result to decide if this is
-        // a legitimate re-call (new/useful result) or a stuck loop (same result).
-        emit(AutonomousAgentEvent.ToolStarted(response.name, response.arguments))
+        val purpose = ToolPurpose.of(response.name, response.arguments)
+        emit(AutonomousAgentEvent.ToolStarted(response.name, response.arguments, purpose))
         if (isCancelled()) return ToolTurnOutcome.Stop
         val toolResult = executeTool(response.name, response.arguments)
 
-        // After any successful mutation, reset the repeat counter completely.
-        // Re-reading the same file after changing it is legitimate verification,
-        // not a loop. The model is doing its job.
         val isMutation = response.name == "replace_text" || response.name == "create_file"
         if (isMutation && !toolResult.startsWith("ERROR:")) {
             state.lastToolSignature = ""
@@ -130,9 +126,6 @@ class ToolCallOutcomeHandler(
         if (isIdenticalCall && !isMutation) {
             val resultChanged = toolResult.trim() != state.lastToolResult.trim()
             if (resultChanged && toolResult.isNotBlank() && !toolResult.startsWith("ERROR:")) {
-                // Same tool call but different result — model is making real progress.
-                // This is normal for verification loops and iterative searches.
-                // Reset completely since we have new information.
                 state.identicalRepeats = 0
                 state.repeatResetCount = 0
             } else {
@@ -140,7 +133,6 @@ class ToolCallOutcomeHandler(
             }
 
             if (state.identicalRepeats >= config.maxIdenticalToolRepeats) {
-                // Listing requests with usable evidence: complete gracefully.
                 if ((response.name == "list_files" || response.name == "search_project") &&
                     state.lastEvidence.isNotBlank() && !state.lastEvidence.startsWith("ERROR:") &&
                     isListingRequest(currentRequestFocus(normalized))
@@ -159,9 +151,6 @@ class ToolCallOutcomeHandler(
                 }
 
                 state.repeatResetCount++
-                // One redirect with specific next-action guidance, then abort.
-                // Two redirects (resetCount >= 3) needs 9 identical turns and loses
-                // to LoopControl lastTurns (maxTurns-2), so the loop never Failed.
                 if (state.repeatResetCount >= 2) {
                     val report = workspace.verify()
                     val msg = "Aborted: ${response.name} was repeated ${state.identicalRepeats} times " +
@@ -177,8 +166,6 @@ class ToolCallOutcomeHandler(
                     return ToolTurnOutcome.Stop
                 }
 
-                // Redirect with specific, actionable guidance rather than just "stop".
-                // Tell the model exactly what to do next based on what we know about the task.
                 val pendingProposals = mutations.pending()
                 val nextStep = when {
                     pendingProposals.isNotEmpty() ->
@@ -204,7 +191,6 @@ class ToolCallOutcomeHandler(
                 )
                 state.lastToolSignature = ""
                 state.identicalRepeats = 0
-                // Update evidence even from a repeated call if we got something.
                 if (toolResult.isNotBlank() && toolResult != "(no files)") {
                     state.lastEvidence = toolResult
                 }
@@ -216,7 +202,6 @@ class ToolCallOutcomeHandler(
             state.identicalRepeats = 1
         }
 
-        // Update evidence — never wipe gathered context with an empty tool body.
         if (toolResult.isNotBlank() && toolResult != "(no files)") {
             state.lastEvidence = toolResult
         }
@@ -287,9 +272,9 @@ class ToolCallOutcomeHandler(
                 ) {
                     val report = workspace.verify()
                     val summary = buildString {
-                        append("File: ${path.trim().trimStart('/')}\n───\n")
+                        append("File: ${path.trim().trimStart('/')}\n\u2500\u2500\u2500\n")
                         append(toolResult.take(12_000))
-                        if (toolResult.length > 12_000) append("\n… (truncated)")
+                        if (toolResult.length > 12_000) append("\n\u2026 (truncated)")
                     }
                     val task = AgentTask(
                         taskId, normalized, "completed", plan,
