@@ -8,6 +8,10 @@ import java.io.File
 class ExperienceRecorder(private val root: File) {
     private val file = root.resolve(".coding-agent/experience.tsv")
 
+    init {
+        LessonContext.bindExperience(::all)
+    }
+
     @Synchronized
     fun record(task: String, operation: String, result: String, evidence: String, passed: Boolean) {
         file.parentFile?.mkdirs()

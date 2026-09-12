@@ -30,6 +30,7 @@ class SelfEvolution(private val root: File) {
 
     init {
         versionsRoot.mkdirs()
+        LessonContext.bindEvolution(::history)
     }
 
     fun stageSource(source: File, kind: String): File {

@@ -40,7 +40,7 @@ object AgentPrompt {
         intake: TaskIntake,
         evidence: String,
         maxEvidenceChars: Int,
-        lessons: String = ""
+        lessons: String = LessonContext.prompt()
     ): String = buildString {
         appendLine("You are the Coding-Agent on this device. You extend the model with tools and real evidence — never invent paths or file contents.")
         appendLine()
