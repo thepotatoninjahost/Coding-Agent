@@ -20,7 +20,7 @@ class AgentDirectLanes(
     fun respond(taskId: String, request: String, intake: TaskIntake, plan: AgentPlan): AgentTask? {
         val t = request.lowercase().trim()
         if (SelfRepair.isRequest(request)) {
-            return SelfRepair.handle(taskId, request, plan, workspace, files, mutations)
+            SelfRepair.handle(taskId, request, plan, workspace, files, mutations)?.let { return it }
         }
         if (AgentRequestKind.isAgentMeta(t)) {
             return AgentTask(
