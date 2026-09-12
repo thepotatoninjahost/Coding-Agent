@@ -1,6 +1,7 @@
 package com.codingagent.agent
 
 import com.codingagent.intake.TaskIntake
+import com.codingagent.intake.TaskIntent
 import com.codingagent.workspace.ProjectFileService
 import com.codingagent.workspace.ProjectWorkspace
 import com.codingagent.workspace.VerificationReport
@@ -62,6 +63,9 @@ object AgentPrompt {
         appendLine("9. Prefer research_web over guessing external APIs. Prefer project files over inventing local paths.")
         if (AgentRequestKind.isWholeProjectReview(request)) {
             appendLine("10. This is a whole-project review. After real evidence, write concrete improvements.")
+        }
+        if (intake.intent in setOf(TaskIntent.CHANGE, TaskIntent.CREATE, TaskIntent.REFACTOR, TaskIntent.DEBUG)) {
+            appendLine("11. This is change work. A review alone is not the work. After reading the target, stage replace_text or create_file. Use run_command when a shell check is cheaper than guessing.")
         }
         if (lessons.isNotBlank()) {
             appendLine()
