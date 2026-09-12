@@ -80,4 +80,23 @@ class GoalInterpreterTest {
         assertEquals(TaskIntent.UNKNOWN, contract.intent)
         assertTrue(contract.ready)
     }
+
+    @Test fun reviewPlusImproveNamedFileIsChangeWork() {
+        val root = Files.createTempDirectory("goal-improve").toFile()
+        val intake = TaskIntakeParser(root).parse(
+            "review project coding agent. i would like you to improve the selfevolution.kt"
+        )
+        assertEquals(TaskIntent.CHANGE, intake.intent)
+        assertTrue(intake.executionReady)
+        assertTrue(intake.contract.targetPaths.any { it.contains("selfevolution.kt", ignoreCase = true) })
+    }
+
+    @Test fun improvementsWithoutExactPathIsStillChange() {
+        val root = Files.createTempDirectory("goal-improvements").toFile()
+        val intake = TaskIntakeParser(root).parse(
+            "Review the project coding agent. I would like to make some improvements to it."
+        )
+        assertEquals(TaskIntent.CHANGE, intake.intent)
+        assertTrue(intake.executionReady)
+    }
 }
