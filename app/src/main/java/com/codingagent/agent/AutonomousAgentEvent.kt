@@ -9,7 +9,7 @@ import com.codingagent.workspace.PendingChangeProposal
 sealed class AutonomousAgentEvent {
     data class Started(val taskId: String, val request: String) : AutonomousAgentEvent()
     data class Phase(val name: String, val detail: String) : AutonomousAgentEvent()
-    data class ToolStarted(val name: String, val arguments: String) : AutonomousAgentEvent()
+    data class ToolStarted(val name: String, val arguments: String, val purpose: String = "") : AutonomousAgentEvent()
     data class ToolFinished(val name: String, val result: String, val success: Boolean) : AutonomousAgentEvent()
     data class ModelDelta(val text: String) : AutonomousAgentEvent()
     data class ModelMessage(val content: String) : AutonomousAgentEvent()
