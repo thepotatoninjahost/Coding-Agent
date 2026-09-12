@@ -33,7 +33,7 @@ object SelfRepair {
     )
 
     private val PHRASES = Regex(
-        """\\b(fix yourself|modify yourself|self[\\-\\s]?repair|repair yourself|update yourself|improve yourself)\\b""",
+        "\\b(fix yourself|modify yourself|self[-\\s]?repair|repair yourself|update yourself|improve yourself)\\b",
         RegexOption.IGNORE_CASE
     )
 
@@ -161,7 +161,7 @@ object SelfRepair {
         appendLine("    const val CONTRACT_STAMP = \"$CONTRACT_STAMP\"")
         appendLine()
         appendLine("    private val PHRASES = Regex(")
-        appendLine("        \"\"\"\\\\b(fix yourself|modify yourself|self[\\\\-\\\\s]?repair|repair yourself|update yourself|improve yourself)\\\\b\"\"\",")
+        appendLine("        \"\\b(fix yourself|modify yourself|self[-\\s]?repair|repair yourself|update yourself|improve yourself)\\b\",")
         appendLine("        RegexOption.IGNORE_CASE")
         appendLine("    )")
         appendLine()
