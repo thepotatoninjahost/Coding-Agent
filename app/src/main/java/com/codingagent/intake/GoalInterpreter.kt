@@ -58,7 +58,10 @@ class GoalInterpreter(private val root: File) {
             matches(request, "test|tests|testing|verify|build") -> TaskIntent.TEST
             matches(request, "fix|debug|broken|error|crash|bug|repair|patch") -> TaskIntent.DEBUG
             matches(request, "refactor|restructure|rename|clean up|cleanup") -> TaskIntent.REFACTOR
-            matches(request, "change|edit|update|modify|implement|add|remove|delete|insert") -> TaskIntent.CHANGE
+            matches(
+                request,
+                "change|edit|update|modify|implement|improve|improvement|improvements|enhance|upgrade|add|remove|delete|insert"
+            ) -> TaskIntent.CHANGE
             matches(request, "explain|why|what does|understand") -> TaskIntent.EXPLAIN
             matches(request, "inspect|list files|search project|find file|analy[sz]e|analysis|review|audit|assess|evaluate|thoughts|look over|report on|summarize") -> TaskIntent.INSPECT
             matches(request, "research|learn|study|investigate|compare|explore") -> TaskIntent.EXPLAIN
