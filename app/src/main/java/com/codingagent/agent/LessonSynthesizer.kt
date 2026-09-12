@@ -1,7 +1,7 @@
 package com.codingagent.agent
 
 /**
- * ONE JOB: Convert raw experience.tsv lines into prompt-ready lessons.
+ * ONE JOB: Convert raw experience.tsv lines and evolution history into prompt-ready lessons.
  * Enables self-modification: the agent reads its own past outcomes and avoids
  * repeating failures while reinforcing successful patterns.
  *
@@ -13,13 +13,14 @@ object LessonSynthesizer {
     private const val MAX_LESSONS = 4
     private const val PREVIEW = 100
 
-    fun synthesize(lines: List<String>): String {
-        if (lines.isEmpty()) return ""
-        val recent = lines.takeLast(LOOKBACK)
-        val failures = recent.filter { parsePassed(it) == false }
-        val successes = recent.filter { parsePassed(it) == true }
-        if (failures.isEmpty() && successes.isEmpty()) return ""
-        return buildString {
+    fun synthesize(
+        lines: List<String>,
+        evolution: List<EvolutionVersion> = emptyList()
+    ): String {
+        val body = buildString {
+            val recent = lines.takeLast(LOOKBACK)
+            val failures = recent.filter { parsePassed(it) == false }
+            val successes = recent.filter { parsePassed(it) == true }
             if (failures.isNotEmpty()) {
                 appendLine("Patterns that failed recently — avoid repeating:")
                 failures.takeLast(MAX_LESSONS).forEach { line ->
@@ -36,7 +37,17 @@ object LessonSynthesizer {
                     appendLine("  - [$op] $task")
                 }
             }
+            val promoted = evolution.takeLast(MAX_LESSONS)
+            if (promoted.isNotEmpty()) {
+                appendLine("Recently promoted self-changes (dual-approved snapshots):")
+                promoted.forEach { version ->
+                    val name = version.sourcePath.substringAfterLast('/').ifBlank { version.id.take(8) }
+                    val verdict = if (version.evaluationPassed) "verified" else "unverified"
+                    appendLine("  - [${version.kind}] $name $verdict")
+                }
+            }
         }.trim()
+        return body
     }
 
     private fun parsePassed(line: String): Boolean? =

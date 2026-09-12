@@ -61,7 +61,16 @@ class SelfEvolution(private val root: File) {
         )
         activeFile.parentFile?.mkdirs()
         activeFile.writeText(version.id)
-        historyFile.appendText(listOf(version.id, kind, version.checksum, version.evaluationPassed, version.createdAt).joinToString("\t") + "\n")
+        historyFile.appendText(
+            listOf(
+                version.id,
+                kind,
+                version.checksum,
+                version.evaluationPassed,
+                version.createdAt,
+                staged.name
+            ).joinToString("\t") + "\n"
+        )
         return PromotionResult.Promoted(version)
     }
 
@@ -69,7 +78,18 @@ class SelfEvolution(private val root: File) {
 
     fun history(): List<EvolutionVersion> = if (!historyFile.isFile) emptyList() else historyFile.readLines().mapNotNull { line ->
         val fields = line.split('\t')
-        if (fields.size != 5) null else EvolutionVersion(fields[0], fields[1], "", fields[2], fields[3].toBoolean(), fields[4].toLongOrNull() ?: 0)
+        if (fields.size < 5) {
+            null
+        } else {
+            EvolutionVersion(
+                id = fields[0],
+                kind = fields[1],
+                sourcePath = fields.getOrNull(5).orEmpty(),
+                checksum = fields[2],
+                evaluationPassed = fields[3].toBoolean(),
+                createdAt = fields[4].toLongOrNull() ?: 0
+            )
+        }
     }
 
     private fun checksum(file: File): String = MessageDigest.getInstance("SHA-256")
