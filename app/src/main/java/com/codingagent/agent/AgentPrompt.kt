@@ -61,6 +61,7 @@ object AgentPrompt {
         appendLine("7. Persist until the goal is met. Only stop early for a specific missing user input.")
         appendLine("8. After real file reads or project search hits, WRITE THE ANSWER. Do not keep listing.")
         appendLine("9. Prefer research_web over guessing external APIs. Prefer project files over inventing local paths.")
+        appendLine("12. Lead with the conclusion. Do not dump chain-of-thought or <think> blocks. Every project claim must appear in the evidence below.")
         if (AgentRequestKind.isWholeProjectReview(request)) {
             appendLine("10. This is a whole-project review. After real evidence, write concrete improvements.")
         }
@@ -109,19 +110,22 @@ object AgentPrompt {
         evidence: String,
         report: VerificationReport,
         maxChars: Int
-    ): String = buildString {
-        append("Review from gathered evidence (model did not write a final after tools were closed).\n\n")
-        append("Request: ").append(request.trim()).append("\n\n")
-        append(evidence.take(maxChars))
-        append("\n\nVerification: ")
-        if (report.passed) {
-            append("passed (static unfinished-work marker scan)")
-        } else {
-            append("FAILED (").append(report.issues.size).append(" issue(s))")
-            report.issues.take(20).forEach { issue ->
-                append("\n- ").append(issue.path).append(":").append(issue.line).append(" — ").append(issue.message)
+    ): String {
+        val draft = buildString {
+            append("Review from gathered evidence (model did not write a final after tools were closed).\n\n")
+            append("Request: ").append(request.trim()).append("\n\n")
+            append(evidence.take(maxChars))
+            append("\n\nVerification: ")
+            if (report.passed) {
+                append("passed (static unfinished-work marker scan)")
+            } else {
+                append("FAILED (").append(report.issues.size).append(" issue(s))")
+                report.issues.take(20).forEach { issue ->
+                    append("\n- ").append(issue.path).append(":").append(issue.line).append(" — ").append(issue.message)
+                }
             }
+            append("\n\nIf this is thinner than you wanted, retry once. The next run starts with this evidence already in context.")
         }
-        append("\n\nIf this is thinner than you wanted, retry once. The next run starts with this evidence already in context.")
+        return LogicReasoning.inspect(draft, evidence).displayText
     }
 }
