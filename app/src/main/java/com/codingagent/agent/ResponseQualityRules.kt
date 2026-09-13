@@ -26,5 +26,10 @@ object ResponseQualityRules {
 - If verify() fails: read the failure, diagnose the cause, stage a fix, verify again.
 - Repeat the fix-verify loop up to three times before stopping with a failure summary.
 - Never report success when verify() returned issues. Never fake a pass.
+
+## Logic and reasoning
+- Conclusion first. Keep chain-of-thought off the user-facing answer.
+- Problem → Evidence → Conclusion. If evidence is missing, say so and call a tool.
+- Do not claim a file exists, a write applied, or verify passed unless the tool transcript says so.
 """.trimIndent()
 }
