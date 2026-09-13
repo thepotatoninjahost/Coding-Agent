@@ -12,7 +12,6 @@ object DegenerateOutput {
         val trimmed = text.trim()
         if (trimmed.isEmpty()) return false
 
-        // Structured listing / local-evidence summaries are never treated as model spam.
         if (trimmed.startsWith("Project files:") ||
             trimmed.startsWith("Source files:") ||
             trimmed.startsWith("Indexed source files") ||
@@ -27,7 +26,6 @@ object DegenerateOutput {
         val lines = trimmed.lineSequence().map { it.trim() }.filter { it.isNotEmpty() }.toList()
         if (lines.isEmpty()) return false
 
-        // Majority path-like lines = real inventory, not token spam.
         if (isMostlyFilePaths(lines)) return false
 
         if (lines.size >= 5) {
@@ -50,17 +48,12 @@ object DegenerateOutput {
         val importLike = lines.filter { it.startsWith("import ") }
         if (importLike.size >= 12 && importLike.size * 2 >= lines.size) return true
 
-        // The checks above only catch REPETITIVE spam. A model can also produce non-repeating
-        // garbage — corrupted encoding, or "token soup" that isn't a real answer in any
-        // language — that would otherwise sail through and get reported as a clean "completed"
-        // task. Catch those two shapes without touching the repetition logic above.
         if (hasCorruptedEncoding(trimmed)) return true
         if (looksLikeTokenSoup(tokens)) return true
 
         return false
     }
 
-    /** Replacement characters / control bytes indicate a mangled response, not prose. */
     private fun hasCorruptedEncoding(text: String): Boolean {
         if (text.length < 20) return false
         var bad = 0
@@ -71,13 +64,6 @@ object DegenerateOutput {
         return bad.toDouble() / text.length > 0.02
     }
 
-    /**
-     * Non-repeating gibberish: a long run of tokens that mostly don't look like real words,
-     * identifiers, numbers, or paths. Deliberately conservative (long tokens only, majority
-     * vote, requires a reasonable sample size) so normal prose or code is never misflagged —
-     * this only fires on the kind of run-on nonsense that has no vowels, no digits, no path
-     * separators, and no punctuation structure at all.
-     */
     private fun looksLikeTokenSoup(tokens: List<String>): Boolean {
         if (tokens.size < 12) return false
         val judged = tokens.filter { it.trim { c -> !c.isLetterOrDigit() }.length > 5 }
@@ -95,13 +81,14 @@ object DegenerateOutput {
     }
 
     fun sanitize(text: String, fallbackPrefix: String = "Model output was degenerate"): String {
-        if (!isDegenerate(text)) return text.take(2_000)
-        val lines = text.lineSequence().map { it.trim() }.filter { it.isNotEmpty() }.toList()
+        val stripped = LogicReasoning.split(text).first.ifBlank { text }
+        if (!isDegenerate(stripped)) return stripped.take(2_000)
+        val lines = stripped.lineSequence().map { it.trim() }.filter { it.isNotEmpty() }.toList()
         val top = lines.groupingBy { it }.eachCount().maxByOrNull { it.value }
         return if (top != null && top.value >= 5) {
             "$fallbackPrefix (repeated \"${top.key.take(80)}\" ×${top.value})."
         } else {
-            "$fallbackPrefix (low-entropy or token spam, ${text.length} chars)."
+            "$fallbackPrefix (low-entropy or token spam, ${stripped.length} chars)."
         }
     }
 
