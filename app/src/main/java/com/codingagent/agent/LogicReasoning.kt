@@ -101,7 +101,7 @@ object LogicReasoning {
             val name = path.substringAfterLast('/')
             val known = evidence.contains(path, ignoreCase = true) || evidence.contains(name, ignoreCase = true)
             if (known) null else "Cited `$path` which does not appear in gathered evidence"
-        }
+        }.toList()
     }
 
     private fun looksLikeChangeRequest(request: String): Boolean {
