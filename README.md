@@ -39,7 +39,6 @@ Terminal behavior and limits are documented in **Terminal limitations**.
 
 ## Recommended remote provider (as of 2026-08)
 
-SambaNova has shown rate-limit (429) and occasional Cloudflare blocks. Prefer **Groq** for reliability:
 
 - Base URL: `https://api.groq.com/openai/v1`
 - Model: `llama-3.3-70b-versatile`
