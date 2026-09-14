@@ -96,12 +96,19 @@ object LogicReasoning {
 
     private fun inventedPaths(answer: String, evidence: String): List<String> {
         if (evidence.isBlank()) return emptyList()
-        val claimed = FILE_CLAIM.findAll(answer).map { it.groupValues[1] }.distinct()
-        return claimed.mapNotNull { path ->
+        val issues = ArrayList<String>()
+        val seen = HashSet<String>()
+        for (match in FILE_CLAIM.findAll(answer)) {
+            val path = match.groupValues[1]
+            if (!seen.add(path)) continue
             val name = path.substringAfterLast('/')
-            val known = evidence.contains(path, ignoreCase = true) || evidence.contains(name, ignoreCase = true)
-            if (known) null else "Cited `$path` which does not appear in gathered evidence"
+            val known = evidence.contains(path, ignoreCase = true) ||
+                evidence.contains(name, ignoreCase = true)
+            if (!known) {
+                issues.add("Cited `$path` which does not appear in gathered evidence")
+            }
         }
+        return issues
     }
 
     private fun looksLikeChangeRequest(request: String): Boolean {
