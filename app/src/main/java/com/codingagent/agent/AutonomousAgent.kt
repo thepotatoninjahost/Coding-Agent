@@ -155,10 +155,15 @@ class AutonomousAgent(
         // (runCatching) — PlanningLoop can at worst no-op, never crash a live run, since
         // this file can't be compiled/tested in this environment before shipping.
         val planningLoop = PlanningLoop(plan)
-        // Wired in: was previously dead code. Tracks the model's actual tool calls against
-        // an ideal fixed tool sequence for observability/journaling only — it never drives
-        // or gates the real turn loop below, which stays fully model-directed.
         val toolSelectionLoop = ToolSelectionLoop(ToolSelector().select(intake))
+        // Intake and the initial repository view are real execution prerequisites, not
+        // observational plan entries. Complete them only after the same workspace instance
+        // used by mutations has produced its repository summary.
+        runCatching { workspace.summary() }.onSuccess {
+            planningLoop.completePhase("intake", "request parsed")
+            planningLoop.completePhase("understand", "repository summary established")
+            toolSelectionLoop.completeKind(ToolKind.INDEX_REPOSITORY, "repository summary established")
+        }
         emit(AutonomousAgentEvent.Phase("PLAN", plan.steps.joinToString(" → ") { it.phase }))
 
         // Direct lanes: do not force the full tool loop for social / status / explicit read.
