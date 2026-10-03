@@ -46,15 +46,21 @@ class ProjectIndexer {
         // The model-facing contract describes this as regex-like search. Compile once per
         // request and fall back to literal matching for malformed expressions.
         val matcher = runCatching { Regex(normalized, RegexOption.IGNORE_CASE) }.getOrNull()
-        return index(root).flatMap { metadata ->
-            val file = File(root, metadata.path)
-            file.useLines { lines ->
-                lines.mapIndexedNotNull { index, text ->
-                val matches = matcher?.containsMatchIn(text) ?: text.contains(normalized, ignoreCase = true)
-                if (matches) SearchHit(metadata.path, index + 1, text.trim()) else null
-                }.toList()
-            }
-        }
+        // Search is a line-oriented operation; do not build the full metadata index first.
+        // Indexing reads every source file to calculate imports, symbols, line counts, and hashes,
+        // which doubled I/O and memory work for every search request.
+        return root.walkTopDown()
+            .onEnter { it.name !in ignored }
+            .filter { it.isFile && (it.extension.lowercase() in extensions || it.name == "Makefile") }
+            .flatMap { file ->
+                val path = ProjectPaths.relative(root, file)
+                file.useLines { lines ->
+                    lines.mapIndexedNotNull { index, text ->
+                        val matches = matcher?.containsMatchIn(text) ?: text.contains(normalized, ignoreCase = true)
+                        if (matches) SearchHit(path, index + 1, text.trim()) else null
+                    }.toList()
+                }
+            }.toList()
     }
     private fun language(file: File): String = when (file.extension.lowercase()) {
         "kt", "kts" -> "kotlin"
