@@ -121,13 +121,22 @@ class ToolCallOutcomeHandler(
                 "Model supplied a concrete mutation proposal through " + response.name
             )
         }
-        val authorizationFailure = toolSelectionLoop.authorize(response.name, toolKind)
-        if (authorizationFailure != null) {
+        val selectionFailure = toolSelectionLoop.authorize(response.name, toolKind)
+        if (selectionFailure != null) {
             transcript += com.codingagent.model.ModelMessage(
                 "user",
-                "SYSTEM: " + authorizationFailure + " Gather the required evidence before attempting this tool."
+                "SYSTEM: " + selectionFailure + " Gather the required evidence before attempting this tool."
             )
-            emit(AutonomousAgentEvent.ToolFinished(response.name, "ERROR: " + authorizationFailure, false))
+            emit(AutonomousAgentEvent.ToolFinished(response.name, "ERROR: " + selectionFailure, false))
+            return ToolTurnOutcome.Continue
+        }
+        val planningFailure = planningLoop.authorizeTool(response.name, toolKind)
+        if (planningFailure != null) {
+            transcript += com.codingagent.model.ModelMessage(
+                "user",
+                "SYSTEM: " + planningFailure + " Follow the active execution plan before attempting this tool."
+            )
+            emit(AutonomousAgentEvent.ToolFinished(response.name, "ERROR: " + planningFailure, false))
             return ToolTurnOutcome.Continue
         }
 
