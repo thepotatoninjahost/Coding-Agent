@@ -2,6 +2,11 @@ package com.codingagent.workspace
 
 import java.io.File
 import java.security.MessageDigest
+import java.io.FileInputStream
+import java.io.InputStreamReader
+import java.io.BufferedReader
+import java.security.DigestInputStream
+import java.nio.charset.StandardCharsets
 
 /**
  * ONE JOB: Project tree → indexed file records with symbols and checksums.
@@ -17,15 +22,15 @@ class ProjectIndexer {
         .onEnter { it.name !in ignored }
         .filter { it.isFile && (it.extension.lowercase() in extensions || it.name == "Makefile") }
         .map { file ->
-            val text = file.readText()
+            val metadata = analyze(file)
             ProjectFile(
                 path = ProjectPaths.relative(root, file),
                 bytes = file.length(),
                 language = language(file),
-                imports = imports(text),
-                symbols = symbols(text),
-                lineCount = text.lines().size,
-                checksum = sha256(text)
+                imports = metadata.imports,
+                symbols = metadata.symbols,
+                lineCount = metadata.lineCount,
+                checksum = metadata.checksum
             )
         }.toList()
 
@@ -62,6 +67,37 @@ class ProjectIndexer {
                 }
             }.toList()
     }
+    private data class FileMetadata(
+        val imports: List<String>,
+        val symbols: List<String>,
+        val lineCount: Int,
+        val checksum: String
+    )
+
+    private fun analyze(file: File): FileMetadata {
+        val imports = linkedSetOf<String>()
+        val symbols = linkedSetOf<String>()
+        var lineCount = 0
+        val digest = MessageDigest.getInstance("SHA-256")
+        DigestInputStream(FileInputStream(file), digest).use { input ->
+            BufferedReader(InputStreamReader(input, StandardCharsets.UTF_8)).useLines { lines ->
+                lines.forEach { line ->
+                    lineCount++
+                    val trimmed = line.trim()
+                    when {
+                        trimmed.startsWith("import ") -> imports += trimmed.removePrefix("import ").trim()
+                        trimmed.startsWith("from ") && " import " in trimmed ->
+                            imports += trimmed.substringBefore(" import ").removePrefix("from ").trim()
+                    }
+                    Regex("\\b(class|interface|object|fun|function|def|const|val|var|public|private|protected|static)\\s+([A-Za-z_][A-Za-z0-9_]*)")
+                        .find(line)?.groupValues?.getOrNull(2)?.let(symbols::add)
+                }
+            }
+        }
+        val checksum = digest.digest().joinToString("") { "%02x".format(it) }
+        return FileMetadata(imports.toList(), symbols.toList(), lineCount, checksum)
+    }
+
     private fun language(file: File): String = when (file.extension.lowercase()) {
         "kt", "kts" -> "kotlin"
         "java" -> "java"
@@ -74,20 +110,4 @@ class ProjectIndexer {
         else -> file.extension.lowercase()
     }
 
-    private fun imports(text: String): List<String> = text.lines()
-        .mapNotNull { line ->
-            val trimmed = line.trim()
-            when {
-                trimmed.startsWith("import ") -> trimmed.removePrefix("import ").trim()
-                trimmed.startsWith("from ") && " import " in trimmed -> trimmed.substringBefore(" import ").removePrefix("from ").trim()
-                else -> null
-            }
-        }.distinct()
-
-    private fun symbols(text: String): List<String> = text.lines().mapNotNull { line ->
-        Regex("\\b(class|interface|object|fun|function|def|const|val|var|public|private|protected|static)\\s+([A-Za-z_][A-Za-z0-9_]*)").find(line)?.groupValues?.getOrNull(2)
-    }.distinct()
-
-    private fun sha256(text: String): String = MessageDigest.getInstance("SHA-256")
-        .digest(text.toByteArray()).joinToString("") { "%02x".format(it) }
 }
