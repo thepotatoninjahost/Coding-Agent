@@ -7,6 +7,7 @@ import com.codingagent.agent.AgentPlan
 import com.codingagent.agent.AgentStep
 import com.codingagent.agent.PlanStepStatus
 import com.codingagent.agent.PlanningLoop
+import com.codingagent.agent.ToolKind
 
 class PlanningLoopTest {
     private fun plan(vararg phases: String) = AgentPlan(
