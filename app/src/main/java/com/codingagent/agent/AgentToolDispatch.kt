@@ -64,11 +64,8 @@ class AgentToolDispatch(
                     }
                     "passed=${report.passed}\n$issues".take(maxOutputCharacters)
                 }
-                "approve_change" -> approveChange(arguments)
-                "reject_change" -> {
-                    val id = arguments.getString("id")
-                    if (mutations.reject(id)) "REJECTED id=$id" else "ERROR: Change proposal does not exist"
-                }
+                "approve_change" -> ownerOnlyMutationControl("approve_change")
+                "reject_change" -> ownerOnlyMutationControl("reject_change")
                 else -> "ERROR: Unknown tool '$name'"
             }
         } catch (error: Exception) {
@@ -193,10 +190,8 @@ class AgentToolDispatch(
         }
     }
 
-    private fun approveChange(arguments: JSONObject): String {
-        // Model-originated tool calls are never proof of owner approval.
-        return "ERROR: approve_change is owner-only. Approve the pending proposal from Review or chat."
-    }
+    private fun ownerOnlyMutationControl(name: String): String =
+        "ERROR: $name is owner-only. Use Review or chat for owner-controlled proposal decisions."
 
 
 }
