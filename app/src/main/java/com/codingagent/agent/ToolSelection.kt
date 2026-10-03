@@ -106,7 +106,10 @@ class ToolSelectionLoop(plan: ToolSelectionPlan, private val maxIterations: Int 
     @Synchronized
     fun completeKind(toolKind: ToolKind, evidence: String = "") {
         val target = tools.firstOrNull { it.kind == toolKind } ?: return
-        if (target.status == ToolStepStatus.PENDING || target.status == ToolStepStatus.ACTIVE) {
+        val dependenciesComplete = target.dependsOn.all { dependency ->
+            tools.firstOrNull { it.id == dependency }?.status == ToolStepStatus.COMPLETE
+        }
+        if (dependenciesComplete && (target.status == ToolStepStatus.PENDING || target.status == ToolStepStatus.ACTIVE)) {
             replace(target.copy(status = ToolStepStatus.COMPLETE, evidence = evidence))
             activeId = null
             reason = "completed " + target.id
