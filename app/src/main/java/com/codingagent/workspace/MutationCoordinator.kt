@@ -10,6 +10,7 @@ import com.codingagent.agent.ConstitutionRule
 import com.codingagent.agent.SelfEvolution
 import com.codingagent.agent.SelfRepair
 import com.codingagent.intake.TaskOperation
+import com.codingagent.intake.TaskIntakeParser
 
 /**
  * ONE JOB: Dual-approval staging, constitution checks, and apply/reject of code changes.
@@ -147,22 +148,37 @@ class MutationCoordinator(
         }
         return try {
             val applied = workspace.applyApproved(proposal.changeSet)
-            val postApply = workspace.verify()
+            val intake = TaskIntakeParser(workspace.projectRoot()).parse(proposal.request)
+            val postApply = if (intake.verificationCommands.isEmpty()) {
+                workspace.verify()
+            } else {
+                workspace.runChecks(intake.verificationCommands, 180)
+            }
             if (!postApply.passed) {
                 val rollback = workspace.rollback(applied)
                 if (rollback == RollbackResult.Restored) {
                     pending.remove(id)
                     persist()
-                            OpenJobStore.markReady(workspace.projectRoot())
+                    OpenJobStore.markReady(workspace.projectRoot())
+                }
+                val details = buildString {
+                    append("Approved change failed post-apply checks")
+                    if (postApply.commands.isNotEmpty()) {
+                        append(". Commands: ")
+                        append(postApply.commands.joinToString("; ") { result ->
+                            "${result.command} (exit ${result.exitCode})"
+                        })
+                    }
+                    if (postApply.issues.isNotEmpty()) {
+                        append(". Issues: ")
+                        append(postApply.issues.joinToString { "${it.path}:${it.line}: ${it.message}" })
+                    }
                 }
                 return if (rollback == RollbackResult.Restored) {
-                    MutationApprovalResult.Rejected(
-                        "Approved change failed post-apply verification and was rolled back: " +
-                            postApply.issues.joinToString { "${it.path}:${it.line}: ${it.message}" }
-                    )
+                    MutationApprovalResult.Rejected("$details; changes were rolled back")
                 } else {
                     MutationApprovalResult.Rejected(
-                        "Approved change failed post-apply verification and rollback was incomplete: $rollback"
+                        "$details; rollback was incomplete: $rollback"
                     )
                 }
             }
