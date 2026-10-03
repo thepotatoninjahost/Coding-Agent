@@ -30,14 +30,17 @@ class AgentDirectLanes(
                 AgentRequestKind.metaAnswer(t)
             )
         }
-        val report = workspace.verify()
-        if (AgentRequestKind.isGreeting(t)) return greeting(taskId, request, plan, report)
-        if (AgentRequestKind.isListing(t) && AgentRequestKind.isSourceFileList(t)) {
-            return listing(taskId, request, plan, report)
+        if (AgentRequestKind.isGreeting(t)) {
+            return greeting(taskId, request, plan, workspace.verify())
         }
-        if (AgentRequestKind.isStatus(t)) return status(taskId, request, intake, plan, report)
+        if (AgentRequestKind.isListing(t) && AgentRequestKind.isSourceFileList(t)) {
+            return listing(taskId, request, plan, workspace.verify())
+        }
+        if (AgentRequestKind.isStatus(t)) {
+            return status(taskId, request, intake, plan, workspace.verify())
+        }
         AgentRequestKind.explicitReadPath(request)?.let { path ->
-            return readFile(taskId, request, plan, report, path)
+            return readFile(taskId, request, plan, VerificationReport(true, emptyList()), path)
         }
         if (!AgentRequestKind.isWholeProjectReview(request)) {
             AgentRequestKind.inspectTarget(request)?.let { target ->
