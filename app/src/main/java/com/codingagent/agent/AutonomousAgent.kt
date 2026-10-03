@@ -76,9 +76,12 @@ class AutonomousAgent(
         onApplied = { changeSets += it }
     )
     private val cancelled = AtomicBoolean(false)
+    private val running = AtomicBoolean(false)
 
     @Volatile
     private var lastCancelReason: String = "Stopped by owner"
+
+    fun isRunning(): Boolean = running.get()
 
     fun cancel(reason: String = "Stopped by owner") {
         cancelled.set(true)
@@ -124,7 +127,16 @@ class AutonomousAgent(
     fun rejectProposal(id: String): Boolean = mutations.reject(id)
 
     fun run(request: String, onEvent: (AutonomousAgentEvent) -> Unit = {}): List<AutonomousAgentEvent> {
-        cancelled.set(false)
+        check(running.compareAndSet(false, true)) { "Agent is already running" }
+        try {
+            cancelled.set(false)
+            return runInternal(request, onEvent)
+        } finally {
+            running.set(false)
+        }
+    }
+
+    private fun runInternal(request: String, onEvent: (AutonomousAgentEvent) -> Unit): List<AutonomousAgentEvent> {
         val normalized = request.trim()
         require(normalized.isNotEmpty()) { "A coding request is required" }
         val taskId = UUID.randomUUID().toString()
