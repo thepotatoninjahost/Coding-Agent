@@ -7,7 +7,7 @@ import com.codingagent.workspace.RollbackResult
 import com.codingagent.workspace.VerificationReport
 
 /**
- * ONE JOB: Diagnose failures, apply bounded repair attempts, and roll back on failure.
+ * ONE JOB: Diagnose failures, apply explicitly authorized repair attempts, and roll back on failure.
  */
 enum class RepairStage { COMPILE, TEST, DIAGNOSE, REPAIR, REVERT, COMPLETE, FAILED }
 
@@ -41,7 +41,8 @@ class CompilerTestRepairCycle(
         plan: AgentPlan,
         _intake: TaskIntake,
         existingChangeSets: List<ChangeSet>,
-        repair: (String, Int) -> ChangeSet
+        repair: (String, Int) -> ChangeSet,
+        applyApprovedRepair: (ChangeSet) -> ChangeSet
     ): RepairCycleResult {
         val attempts = mutableListOf<RepairAttempt>()
         var report = execute(plan)
@@ -58,8 +59,19 @@ class CompilerTestRepairCycle(
                 attempts += RepairAttempt(attempt, RepairStage.FAILED, report, "No repair was produced for: $diagnosis", emptyList())
                 return revertAndFail(attempts, report, existingChangeSets)
             }
+            val applied = runCatching { applyApprovedRepair(changeSet) }.getOrElse {
+                attempts += RepairAttempt(
+                    attempt,
+                    RepairStage.FAILED,
+                    report,
+                    "Authorized repair could not be applied: ${it.message}",
+                    emptyList(),
+                    listOf(changeSet)
+                )
+                return revertAndFail(attempts, report, existingChangeSets)
+            }
             report = execute(plan)
-            attempts += RepairAttempt(attempt, classify(report), report, diagnosis, changeSet.changes, listOf(changeSet))
+            attempts += RepairAttempt(attempt, classify(report), report, diagnosis, applied.changes, listOf(applied))
             if (report.passed) return RepairCycleResult(true, report, attempts, false)
             attempt++
         }
