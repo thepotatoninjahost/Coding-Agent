@@ -48,9 +48,11 @@ class ProjectIndexer {
         val matcher = runCatching { Regex(normalized, RegexOption.IGNORE_CASE) }.getOrNull()
         return index(root).flatMap { metadata ->
             val file = File(root, metadata.path)
-            file.readLines().mapIndexedNotNull { index, text ->
+            file.useLines { lines ->
+                lines.mapIndexedNotNull { index, text ->
                 val matches = matcher?.containsMatchIn(text) ?: text.contains(normalized, ignoreCase = true)
                 if (matches) SearchHit(metadata.path, index + 1, text.trim()) else null
+                }.toList()
             }
         }
     }
