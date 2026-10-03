@@ -194,6 +194,11 @@ class AgentToolDispatch(
     }
 
     private fun approveChange(arguments: JSONObject): String {
+        // Model-originated tool calls are never proof of owner approval.
+        return "ERROR: approve_change is owner-only. Approve the pending proposal from Review or chat."
+    }
+
+    private fun approveChangeLegacy(arguments: JSONObject): String {
         val result = mutations.approve(
             id = arguments.getString("id"),
             ownerVerified = arguments.optBoolean("ownerVerified", false),
