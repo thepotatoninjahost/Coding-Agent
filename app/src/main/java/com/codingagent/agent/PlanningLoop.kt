@@ -48,6 +48,64 @@ class PlanningLoop(
     init { snapshot() }
 
     @Synchronized
+    fun authorizeTool(toolName: String, toolKind: ToolKind): String? {
+        val completed = steps.filter { it.status == PlanStepStatus.COMPLETE }.map { it.phase }.toSet()
+        return when (toolKind) {
+            ToolKind.SEARCH_PROJECT ->
+                if ("understand" in completed) null else "Tool " + toolName + " is blocked until repository understanding is established"
+            ToolKind.SEARCH_KNOWLEDGE ->
+                if ("understand" in completed) null else "Tool " + toolName + " is blocked until repository understanding is established"
+            ToolKind.APPLY_CHANGES ->
+                if ("understand" in completed && ("target" in completed || "scope" in completed || "inspect" in completed || "change" in completed))
+                    null
+                else "Tool " + toolName + " is blocked until the target and project evidence are established"
+            ToolKind.RUN_CHECKS ->
+                if ("change" in completed || "inspect" in completed || "verify" in completed) null
+                else "Tool " + toolName + " is blocked until the work reaches verification"
+            ToolKind.VERIFY ->
+                if ("change" in completed || "inspect" in completed || "verify" in completed) null
+                else "Tool " + toolName + " is blocked until the task reaches verification"
+            else -> null
+        }
+    }
+
+    @Synchronized
+    fun recordSuccess(toolName: String, toolKind: ToolKind, evidence: String = "") {
+        when (toolKind) {
+            ToolKind.SEARCH_PROJECT -> {
+                completePhase("understand", evidence)
+                steps.filter { it.phase == "target" || it.phase == "scope" }.forEach { completePhase(it.phase, evidence) }
+                if (steps.none { it.phase == "target" || it.phase == "scope" }) completePhase("inspect", evidence)
+            }
+            ToolKind.SEARCH_KNOWLEDGE -> completePhase("research", evidence)
+            ToolKind.APPLY_CHANGES -> completePhase("change", evidence)
+            ToolKind.RUN_CHECKS, ToolKind.VERIFY -> completePhase("verify", evidence)
+            else -> Unit
+        }
+    }
+
+    @Synchronized
+    fun recordFailure(toolName: String, toolKind: ToolKind, message: String) {
+        val active = steps.firstOrNull { it.status == PlanStepStatus.ACTIVE }
+        if (active != null) {
+            replace(active.copy(status = PlanStepStatus.FAILED, evidence = toolName + ": " + message))
+            activeId = null
+            status = "failed"
+            reason = active.id + " failed: " + message
+            snapshot()
+        }
+    }
+
+    @Synchronized
+    fun completePhase(phase: String, evidence: String = "") {
+        val step = steps.firstOrNull { it.phase == phase && it.status != PlanStepStatus.COMPLETE } ?: return
+        replace(step.copy(status = PlanStepStatus.COMPLETE, evidence = evidence))
+        activeId = null
+        reason = "completed " + phase
+        snapshot()
+    }
+
+    @Synchronized
     fun next(): PlannedStep? {
         if (status != "running") return null
         if (iteration >= maxIterations) {
