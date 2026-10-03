@@ -130,6 +130,8 @@ class AutonomousAgent(
         check(running.compareAndSet(false, true)) { "Agent is already running" }
         try {
             cancelled.set(false)
+            changeSets.clear()
+            lastResearchProgress = "not started"
             return runInternal(request, onEvent)
         } finally {
             running.set(false)
