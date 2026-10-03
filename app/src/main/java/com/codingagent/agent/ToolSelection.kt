@@ -43,32 +43,42 @@ data class ToolLoopSnapshot(
 class ToolSelector {
     fun select(intake: TaskIntake): ToolSelectionPlan {
         val tools = mutableListOf<ToolInvocation>()
-        fun add(kind: ToolKind, purpose: String) {
-            val dependency = tools.lastOrNull()?.id?.let(::listOf).orEmpty()
-            tools += ToolInvocation("${tools.size + 1}-${kind.name.lowercase()}", kind, purpose, dependency)
-        }
-        fun addAfter(kind: ToolKind, purpose: String, dependencyId: String) {
-            tools += ToolInvocation("${tools.size + 1}-${kind.name.lowercase()}", kind, purpose, listOf(dependencyId))
+        fun add(kind: ToolKind, purpose: String, dependencies: List<String> = emptyList()): String {
+            val id = (tools.size + 1).toString() + "-" + kind.name.lowercase()
+            tools += ToolInvocation(id, kind, purpose, dependencies)
+            return id
         }
 
-        add(ToolKind.INDEX_REPOSITORY, "Build the repository file, symbol, import, and checksum view")
-        val indexId = tools.last().id
-        if (intake.contract.targetPaths.isNotEmpty() || intake.contract.targetSymbols.isNotEmpty() || intake.intent in setOf(TaskIntent.INSPECT, TaskIntent.DEBUG, TaskIntent.REFACTOR)) {
-            add(ToolKind.SEARCH_PROJECT, "Locate target files, symbols, and relevant project evidence")
-        }
-        val searchId = tools.lastOrNull { it.kind == ToolKind.SEARCH_PROJECT }?.id ?: indexId
-        addAfter(ToolKind.SEARCH_KNOWLEDGE, "Retrieve relevant local coding references and lessons", searchId)
-        val knowledgeId = tools.last().id
-        if (intake.intent in setOf(TaskIntent.CHANGE, TaskIntent.CREATE, TaskIntent.REFACTOR, TaskIntent.DEBUG)) {
-            addAfter(ToolKind.SYNTHESIZE_CODE, "Produce a structured, testable change proposal", knowledgeId)
-            addAfter(ToolKind.APPLY_CHANGES, "Apply the selected proposal through the workspace mutation API", tools.last().id)
-        }
-        if (intake.verificationCommands.isNotEmpty()) {
-            addAfter(ToolKind.RUN_CHECKS, "Run the project checks selected during intake", tools.last().id)
-        }
-        addAfter(ToolKind.VERIFY, "Run static verification and evaluate acceptance evidence", tools.last().id)
-        addAfter(ToolKind.RECORD_LESSON, "Persist the selected tools, result, and reusable evidence", tools.last().id)
-        return ToolSelectionPlan(intake.originalRequest, tools, "Tools selected from intent, targets, constraints, and available project checks")
+        val indexId = add(ToolKind.INDEX_REPOSITORY, "Build the repository file, symbol, import, and checksum view")
+        val needsProjectEvidence =
+            intake.contract.targetPaths.isNotEmpty() ||
+                intake.contract.targetSymbols.isNotEmpty() ||
+                intake.intent in setOf(TaskIntent.INSPECT, TaskIntent.DEBUG, TaskIntent.REFACTOR, TaskIntent.CHANGE, TaskIntent.CREATE)
+        val searchId = if (needsProjectEvidence) {
+            add(ToolKind.SEARCH_PROJECT, "Locate target files, symbols, and relevant project evidence", listOf(indexId))
+        } else null
+        add(ToolKind.SEARCH_KNOWLEDGE, "Retrieve relevant local coding references and lessons", listOf(indexId))
+        val changeWork = intake.intent in setOf(TaskIntent.CHANGE, TaskIntent.CREATE, TaskIntent.REFACTOR, TaskIntent.DEBUG)
+        val synthesisId = if (changeWork) {
+            add(ToolKind.SYNTHESIZE_CODE, "Produce a structured, testable change proposal", listOf(searchId ?: indexId))
+        } else null
+        val applyId = if (changeWork) {
+            add(ToolKind.APPLY_CHANGES, "Stage the selected proposal through the workspace mutation API", listOf(synthesisId!!))
+        } else null
+        val checksId = if (intake.verificationCommands.isNotEmpty()) {
+            add(ToolKind.RUN_CHECKS, "Run the project checks selected during intake", listOf(if (changeWork) applyId!! else searchId ?: indexId))
+        } else null
+        val verifyId = add(
+            ToolKind.VERIFY,
+            "Run static verification and evaluate acceptance evidence",
+            listOf(checksId ?: if (changeWork) applyId!! else searchId ?: indexId)
+        )
+        add(ToolKind.RECORD_LESSON, "Persist the selected tools, result, and reusable evidence", listOf(verifyId))
+        return ToolSelectionPlan(
+            intake.originalRequest,
+            tools,
+            "Tools selected from intent, targets, constraints, and available project checks"
+        )
     }
 }
 
@@ -83,6 +93,38 @@ class ToolSelectionLoop(plan: ToolSelectionPlan, private val maxIterations: Int 
     init { snapshot() }
 
     @Synchronized
+    fun authorize(toolName: String, toolKind: ToolKind): String? {
+        val target = tools.firstOrNull { it.kind == toolKind }
+            ?: return "Tool " + toolName + " is not part of the active execution plan"
+        val blockedDependency = target.dependsOn.firstOrNull { dependency ->
+            tools.firstOrNull { it.id == dependency }?.status != ToolStepStatus.COMPLETE
+        }
+        return blockedDependency?.let { dependency ->
+            "Tool " + toolName + " is blocked until planned tool " + dependency + " completes"
+        }
+    }
+
+    fun recordSuccess(toolName: String, toolKind: ToolKind, evidence: String = "") {
+        val target = tools.firstOrNull { it.kind == toolKind } ?: return
+        if (target.status == ToolStepStatus.ACTIVE || target.status == ToolStepStatus.PENDING) {
+            replace(target.copy(status = ToolStepStatus.COMPLETE, evidence = evidence))
+            activeId = null
+            reason = "completed " + target.id + " from " + toolName
+            snapshot()
+        }
+    }
+
+    fun recordFailure(toolName: String, toolKind: ToolKind, message: String) {
+        val target = tools.firstOrNull { it.kind == toolKind } ?: return
+        if (target.status == ToolStepStatus.ACTIVE || target.status == ToolStepStatus.PENDING) {
+            replace(target.copy(status = ToolStepStatus.FAILED, evidence = message))
+            activeId = null
+            status = "failed"
+            reason = target.id + " failed via " + toolName + ": " + message
+            snapshot()
+        }
+    }
+
     fun next(): ToolInvocation? {
         if (status != "running") return null
         if (iteration >= maxIterations) {
