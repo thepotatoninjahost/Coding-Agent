@@ -39,6 +39,18 @@ class PlanningLoopTest {
         assertEquals("diagnose", loop.next()!!.phase)
     }
 
+    @Test fun toolAuthorizationFollowsRealEvidencePhases() {
+        val loop = PlanningLoop(plan("intake", "understand", "target", "change", "verify"))
+        loop.completePhase("intake", "parsed")
+        loop.completePhase("understand", "indexed")
+        assertEquals(null, loop.authorizeTool("search_project", ToolKind.SEARCH_PROJECT))
+        assertTrue(loop.authorizeTool("replace_text", ToolKind.APPLY_CHANGES)!!.contains("blocked"))
+        loop.recordSuccess("search_project", ToolKind.SEARCH_PROJECT, "target found")
+        assertEquals(null, loop.authorizeTool("replace_text", ToolKind.APPLY_CHANGES))
+        loop.recordSuccess("replace_text", ToolKind.APPLY_CHANGES, "proposal staged")
+        assertEquals(null, loop.authorizeTool("verify", ToolKind.VERIFY))
+    }
+
     @Test fun iterationLimitStopsRunawayPlanning() {
         val loop = PlanningLoop(plan("one", "two"), maxIterations = 1)
         loop.next()
