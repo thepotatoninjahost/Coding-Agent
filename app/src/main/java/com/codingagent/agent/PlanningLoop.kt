@@ -86,12 +86,19 @@ class PlanningLoop(
 
     @Synchronized
     fun recordFailure(toolName: String, toolKind: ToolKind, message: String) {
-        val active = steps.firstOrNull { it.status == PlanStepStatus.ACTIVE }
-        if (active != null) {
-            replace(active.copy(status = PlanStepStatus.FAILED, evidence = toolName + ": " + message))
-            activeId = null
-            status = "failed"
-            reason = active.id + " failed: " + message
+        val phase = when (toolKind) {
+            ToolKind.SEARCH_PROJECT -> listOf("understand", "target", "scope", "inspect")
+            ToolKind.SEARCH_KNOWLEDGE -> listOf("research", "constraints")
+            ToolKind.APPLY_CHANGES -> listOf("change")
+            ToolKind.RUN_CHECKS, ToolKind.VERIFY -> listOf("verify")
+            else -> emptyList()
+        }.firstOrNull { candidate ->
+            steps.any { it.phase == candidate && it.status != PlanStepStatus.COMPLETE }
+        }
+        if (phase != null) {
+            val step = steps.first { it.phase == phase }
+            replace(step.copy(status = PlanStepStatus.PENDING, evidence = toolName + ": " + message))
+            reason = "recoverable failure in " + phase + ": " + message
             snapshot()
         }
     }
