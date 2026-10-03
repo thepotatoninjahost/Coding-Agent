@@ -78,6 +78,30 @@ class TerminalCancelTest {
     }
 
     @Test
+    fun concurrentCommandsAreRejectedWithoutReplacingActiveProcess() {
+        val root = Files.createTempDirectory("term-concurrent").toFile()
+        val runner = CommandRunner(root)
+        val started = CountDownLatch(1)
+        val thread = Thread {
+            started.countDown()
+            runner.run(listOf("sh", "-c", "sleep 20"), timeoutSeconds = 60)
+        }
+        thread.start()
+        assertTrue(started.await(2, TimeUnit.SECONDS))
+        Thread.sleep(150)
+        try {
+            runner.run(listOf("sh", "-c", "printf second"), timeoutSeconds = 5)
+            throw AssertionError("Expected concurrent terminal execution to be rejected")
+        } catch (expected: IllegalStateException) {
+            assertTrue(expected.message!!.contains("already running"))
+        } finally {
+            runner.cancel("concurrency-test")
+            thread.join(5_000)
+        }
+        assertTrue(!runner.isRunning())
+    }
+
+    @Test
     fun streamingCallbackReceivesOutput() {
         val root = Files.createTempDirectory("term-stream").toFile()
         val runner = CommandRunner(root)
