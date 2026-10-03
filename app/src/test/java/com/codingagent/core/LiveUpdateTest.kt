@@ -17,6 +17,19 @@ import com.codingagent.workspace.VerificationReport
 
 class LiveUpdateTest {
     @Test
+    fun moduleParserAcceptsEscapedJsonStringsWithoutRegexCorruption() {
+        val store = LiveModuleStore(java.io.File.createTempFile("module-test", "").parentFile)
+        val parsed = store.parse(
+            """{"kind":"coding","version":1,"steps":[{"op":"emit","value":"quoted \\"value\\" and {braces}","argument":"a:b"}]}"""
+        )
+        assertEquals("coding", parsed.kind)
+        assertEquals(1, parsed.version)
+        assertEquals("emit", parsed.steps.single().operation)
+        assertEquals("quoted \"value\" and {braces}", parsed.steps.single().value)
+        assertEquals("a:b", parsed.steps.single().argument)
+    }
+
+    @Test
     fun `module source changes are installed and loaded without process restart`() {
         val root = Files.createTempDirectory("coding-agent-live").toFile()
         val workspace = ProjectWorkspace(root)
