@@ -82,7 +82,7 @@ class TaskIntakeParser(private val root: File) {
                 listOf("sh", "-c", "./gradlew :app:lintDebug --no-daemon --console=plain"),
                 listOf("sh", "-c", "./gradlew :app:assembleDebug --no-daemon --console=plain")
             )
-            root.resolve("gradlew").isFile -> listOf(listOf("sh", "-c", "./gradlew test --no-daemon --console=plain"))
+            root.resolve("gradlew").isFile -> listOf(listOf("sh", "-c", "./gradlew test --no-daemon"))
             root.resolve("package.json").isFile -> listOf(listOf("sh", "-c", "npm test --if-present"))
             root.resolve("pyproject.toml").isFile || root.resolve("pytest.ini").isFile -> listOf(listOf("python", "-m", "pytest"))
             root.resolve("Makefile").isFile -> listOf(listOf("make", "test"))
