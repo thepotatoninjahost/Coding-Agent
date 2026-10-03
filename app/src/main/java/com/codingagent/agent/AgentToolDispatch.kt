@@ -198,21 +198,5 @@ class AgentToolDispatch(
         return "ERROR: approve_change is owner-only. Approve the pending proposal from Review or chat."
     }
 
-    private fun approveChangeLegacy(arguments: JSONObject): String {
-        val result = mutations.approve(
-            id = arguments.getString("id"),
-            ownerVerified = arguments.optBoolean("ownerVerified", false),
-            ownerLabel = arguments.optString("ownerLabel", "owner")
-        )
-        return when (result) {
-            is MutationApprovalResult.AwaitingSecond ->
-                "AWAITING_SECOND_APPROVAL id=${result.proposal.id} approvals=${result.proposal.approvalCount}"
-            is MutationApprovalResult.Applied -> {
-                onApplied(result.changeSet)
-                promoteAppliedChanges(result)
-                "APPLIED id=${result.proposal.id} changes=${result.changeSet.changes.size}"
-            }
-            is MutationApprovalResult.Rejected -> "ERROR: ${result.reason}"
-        }
-    }
+
 }
