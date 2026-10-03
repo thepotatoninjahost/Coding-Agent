@@ -85,6 +85,7 @@ class AutonomousAgent(
     fun cancel(reason: String = "Stopped by owner") {
         cancelled.set(true)
         lastCancelReason = reason
+        gateway?.cancel()
     }
 
     fun isCancelled(): Boolean = cancelled.get()
