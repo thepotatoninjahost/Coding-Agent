@@ -108,6 +108,29 @@ class ToolCallOutcomeHandler(
             }
         }
 
+        val toolKind = ToolKindMapper.kindFor(response.name)
+        if (toolKind == null) {
+            val msg = "Tool '" + response.name + "' is not authorized by the production tool plan"
+            transcript += com.codingagent.model.ModelMessage("user", "SYSTEM: " + msg + " Use only an available planned tool.")
+            emit(AutonomousAgentEvent.ToolFinished(response.name, "ERROR: " + msg, false))
+            return ToolTurnOutcome.Continue
+        }
+        if (toolKind == ToolKind.APPLY_CHANGES) {
+            toolSelectionLoop.completeKind(
+                ToolKind.SYNTHESIZE_CODE,
+                "Model supplied a concrete mutation proposal through " + response.name
+            )
+        }
+        val authorizationFailure = toolSelectionLoop.authorize(response.name, toolKind)
+        if (authorizationFailure != null) {
+            transcript += com.codingagent.model.ModelMessage(
+                "user",
+                "SYSTEM: " + authorizationFailure + " Gather the required evidence before attempting this tool."
+            )
+            emit(AutonomousAgentEvent.ToolFinished(response.name, "ERROR: " + authorizationFailure, false))
+            return ToolTurnOutcome.Continue
+        }
+
         val signature = "${response.name}|${response.arguments.trim()}"
         val isIdenticalCall = signature == state.lastToolSignature
 
@@ -213,32 +236,17 @@ class ToolCallOutcomeHandler(
 
         val success = !toolResult.startsWith("ERROR:")
 
-        runCatching { planningLoop.next() }.getOrNull()?.let {
-            if (success) {
-                runCatching { planningLoop.complete(toolResult.take(300)) }
-            } else {
-                val replanned = runCatching { planningLoop.fail(toolResult.take(300)) }.getOrDefault(false)
-                if (replanned) {
-                    val guidance = planningLoop.currentSteps()
-                        .filter { step -> step.status == PlanStepStatus.PENDING }
-                        .takeLast(2)
-                        .joinToString("; ") { step -> step.detail }
-                    if (guidance.isNotBlank()) {
-                        transcript += com.codingagent.model.ModelMessage(
-                            "user",
-                            "SYSTEM: Repeated failure on ${response.name} — diagnosis: $guidance"
-                        )
-                    }
-                }
-            }
+        if (success) {
+            toolSelectionLoop.recordSuccess(response.name, toolKind, toolResult.take(300))
+        } else {
+            toolSelectionLoop.recordFailure(response.name, toolKind, toolResult.take(300))
         }
-        runCatching { toolSelectionLoop.next() }.getOrNull()?.let {
-            if (success) {
-                runCatching { toolSelectionLoop.complete(toolResult.take(300)) }
-            } else {
-                runCatching { toolSelectionLoop.fail(toolResult.take(300)) }
-            }
+        if (success) {
+            planningLoop.recordSuccess(response.name, toolKind, toolResult.take(300))
+        } else {
+            planningLoop.recordFailure(response.name, toolKind, toolResult.take(300))
         }
+
 
         if (success) {
             when (response.name) {
