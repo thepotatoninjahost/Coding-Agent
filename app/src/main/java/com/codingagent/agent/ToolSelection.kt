@@ -56,8 +56,8 @@ class ToolSelector {
         if (intake.contract.targetPaths.isNotEmpty() || intake.contract.targetSymbols.isNotEmpty() || intake.intent in setOf(TaskIntent.INSPECT, TaskIntent.DEBUG, TaskIntent.REFACTOR)) {
             add(ToolKind.SEARCH_PROJECT, "Locate target files, symbols, and relevant project evidence")
         }
-        val searchId = tools.last().id
-        addAfter(ToolKind.SEARCH_KNOWLEDGE, "Retrieve relevant local coding references and lessons", indexId)
+        val searchId = tools.lastOrNull { it.kind == ToolKind.SEARCH_PROJECT }?.id ?: indexId
+        addAfter(ToolKind.SEARCH_KNOWLEDGE, "Retrieve relevant local coding references and lessons", searchId)
         val knowledgeId = tools.last().id
         if (intake.intent in setOf(TaskIntent.CHANGE, TaskIntent.CREATE, TaskIntent.REFACTOR, TaskIntent.DEBUG)) {
             addAfter(ToolKind.SYNTHESIZE_CODE, "Produce a structured, testable change proposal", knowledgeId)
