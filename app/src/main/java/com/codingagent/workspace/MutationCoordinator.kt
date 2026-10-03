@@ -170,6 +170,13 @@ class MutationCoordinator(
 
     @Synchronized
     fun clearExpired() {
+        val timestamp = now()
+        val expiredIds = pending.values
+            .filter { timestamp > it.expiresAt }
+            .map { it.id }
+        if (expiredIds.isEmpty()) return
+        expiredIds.forEach { pending.remove(it) }
+        persist()
     }
 
     @Synchronized
