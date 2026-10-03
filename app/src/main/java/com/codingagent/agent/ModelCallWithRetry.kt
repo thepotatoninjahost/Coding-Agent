@@ -20,6 +20,10 @@ object ModelCallWithRetry {
         isCancelled: () -> Boolean,
         onPhase: (String) -> Unit
     ): ModelResponse? {
+        if (isCancelled()) {
+            gateway.cancel()
+            return null
+        }
         var response = gateway.complete(request())
         var attempt = 0
         while (
@@ -43,6 +47,10 @@ object ModelCallWithRetry {
             } else {
                 onPhase("Empty model response — retry $attempt/$MAX_RETRIES")
                 if (isCancelled()) return null
+            }
+            if (isCancelled()) {
+                gateway.cancel()
+                return null
             }
             response = gateway.complete(request())
         }
