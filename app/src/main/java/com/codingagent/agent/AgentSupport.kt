@@ -57,5 +57,31 @@ class AgentJournal(private val root: File) {
         file.appendText(line + "\n")
     }
 
-    fun recent(limit: Int = 20): List<String> = if (!file.isFile) emptyList() else file.readLines().asReversed().take(limit)
+    fun recent(limit: Int = 20): List<String> {
+        if (!file.isFile || limit <= 0) return emptyList()
+        val result = ArrayDeque<String>(limit)
+        java.io.RandomAccessFile(file, "r").use { raf ->
+            var position = raf.length() - 1
+            val bytes = java.io.ByteArrayOutputStream()
+            while (position >= 0 && result.size < limit) {
+                raf.seek(position--)
+                val value = raf.read()
+                if (value == '\n'.code) {
+                    val line = bytes.toByteArray().reversedArray().toString(Charsets.UTF_8).trim()
+                    if (line.isNotBlank()) {
+                        result.addFirst(line)
+                        if (result.size > limit) result.removeFirst()
+                    }
+                    bytes.reset()
+                } else {
+                    bytes.write(value)
+                }
+            }
+            if (bytes.size() > 0 && result.size < limit) {
+                val line = bytes.toByteArray().reversedArray().toString(Charsets.UTF_8).trim()
+                if (line.isNotBlank()) result.addFirst(line)
+            }
+        }
+        return result.asReversed()
+    }
 }
