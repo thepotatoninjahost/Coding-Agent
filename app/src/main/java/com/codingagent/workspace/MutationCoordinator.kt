@@ -141,6 +141,20 @@ class MutationCoordinator(
         }
         return try {
             val applied = workspace.applyApproved(proposal.changeSet)
+            val postApply = workspace.verify()
+            if (!postApply.passed) {
+                val rollback = workspace.rollback(applied)
+                return if (rollback == RollbackResult.Restored) {
+                    MutationApprovalResult.Rejected(
+                        "Approved change failed post-apply verification and was rolled back: " +
+                            postApply.issues.joinToString { "${it.path}:${it.line}: ${it.message}" }
+                    )
+                } else {
+                    MutationApprovalResult.Rejected(
+                        "Approved change failed post-apply verification and rollback was incomplete: $rollback"
+                    )
+                }
+            }
             pending.remove(id)
             persist()
             OpenJobStore.markApplied(workspace.projectRoot())
