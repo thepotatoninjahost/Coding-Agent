@@ -141,10 +141,11 @@ class ToolSelectionLoop(plan: ToolSelectionPlan, private val maxIterations: Int 
     fun recordFailure(toolName: String, toolKind: ToolKind, message: String) {
         val target = tools.firstOrNull { it.kind == toolKind } ?: return
         if (target.status == ToolStepStatus.ACTIVE || target.status == ToolStepStatus.PENDING) {
-            replace(target.copy(status = ToolStepStatus.FAILED, evidence = message))
+            // A tool failure is recoverable: keep the gate pending so the model can
+            // change arguments or approach. The autonomous loop owns retry limits.
+            replace(target.copy(status = ToolStepStatus.PENDING, evidence = message))
             activeId = null
-            status = "failed"
-            reason = target.id + " failed via " + toolName + ": " + message
+            reason = target.id + " failed via " + toolName + ": " + message + " (recoverable)"
             snapshot()
         }
     }
