@@ -35,6 +35,18 @@ class DeepResearchTest {
         assertEquals("fun main() = 42", result.code.single())
     }
 
+    @Test fun researchFetcherRejectsPrivateAndMetadataTargetsBeforeConnection() {
+        var opened = false
+        val factory: (String) -> HttpURLConnection = {
+            opened = true
+            fakeConnection(it)
+        }
+        assertEquals(null, ArticleExtractor.fetch("http://127.0.0.1:8080/admin", factory))
+        assertEquals(null, ArticleExtractor.fetch("http://localhost/admin", factory))
+        assertEquals(null, ArticleExtractor.fetch("http://169.254.169.254/latest/meta-data", factory))
+        assertTrue(!opened)
+    }
+
     @Test fun deepResearchFetchesManyUniqueSourcesAndPersistsLearning() {
         val root = Files.createTempDirectory("deep-research").toFile()
         val search = object : WebResearchProvider {
