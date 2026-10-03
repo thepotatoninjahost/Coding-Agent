@@ -151,7 +151,8 @@ class RemoteHttpGateway(
 
     private fun openConnection(): HttpURLConnection? {
         if (endpoint.isBlank() || model.isBlank()) return null
-        if (apiKey.isBlank() && !endpoint.startsWith("http://127.0.0.1") && !endpoint.startsWith("http://localhost")) return null
+        if (ModelEndpointPolicy.validate(endpoint) != null) return null
+        if (apiKey.isBlank() && !ModelEndpointPolicy.isLocalEndpoint(endpoint)) return null
         return connectionFactory(endpoint.trimEnd('/') + "/chat/completions")
     }
 
