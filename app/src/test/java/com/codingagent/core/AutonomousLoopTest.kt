@@ -22,7 +22,7 @@ class AutonomousLoopTest {
         val names = AgentModelProtocol.tools().map { it.name }.toSet()
         val required = setOf(
             "list_files", "read_file", "search_project", "search_knowledge", "research_web",
-            "replace_text", "create_file", "approve_change", "reject_change", "run_command", "verify"
+            "replace_text", "create_file", "run_command", "verify"
         )
         assertTrue(names.containsAll(required))
     }
