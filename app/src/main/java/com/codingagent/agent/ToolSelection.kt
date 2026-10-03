@@ -82,6 +82,17 @@ class ToolSelector {
     }
 }
 
+object ToolKindMapper {
+    fun kindFor(toolName: String): ToolKind? = when (toolName) {
+        "list_files", "read_file", "search_project" -> ToolKind.SEARCH_PROJECT
+        "search_knowledge", "research_web" -> ToolKind.SEARCH_KNOWLEDGE
+        "replace_text", "create_file" -> ToolKind.APPLY_CHANGES
+        "run_command" -> ToolKind.RUN_CHECKS
+        "verify" -> ToolKind.VERIFY
+        else -> null
+    }
+}
+
 class ToolSelectionLoop(plan: ToolSelectionPlan, private val maxIterations: Int = 32) {
     private val tools = plan.tools.toMutableList()
     private val history = mutableListOf<ToolLoopSnapshot>()
