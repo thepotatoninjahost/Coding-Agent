@@ -122,7 +122,21 @@ object OpenJobStore {
     fun markApplied(root: File) {
         bind(root)
         val current = load(root) ?: return
-        save(root, current.copy(status = "applied", updatedAt = System.currentTimeMillis()))
+        save(root, current.copy(status = "applied", proposalId = null, updatedAt = System.currentTimeMillis()))
+    }
+
+    @Synchronized
+    fun markReady(root: File) {
+        bind(root)
+        val current = load(root) ?: return
+        save(
+            root,
+            current.copy(
+                status = "open",
+                proposalId = null,
+                updatedAt = System.currentTimeMillis()
+            )
+        )
     }
 
     @Synchronized
