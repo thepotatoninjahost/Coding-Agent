@@ -81,7 +81,7 @@ class LiveModelStore(private val root: File) {
         }
         if (!evaluation.passed) {
             return ModelInstallResult.Rejected(
-                "Model evaluation failed: ${evaluation.issues.joinToString { "${it.path}:${it.line}: ${it.message}" }"}"
+                "Model evaluation failed: ${evaluation.issues.joinToString { "${it.path}:${it.line}: ${it.message}" }}"
             )
         }
         val violations = AgentConstitution.check(action.copy(sandboxPassed = evaluation.passed))
@@ -119,6 +119,11 @@ class LiveModelStore(private val root: File) {
         evaluation: VerificationReport
     ): ModelInstallResult {
         if (!source.isFile) return ModelInstallResult.Rejected("Model file does not exist")
+        if (!evaluation.passed) {
+            return ModelInstallResult.Rejected(
+                "Model evaluation failed: ${evaluation.issues.joinToString { "${it.path}:${it.line}: ${it.message}" }}"
+            )
+        }
         val violations = AgentConstitution.check(action.copy(sandboxPassed = evaluation.passed))
         if (violations.isNotEmpty()) {
             return ModelInstallResult.Rejected(violations.joinToString("; ") { "${it.rule}: ${it.message}" })
