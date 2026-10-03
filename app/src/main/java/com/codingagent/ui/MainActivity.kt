@@ -135,6 +135,7 @@ private fun CodingAgentApp(privateDir: File) {
     var fileList by remember { mutableStateOf(emptyList<String>()) }
     var terminalCommand by remember { mutableStateOf("") }
     var terminalHistory by remember { mutableStateOf(emptyList<TerminalEntry>()) }
+    var terminalLiveOutput by remember { mutableStateOf("") }
     var activeJob by remember { mutableStateOf<Job?>(null) }
     var pendingApproval by remember { mutableStateOf(false) }
     var approvalCount by remember { mutableStateOf(0) }
@@ -315,6 +316,7 @@ private fun CodingAgentApp(privateDir: File) {
     }
 
     fun stopAgent() {
+        tools?.cancelTerminal()
         activeJob?.cancel()
         activeJob = null
         messageQueue = emptyList()
@@ -573,7 +575,42 @@ private fun CodingAgentApp(privateDir: File) {
                             is MutationApprovalResult.Rejected -> { status = AgentStatus.STOPPED; detail = result.reason }
                         }
                     }, onReject = { pendingProposalId?.let { mutationCoordinator?.reject(it) }; pendingProposal = null; pendingApproval = false; pendingProposalId = null; approvalCount = 0; status = AgentStatus.STOPPED; detail = "Proposed changes rejected" })
-                    SurfaceTab.TERMINAL -> TerminalSurface(terminalCommand, { terminalCommand = it }, terminalHistory, tools != null, onRun = { command -> activeJob = scope.launch(Dispatchers.IO) { status = AgentStatus.RUNNING; tools?.terminal(command.trim().split(Regex("\\s+")).filter(String::isNotBlank))?.let { terminalHistory = (terminalHistory + it).takeLast(40) }; status = AgentStatus.READY; detail = "Terminal finished" } }, onStop = ::stopAgent)
+                    SurfaceTab.TERMINAL -> TerminalSurface(
+                        command = terminalCommand,
+                        onCommand = { terminalCommand = it },
+                        history = terminalHistory,
+                        liveOutput = terminalLiveOutput,
+                        cwd = tools?.terminalWorkingDirectory()?.absolutePath ?: "—",
+                        shell = tools?.terminalShellPath ?: "—",
+                        timeoutSeconds = tools?.terminalTimeoutSeconds() ?: 90L,
+                        running = tools?.isTerminalBusy() == true,
+                        enabled = tools != null,
+                        onRun = { command ->
+                            terminalLiveOutput = ""
+                            activeJob = scope.launch(Dispatchers.IO) {
+                                status = AgentStatus.RUNNING
+                                runCatching {
+                                    tools?.terminal(
+                                        command.trim().split(Regex("\\s+")).filter(String::isNotBlank),
+                                        onStdout = { chunk -> scope.launch(Dispatchers.Main.immediate) { terminalLiveOutput += chunk } },
+                                        onStderr = { chunk -> scope.launch(Dispatchers.Main.immediate) { terminalLiveOutput += chunk } }
+                                    )
+                                }.onSuccess { entry ->
+                                    terminalHistory = (terminalHistory + entry).takeLast(40)
+                                }.onFailure { failure ->
+                                    terminalLiveOutput += "\\n" + failure.message.orEmpty()
+                                }
+                                status = AgentStatus.READY
+                                detail = "Terminal finished"
+                            }
+                        },
+                        onStop = ::stopAgent,
+                        onClear = {
+                            tools?.clearTerminalHistory()
+                            terminalHistory = emptyList()
+                            terminalLiveOutput = ""
+                        }
+                    )
                     SurfaceTab.RESEARCH -> ResearchSurface(researchQuery, { researchQuery = it }, researchHits, researchError, researchState, onSearch = { query ->
                         store.saveLastResearchQuery(query)
                         activeJob = scope.launch(Dispatchers.IO) {
