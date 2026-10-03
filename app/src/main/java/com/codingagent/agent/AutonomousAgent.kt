@@ -72,8 +72,7 @@ class AutonomousAgent(
         mutations = mutations,
         terminal = terminal,
         maxOutputCharacters = config.maxOutputCharacters,
-        onResearchProgress = { lastResearchProgress = it },
-        onApplied = { changeSets += it }
+        onResearchProgress = { lastResearchProgress = it }
     )
     private val cancelled = AtomicBoolean(false)
     private val running = AtomicBoolean(false)
