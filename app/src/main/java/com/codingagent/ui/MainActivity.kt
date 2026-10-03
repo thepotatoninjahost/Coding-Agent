@@ -596,7 +596,9 @@ private fun CodingAgentApp(privateDir: File) {
                                         onStderr = { chunk -> scope.launch(Dispatchers.Main.immediate) { terminalLiveOutput += chunk } }
                                     )
                                 }.onSuccess { entry ->
-                                    terminalHistory = (terminalHistory + entry).takeLast(40)
+                                    if (entry != null) {
+                                        terminalHistory = (terminalHistory + entry).takeLast(40)
+                                    }
                                 }.onFailure { failure ->
                                     terminalLiveOutput += "\\n" + failure.message.orEmpty()
                                 }
