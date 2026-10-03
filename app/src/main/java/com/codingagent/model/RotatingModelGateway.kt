@@ -31,6 +31,10 @@ class RotatingModelGateway(
     override fun stream(request: ModelRequest, onDelta: (String) -> Unit): ModelResponse =
         runWithRotation { it.stream(request, onDelta) }
 
+    override fun cancel() {
+        entries.forEach { it.gateway.cancel() }
+    }
+
     private fun runWithRotation(call: (ModelGateway) -> ModelResponse): ModelResponse {
         val start = index.get().coerceIn(0, entries.lastIndex)
         var lastFailure: ModelResponse.Failure? = null
