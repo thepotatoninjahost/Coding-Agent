@@ -6,6 +6,35 @@ import java.net.URL
 /**
  * ONE JOB: URL/HTML → clean text and code blocks for research.
  */
+object ResearchUrlSafety {
+    fun validatePublicHttpUrl(raw: String): String? {
+        val uri = runCatching { java.net.URI(raw.trim()) }.getOrNull()
+            ?: return "Invalid research URL"
+        val scheme = uri.scheme?.lowercase()
+        if (scheme != "http" && scheme != "https") return "Research URL must use HTTP or HTTPS"
+        if (uri.userInfo != null) return "Research URL must not contain embedded credentials"
+        val host = uri.host?.trim()?.lowercase()
+            ?: return "Research URL has no hostname"
+        if (host == "localhost" || host.endsWith(".localhost") || host == "metadata.google.internal") {
+            return "Research URL targets a local or metadata hostname"
+        }
+        val addresses = runCatching { java.net.InetAddress.getAllByName(host).toList() }
+            .getOrElse { return "Research hostname could not be resolved safely" }
+        if (addresses.isEmpty()) return "Research hostname has no resolved address"
+        if (addresses.any { isPrivateOrLocal(it) }) {
+            return "Research URL resolves to a private, loopback, link-local, multicast, or unspecified address"
+        }
+        return null
+    }
+
+    private fun isPrivateOrLocal(address: java.net.InetAddress): Boolean {
+        val host = address.hostAddress?.lowercase().orEmpty()
+        if (address.isAnyLocalAddress || address.isLoopbackAddress || address.isLinkLocalAddress ||
+            address.isSiteLocalAddress || address.isMulticastAddress) return true
+        return host.startsWith("fc") || host.startsWith("fd") || host.startsWith("fe80:")
+    }
+}
+
 object ArticleExtractor {
     data class Extracted(val title: String, val text: String, val wordCount: Int, val codeBlocks: List<String>) {
         val code: List<String> get() = codeBlocks
@@ -16,11 +45,14 @@ object ArticleExtractor {
     fun fetch(
         url: String,
         connectionFactory: (String) -> HttpURLConnection = { URL(it).openConnection() as HttpURLConnection },
-        timeoutMillis: Int = 15_000
+        timeoutMillis: Int = 15_000,
+        urlValidator: (String) -> String? = ResearchUrlSafety::validatePublicHttpUrl
     ): Extracted? {
+        if (urlValidator(url) != null) return null
         val connection = connectionFactory(url).apply {
             connectTimeout = timeoutMillis
             readTimeout = timeoutMillis
+            instanceFollowRedirects = false
             requestMethod = "GET"
             setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/120.0.0.0 Mobile Safari/537.36")
             setRequestProperty("Accept", "text/html,application/xhtml+xml")
