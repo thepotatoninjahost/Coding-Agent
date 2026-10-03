@@ -48,6 +48,7 @@ class MutationCoordinator(
     init {
         OpenJobStore.bind(workspace.projectRoot())
         PendingProposalStore.load(workspace.projectRoot()).forEach { pending[it.id] = it }
+        clearExpired()
     }
 
     @Synchronized
@@ -56,6 +57,7 @@ class MutationCoordinator(
         operations: List<TaskOperation>,
         reason: String = request
     ): MutationProposeResult {
+        clearExpired()
         if (request.isBlank()) return MutationProposeResult.Rejected("A mutation request is required")
         if (operations.isEmpty()) return MutationProposeResult.Rejected("At least one mutation operation is required")
 
@@ -102,10 +104,14 @@ class MutationCoordinator(
     }
 
     @Synchronized
-    fun get(id: String): PendingChangeProposal? = pending[id]
+    fun get(id: String): PendingChangeProposal? {
+        clearExpired()
+        return pending[id]
+    }
 
     @Synchronized
     fun approve(id: String, ownerVerified: Boolean, ownerLabel: String): MutationApprovalResult {
+        clearExpired()
         val proposal = pending[id] ?: return MutationApprovalResult.Rejected("Change proposal does not exist")
         val timestamp = now()
         if (timestamp > proposal.expiresAt) {
@@ -171,7 +177,10 @@ class MutationCoordinator(
     }
 
     @Synchronized
-    fun pending(): List<PendingChangeProposal> = pending.values.toList()
+    fun pending(): List<PendingChangeProposal> {
+        clearExpired()
+        return pending.values.toList()
+    }
 
     @Synchronized
     fun clear(id: String): Boolean {
@@ -200,6 +209,7 @@ class MutationCoordinator(
 
     @Synchronized
     fun refreshExpiry(id: String): PendingChangeProposal? {
+        clearExpired()
         val current = pending[id] ?: return null
         val refreshed = current.copy(expiresAt = now() + AgentConstitution.APPROVAL_EXPIRATION_MS)
         pending[id] = refreshed
