@@ -170,7 +170,7 @@ class ToolCallOutcomeHandler(
                 val nextStep = when {
                     pendingProposals.isNotEmpty() ->
                         "You have a pending proposal (${pendingProposals.first().id.take(8)}). " +
-                            "Call approve_change with ownerVerified=true to apply it, then call verify."
+                            "Do not call approve_change. The owner must approve the pending proposal from Review or chat."
                     state.readPaths.isEmpty() ->
                         "You have not read any project files yet. " +
                             "Call read_file with the path of the first file you need to modify."
