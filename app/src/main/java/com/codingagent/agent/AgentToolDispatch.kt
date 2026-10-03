@@ -7,8 +7,6 @@ import com.codingagent.research.DeepResearchProvider
 import com.codingagent.research.ResearchBriefBuilder
 import com.codingagent.research.ResearchMode
 import com.codingagent.research.ResearchModeDetector
-import com.codingagent.workspace.ChangeSet
-import com.codingagent.workspace.MutationApprovalResult
 import com.codingagent.workspace.MutationCoordinator
 import com.codingagent.workspace.MutationProposeResult
 import com.codingagent.workspace.ProjectFileService
@@ -26,16 +24,8 @@ class AgentToolDispatch(
     private val mutations: MutationCoordinator,
     private val terminal: TerminalSession,
     private val maxOutputCharacters: Int,
-    private val onResearchProgress: (String) -> Unit,
-    private val onApplied: (ChangeSet) -> Unit
+    private val onResearchProgress: (String) -> Unit
 ) {
-    // Wired in: was previously dead code. Every disk write that clears the full dual-owner
-    // approval gate below also gets staged and promoted through SelfEvolution, so successful
-    // changes are recorded for later sessions. This reuses the SAME approval already granted
-    // for the write (ownerVerified + approvalCount>=2 + sandboxPassed, all enforced above by
-    // MutationCoordinator via AgentConstitution) — it does not grant any new authority, and
-    // AgentConstitution.check runs again inside promoteSource as a second, independent gate.
-    private val evolution = SelfEvolution(workspace.projectRoot())
 
     fun execute(name: String, rawArguments: String): String {
         return try {
@@ -70,28 +60,6 @@ class AgentToolDispatch(
             }
         } catch (error: Exception) {
             "ERROR: ${error.message ?: error.javaClass.simpleName}"
-        }
-    }
-
-    // Best-effort: promotion failing must never affect the write that already succeeded above.
-    private fun promoteAppliedChanges(result: MutationApprovalResult.Applied) {
-        runCatching {
-            val proposal = result.proposal
-            val latestApproval = proposal.approvals.maxOfOrNull { it.approvedAt }
-            result.changeSet.changes.forEach { change ->
-                val file = workspace.projectRoot().resolve(change.path)
-                if (!file.isFile) return@forEach
-                val staged = evolution.stageSource(file, kind = change.operation.name)
-                val action = AgentAction(
-                    description = proposal.request,
-                    category = AgentActionCategory.CODE_CHANGE,
-                    ownerVerified = true,
-                    approvalCount = proposal.approvalCount,
-                    sandboxPassed = proposal.verification.passed,
-                    clearPermission = true
-                )
-                evolution.promoteSource(staged, change.operation.name, proposal.verification, action, latestApproval)
-            }
         }
     }
 
