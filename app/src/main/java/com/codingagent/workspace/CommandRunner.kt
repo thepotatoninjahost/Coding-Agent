@@ -11,6 +11,7 @@ import java.util.concurrent.TimeUnit
 class CommandRunner(private val directory: File) {
     private val activeProcess = java.util.concurrent.atomic.AtomicReference<Process?>(null)
     private val cancelled = java.util.concurrent.atomic.AtomicBoolean(false)
+    private val running = java.util.concurrent.atomic.AtomicBoolean(false)
 
     fun cancel(reason: String = "cancelled") {
         cancelled.set(true)
@@ -24,7 +25,7 @@ class CommandRunner(private val directory: File) {
 
     fun isCancelled(): Boolean = cancelled.get()
 
-    fun isRunning(): Boolean = activeProcess.get()?.isAlive == true
+    fun isRunning(): Boolean = running.get()
 
     fun run(
         command: List<String>,
@@ -33,6 +34,7 @@ class CommandRunner(private val directory: File) {
         onStderr: ((String) -> Unit)? = null
     ): CommandResult {
         require(command.isNotEmpty()) { "Command cannot be empty" }
+        check(running.compareAndSet(false, true)) { "A terminal command is already running" }
         cancelled.set(false)
         return try {
             val process = ProcessBuilder(command).directory(directory).redirectErrorStream(false).start()
@@ -80,6 +82,8 @@ class CommandRunner(private val directory: File) {
             CommandResult(command.joinToString(" "), -1, "", error.message.orEmpty(), false)
         } finally {
             activeProcess.set(null)
+            running.set(false)
+            cancelled.set(false)
         }
     }
 
