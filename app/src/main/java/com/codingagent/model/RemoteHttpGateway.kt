@@ -6,6 +6,7 @@ import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 import java.nio.charset.StandardCharsets
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * ONE JOB: HTTP OpenAI-compatible /chat/completions.
@@ -16,8 +17,12 @@ class RemoteHttpGateway(
     private val model: String,
     private val timeoutMillis: Int = 60_000,
     private val connectionFactory: (String) -> HttpURLConnection = { URL(it).openConnection() as HttpURLConnection },
-    private val extraHeaders: Map<String, String> = emptyMap()
+    private val extraHeaders: Map<String, String> = emptyMap(),
+    private val activeConnection: AtomicReference<HttpURLConnection?> = AtomicReference(null)
 ) : ModelGateway {
+    override fun cancel() {
+        activeConnection.getAndSet(null)?.disconnect()
+    }
     override fun stream(request: ModelRequest, onDelta: (String) -> Unit): ModelResponse {
         val first = streamOnce(request, onDelta)
         if (first is ModelResponse.Failure && isEmptyContentFailure(first.message) && request.tools.isNotEmpty()) {
@@ -40,6 +45,7 @@ class RemoteHttpGateway(
         } catch (error: Exception) {
             ModelResponse.Failure("Model response could not be processed: ${error.message.orEmpty().ifBlank { error.javaClass.simpleName }}")
         } finally {
+            activeConnection.compareAndSet(connection, null)
             connection.disconnect()
         }
     }
@@ -124,6 +130,7 @@ class RemoteHttpGateway(
         } catch (error: Exception) {
             ModelResponse.Failure("Model response could not be processed: ${error.message.orEmpty().ifBlank { error.javaClass.simpleName }}")
         } finally {
+            activeConnection.compareAndSet(connection, null)
             connection.disconnect()
         }
     }
@@ -153,7 +160,7 @@ class RemoteHttpGateway(
         if (endpoint.isBlank() || model.isBlank()) return null
         if (ModelEndpointPolicy.validate(endpoint) != null) return null
         if (apiKey.isBlank() && !ModelEndpointPolicy.isLocalEndpoint(endpoint)) return null
-        return connectionFactory(endpoint.trimEnd('/') + "/chat/completions")
+        return connectionFactory(endpoint.trimEnd('/') + "/chat/completions").also { activeConnection.set(it) }
     }
 
     private fun configure(connection: HttpURLConnection) {
