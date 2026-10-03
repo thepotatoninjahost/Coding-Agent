@@ -153,7 +153,7 @@ class MutationCoordinator(
                 if (rollback == RollbackResult.Restored) {
                     pending.remove(id)
                     persist()
-                    OpenJobStore.markApplied(workspace.projectRoot())
+                            OpenJobStore.markReady(workspace.projectRoot())
                 }
                 return if (rollback == RollbackResult.Restored) {
                     MutationApprovalResult.Rejected(
@@ -185,14 +185,20 @@ class MutationCoordinator(
     @Synchronized
     fun clear(id: String): Boolean {
         val gone = pending.remove(id) != null
-        if (gone) persist()
+        if (gone) {
+            persist()
+            OpenJobStore.markReady(workspace.projectRoot())
+        }
         return gone
     }
 
     @Synchronized
     fun reject(id: String): Boolean {
         val gone = pending.remove(id) != null
-        if (gone) persist()
+        if (gone) {
+            persist()
+            OpenJobStore.markReady(workspace.projectRoot())
+        }
         return gone
     }
 
@@ -205,6 +211,7 @@ class MutationCoordinator(
         if (expiredIds.isEmpty()) return
         expiredIds.forEach { pending.remove(it) }
         persist()
+        OpenJobStore.markReady(workspace.projectRoot())
     }
 
     @Synchronized
