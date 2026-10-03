@@ -55,10 +55,16 @@ class PlanningLoop(
                 if ("understand" in completed) null else "Tool " + toolName + " is blocked until repository understanding is established"
             ToolKind.SEARCH_KNOWLEDGE ->
                 if ("understand" in completed) null else "Tool " + toolName + " is blocked until repository understanding is established"
-            ToolKind.APPLY_CHANGES ->
-                if ("understand" in completed && ("target" in completed || "scope" in completed || "inspect" in completed || "change" in completed))
+            ToolKind.APPLY_CHANGES -> {
+                val evidenceReady = "understand" in completed &&
+                    ("target" in completed || "scope" in completed || "inspect" in completed)
+                if (!evidenceReady) {
+                    "Tool " + toolName + " is blocked until the target and project evidence are established"
+                } else {
+                    completePhase("change", "model produced a concrete mutation proposal")
                     null
-                else "Tool " + toolName + " is blocked until the target and project evidence are established"
+                }
+            }
             ToolKind.RUN_CHECKS ->
                 if ("change" in completed || "inspect" in completed || "verify" in completed) null
                 else "Tool " + toolName + " is blocked until the work reaches verification"
