@@ -39,7 +39,12 @@ class LiveModuleStore(private val root: File) {
     init { moduleRoot.mkdirs() }
 
     fun install(source: String, kind: String, version: Int = 1, action: AgentAction, evaluation: VerificationReport): ModuleInstallResult {
-        val violations = AgentConstitution.check(action.copy(sandboxPassed = true, ownerVerified = true, approvalCount = maxOf(2, action.approvalCount), clearPermission = true))
+        if (!evaluation.passed) {
+            return ModuleInstallResult.Rejected(
+                "Module evaluation failed: ${evaluation.issues.joinToString { "${it.path}:${it.line}: ${it.message}" }}"
+            )
+        }
+        val violations = AgentConstitution.check(action.copy(sandboxPassed = evaluation.passed))
         if (violations.isNotEmpty()) return ModuleInstallResult.Rejected(violations.joinToString("; ") { "${it.rule}: ${it.message}" })
         val parsed = runCatching { parse(source) }.getOrElse { return ModuleInstallResult.Rejected("Invalid module: ${it.message}") }
         if (parsed.kind != kind) return ModuleInstallResult.Rejected("Module kind does not match requested kind")
