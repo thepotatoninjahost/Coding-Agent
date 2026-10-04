@@ -11,6 +11,7 @@ import com.codingagent.agent.ChatMessageStore
 import com.codingagent.agent.ChatRole
 import com.codingagent.agent.ChatWorkspace
 import com.codingagent.workspace.KnowledgeHit
+import com.codingagent.workspace.OpenJobStore
 
 class ChatWorkspaceTest {
     private val emptyKnowledge = object : AgentKnowledge {
@@ -31,6 +32,26 @@ class ChatWorkspaceTest {
         assertEquals(2, workspace.history().size)
         assertEquals("hello", workspace.history().first().content)
         assertTrue(workspace.history().last().content.isNotBlank())
+    }
+
+    @Test
+    fun continueRestartsPersistedOpenJobInsteadOfReportingDroppedWork() {
+        val root = Files.createTempDirectory("chat-resume-open-job").toFile()
+        root.resolve("Main.kt").writeText("fun main() = 1\n")
+        OpenJobStore.openOrKeep(root, "fix Main.kt and run the tests")
+        val store = MemoryChatStore()
+        val agent = AutonomousAgent(root, emptyKnowledge, gateway = null)
+        val workspace = ChatWorkspace(store, runtimeProvider = { agent })
+
+        val turn = workspace.send("continue")
+
+        assertTrue(turn.response.content.isNotBlank())
+        assertTrue(
+            !turn.response.content.contains(
+                "There is no pending code proposal and no live task to resume",
+                ignoreCase = true
+            )
+        )
     }
 
     @Test
