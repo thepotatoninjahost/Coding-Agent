@@ -161,7 +161,7 @@ class AcceptancePathTest {
                         OperationKind.REPLACE,
                         "Main.kt",
                         "fun main() = 1\n",
-                        "fun main() = $attempt\n"
+                        "fun main() = ${attempt + 1}\n"
                     )
                 ),
                 "repair attempt $attempt"
