@@ -61,7 +61,6 @@ class PlanningLoop(
                 if (!evidenceReady) {
                     "Tool " + toolName + " is blocked until the target and project evidence are established"
                 } else {
-                    completePhase("change", "model produced a concrete mutation proposal")
                     null
                 }
             }
