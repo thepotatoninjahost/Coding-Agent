@@ -121,7 +121,10 @@ class ToolSelectionLoop(plan: ToolSelectionPlan, private val maxIterations: Int 
         val target = tools.firstOrNull { it.kind == toolKind }
             ?: return "Tool " + toolName + " is not part of the active execution plan"
         val blockedDependency = target.dependsOn.firstOrNull { dependency ->
-            tools.firstOrNull { it.id == dependency }?.status != ToolStepStatus.COMPLETE
+            val dependencyTool = tools.firstOrNull { it.id == dependency }
+            val synthesisProvidedByApply = toolKind == ToolKind.APPLY_CHANGES &&
+                dependencyTool?.kind == ToolKind.SYNTHESIZE_CODE
+            dependencyTool?.status != ToolStepStatus.COMPLETE && !synthesisProvidedByApply
         }
         return blockedDependency?.let { dependency ->
             "Tool " + toolName + " is blocked until planned tool " + dependency + " completes"
@@ -129,6 +132,9 @@ class ToolSelectionLoop(plan: ToolSelectionPlan, private val maxIterations: Int 
     }
 
     fun recordSuccess(toolName: String, toolKind: ToolKind, evidence: String = "") {
+        if (toolKind == ToolKind.APPLY_CHANGES) {
+            completeKind(ToolKind.SYNTHESIZE_CODE, "Concrete mutation supplied by " + toolName)
+        }
         val target = tools.firstOrNull { it.kind == toolKind } ?: return
         if (target.status == ToolStepStatus.ACTIVE || target.status == ToolStepStatus.PENDING) {
             replace(target.copy(status = ToolStepStatus.COMPLETE, evidence = evidence))
