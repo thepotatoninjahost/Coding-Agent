@@ -9,6 +9,7 @@ import com.codingagent.agent.ApprovalRecord
 import com.codingagent.agent.ConstitutionRule
 import com.codingagent.agent.SelfEvolution
 import com.codingagent.agent.SelfRepair
+import com.codingagent.agent.RepairCycleConfig
 import com.codingagent.intake.TaskOperation
 import com.codingagent.intake.TaskIntakeParser
 
@@ -34,7 +35,9 @@ data class PendingChangeProposal(
     val verification: VerificationReport,
     val createdAt: Long,
     val expiresAt: Long,
-    val approvals: List<ApprovalRecord> = emptyList()
+    val approvals: List<ApprovalRecord> = emptyList(),
+    val repairAttempt: Int = 0,
+    val repairRootRequest: String = request
 ) {
     val approvalCount: Int get() = approvals.size
 }
@@ -42,7 +45,8 @@ data class PendingChangeProposal(
 class MutationCoordinator(
     internal val workspace: ProjectWorkspace,
     private val ledger: ApprovalLedger = ApprovalLedger(),
-    private val now: () -> Long = { System.currentTimeMillis() }
+    private val now: () -> Long = { System.currentTimeMillis() },
+    private val repairConfig: RepairCycleConfig = RepairCycleConfig()
 ) {
     private val pending = linkedMapOf<String, PendingChangeProposal>()
     private val evolution = SelfEvolution(workspace.projectRoot())
@@ -97,7 +101,9 @@ class MutationCoordinator(
             changeSet = changeSet,
             verification = verification,
             createdAt = timestamp,
-            expiresAt = timestamp + AgentConstitution.APPROVAL_EXPIRATION_MS
+            expiresAt = timestamp + AgentConstitution.APPROVAL_EXPIRATION_MS,
+            repairAttempt = repairAttempt,
+            repairRootRequest = rootRequest
         )
         pending[proposal.id] = proposal
         persist()
@@ -181,19 +187,26 @@ class MutationCoordinator(
                     }
                 }
                 if (rollback == RollbackResult.Restored) {
-                    val repair = runCatching {
-                        repairProvider?.let { provider ->
-                            com.codingagent.agent.CompilerTestRepairCycle(workspace).prepareRepair(
-                                postApply,
-                                attempt = 1,
-                                repair = provider
+                    val nextRepairAttempt = proposal.repairAttempt + 1
+                    if (nextRepairAttempt <= repairConfig.maxRepairAttempts) {
+                        val repair = runCatching {
+                            repairProvider?.let { provider ->
+                                com.codingagent.agent.CompilerTestRepairCycle(workspace).prepareRepair(
+                                    postApply,
+                                    attempt = nextRepairAttempt,
+                                    repair = provider
+                                )
+                            }
+                        }.getOrNull()
+                        if (repair != null) {
+                            val repairProposal = stageRepairProposal(
+                                rootRequest = proposal.repairRootRequest,
+                                repairAttempt = nextRepairAttempt,
+                                changeSet = repair
                             )
-                        }
-                    }.getOrNull()
-                    if (repair != null) {
-                        val repairProposal = stageRepairProposal(proposal.request, details, repair)
-                        if (repairProposal != null) {
-                            return MutationApprovalResult.RepairRequired(repairProposal, details)
+                            if (repairProposal != null) {
+                                return MutationApprovalResult.RepairRequired(repairProposal, details)
+                            }
                         }
                     }
                     return MutationApprovalResult.Rejected("$details; changes were rolled back")
@@ -261,8 +274,8 @@ class MutationCoordinator(
     }
 
     private fun stageRepairProposal(
-        originalRequest: String,
-        failure: String,
+        rootRequest: String,
+        repairAttempt: Int,
         changeSet: ChangeSet
     ): PendingChangeProposal? {
         val verification = runCatching { workspace.verifyProposal(changeSet) }.getOrNull() ?: return null
@@ -270,7 +283,7 @@ class MutationCoordinator(
         val timestamp = now()
         val proposal = PendingChangeProposal(
             id = UUID.randomUUID().toString(),
-            request = "Self-repair after failed change: ${originalRequest.take(180)}",
+            request = "Self-repair attempt $repairAttempt after failed change: ${rootRequest.take(180)}",
             changeSet = changeSet,
             verification = verification,
             createdAt = timestamp,
