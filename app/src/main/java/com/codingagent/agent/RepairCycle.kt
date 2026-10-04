@@ -78,6 +78,17 @@ class CompilerTestRepairCycle(
         return revertAndFail(attempts, report, existingChangeSets)
     }
 
+    fun prepareRepair(
+        report: VerificationReport,
+        attempt: Int = 1,
+        repair: (String, Int) -> ChangeSet?
+    ): ChangeSet? {
+        val diagnosis = diagnose(report)
+        return runCatching { repair(diagnosis, attempt) }
+            .getOrNull()
+            ?.takeIf { it.changes.isNotEmpty() }
+    }
+
     private fun execute(plan: AgentPlan): VerificationReport =
         if (plan.checks.isEmpty()) workspace.verify() else workspace.runChecks(plan.checks, config.commandTimeoutSeconds)
 
