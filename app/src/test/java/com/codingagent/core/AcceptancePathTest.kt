@@ -141,11 +141,56 @@ class AcceptancePathTest {
         assertTrue(result is MutationApprovalResult.RepairRequired)
         val repair = (result as MutationApprovalResult.RepairRequired).proposal
         assertEquals("fun main() = 1\n", root.resolve("Main.kt").readText())
-        assertEquals("Self-repair after failed change: run the tests", repair.request)
+        assertEquals("Self-repair attempt 1 after failed change: run the tests", repair.request)
         assertEquals("fun main() = 1\n", repair.changeSet.changes.single().before)
         assertEquals("fun main() = 2\n", repair.changeSet.changes.single().after)
         assertEquals(1, coordinator.pending().size)
     }
+    @Test
+    fun failedRepairStagesNextAttemptAndPreservesRootRequest() {
+        val root = Files.createTempDirectory("accept-repair-retry").toFile()
+        root.resolve("gradlew").writeText("#!/bin/sh\nexit 1\n")
+        root.resolve("gradlew").setExecutable(true)
+        root.resolve("Main.kt").writeText("fun main() = 1\n")
+        val workspace = ProjectWorkspace(root)
+        val coordinator = MutationCoordinator(workspace)
+        coordinator.setRepairProvider { _, attempt ->
+            workspace.preview(
+                listOf(
+                    TaskOperation(
+                        OperationKind.REPLACE,
+                        "Main.kt",
+                        "fun main() = 1\n",
+                        "fun main() = $attempt\n"
+                    )
+                ),
+                "repair attempt $attempt"
+            )
+        }
+
+        val proposed = coordinator.propose(
+            "run the tests",
+            listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = broken\n"))
+        ) as MutationProposeResult.Proposed
+        var proposal = proposed.proposal
+
+        coordinator.approve(proposal.id, true, "owner")
+        var result = coordinator.approve(proposal.id, true, "owner")
+        assertTrue(result is MutationApprovalResult.RepairRequired)
+        proposal = (result as MutationApprovalResult.RepairRequired).proposal
+        assertEquals(1, proposal.repairAttempt)
+        assertEquals("Self-repair attempt 1 after failed change: run the tests", proposal.request)
+
+        coordinator.approve(proposal.id, true, "owner")
+        result = coordinator.approve(proposal.id, true, "owner")
+        assertTrue(result is MutationApprovalResult.RepairRequired)
+        proposal = (result as MutationApprovalResult.RepairRequired).proposal
+        assertEquals(2, proposal.repairAttempt)
+        assertEquals("Self-repair attempt 2 after failed change: run the tests", proposal.request)
+        assertEquals("run the tests", proposal.repairRootRequest)
+        assertEquals("fun main() = 1\n", root.resolve("Main.kt").readText())
+    }
+
     @Test
     fun knowledgeIngestThenSearchReturnsHit() {
         val root = Files.createTempDirectory("accept-knowledge").toFile()
