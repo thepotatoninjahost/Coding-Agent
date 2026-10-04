@@ -66,7 +66,7 @@ class ToolSelector {
             add(ToolKind.APPLY_CHANGES, "Stage the selected proposal through the workspace mutation API", listOf(synthesisId!!))
         } else null
         val checksId = if (intake.verificationCommands.isNotEmpty() || changeWork) {
-            add(ToolKind.RUN_CHECKS, "Run project diagnostics and selected verification checks", listOf(searchId ?: indexId))
+            add(ToolKind.RUN_CHECKS, "Run project diagnostics and selected verification checks", listOf(indexId))
         } else null
         val verifyId = add(
             ToolKind.VERIFY,
