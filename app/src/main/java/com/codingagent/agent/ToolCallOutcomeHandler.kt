@@ -22,6 +22,7 @@ class ToolTurnState {
     var lastToolResult: String = ""
     var identicalRepeats = 0
     var repeatResetCount = 0
+    var sameSignatureCalls = 0
     var mutationOccurred: Boolean = false
     val readPaths = linkedSetOf<String>()
     var searchedProject = false
@@ -142,6 +143,7 @@ class ToolCallOutcomeHandler(
 
         val signature = "${response.name}|${response.arguments.trim()}"
         val isIdenticalCall = signature == state.lastToolSignature
+        if (isIdenticalCall) state.sameSignatureCalls++ else state.sameSignatureCalls = 1
 
         val purpose = ToolPurpose.of(response.name, response.arguments)
         emit(AutonomousAgentEvent.ToolStarted(response.name, response.arguments, purpose))
@@ -153,6 +155,31 @@ class ToolCallOutcomeHandler(
             state.lastToolSignature = ""
             state.identicalRepeats = 0
             state.mutationOccurred = true
+        }
+
+        if (isIdenticalCall && !isMutation && state.sameSignatureCalls >= config.maxIdenticalToolRepeats) {
+            state.repeatResetCount++
+            if (state.repeatResetCount >= 2) {
+                val report = workspace.verify()
+                val msg = "Aborted: ${response.name} was repeated with the same arguments ${state.sameSignatureCalls} times without establishing a new path. The model cannot make progress on this path."
+                val task = AgentTask(
+                    taskId, normalized, "failed", plan,
+                    changes(), report,
+                    listOf("${Instant.now()}: aborted after repeated identical ${response.name} signatures"),
+                    msg
+                )
+                recordTask(task)
+                emit(AutonomousAgentEvent.Failed(task, msg))
+                return ToolTurnOutcome.Stop
+            }
+            state.lastToolSignature = ""
+            state.identicalRepeats = 0
+            state.sameSignatureCalls = 0
+            transcript += com.codingagent.model.ModelMessage(
+                "user",
+                "SYSTEM: ${response.name} has been called repeatedly with identical arguments. " +
+                    "Do NOT call it again with those arguments. Choose a different diagnostic or implementation path."
+            )
         }
 
         if (isIdenticalCall && !isMutation) {
