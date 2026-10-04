@@ -20,7 +20,7 @@ class LiveUpdateTest {
     fun moduleParserAcceptsEscapedJsonStringsWithoutRegexCorruption() {
         val store = LiveModuleStore(java.io.File.createTempFile("module-test", "").parentFile)
         val parsed = store.parse(
-            """{"kind":"coding","version":1,"steps":[{"op":"emit","value":"quoted \\"value\\" and {braces}","argument":"a:b"}]}"""
+            """{"kind":"coding","version":1,"steps":[{"op":"emit","value":"quoted \"value\" and {braces}","argument":"a:b"}]}"""
         )
         assertEquals("coding", parsed.kind)
         assertEquals(1, parsed.version)
