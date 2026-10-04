@@ -23,6 +23,7 @@ sealed class MutationProposeResult {
 sealed class MutationApprovalResult {
     data class AwaitingSecond(val proposal: PendingChangeProposal, val approval: ApprovalRecord) : MutationApprovalResult()
     data class Applied(val proposal: PendingChangeProposal, val changeSet: ChangeSet) : MutationApprovalResult()
+    data class RepairRequired(val proposal: PendingChangeProposal, val failure: String) : MutationApprovalResult()
     data class Rejected(val reason: String) : MutationApprovalResult()
 }
 
@@ -45,6 +46,11 @@ class MutationCoordinator(
 ) {
     private val pending = linkedMapOf<String, PendingChangeProposal>()
     private val evolution = SelfEvolution(workspace.projectRoot())
+    @Volatile private var repairProvider: ((String, Int) -> ChangeSet?)? = null
+
+    fun setRepairProvider(provider: ((String, Int) -> ChangeSet?)?) {
+        repairProvider = provider
+    }
 
     init {
         OpenJobStore.bind(workspace.projectRoot())
@@ -174,13 +180,27 @@ class MutationCoordinator(
                         append(postApply.issues.joinToString { "${it.path}:${it.line}: ${it.message}" })
                     }
                 }
-                return if (rollback == RollbackResult.Restored) {
-                    MutationApprovalResult.Rejected("$details; changes were rolled back")
-                } else {
-                    MutationApprovalResult.Rejected(
-                        "$details; rollback was incomplete: $rollback"
-                    )
+                if (rollback == RollbackResult.Restored) {
+                    val repair = runCatching {
+                        repairProvider?.let { provider ->
+                            com.codingagent.agent.CompilerTestRepairCycle(workspace).prepareRepair(
+                                postApply,
+                                attempt = 1,
+                                repair = provider
+                            )
+                        }
+                    }.getOrNull()
+                    if (repair != null) {
+                        val repairProposal = stageRepairProposal(proposal.request, details, repair)
+                        if (repairProposal != null) {
+                            return MutationApprovalResult.RepairRequired(repairProposal, details)
+                        }
+                    }
+                    return MutationApprovalResult.Rejected("$details; changes were rolled back")
                 }
+                return MutationApprovalResult.Rejected(
+                    "$details; rollback was incomplete: $rollback"
+                )
             }
             pending.remove(id)
             persist()
@@ -238,6 +258,33 @@ class MutationCoordinator(
         pending[id] = refreshed
         persist()
         return refreshed
+    }
+
+    private fun stageRepairProposal(
+        originalRequest: String,
+        failure: String,
+        changeSet: ChangeSet
+    ): PendingChangeProposal? {
+        val verification = runCatching { workspace.verifyProposal(changeSet) }.getOrNull() ?: return null
+        if (!verification.passed || changeSet.changes.isEmpty()) return null
+        val timestamp = now()
+        val proposal = PendingChangeProposal(
+            id = UUID.randomUUID().toString(),
+            request = "Self-repair after failed change: ${originalRequest.take(180)}",
+            changeSet = changeSet,
+            verification = verification,
+            createdAt = timestamp,
+            expiresAt = timestamp + AgentConstitution.APPROVAL_EXPIRATION_MS
+        )
+        pending[proposal.id] = proposal
+        persist()
+        OpenJobStore.markWaiting(
+            workspace.projectRoot(),
+            proposal.id,
+            changeSet.changes.map { it.path }.distinct(),
+            proposal.request
+        )
+        return proposal
     }
 
     private fun recordEvolution(proposal: PendingChangeProposal, changeSet: ChangeSet) {
