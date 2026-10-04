@@ -29,6 +29,17 @@ object ChatApproval {
                     "First approval recorded. Type approve or confirm once more to write the files.",
                     pending.id
                 )
+            is MutationApprovalResult.RepairRequired ->
+                AgentRuntimeResult.NeedsApproval(
+                    task(
+                        request = text,
+                        summary = "The approved change failed verification and was rolled back. A repair proposal is staged for dual approval: ${result.proposal.id}",
+                        status = "repair-waiting-approval",
+                        proposalId = result.proposal.id
+                    ),
+                    "The failed change was rolled back. Review and approve the staged repair proposal, then confirm again.",
+                    result.proposal.id
+                )
             is MutationApprovalResult.Applied -> {
                 val paths = result.changeSet.changes.map { it.path }.distinct()
                 AgentRuntimeResult.Completed(
