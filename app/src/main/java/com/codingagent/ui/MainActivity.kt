@@ -560,6 +560,15 @@ private fun CodingAgentApp(privateDir: File) {
                             val coordinator = mutationCoordinator ?: return@ChatSurface
                             when (val result = coordinator.approve(id, ownerVerified = true, ownerLabel = "owner")) {
                                 is MutationApprovalResult.AwaitingSecond -> { approvalCount = result.proposal.approvalCount; detail = "Confirmation ${approvalCount}/2 recorded; transaction remains unapplied" }
+                                is MutationApprovalResult.RepairRequired -> {
+                                    pendingProposal = result.proposal
+                                    pendingProposalId = result.proposal.id
+                                    pendingApproval = true
+                                    approvalCount = result.proposal.approvalCount
+                                    pendingReason = result.proposal.request
+                                    status = AgentStatus.APPROVAL
+                                    detail = "Original change was rolled back. Review the staged repair and confirm twice."
+                                }
                                 is MutationApprovalResult.Applied -> onChangeApplied(result)
                                 is MutationApprovalResult.Rejected -> { status = AgentStatus.STOPPED; detail = result.reason }
                             }
@@ -570,6 +579,15 @@ private fun CodingAgentApp(privateDir: File) {
                         val id = pendingProposalId ?: return@ReviewSurface
                         val coordinator = mutationCoordinator ?: return@ReviewSurface
                         when (val result = coordinator.approve(id, ownerVerified = true, ownerLabel = "owner")) {
+                            is MutationApprovalResult.RepairRequired -> {
+                                pendingProposal = result.proposal
+                                pendingProposalId = result.proposal.id
+                                pendingApproval = true
+                                approvalCount = result.proposal.approvalCount
+                                pendingReason = result.proposal.request
+                                status = AgentStatus.APPROVAL
+                                detail = "Original change was rolled back. Review the staged repair and confirm twice."
+                            }
                             is MutationApprovalResult.AwaitingSecond -> { approvalCount = result.proposal.approvalCount; detail = "Confirmation ${approvalCount}/2 recorded" }
                             is MutationApprovalResult.Applied -> onChangeApplied(result)
                             is MutationApprovalResult.Rejected -> { status = AgentStatus.STOPPED; detail = result.reason }
