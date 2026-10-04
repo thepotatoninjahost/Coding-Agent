@@ -48,6 +48,8 @@ class PlanningLoopTest {
         assertTrue(loop.authorizeTool("replace_text", ToolKind.APPLY_CHANGES)!!.contains("blocked"))
         loop.recordSuccess("search_project", ToolKind.SEARCH_PROJECT, "target found")
         assertEquals(null, loop.authorizeTool("replace_text", ToolKind.APPLY_CHANGES))
+        assertEquals(PlanStepStatus.COMPLETE, loop.currentSteps().first { it.phase == "understand" }.status)
+        assertEquals(PlanStepStatus.PENDING, loop.currentSteps().first { it.phase == "change" }.status)
         loop.recordSuccess("replace_text", ToolKind.APPLY_CHANGES, "proposal staged")
         assertEquals(null, loop.authorizeTool("verify", ToolKind.VERIFY))
     }
