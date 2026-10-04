@@ -116,12 +116,6 @@ class ToolCallOutcomeHandler(
             emit(AutonomousAgentEvent.ToolFinished(response.name, "ERROR: " + msg, false))
             return ToolTurnOutcome.Continue
         }
-        if (toolKind == ToolKind.APPLY_CHANGES) {
-            toolSelectionLoop.completeKind(
-                ToolKind.SYNTHESIZE_CODE,
-                "Model supplied a concrete mutation proposal through " + response.name
-            )
-        }
         val selectionFailure = toolSelectionLoop.authorize(response.name, toolKind)
         if (selectionFailure != null) {
             transcript += com.codingagent.model.ModelMessage(
