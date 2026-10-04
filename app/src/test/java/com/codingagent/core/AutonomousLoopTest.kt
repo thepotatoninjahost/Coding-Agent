@@ -222,7 +222,7 @@ class AutonomousLoopTest {
         // DEBUG intent (contains "bug"/"fix") → changeWork=true → writeNow stays false
         // while successfulGathers < gatherCap, keeping tools open for the repeat-abort path.
         val events = agent.run("Fix the bug by running the same diagnostic command repeatedly")
-        assertTrue(events.last() is AutonomousAgentEvent.Failed)
+        if (events.last() !is AutonomousAgentEvent.Failed) throw AssertionError(events.joinToString("\n"))
         assertTrue((events.last() as AutonomousAgentEvent.Failed).message.contains("repeated"))
     }
 }
