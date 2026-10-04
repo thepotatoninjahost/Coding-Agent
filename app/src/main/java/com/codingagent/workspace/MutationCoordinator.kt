@@ -101,9 +101,7 @@ class MutationCoordinator(
             changeSet = changeSet,
             verification = verification,
             createdAt = timestamp,
-            expiresAt = timestamp + AgentConstitution.APPROVAL_EXPIRATION_MS,
-            repairAttempt = repairAttempt,
-            repairRootRequest = rootRequest
+            expiresAt = timestamp + AgentConstitution.APPROVAL_EXPIRATION_MS
         )
         pending[proposal.id] = proposal
         persist()
@@ -287,7 +285,9 @@ class MutationCoordinator(
             changeSet = changeSet,
             verification = verification,
             createdAt = timestamp,
-            expiresAt = timestamp + AgentConstitution.APPROVAL_EXPIRATION_MS
+            expiresAt = timestamp + AgentConstitution.APPROVAL_EXPIRATION_MS,
+            repairAttempt = repairAttempt,
+            repairRootRequest = rootRequest
         )
         pending[proposal.id] = proposal
         persist()
