@@ -60,7 +60,7 @@ class ToolSelector {
         add(ToolKind.SEARCH_KNOWLEDGE, "Retrieve relevant local coding references and lessons", listOf(indexId))
         val changeWork = intake.intent in setOf(TaskIntent.CHANGE, TaskIntent.CREATE, TaskIntent.REFACTOR, TaskIntent.DEBUG)
         val synthesisId = if (changeWork) {
-            add(ToolKind.SYNTHESIZE_CODE, "Produce a structured, testable change proposal", listOf(searchId ?: indexId))
+            add(ToolKind.SYNTHESIZE_CODE, "Produce a structured, testable change proposal", listOf(indexId))
         } else null
         val applyId = if (changeWork) {
             add(ToolKind.APPLY_CHANGES, "Stage the selected proposal through the workspace mutation API", listOf(synthesisId!!))
