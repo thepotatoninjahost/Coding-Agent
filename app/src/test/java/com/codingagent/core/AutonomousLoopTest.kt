@@ -152,7 +152,7 @@ class AutonomousLoopTest {
         // That lane returns local evidence without the model. This test covers the
         // model-loop evidence gate for ungrounded completions only.
         val events = agent.run("Write a deep technical report on how Report works end to end")
-        assertTrue(events.last() is AutonomousAgentEvent.Failed)
+        assertTrue("last=" + events.last() + "\nevents=" + events.joinToString("\n"), events.last() is AutonomousAgentEvent.Failed)
         assertTrue((events.last() as AutonomousAgentEvent.Failed).message.contains("without reading"))
     }
 
