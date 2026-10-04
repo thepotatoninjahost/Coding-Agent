@@ -117,6 +117,36 @@ class AcceptancePathTest {
     }
 
     @Test
+    fun failedApprovedChangeStagesRepairAfterRollback() {
+        val root = Files.createTempDirectory("accept-repair").toFile()
+        root.resolve("gradlew").writeText("#!/bin/sh\nexit 1\n")
+        root.resolve("gradlew").setExecutable(true)
+        root.resolve("Main.kt").writeText("fun main() = 1\n")
+        val workspace = ProjectWorkspace(root)
+        val coordinator = MutationCoordinator(workspace)
+        coordinator.setRepairProvider { _, _ ->
+            workspace.preview(
+                listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 2\n")),
+                "repair"
+            )
+        }
+        val proposed = coordinator.propose(
+            "run the tests",
+            listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = broken\n"))
+        )
+        assertTrue(proposed is MutationProposeResult.Proposed)
+        val original = (proposed as MutationProposeResult.Proposed).proposal
+        assertTrue(coordinator.approve(original.id, true, "owner") is MutationApprovalResult.AwaitingSecond)
+        val result = coordinator.approve(original.id, true, "owner")
+        assertTrue(result is MutationApprovalResult.RepairRequired)
+        val repair = (result as MutationApprovalResult.RepairRequired).proposal
+        assertEquals("fun main() = 1\n", root.resolve("Main.kt").readText())
+        assertEquals("Self-repair after failed change: run the tests", repair.request)
+        assertEquals("fun main() = 1\n", repair.changeSet.changes.single().before)
+        assertEquals("fun main() = 2\n", repair.changeSet.changes.single().after)
+        assertEquals(1, coordinator.pending().size)
+    }
+    @Test
     fun knowledgeIngestThenSearchReturnsHit() {
         val root = Files.createTempDirectory("accept-knowledge").toFile()
         val index = KnowledgeIndex(root)
