@@ -66,7 +66,7 @@ class PlanningLoop(
                 }
             }
             ToolKind.RUN_CHECKS ->
-                if ("change" in completed || "inspect" in completed || "verify" in completed) null
+                if ("understand" in completed || "change" in completed || "inspect" in completed || "verify" in completed) null
                 else "Tool " + toolName + " is blocked until the work reaches verification"
             ToolKind.VERIFY ->
                 if ("change" in completed || "inspect" in completed || "verify" in completed) null
