@@ -123,7 +123,10 @@ class ToolSelectionLoop(plan: ToolSelectionPlan, private val maxIterations: Int 
         val blockedDependency = target.dependsOn.firstOrNull { dependency ->
             val dependencyTool = tools.firstOrNull { it.id == dependency }
             val synthesisProvidedByApply = toolKind == ToolKind.APPLY_CHANGES &&
-                dependencyTool?.kind == ToolKind.SYNTHESIZE_CODE
+                dependencyTool?.kind == ToolKind.SYNTHESIZE_CODE &&
+                dependencyTool.dependsOn.all { synthesisDependency ->
+                    tools.firstOrNull { it.id == synthesisDependency }?.status == ToolStepStatus.COMPLETE
+                }
             dependencyTool?.status != ToolStepStatus.COMPLETE && !synthesisProvidedByApply
         }
         return blockedDependency?.let { dependency ->
