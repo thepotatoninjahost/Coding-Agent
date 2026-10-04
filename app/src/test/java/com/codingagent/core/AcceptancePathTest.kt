@@ -176,7 +176,7 @@ class AcceptancePathTest {
 
         coordinator.approve(proposal.id, true, "owner")
         var result = coordinator.approve(proposal.id, true, "owner")
-        assertTrue(result is MutationApprovalResult.RepairRequired)
+        assertTrue("Unexpected first repair result: $result", result is MutationApprovalResult.RepairRequired)
         proposal = (result as MutationApprovalResult.RepairRequired).proposal
         assertEquals(1, proposal.repairAttempt)
         assertEquals("Self-repair attempt 1 after failed change: run the tests", proposal.request)
