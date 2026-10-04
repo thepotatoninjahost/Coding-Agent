@@ -80,6 +80,12 @@ class AutonomousAgent(
     @Volatile
     private var lastCancelReason: String = "Stopped by owner"
 
+    init {
+        mutations.setRepairProvider { diagnosis, attempt ->
+            synthesizeRepairChangeSet(diagnosis, attempt)
+        }
+    }
+
     fun isRunning(): Boolean = running.get()
 
     fun cancel(reason: String = "Stopped by owner") {
@@ -547,6 +553,61 @@ class AutonomousAgent(
     private fun buildPrompt(request: String, intake: TaskIntake, evidence: String): String =
         AgentPrompt.build(request, intake, evidence, config.maxOutputCharacters)
 
+    private fun synthesizeRepairChangeSet(diagnosis: String, attempt: Int): ChangeSet? {
+        val model = gateway ?: return null
+        val repairTools = AgentModelProtocol.tools().filter { it.name == "replace_text" || it.name == "create_file" }
+        val evidence = buildString {
+            append("Repair attempt ").append(attempt).append(".\n")
+            append("Failure diagnosis: ").append(diagnosis.take(8_000)).append("\n")
+            append("Current repository map:\n").append(repoMapSummary()).append("\n")
+            workspace.verify().issues.take(20).forEach { issue ->
+                val content = runCatching { files.read(issue.path).content }.getOrNull()
+                if (content != null) {
+                    append("\nFILE ").append(issue.path).append("\n")
+                    append(content.take(12_000)).append("\n")
+                }
+            }
+        }
+        val response = ModelCallWithRetry.call(
+            gateway = model,
+            request = {
+                ModelRequest(
+                    AgentModelProtocol.SYSTEM,
+                    "You are repairing a failed approved code change. $evidence\n" +
+                        "Return exactly one replace_text or create_file tool call that fixes the diagnosed failure. " +
+                        "Do not explain. Do not use any other tool. Never weaken tests or safety controls.",
+                    repairTools,
+                    emptyList(),
+                    researchRequired = false
+                )
+            },
+            isCancelled = { cancelled.get() },
+            onPhase = { }
+        ) ?: return null
+        val call = when (response) {
+            is ModelResponse.ToolCall -> response
+            is ModelResponse.Text -> JsonModelResponseParser().parse(response.content) as? ModelResponse.ToolCall
+            else -> null
+        } ?: return null
+        return runCatching {
+            val args = JSONObject(call.arguments)
+            val operation = when (call.name) {
+                "replace_text" -> TaskOperation(
+                    OperationKind.REPLACE,
+                    args.getString("path"),
+                    args.getString("oldText"),
+                    args.getString("newText")
+                )
+                "create_file" -> TaskOperation(
+                    OperationKind.CREATE_FILE,
+                    args.getString("path"),
+                    text = args.getString("content")
+                )
+                else -> return@runCatching null
+            }
+            workspace.preview(listOf(operation), "Self-repair attempt $attempt: $diagnosis")
+        }.getOrNull()
+    }
     private fun executeTool(name: String, rawArguments: String): String {
         return tools.execute(name, rawArguments)
     }
