@@ -19,7 +19,7 @@ object ReviewBinder {
     fun bind(coordinator: MutationCoordinator?, wantedId: String? = null): ReviewBinding {
         val pending = coordinator?.pending().orEmpty()
         val proposal = when {
-            !wantedId.isNullOrBlank() -> coordinator?.get(wantedId) ?: pending.firstOrNull { it.id == wantedId } ?: pending.lastOrNull()
+            !wantedId.isNullOrBlank() -> coordinator?.get(wantedId) ?: pending.firstOrNull { it.id == wantedId }
             else -> pending.lastOrNull()
         }
         return ReviewBinding(
