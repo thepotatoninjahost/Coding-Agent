@@ -46,6 +46,7 @@ class AtomicFileWriterTest {
 
         val pending = File(file.path + ".new")
         assertTrue(pending.mkdir())
+        File(pending, "blocker").writeText("keep this directory non-empty")
 
         try {
             AtomicFileWriter.write(file, "new")
@@ -54,7 +55,8 @@ class AtomicFileWriterTest {
         }
 
         assertEquals("last-good", file.readText())
-        assertTrue(pending.exists())
+        assertTrue(pending.isDirectory())
+        assertTrue(File(pending, "blocker").exists())
     }
 
     @Test
