@@ -39,7 +39,6 @@ object PendingProposalStore {
             } catch (error: java.nio.file.AtomicMoveNotSupportedException) {
                 throw IllegalStateException("Atomic replacement is required for pending proposals", error)
             }
-            }
             val onDisk = Files.readAllBytes(target)
             val expected = arr.toString().toByteArray(Charsets.UTF_8)
             require(onDisk.contentEquals(expected)) {
