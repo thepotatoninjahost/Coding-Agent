@@ -21,4 +21,28 @@ class OpenJobStoreTest {
         assertTrue(loaded.promptBlock().contains("OPEN JOB"))
         assertTrue(loaded.promptBlock().contains("create a autonomous agent"))
     }
+
+    @Test
+    fun saveReplacesJobAtomicallyAndLeavesNoTemporaryFiles() {
+        val root = Files.createTempDirectory("open-job-atomic").toFile()
+        val first = OpenJobStore.openOrKeep(root, "first goal")
+        OpenJobStore.save(
+            root,
+            first.copy(
+                goal = "second goal",
+                status = "waiting-approval",
+                proposalId = "proposal-2",
+                paths = listOf("src/Agent.kt")
+            )
+        )
+        val loaded = OpenJobStore.load(root)!!
+        assertEquals("second goal", loaded.goal)
+        assertEquals("waiting-approval", loaded.status)
+        assertEquals("proposal-2", loaded.proposalId)
+        assertEquals(listOf("src/Agent.kt"), loaded.paths)
+        val tempFiles = root.resolve(".coding-agent").listFiles()
+            ?.filter { it.name.endsWith(".tmp") }
+            .orEmpty()
+        assertTrue("Atomic save left temporary files: $tempFiles", tempFiles.isEmpty())
+    }
 }
