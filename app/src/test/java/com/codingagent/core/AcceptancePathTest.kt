@@ -192,6 +192,26 @@ class AcceptancePathTest {
     }
 
     @Test
+    fun mutationProposalRetainsVerificationIntent() {
+        val root = Files.createTempDirectory("accept-request-context").toFile()
+        root.resolve("gradlew").writeText("#!/bin/sh\nexit 1\n")
+        root.resolve("gradlew").setExecutable(true)
+        root.resolve("Main.kt").writeText("fun main() = 1\n")
+        val workspace = ProjectWorkspace(root)
+        val coordinator = MutationCoordinator(workspace)
+        val result = coordinator.propose(
+            "run ./gradlew test after changing Main.kt",
+            listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 2\n")),
+            "model mutation"
+        )
+        assertTrue(result is MutationProposeResult.Proposed)
+        assertEquals(
+            "run ./gradlew test after changing Main.kt",
+            (result as MutationProposeResult.Proposed).proposal.request
+        )
+    }
+
+    @Test
     fun knowledgeIngestThenSearchReturnsHit() {
         val root = Files.createTempDirectory("accept-knowledge").toFile()
         val index = KnowledgeIndex(root)
