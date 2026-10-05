@@ -48,4 +48,18 @@ class AtomicFileWriterTest {
         assertFalse(File(file.path + ".bak").exists())
         assertFalse(File(file.path + ".new").exists())
     }
+    @Test
+    fun deleteRemovesCommittedStateAndRecoverySidecars() {
+        val root = Files.createTempDirectory("atomic-delete").toFile()
+        val file = root.resolve("state.json")
+        AtomicFileWriter.write(file, "state")
+        File(file.path + ".bak").writeText("stale")
+        File(file.path + ".new").writeText("stale")
+        AtomicFileWriter.delete(file)
+
+        assertFalse(file.exists())
+        assertFalse(File(file.path + ".bak").exists())
+        assertFalse(File(file.path + ".new").exists())
+    }
+
 }
