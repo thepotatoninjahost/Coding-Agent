@@ -322,6 +322,50 @@ private fun CodingAgentApp(privateDir: File) {
         chatMessages = store.recentChatMessages().asReversed()
     }
 
+    fun approvePendingProposal() {
+        val id = pendingProposalId ?: return
+        val coordinator = mutationCoordinator ?: return
+        if (activeJob != null) return
+        status = AgentStatus.WORKING
+        detail = "Processing approval off the UI thread…"
+        activeJob = scope.launch(Dispatchers.IO) {
+            val outcome = runCatching {
+                coordinator.approve(id, ownerVerified = true, ownerLabel = "owner")
+            }
+            withContext(Dispatchers.Main.immediate) {
+                outcome.onSuccess { result ->
+                    when (result) {
+                        is MutationApprovalResult.AwaitingSecond -> {
+                            approvalCount = result.proposal.approvalCount
+                            pendingProposal = result.proposal
+                            pendingProposalId = result.proposal.id
+                            pendingApproval = true
+                            detail = "Confirmation ${approvalCount}/2 recorded; transaction remains unapplied"
+                            status = AgentStatus.APPROVAL
+                        }
+                        is MutationApprovalResult.RepairRequired -> {
+                            pendingProposal = result.proposal
+                            pendingProposalId = result.proposal.id
+                            pendingApproval = true
+                            approvalCount = result.proposal.approvalCount
+                            pendingReason = result.proposal.request
+                            status = AgentStatus.APPROVAL
+                            detail = "Original change was rolled back. Review the staged repair and confirm twice."
+                        }
+                        is MutationApprovalResult.Applied -> onChangeApplied(result)
+                        is MutationApprovalResult.Rejected -> {
+                            status = AgentStatus.STOPPED
+                            detail = result.reason
+                        }
+                    }
+                }.onFailure {
+                    status = AgentStatus.FAILED
+                    detail = "Approval failed: " + (it.message.orEmpty().ifBlank { it.javaClass.simpleName })
+                }
+                activeJob = null
+            }
+        }
+    }
     fun stopAgent() {
         chat?.cancel()
         tools?.cancelTerminal()
@@ -563,44 +607,10 @@ private fun CodingAgentApp(privateDir: File) {
                         pendingApproval = pendingApproval,
                         approvalCount = approvalCount,
                         reason = pendingReason,
-                        onApprove = {
-                            val id = pendingProposalId ?: return@ChatSurface
-                            val coordinator = mutationCoordinator ?: return@ChatSurface
-                            when (val result = coordinator.approve(id, ownerVerified = true, ownerLabel = "owner")) {
-                                is MutationApprovalResult.AwaitingSecond -> { approvalCount = result.proposal.approvalCount; detail = "Confirmation ${approvalCount}/2 recorded; transaction remains unapplied" }
-                                is MutationApprovalResult.RepairRequired -> {
-                                    pendingProposal = result.proposal
-                                    pendingProposalId = result.proposal.id
-                                    pendingApproval = true
-                                    approvalCount = result.proposal.approvalCount
-                                    pendingReason = result.proposal.request
-                                    status = AgentStatus.APPROVAL
-                                    detail = "Original change was rolled back. Review the staged repair and confirm twice."
-                                }
-                                is MutationApprovalResult.Applied -> onChangeApplied(result)
-                                is MutationApprovalResult.Rejected -> { status = AgentStatus.STOPPED; detail = result.reason }
-                            }
-                        }
+                        onApprove = ::approvePendingProposal
                     )
                     SurfaceTab.FILES -> FilesSurface(fileList, projectQuery, { projectQuery = it }, editorPath, { editorPath = it }, editorContent, { editorContent = it }, editorDocument, tools, mutationCoordinator, onStatus = { status = it.first; detail = it.second })
-                    SurfaceTab.REVIEW -> ReviewSurface(pendingApproval, approvalCount, pendingReason, onApprove = {
-                        val id = pendingProposalId ?: return@ReviewSurface
-                        val coordinator = mutationCoordinator ?: return@ReviewSurface
-                        when (val result = coordinator.approve(id, ownerVerified = true, ownerLabel = "owner")) {
-                            is MutationApprovalResult.RepairRequired -> {
-                                pendingProposal = result.proposal
-                                pendingProposalId = result.proposal.id
-                                pendingApproval = true
-                                approvalCount = result.proposal.approvalCount
-                                pendingReason = result.proposal.request
-                                status = AgentStatus.APPROVAL
-                                detail = "Original change was rolled back. Review the staged repair and confirm twice."
-                            }
-                            is MutationApprovalResult.AwaitingSecond -> { approvalCount = result.proposal.approvalCount; detail = "Confirmation ${approvalCount}/2 recorded" }
-                            is MutationApprovalResult.Applied -> onChangeApplied(result)
-                            is MutationApprovalResult.Rejected -> { status = AgentStatus.STOPPED; detail = result.reason }
-                        }
-                    }, onReject = { pendingProposalId?.let { mutationCoordinator?.reject(it) }; pendingProposal = null; pendingApproval = false; pendingProposalId = null; approvalCount = 0; status = AgentStatus.STOPPED; detail = "Proposed changes rejected" })
+                    SurfaceTab.REVIEW -> ReviewSurface(pendingApproval, approvalCount, pendingReason, onApprove = ::approvePendingProposal, onReject = { pendingProposalId?.let { mutationCoordinator?.reject(it) }; pendingProposal = null; pendingApproval = false; pendingProposalId = null; approvalCount = 0; status = AgentStatus.STOPPED; detail = "Proposed changes rejected" })
                     SurfaceTab.TERMINAL -> TerminalSurface(
                         command = terminalCommand,
                         onCommand = { terminalCommand = it },
