@@ -86,6 +86,9 @@ class ProjectWorkspace(private val root: File) {
         val written = mutableListOf<ChangeRecord>()
         try {
             changeSet.changes.forEach { record ->
+                // Register before the write: an atomic replacement can succeed while the
+                // subsequent integrity read fails, and that file must then be rolled back.
+                written += record
                 writeAtomically(requireSafePath(record.path), requireNotNull(record.after))
                 val onDisk = requireSafePath(record.path).readText(Charsets.UTF_8)
                 require(checksum(onDisk) == record.afterChecksum) {
@@ -95,7 +98,6 @@ class ProjectWorkspace(private val root: File) {
                 require(integrity.isEmpty()) {
                     "Integrity: applied file failed checks: ${integrity.joinToString { it.message }}"
                 }
-                written += record
             }
             persist(changeSet)
             return changeSet
@@ -106,67 +108,6 @@ class ProjectWorkspace(private val root: File) {
             }
             throw error
         }
-    }
-
-    inner class Transaction(private val reason: String) {
-        private val staged = linkedMapOf<String, StagedChange>()
-        private var committed = false
-
-        fun replace(path: String, oldText: String, newText: String) {
-            require(oldText.isNotEmpty()) { "Replacement target cannot be empty" }
-            val current = staged[path]?.after ?: diskContent(path)
-            require(current != null) { "File does not exist: $path" }
-            require(current.countOccurrences(oldText) == 1) { "Expected exactly one match in $path" }
-            stage(path, ChangeOperation.REPLACE, current.replace(oldText, newText))
-        }
-
-        fun create(path: String, text: String) {
-            requireSafePath(path)
-            require(staged[path]?.after == null && diskContent(path) == null) { "File already exists: $path" }
-            stage(path, ChangeOperation.CREATE, text, null)
-        }
-
-        fun append(path: String, text: String) {
-            val current = staged[path]?.after ?: diskContent(path)
-            require(current != null) { "File does not exist: $path" }
-            stage(path, ChangeOperation.APPEND, current + text)
-        }
-
-        fun remove(path: String, oldText: String) {
-            require(oldText.isNotEmpty()) { "Removal target cannot be empty" }
-            val current = staged[path]?.after ?: diskContent(path)
-            require(current != null) { "File does not exist: $path" }
-            require(current.countOccurrences(oldText) == 1) { "Expected exactly one match in $path" }
-            stage(path, ChangeOperation.REMOVE, current.replace(oldText, ""))
-        }
-
-        fun commit(): ChangeSet = commitInternal(true)
-        fun commitPreview(): ChangeSet = commitInternal(false)
-        fun abort() { if (!committed) staged.clear() }
-
-        private fun commitInternal(write: Boolean): ChangeSet {
-            check(!committed) { "Transaction already completed" }
-            val records = staged.values
-                .map { it.toRecord() }
-                .filter { it.beforeChecksum != it.afterChecksum }
-            val changeSet = ChangeSet(UUID.randomUUID().toString(), records, System.currentTimeMillis(), reason)
-            if (write) applyApproved(changeSet)
-            committed = true
-            return changeSet
-        }
-
-        private fun stage(path: String, operation: ChangeOperation, after: String, beforeOverride: String? = null) {
-            val existing = staged[path]
-            staged[path] = if (existing == null) {
-                StagedChange(path, operation, if (beforeOverride != null) beforeOverride else diskContent(path), after, reason)
-            } else {
-                existing.copy(after = after)
-            }
-        }
-
-        private fun StagedChange.toRecord() = ChangeRecord(path, operation, before, after, reason, checksum(before), checksum(after))
-    }
-
     @Synchronized
     fun rollback(changeSet: ChangeSet): RollbackResult = rollback(listOf(changeSet))
 
