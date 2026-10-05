@@ -167,12 +167,9 @@ object OpenJobStore {
                     StandardCopyOption.ATOMIC_MOVE,
                     StandardCopyOption.REPLACE_EXISTING
                 )
-            } catch (_: AtomicMoveNotSupportedException) {
-                Files.move(
-                    temporary.toPath(),
-                    file.toPath(),
-                    StandardCopyOption.REPLACE_EXISTING
-                )
+            } catch (error: AtomicMoveNotSupportedException) {
+                throw IllegalStateException("Atomic replacement is required for open-job state", error)
+            }
             }
             val onDisk = Files.readAllBytes(file.toPath())
             require(onDisk.contentEquals(bytes)) {
