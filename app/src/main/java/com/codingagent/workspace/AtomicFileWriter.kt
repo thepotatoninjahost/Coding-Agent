@@ -27,57 +27,30 @@ internal object AtomicFileWriter {
 
         recover(file)
 
-        val backup = backup(file)
         val pending = pending(file)
-        var backedUp = false
-
         try {
-            if (file.exists()) {
-                if (backup.exists() && !backup.delete()) {
-                    throw IOException("Could not remove stale atomic backup: " + backup)
-                }
-                if (!file.renameTo(backup)) {
-                    throw IOException("Could not create atomic backup: " + file + " -> " + backup)
-                }
-                backedUp = true
-            }
-
             if (pending.exists() && !pending.delete()) {
                 throw IOException("Could not remove stale atomic pending file: " + pending)
             }
 
-            if (backedUp) {
-                writeAndSync(file, content)
-            } else {
-                writeAndSync(pending, content)
-                if (!pending.renameTo(file)) {
-                    throw IOException("Could not commit atomic new file: " + pending + " -> " + file)
-                }
-            }
+            writeAndSync(pending, content)
 
-            val onDisk = file.readBytes()
+            val onDisk = pending.readBytes()
             val expected = content.toByteArray(Charsets.UTF_8)
             require(onDisk.contentEquals(expected)) {
                 "Atomic write verification failed for " + file.name
             }
 
-            if (backup.exists() && !backup.delete()) {
-                throw IOException("Could not remove committed atomic backup: " + backup)
+            if (!pending.renameTo(file)) {
+                throw IOException("Could not commit atomic file: " + pending + " -> " + file)
             }
         } catch (error: Exception) {
-            pending.delete()
-            if (backedUp) {
-                file.delete()
-                if (!backup.renameTo(file)) {
-                    throw IllegalStateException(
-                        "Atomic write failed and previous file could not be restored: " + file,
-                        error
-                    )
-                }
+            if (pending.exists() && !pending.delete()) {
+                error.addSuppressed(
+                    IOException("Could not remove failed atomic pending file: " + pending)
+                )
             }
             throw error
-        } finally {
-            pending.delete()
         }
     }
 
