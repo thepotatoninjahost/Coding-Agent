@@ -2,6 +2,8 @@ package com.codingagent.workspace
 
 import java.io.File
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * ONE JOB: Run a shell command with cancellation, a timeout, and bounded output capture.
@@ -9,23 +11,27 @@ import java.util.concurrent.TimeUnit
  * transactions, and verification, which is what the rest of that file does.
  */
 class CommandRunner(private val directory: File) {
-    private val activeProcess = java.util.concurrent.atomic.AtomicReference<Process?>(null)
-    private val cancelled = java.util.concurrent.atomic.AtomicBoolean(false)
+    private val activeProcess = AtomicReference<Process?>(null)
+    private val cancellationGeneration = AtomicLong(0L)
     private val running = java.util.concurrent.atomic.AtomicBoolean(false)
+    private val lifecycleLock = Any()
 
     fun cancel(reason: String = "cancelled") {
-        cancelled.set(true)
-        activeProcess.getAndSet(null)?.let { process ->
-            runCatching {
-                process.destroy()
-                if (!process.waitFor(2, TimeUnit.SECONDS)) process.destroyForcibly()
-            }
+        synchronized(lifecycleLock) {
+            cancellationGeneration.incrementAndGet()
         }
+        activeProcess.getAndSet(null)?.let { terminate(it) }
     }
 
-    fun isCancelled(): Boolean = cancelled.get()
+    fun isCancelled(): Boolean {
+        val active = activeRunGeneration
+        return active >= 0L && cancellationGeneration.get() != active
+    }
 
     fun isRunning(): Boolean = running.get()
+
+    @Volatile
+    private var activeRunGeneration: Long = -1L
 
     fun run(
         command: List<String>,
@@ -34,56 +40,81 @@ class CommandRunner(private val directory: File) {
         onStderr: ((String) -> Unit)? = null
     ): CommandResult {
         require(command.isNotEmpty()) { "Command cannot be empty" }
-        check(running.compareAndSet(false, true)) { "A terminal command is already running" }
-        cancelled.set(false)
+        synchronized(lifecycleLock) {
+            check(running.compareAndSet(false, true)) { "A terminal command is already running" }
+            activeRunGeneration = cancellationGeneration.get()
+        }
+
+        val runGeneration = activeRunGeneration
         return try {
-            val process = ProcessBuilder(command).directory(directory).redirectErrorStream(false).start()
+            val process = ProcessBuilder(command)
+                .directory(directory)
+                .redirectErrorStream(false)
+                .start()
             activeProcess.set(process)
+
+            // Cancellation can race ProcessBuilder.start(). Publish the process first,
+            // then immediately honor a generation change that happened during startup.
+            if (cancellationGeneration.get() != runGeneration) {
+                activeProcess.compareAndSet(process, null)
+                terminate(process)
+            }
+
             val stdout = StringBuilder()
             val stderr = StringBuilder()
             val outThread = Thread { process.inputStream.use { input -> readLimited(input, stdout, onStdout) } }
             val errThread = Thread { process.errorStream.use { input -> readLimited(input, stderr, onStderr) } }
             outThread.start()
             errThread.start()
+
             var completed = false
             val deadline = System.nanoTime() + timeoutSeconds * 1_000_000_000L
             while (System.nanoTime() < deadline) {
-                if (cancelled.get()) break
-                if (!process.isAlive) { completed = true; break }
+                if (cancellationGeneration.get() != runGeneration) break
+                if (!process.isAlive) {
+                    completed = true
+                    break
+                }
                 process.waitFor(200, TimeUnit.MILLISECONDS)
             }
-            if (!completed) {
-                if (!cancelled.get() && !process.isAlive) completed = true
+            if (!completed && cancellationGeneration.get() == runGeneration && !process.isAlive) {
+                completed = true
             }
-            if (!completed) {
-                process.destroy()
-                if (!process.waitFor(2, TimeUnit.SECONDS)) process.destroyForcibly()
-            }
+            if (!completed) terminate(process)
+
             outThread.join(2_000)
             errThread.join(2_000)
-            val timedOut = !completed && !cancelled.get()
+
+            val cancelled = !completed && cancellationGeneration.get() != runGeneration
+            val timedOut = !completed && !cancelled
             val exit = when {
                 completed -> runCatching { process.exitValue() }.getOrDefault(-1)
-                cancelled.get() -> 130
+                cancelled -> 130
                 else -> -1
             }
-            val note = when {
-                cancelled.get() && stderr.isEmpty() -> "command cancelled"
-                else -> ""
-            }
+            val note = if (cancelled && stderr.isEmpty()) "command cancelled" else ""
             CommandResult(
                 command.joinToString(" "),
                 exit,
                 stdout.toString().trimEnd('\n'),
-                (stderr.toString().trimEnd('\n') + if (note.isNotEmpty()) (if (stderr.isNotEmpty()) "\n" else "") + note else "").trimEnd('\n'),
+                (stderr.toString().trimEnd('\n') +
+                    if (note.isNotEmpty()) (if (stderr.isNotEmpty()) "\n" else "") + note else "")
+                    .trimEnd('\n'),
                 timedOut
             )
         } catch (error: Exception) {
             CommandResult(command.joinToString(" "), -1, "", error.message.orEmpty(), false)
         } finally {
             activeProcess.set(null)
+            activeRunGeneration = -1L
             running.set(false)
-            cancelled.set(false)
+        }
+    }
+
+    private fun terminate(process: Process) {
+        runCatching {
+            process.destroy()
+            if (!process.waitFor(2, TimeUnit.SECONDS)) process.destroyForcibly()
         }
     }
 
