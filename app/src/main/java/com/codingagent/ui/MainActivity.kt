@@ -44,6 +44,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -233,6 +234,12 @@ private fun CodingAgentApp(privateDir: File) {
             )
         }
     }
+    // Tie agent-owned blocking work to the activity composition lifecycle.
+    // Coroutine cancellation alone cannot interrupt synchronous gateway/terminal calls.
+    DisposableEffect(agent) {
+        onDispose { agent?.cancel("Activity composition disposed") }
+    }
+
     val progressEpoch = remember { java.util.concurrent.atomic.AtomicInteger(0) }
     val chat = remember(agent, workspace, modelLoadError) {
         ChatWorkspace(
