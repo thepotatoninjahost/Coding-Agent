@@ -108,6 +108,8 @@ class ProjectWorkspace(private val root: File) {
             }
             throw error
         }
+    }
+
     @Synchronized
     fun rollback(changeSet: ChangeSet): RollbackResult = rollback(listOf(changeSet))
 
