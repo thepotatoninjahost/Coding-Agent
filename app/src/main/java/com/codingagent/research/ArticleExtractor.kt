@@ -64,7 +64,7 @@ object ArticleExtractor {
             if (connection.responseCode !in 200..299) return null
             val html = connection.inputStream.use { input ->
                 val bytes = ByteArrayOutputStream()
-                val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                val buffer = ByteArray(8 * 1024)
                 var total = 0
                 while (true) {
                     val count = input.read(buffer)
