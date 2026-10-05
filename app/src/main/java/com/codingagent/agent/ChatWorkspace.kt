@@ -41,6 +41,11 @@ class ChatWorkspace(
 ) {
     fun history(limit: Int = 100): List<ChatMessage> = store.recentChatMessages(limit).asReversed()
 
+    fun cancel() {
+        runtimeProvider()?.cancel("Stopped by owner")
+    }
+
+
     fun send(request: String): ChatTurn {
         val trimmed = request.trim()
         require(trimmed.isNotEmpty()) { "A message is required" }
