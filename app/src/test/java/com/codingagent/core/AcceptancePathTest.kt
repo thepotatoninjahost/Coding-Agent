@@ -14,6 +14,7 @@ import com.codingagent.model.ModelSettings
 import com.codingagent.model.RemoteHttpGateway
 import com.codingagent.workspace.ChangeDiff
 import com.codingagent.workspace.MutationApprovalResult
+import com.codingagent.workspace.OwnerApprovalToken
 import com.codingagent.workspace.MutationCoordinator
 import com.codingagent.workspace.MutationProposeResult
 import com.codingagent.workspace.ProjectWorkspace
@@ -51,7 +52,7 @@ class AcceptancePathTest {
         assertEquals("fun a() = 1\n", root.resolve("src/A.kt").readText())
         assertEquals("fun b() = 1\n", root.resolve("src/B.kt").readText())
 
-        val first = coordinator.approve(proposal.id, ownerVerified = true, ownerLabel = "owner")
+        val first = coordinator.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id))
         assertTrue(first is MutationApprovalResult.AwaitingSecond)
         assertEquals("fun a() = 1\n", root.resolve("src/A.kt").readText())
 
@@ -132,7 +133,7 @@ class AcceptancePathTest {
     }
 
     @Test
-    fun approvalRequiresAnExplicitIdentityLabel() {
+    fun approvalTokenMustBeBoundToThePendingProposal() {
         val root = Files.createTempDirectory("accept-approval-identity").toFile()
         root.resolve("Main.kt").writeText("fun main() = 1\n")
         val coordinator = MutationCoordinator(ProjectWorkspace(root))
@@ -141,10 +142,29 @@ class AcceptancePathTest {
             listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 2\n"))
         ) as MutationProposeResult.Proposed).proposal
 
-        val result = coordinator.approve(proposal.id, ownerVerified = true, ownerLabel = " ")
+        val result = coordinator.approve(
+            proposal.id,
+            OwnerApprovalToken.authenticated("different-proposal")
+        )
         assertTrue(result is MutationApprovalResult.Rejected)
         assertEquals(0, coordinator.pending().single().approvalCount)
         assertEquals("fun main() = 1\n", root.resolve("Main.kt").readText())
+    }
+
+    @Test
+    fun approvalTokenCannotBeReplayed() {
+        val root = Files.createTempDirectory("accept-approval-replay").toFile()
+        root.resolve("Main.kt").writeText("fun main() = 1\n")
+        val coordinator = MutationCoordinator(ProjectWorkspace(root))
+        val proposal = (coordinator.propose(
+            "replay protected",
+            listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 2\n"))
+        ) as MutationProposeResult.Proposed).proposal
+        val token = OwnerApprovalToken.authenticated(proposal.id)
+
+        assertTrue(coordinator.approve(proposal.id, token) is MutationApprovalResult.AwaitingSecond)
+        assertTrue(coordinator.approve(proposal.id, token) is MutationApprovalResult.Rejected)
+        assertEquals(1, coordinator.pending().single().approvalCount)
     }
 
     @Test
@@ -162,9 +182,9 @@ class AcceptancePathTest {
         val proposal = (proposeResult as MutationProposeResult.Proposed).proposal
 
         assertFalse(root.resolve("src/New.kt").exists())
-        coordinator.approve(proposal.id, true, "owner")
+        coordinator.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id))
         assertFalse(root.resolve("src/New.kt").exists())
-        val applied = coordinator.approve(proposal.id, true, "owner")
+        val applied = coordinator.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id))
         assertTrue(applied is MutationApprovalResult.Applied)
         assertEquals("class New\n", root.resolve("src/New.kt").readText())
     }
@@ -204,7 +224,7 @@ class AcceptancePathTest {
         )
         assertTrue(proposed is MutationProposeResult.Proposed)
         val original = (proposed as MutationProposeResult.Proposed).proposal
-        assertTrue(coordinator.approve(original.id, true, "owner") is MutationApprovalResult.AwaitingSecond)
+        assertTrue(coordinator.approve(original.id, OwnerApprovalToken.authenticated(original.id)) is MutationApprovalResult.AwaitingSecond)
         val result = coordinator.approve(original.id, true, "owner")
         assertTrue(result is MutationApprovalResult.RepairRequired)
         val repair = (result as MutationApprovalResult.RepairRequired).proposal
