@@ -1,9 +1,6 @@
 package com.codingagent.workspace
 
 import java.io.File
-import java.nio.file.Files
-import java.nio.file.StandardCopyOption
-import java.nio.file.StandardOpenOption
 import org.json.JSONArray
 import org.json.JSONObject
 import com.codingagent.agent.ApprovalRecord
@@ -20,40 +17,13 @@ object PendingProposalStore {
         f.parentFile?.mkdirs()
         val arr = JSONArray()
         proposals.forEach { arr.put(toJson(it)) }
-        val target = f.toPath()
-        val temporary = Files.createTempFile(f.parentFile.toPath(), "pending-proposals-", ".tmp")
-        try {
-            Files.write(
-                temporary,
-                arr.toString().toByteArray(Charsets.UTF_8),
-                StandardOpenOption.WRITE,
-                StandardOpenOption.TRUNCATE_EXISTING
-            )
-            try {
-                Files.move(
-                    temporary,
-                    target,
-                    StandardCopyOption.ATOMIC_MOVE,
-                    StandardCopyOption.REPLACE_EXISTING
-                )
-            } catch (error: java.nio.file.AtomicMoveNotSupportedException) {
-                throw IllegalStateException("Atomic replacement is required for pending proposals", error)
-            }
-            val onDisk = Files.readAllBytes(target)
-            val expected = arr.toString().toByteArray(Charsets.UTF_8)
-            require(onDisk.contentEquals(expected)) {
-                "Integrity: pending-proposals write did not persist expected bytes for ${f.name}"
-            }
-        } finally {
-            Files.deleteIfExists(temporary)
-        }
+        AtomicFileWriter.write(f, arr.toString())
     }
 
     @Synchronized
     fun load(root: File): List<PendingChangeProposal> {
         val f = file(root)
-        if (!f.isFile) return emptyList()
-        val text = f.readText().trim()
+        val text = AtomicFileWriter.readTextIfExists(f)?.trim() ?: return emptyList()
         if (text.isEmpty()) return emptyList()
         return runCatching {
             val arr = JSONArray(text)
