@@ -4,6 +4,8 @@ import java.nio.file.Files
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import org.junit.Test
 import com.codingagent.agent.AgentKnowledge
 import com.codingagent.agent.AutonomousAgent
@@ -40,9 +42,13 @@ class ChatWorkspaceTest {
         val root = Files.createTempDirectory("chat-cancel").toFile()
         root.resolve("Main.kt").writeText("fun main() = 1\n")
         val cancelled = AtomicBoolean(false)
+        val entered = CountDownLatch(1)
         val gateway = object : com.codingagent.model.ModelGateway {
-            override fun complete(request: com.codingagent.model.ModelRequest): com.codingagent.model.ModelResponse =
-                com.codingagent.model.ModelResponse.Text("unused")
+            override fun complete(request: com.codingagent.model.ModelRequest): com.codingagent.model.ModelResponse {
+                entered.countDown()
+                while (!cancelled.get()) Thread.sleep(10)
+                return com.codingagent.model.ModelResponse.Failure("Cancelled")
+            }
 
             override fun cancel() {
                 cancelled.set(true)
@@ -52,10 +58,18 @@ class ChatWorkspaceTest {
         val agent = AutonomousAgent(root, emptyKnowledge, gateway = gateway)
         val workspace = ChatWorkspace(store, runtimeProvider = { agent })
 
+        val worker = Thread { workspace.send("fix Main.kt") }
+        worker.start()
+
+        assertTrue("agent did not reach the model gateway", entered.await(2, TimeUnit.SECONDS))
+        assertTrue(agent.isRunning())
+
         workspace.cancel()
 
+        worker.join(2_000)
+        assertTrue("agent run did not stop after cancellation", !worker.isAlive)
         assertTrue(cancelled.get())
-        assertTrue(agent.isCancelled())
+        assertTrue(!agent.isRunning())
     }
 
     @Test
