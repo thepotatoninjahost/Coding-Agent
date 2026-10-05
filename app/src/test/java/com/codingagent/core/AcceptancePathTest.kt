@@ -92,7 +92,7 @@ class AcceptancePathTest {
             listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 2\n"))
         ) as MutationProposeResult.Proposed
 
-        val first = firstCoordinator.approve(proposed.proposal.id, true, "owner")
+        val first = firstCoordinator.approve(proposed.proposal.id, OwnerApprovalToken.authenticated(proposed.proposal.id))
         assertTrue(first is MutationApprovalResult.AwaitingSecond)
         assertEquals(1, (first as MutationApprovalResult.AwaitingSecond).approval.confirmationNumber)
 
@@ -101,7 +101,7 @@ class AcceptancePathTest {
         assertEquals(1, restored.approvalCount)
         assertEquals(1, restored.approvals.single().confirmationNumber)
 
-        val second = restartedCoordinator.approve(restored.id, true, "owner")
+        val second = restartedCoordinator.approve(restored.id, OwnerApprovalToken.authenticated(restored.id))
         assertTrue(second is MutationApprovalResult.Applied)
         val applied = second as MutationApprovalResult.Applied
         assertEquals(2, applied.proposal.approvalCount)
