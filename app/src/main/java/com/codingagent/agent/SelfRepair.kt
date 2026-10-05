@@ -41,30 +41,15 @@ object SelfRepair {
     fun isRequest(text: String): Boolean = PHRASES.containsMatchIn(text)
 
     /**
-     * Choose the best repair operation for the current workspace state.
-     * Priority: well-known agent files that lack the contract stamp.
+     * Self-repair must never mutate source merely to mark it as "reviewed".
+     * Real self-repair is driven by the autonomous diagnose -> repair -> verify
+     * recovery path. Returning null here deliberately falls through to that path.
      */
     fun chooseOperation(
         workspace: ProjectWorkspace,
         files: ProjectFileService,
         verification: VerificationReport
-    ): TaskOperation? {
-        val indexed = workspace.summary().files
-        for (candidate in PRIORITY_FILES) {
-            val found = indexed.firstOrNull { it.path == candidate || it.path.endsWith("/$candidate") }
-                ?: continue
-            val content = runCatching { files.read(found.path).content }.getOrNull() ?: continue
-            if (content.contains(CONTRACT_STAMP)) continue
-            val stamped = content.trimEnd() + "\n// $CONTRACT_STAMP: agent-reviewed\n"
-            return TaskOperation(
-                kind = OperationKind.REPLACE,
-                path = found.path,
-                oldText = content,
-                newText = stamped
-            )
-        }
-        return null
-    }
+    ): TaskOperation? = null
 
     /**
      * Stage a self-repair proposal for dual-owner approval, or return null so the
