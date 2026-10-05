@@ -6,6 +6,7 @@ import org.json.JSONObject
 import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 import com.codingagent.intake.OperationKind
 import com.codingagent.intake.TaskIntake
 import com.codingagent.intake.TaskIntakeParser
@@ -74,8 +75,10 @@ class AutonomousAgent(
         maxOutputCharacters = config.maxOutputCharacters,
         onResearchProgress = { lastResearchProgress = it }
     )
-    private val cancelled = AtomicBoolean(false)
     private val running = AtomicBoolean(false)
+    private val cancellationGeneration = AtomicLong(0L)
+    @Volatile
+    private var activeRunGeneration: Long = -1L
 
     @Volatile
     private var lastCancelReason: String = "Stopped by owner"
@@ -89,12 +92,15 @@ class AutonomousAgent(
     fun isRunning(): Boolean = running.get()
 
     fun cancel(reason: String = "Stopped by owner") {
-        cancelled.set(true)
+        cancellationGeneration.incrementAndGet()
         lastCancelReason = reason
         gateway?.cancel()
     }
 
-    fun isCancelled(): Boolean = cancelled.get()
+    fun isCancelled(): Boolean {
+        val active = activeRunGeneration
+        return active >= 0L && cancellationGeneration.get() != active
+    }
 
     /**
      * Replace the model gateway without recreating the agent. Safe to call from the UI thread
@@ -134,12 +140,14 @@ class AutonomousAgent(
 
     fun run(request: String, onEvent: (AutonomousAgentEvent) -> Unit = {}): List<AutonomousAgentEvent> {
         check(running.compareAndSet(false, true)) { "Agent is already running" }
+        val runGeneration = cancellationGeneration.get()
+        activeRunGeneration = runGeneration
         try {
-            cancelled.set(false)
             changeSets.clear()
             lastResearchProgress = "not started"
             return runInternal(request, onEvent)
         } finally {
+            activeRunGeneration = -1L
             running.set(false)
         }
     }
@@ -236,7 +244,7 @@ class AutonomousAgent(
         var researchEvidence = ""
         val wantsResearch = shouldResearch(focus, intake)
         if (wantsResearch) {
-            if (cancelled.get()) return stopNow(taskId, normalized, plan, events) { emit(it) }
+            if (isCancelled()) return stopNow(taskId, normalized, plan, events) { emit(it) }
             emit(AutonomousAgentEvent.Phase("RESEARCH", "Looking up external sources"))
             val mode = ResearchModeDetector.detect(focus)
             val session = runCatching {
