@@ -44,16 +44,17 @@ class AtomicFileWriterTest {
         val file = root.resolve("state.json")
         file.writeText("last-good")
 
-        val directoryTarget = root.resolve("replacement-directory")
-        assertTrue(directoryTarget.mkdir())
+        val pending = File(file.path + ".new")
+        assertTrue(pending.mkdir())
 
         try {
-            AtomicFileWriter.write(directoryTarget, "new")
+            AtomicFileWriter.write(file, "new")
         } catch (_: Exception) {
-            // The replacement target is intentionally invalid for a regular file write.
+            // A blocked pending path must not destroy the last committed file.
         }
 
         assertEquals("last-good", file.readText())
+        assertTrue(pending.exists())
     }
 
     @Test
