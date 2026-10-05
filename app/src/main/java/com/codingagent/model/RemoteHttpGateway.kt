@@ -131,7 +131,7 @@ class RemoteHttpGateway(
 
     private fun completeOnce(request: ModelRequest, generation: Long): ModelResponse {
         if (isCancelled(generation)) return ModelResponse.Failure("Cancelled")
-        val connection = openConnection() ?: return ModelResponse.Failure("Model gateway configuration is incomplete")
+        val connection = openConnection(generation) ?: return if (isCancelled(generation)) ModelResponse.Failure("Cancelled") else ModelResponse.Failure("Model gateway configuration is incomplete")
         return try {
             configure(connection)
             connection.outputStream.use { it.write(requestBody(request).toString().toByteArray(StandardCharsets.UTF_8)) }
