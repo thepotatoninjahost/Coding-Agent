@@ -39,14 +39,12 @@ class AtomicFileWriterTest {
     }
 
     @Test
-    fun failedReplacementPreservesPreviouslyCommittedContent() {
+    fun failedCommitPreservesPreviouslyCommittedContent() {
         val root = Files.createTempDirectory("atomic-failure").toFile()
         val file = root.resolve("state.json")
-        file.writeText("last-good")
-
-        val pending = File(file.path + ".new")
-        assertTrue(pending.mkdir())
-        File(pending, "blocker").writeText("keep this directory non-empty")
+        assertTrue(file.mkdir())
+        val blocker = File(file, "blocker")
+        blocker.writeText("last-good")
 
         var failed = false
         try {
@@ -56,9 +54,9 @@ class AtomicFileWriterTest {
         }
 
         assertTrue(failed)
-        assertEquals("last-good", file.readText())
-        assertTrue(pending.isDirectory())
-        assertTrue(File(pending, "blocker").exists())
+        assertTrue(file.isDirectory)
+        assertEquals("last-good", blocker.readText())
+        assertFalse(File(file.path + ".new").exists())
     }
 
     @Test
