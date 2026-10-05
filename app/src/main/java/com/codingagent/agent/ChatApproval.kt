@@ -6,8 +6,8 @@ import com.codingagent.workspace.MutationApprovalResult
 import com.codingagent.workspace.VerificationReport
 
 /**
- * ONE JOB: Apply a pending mutation when the user types an explicit approval word.
- * Returns null when this turn is not an approval, so chat continues normally.
+ * ONE JOB: Route approval phrases to the authenticated Review flow.
+ * Chat text never grants owner authority.
  */
 object ChatApproval {
     private val phrases = setOf("approve", "confirm", "apply")
