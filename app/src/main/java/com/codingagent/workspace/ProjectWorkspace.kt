@@ -225,8 +225,9 @@ class ProjectWorkspace(private val root: File) {
         try {
             try {
                 Files.move(temporary.toPath(), file.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
-            } catch (_: AtomicMoveNotSupportedException) {
-                Files.move(temporary.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING)
+            } catch (error: AtomicMoveNotSupportedException) {
+                throw IllegalStateException("Atomic replacement is required for ProjectWorkspace", error)
+            }
             }
             val onDisk = Files.readAllBytes(file.toPath())
             val expected = content.toByteArray(Charsets.UTF_8)
