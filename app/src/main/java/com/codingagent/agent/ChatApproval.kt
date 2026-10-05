@@ -16,18 +16,30 @@ object ChatApproval {
 
     fun tryApprove(agent: AutonomousAgent, text: String): AgentRuntimeResult? {
         if (!isApprovalPhrase(text)) return null
-        val pending = agent.pendingProposals().firstOrNull() ?: return null
-        return when (val result = agent.approveProposal(pending.id, ownerVerified = true, ownerLabel = "owner")) {
+        val pending = agent.pendingProposals()
+        if (pending.isEmpty()) return null
+        if (pending.size > 1) {
+            return AgentRuntimeResult.Failed(
+                task(
+                    request = text,
+                    summary = "Approval is ambiguous because multiple proposals are pending. Open Review and approve the intended proposal there.",
+                    status = "approval-ambiguous",
+                    proposalId = pending.joinToString(",") { it.id }
+                )
+            )
+        }
+        val proposal = pending.single()
+        return when (val result = agent.approveProposal(proposal.id, ownerVerified = true, ownerLabel = "owner")) {
             is MutationApprovalResult.AwaitingSecond ->
                 AgentRuntimeResult.NeedsApproval(
                     task(
                         request = text,
                         summary = "First approval recorded. Type approve or confirm once more to write the files.",
                         status = "waiting-approval",
-                        proposalId = pending.id
+                        proposalId = proposal.id
                     ),
                     "First approval recorded. Type approve or confirm once more to write the files.",
-                    pending.id
+                    proposal.id
                 )
             is MutationApprovalResult.RepairRequired ->
                 AgentRuntimeResult.NeedsApproval(
@@ -50,7 +62,7 @@ object ChatApproval {
                         plan = AgentPlan(text, emptyList(), emptyList()),
                         changes = result.changeSet.changes,
                         verification = VerificationReport(true, emptyList()),
-                        events = listOf("applied ${pending.id}"),
+                        events = listOf("applied ${proposal.id}"),
                         summary = "APPLIED to disk after dual approval.\nFiles:\n" +
                             paths.joinToString("\n") { "- $it" }
                     )
