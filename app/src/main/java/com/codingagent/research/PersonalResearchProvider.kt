@@ -5,6 +5,7 @@ import org.json.JSONObject
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 import java.util.UUID
 import com.codingagent.workspace.DeepResearchProgress
@@ -24,11 +25,11 @@ class PersonalResearchProvider(
 ) : DeepResearchProvider {
 
     private val activeConnection = AtomicReference<HttpURLConnection?>(null)
-    @Volatile private var cancelled = false
+    private val cancellationGeneration = AtomicLong(0L)
     private val sessionsDir = File(researchRoot, "sessions").apply { mkdirs() }
 
     override fun cancel() {
-        cancelled = true
+        cancellationGeneration.incrementAndGet()
         activeConnection.getAndSet(null)?.disconnect()
     }
 
@@ -38,7 +39,7 @@ class PersonalResearchProvider(
         mode: ResearchMode,
         onProgress: (DeepResearchProgress) -> Unit
     ): ResearchSession {
-        cancelled = false
+        val runGeneration = cancellationGeneration.get()
         val normalized = query.trim()
         require(normalized.isNotBlank()) { "Research query is required" }
         val target = targetSources.coerceIn(1, 20)
@@ -65,7 +66,7 @@ class PersonalResearchProvider(
 
         val hits = linkedMapOf<String, ResearchHit>()
         for (q in searchQueries) {
-            check(!cancelled) { "Research cancelled" }
+            check(!isCancelled(runGeneration)) { "Research cancelled" }
             val result = searchProvider.search(q, 14)
             result.hits.forEach { hit ->
                 if (!SourceQuality.isAcceptable(hit.url, hit.title, hit.excerpt)) return@forEach
@@ -84,10 +85,10 @@ class PersonalResearchProvider(
         val sources = mutableListOf<ResearchSource>()
         var failed = 0
         ranked.forEachIndexed { index, hit ->
-            if (cancelled) return@forEachIndexed
+            if (isCancelled(runGeneration)) return@forEachIndexed
             if (sources.size >= target) return@forEachIndexed
             val fetched = runCatching {
-                ArticleExtractor.fetch(hit.url, connectionFactory, pageTimeoutMillis, { cancelled }) { connection ->
+                ArticleExtractor.fetch(hit.url, connectionFactory, pageTimeoutMillis, { isCancelled(runGeneration) }) { connection ->
                     activeConnection.set(connection)
                 }
             }.getOrNull()
@@ -138,6 +139,8 @@ class PersonalResearchProvider(
         onProgress(DeepResearchProgress("learned", sources.size, sources.size.coerceAtLeast(1), sources.size, failed))
         return session
     }
+
+    private fun isCancelled(runGeneration: Long): Boolean = cancellationGeneration.get() != runGeneration
 
     private fun persist(session: ResearchSession) {
         val file = File(sessionsDir, "${session.id}.json")
