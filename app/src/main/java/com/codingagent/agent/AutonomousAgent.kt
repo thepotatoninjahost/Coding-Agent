@@ -174,6 +174,7 @@ class AutonomousAgent(
         emit(AutonomousAgentEvent.Phase("INTAKE", "Inspecting the request and repository"))
         // Strip chat-history wrapper so intent matches the current user line only.
         val focus = currentRequestFocus(normalized)
+        tools.setRequestContext(focus)
         val intake = TaskIntakeParser(root).parse(focus)
         val plan = AgentPlanner(workspace).plan(intake)
         // Wired in: was previously dead code. Every call below is defensively wrapped
