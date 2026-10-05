@@ -11,6 +11,8 @@ import java.nio.charset.StandardCharsets
 /**
  * ONE JOB: Project tree → indexed file records with symbols and checksums.
  */
+private val SYMBOL_PATTERN = Regex("\\b(class|interface|object|fun|function|def|const|val|var|public|private|protected|static)\\s+([A-Za-z_][A-Za-z0-9_]*)")
+
 class ProjectIndexer {
     private val ignored = setOf(
         ".git", ".gradle", "build", "node_modules", "target", "Trash",
@@ -89,8 +91,7 @@ class ProjectIndexer {
                         trimmed.startsWith("from ") && " import " in trimmed ->
                             imports += trimmed.substringBefore(" import ").removePrefix("from ").trim()
                     }
-                    Regex("\\b(class|interface|object|fun|function|def|const|val|var|public|private|protected|static)\\s+([A-Za-z_][A-Za-z0-9_]*)")
-                        .find(line)?.groupValues?.getOrNull(2)?.let(symbols::add)
+                    SYMBOL_PATTERN.find(line)?.groupValues?.getOrNull(2)?.let(symbols::add)
                 }
             }
         }
