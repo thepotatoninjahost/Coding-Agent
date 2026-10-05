@@ -25,6 +25,23 @@ class ProjectWorkspaceTest {
         assertTrue(root.resolve(".coding-agent/transactions").walkTopDown().any { it.isFile })
     }
 
+    @Test fun transactionJournalIsCompleteAndLeavesNoTemporaryFile() {
+        val root = Files.createTempDirectory("coding-agent-journal").toFile()
+        root.resolve("Example.kt").writeText("fun one() = 1\n")
+        val workspace = ProjectWorkspace(root)
+        val changeSet = workspace.replace("Example.kt", "= 1", "= 2", "journal integrity")
+        val journals = root.resolve(".coding-agent/transactions").listFiles().orEmpty()
+            .filter { it.isFile && it.name.endsWith(".tsv") }
+        assertEquals(1, journals.size)
+        val journal = journals.single().readText()
+        assertTrue(journal.contains(changeSet.id))
+        assertTrue(journal.contains("Example.kt"))
+        assertTrue(
+            root.resolve(".coding-agent/transactions").listFiles().orEmpty()
+                .none { it.name.endsWith(".tmp") }
+        )
+    }
+
     @Test fun verifyRejectsUnfinishedMarkers() {
         val root = Files.createTempDirectory("coding-agent").toFile()
         root.resolve("Example.kt").writeText("// TODO finish\n")
