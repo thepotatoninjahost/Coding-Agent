@@ -5,6 +5,9 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.biometric.BiometricManager
+import androidx.biometric.BiometricPrompt
+import androidx.core.content.ContextCompat
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -84,6 +87,7 @@ import com.codingagent.model.ModelDownloadProgress
 import com.codingagent.model.ModelGateway
 import com.codingagent.model.ModelSettings
 import com.codingagent.workspace.MutationApprovalResult
+import com.codingagent.workspace.OwnerApprovalToken
 import com.codingagent.workspace.MutationCoordinator
 import com.codingagent.workspace.PendingChangeProposal
 import com.codingagent.workspace.ProjectWorkspace
@@ -143,6 +147,7 @@ private fun CodingAgentApp(privateDir: File) {
     var pendingReason by remember { mutableStateOf("The agent proposes a transactional code change.") }
     var pendingProposalId by remember { mutableStateOf<String?>(null) }
     var pendingProposal by remember { mutableStateOf<PendingChangeProposal?>(null) }
+    var approvalPromptOpen by remember { mutableStateOf(false) }
     val mutationCoordinator = remember(workspace) { workspace?.let { MutationCoordinator(it) } }
     var messageQueue by remember { mutableStateOf(emptyList<String>()) }
     var modelSettings by remember { mutableStateOf(store.loadModelSettings()) }
@@ -325,47 +330,92 @@ private fun CodingAgentApp(privateDir: File) {
     fun approvePendingProposal() {
         val id = pendingProposalId ?: return
         val coordinator = mutationCoordinator ?: return
-        if (activeJob != null) return
-        status = AgentStatus.WORKING
-        detail = "Processing approval off the UI thread…"
-        activeJob = scope.launch(Dispatchers.IO) {
-            val outcome = runCatching {
-                coordinator.approve(id, ownerVerified = true, ownerLabel = "owner")
-            }
-            withContext(Dispatchers.Main.immediate) {
-                outcome.onSuccess { result ->
-                    when (result) {
-                        is MutationApprovalResult.AwaitingSecond -> {
-                            approvalCount = result.proposal.approvalCount
-                            pendingProposal = result.proposal
-                            pendingProposalId = result.proposal.id
-                            pendingApproval = true
-                            detail = "Confirmation ${approvalCount}/2 recorded; transaction remains unapplied"
-                            status = AgentStatus.APPROVAL
-                        }
-                        is MutationApprovalResult.RepairRequired -> {
-                            pendingProposal = result.proposal
-                            pendingProposalId = result.proposal.id
-                            pendingApproval = true
-                            approvalCount = result.proposal.approvalCount
-                            pendingReason = result.proposal.request
-                            status = AgentStatus.APPROVAL
-                            detail = "Original change was rolled back. Review the staged repair and confirm twice."
-                        }
-                        is MutationApprovalResult.Applied -> onChangeApplied(result)
-                        is MutationApprovalResult.Rejected -> {
-                            status = AgentStatus.STOPPED
-                            detail = result.reason
+        if (activeJob != null || approvalPromptOpen) return
+        if (coordinator.get(id) == null) {
+            pendingApproval = false
+            pendingProposal = null
+            pendingProposalId = null
+            approvalCount = 0
+            status = AgentStatus.STOPPED
+            detail = "The proposal is no longer pending."
+            return
+        }
+
+        val authenticators = BiometricManager.Authenticators.BIOMETRIC_STRONG or
+            BiometricManager.Authenticators.DEVICE_CREDENTIAL
+        val biometricManager = BiometricManager.from(context)
+        if (biometricManager.canAuthenticate(authenticators) != BiometricManager.BIOMETRIC_SUCCESS) {
+            status = AgentStatus.STOPPED
+            detail = "Owner authentication is unavailable. Configure a strong biometric or device credential."
+            return
+        }
+
+        approvalPromptOpen = true
+        val executor = ContextCompat.getMainExecutor(context)
+        val prompt = BiometricPrompt(
+            context as ComponentActivity,
+            executor,
+            object : BiometricPrompt.AuthenticationCallback() {
+                override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                    super.onAuthenticationSucceeded(result)
+                    approvalPromptOpen = false
+                    status = AgentStatus.WORKING
+                    detail = "Owner authenticated; recording approval off the UI thread…"
+                    val token = OwnerApprovalToken.authenticated(id)
+                    activeJob = scope.launch(Dispatchers.IO) {
+                        val outcome = runCatching { coordinator.approve(id, token) }
+                        withContext(Dispatchers.Main.immediate) {
+                            outcome.onSuccess { result ->
+                                when (result) {
+                                    is MutationApprovalResult.AwaitingSecond -> {
+                                        approvalCount = result.proposal.approvalCount
+                                        pendingProposal = result.proposal
+                                        pendingProposalId = result.proposal.id
+                                        pendingApproval = true
+                                        detail = "Authenticated confirmation ${approvalCount}/2 recorded; transaction remains unapplied"
+                                        status = AgentStatus.APPROVAL
+                                    }
+                                    is MutationApprovalResult.RepairRequired -> {
+                                        pendingProposal = result.proposal
+                                        pendingProposalId = result.proposal.id
+                                        pendingApproval = true
+                                        approvalCount = result.proposal.approvalCount
+                                        pendingReason = result.proposal.request
+                                        status = AgentStatus.APPROVAL
+                                        detail = "Original change was rolled back. Review the staged repair and authenticate again."
+                                    }
+                                    is MutationApprovalResult.Applied -> onChangeApplied(result)
+                                    is MutationApprovalResult.Rejected -> {
+                                        status = AgentStatus.STOPPED
+                                        detail = result.reason
+                                    }
+                                }
+                            }.onFailure {
+                                status = AgentStatus.FAILED
+                                detail = "Approval failed: " + (it.message.orEmpty().ifBlank { it.javaClass.simpleName })
+                            }
+                            activeJob = null
                         }
                     }
-                }.onFailure {
-                    status = AgentStatus.FAILED
-                    detail = "Approval failed: " + (it.message.orEmpty().ifBlank { it.javaClass.simpleName })
                 }
-                activeJob = null
+
+                override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                    super.onAuthenticationError(errorCode, errString)
+                    approvalPromptOpen = false
+                    status = AgentStatus.STOPPED
+                    detail = "Owner authentication cancelled or failed: $errString"
+                }
             }
-        }
+        )
+        val promptInfo = BiometricPrompt.PromptInfo.Builder()
+            .setTitle("Confirm code change")
+            .setSubtitle("Authenticate as the device owner to approve this proposal")
+            .setAllowedAuthenticators(authenticators)
+            .setConfirmationRequired(true)
+            .build()
+        prompt.authenticate(promptInfo)
     }
+
     fun stopAgent() {
         chat?.cancel()
         tools?.cancelTerminal()
