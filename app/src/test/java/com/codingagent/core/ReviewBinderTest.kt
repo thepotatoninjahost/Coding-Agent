@@ -21,6 +21,23 @@ class ReviewBinderTest {
     }
 
     @Test
+    fun staleRequestedProposalIdNeverFallsBackToAnotherProposal() {
+        val root = Files.createTempDirectory("review-binder-stale").toFile()
+        root.resolve("Main.kt").writeText("fun main() = 1\n")
+        val mutations = MutationCoordinator(ProjectWorkspace(root))
+        val result = mutations.propose(
+            "change main",
+            listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 2\n"))
+        )
+        assertTrue(result is MutationProposeResult.Proposed)
+
+        val bound = ReviewBinder.bind(mutations, wantedId = "stale-proposal-id")
+        assertFalse(bound.pendingApproval)
+        assertEquals(null, bound.proposal)
+        assertEquals(null, bound.proposalId)
+    }
+
+    @Test
     fun stagedProposalFillsReview() {
         val root = Files.createTempDirectory("review-binder").toFile()
         root.resolve("src").mkdirs()
