@@ -1,6 +1,7 @@
 package com.codingagent.model
 
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * ONE JOB: Try the next configured model when the current one is rate-limited,
@@ -16,6 +17,7 @@ class RotatingModelGateway(
     data class Entry(val modelId: String, val gateway: ModelGateway)
 
     private val index = AtomicInteger(0)
+    private val cancellationGeneration = AtomicLong(0L)
 
     init {
         require(entries.isNotEmpty()) { "RotatingModelGateway requires at least one model entry" }
@@ -32,17 +34,22 @@ class RotatingModelGateway(
         runWithRotation { it.stream(request, onDelta) }
 
     override fun cancel() {
+        cancellationGeneration.incrementAndGet()
         entries.forEach { it.gateway.cancel() }
     }
 
     private fun runWithRotation(call: (ModelGateway) -> ModelResponse): ModelResponse {
+        val generation = cancellationGeneration.get()
+        if (isCancelled(generation)) return ModelResponse.Failure("Cancelled")
         val start = index.get().coerceIn(0, entries.lastIndex)
         var lastFailure: ModelResponse.Failure? = null
 
         for (offset in entries.indices) {
+            if (isCancelled(generation)) return ModelResponse.Failure("Cancelled")
             val idx = (start + offset) % entries.size
             val entry = entries[idx]
             val response = call(entry.gateway)
+            if (isCancelled(generation)) return ModelResponse.Failure("Cancelled")
 
             if (response !is ModelResponse.Failure) {
                 // Stick on the model that worked so the next turn does not bounce.
@@ -59,6 +66,7 @@ class RotatingModelGateway(
             }
 
             if (offset < entries.lastIndex) {
+                if (isCancelled(generation)) return ModelResponse.Failure("Cancelled")
                 val next = entries[(idx + 1) % entries.size]
                 onRotated?.invoke(entry.modelId, next.modelId, response.message.take(160))
                 // Brief pause so a shared free-tier bucket has a chance to recover
@@ -74,6 +82,8 @@ class RotatingModelGateway(
 
         return lastFailure ?: ModelResponse.Failure("All rotation models failed")
     }
+
+    private fun isCancelled(generation: Long): Boolean = cancellationGeneration.get() != generation
 
     companion object {
         /**
