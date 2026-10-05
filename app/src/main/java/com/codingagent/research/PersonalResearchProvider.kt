@@ -121,7 +121,7 @@ class PersonalResearchProvider(
             onProgress(DeepResearchProgress("fetching", index + 1, ranked.size, sources.size, failed))
         }
 
-        check(!cancelled) { "Research cancelled" }
+        check(!isCancelled(runGeneration)) { "Research cancelled" }
         val session = ResearchSession(
             id = UUID.randomUUID().toString(),
             query = normalized,
