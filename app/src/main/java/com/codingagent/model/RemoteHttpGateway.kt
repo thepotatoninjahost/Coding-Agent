@@ -39,12 +39,13 @@ class RemoteHttpGateway(
 
     private fun streamOnce(request: ModelRequest, onDelta: (String) -> Unit, generation: Long): ModelResponse {
         if (isCancelled(generation)) return ModelResponse.Failure("Cancelled")
-        val connection = openConnection() ?: return ModelResponse.Failure("Model gateway configuration is incomplete")
+        val connection = openConnection(generation) ?: return if (isCancelled(generation)) ModelResponse.Failure("Cancelled") else ModelResponse.Failure("Model gateway configuration is incomplete")
         return try {
             configure(connection)
             val body = requestBody(request)
             body.put("stream", true)
             connection.outputStream.use { it.write(body.toString().toByteArray(StandardCharsets.UTF_8)) }
+            if (isCancelled(generation)) return ModelResponse.Failure("Cancelled")
             if (connection.responseCode !in 200..299) return failure(connection)
             parseStreamedBody(connection.inputStream, onDelta)
         } catch (error: IOException) {
@@ -134,6 +135,7 @@ class RemoteHttpGateway(
         return try {
             configure(connection)
             connection.outputStream.use { it.write(requestBody(request).toString().toByteArray(StandardCharsets.UTF_8)) }
+            if (isCancelled(generation)) return ModelResponse.Failure("Cancelled")
             if (connection.responseCode !in 200..299) return failure(connection)
             parseCompletionBody(connection.inputStream.bufferedReader().use { it.readText() })
         } catch (error: IOException) {
@@ -169,11 +171,21 @@ class RemoteHttpGateway(
 
     private fun isCancelled(generation: Long): Boolean = cancellationGeneration.get() != generation
 
-    private fun openConnection(): HttpURLConnection? {
+    private fun openConnection(generation: Long): HttpURLConnection? {
         if (endpoint.isBlank() || model.isBlank()) return null
         if (ModelEndpointPolicy.validate(endpoint) != null) return null
         if (apiKey.isBlank() && !ModelEndpointPolicy.isLocalEndpoint(endpoint)) return null
-        return connectionFactory(endpoint.trimEnd('/') + "/chat/completions").also { activeConnection.set(it) }
+        val connection = connectionFactory(endpoint.trimEnd('/') + "/chat/completions")
+        if (isCancelled(generation)) {
+            connection.disconnect()
+            return null
+        }
+        activeConnection.set(connection)
+        if (isCancelled(generation) && activeConnection.compareAndSet(connection, null)) {
+            connection.disconnect()
+            return null
+        }
+        return connection
     }
 
     private fun configure(connection: HttpURLConnection) {
