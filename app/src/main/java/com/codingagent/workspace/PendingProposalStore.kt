@@ -23,10 +23,9 @@ object PendingProposalStore {
         val target = f.toPath()
         val temporary = Files.createTempFile(f.parentFile.toPath(), "pending-proposals-", ".tmp")
         try {
-            Files.writeString(
+            Files.write(
                 temporary,
-                arr.toString(),
-                Charsets.UTF_8,
+                arr.toString().toByteArray(Charsets.UTF_8),
                 StandardOpenOption.TRUNCATE_EXISTING
             )
             try {
