@@ -37,7 +37,7 @@ class ModelGatewayTest {
         )
         gateway.cancel()
 
-        val result = gateway.complete(ModelRequest("system", "test"))
+        val result = gateway.complete(ModelRequest("system", "test", emptyList()))
 
         assertEquals(ModelResponse.Failure("Cancelled"), result)
         assertEquals(0, firstCalls)
