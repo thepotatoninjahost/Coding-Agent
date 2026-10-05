@@ -141,7 +141,7 @@ object OpenJobStore {
 
     @Synchronized
     fun clear(root: File) {
-        file(root).delete()
+        AtomicFileWriter.delete(file(root))
     }
 
     private fun writeAtomically(file: File, content: String) = AtomicFileWriter.write(file, content)
