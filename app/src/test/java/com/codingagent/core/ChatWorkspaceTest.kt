@@ -13,6 +13,7 @@ import com.codingagent.agent.ChatMessage
 import com.codingagent.agent.ChatMessageStore
 import com.codingagent.agent.ChatRole
 import com.codingagent.agent.ChatWorkspace
+import com.codingagent.agent.PendingWorkResume
 import com.codingagent.workspace.KnowledgeHit
 import com.codingagent.workspace.OpenJobStore
 
@@ -72,7 +73,6 @@ class ChatWorkspaceTest {
         assertTrue(!agent.isRunning())
     }
 
-
     @Test
     fun chatApprovalRefusesWhenMultipleProposalsArePending() {
         val root = Files.createTempDirectory("chat-ambiguous-approval").toFile()
@@ -87,6 +87,28 @@ class ChatWorkspaceTest {
 
         val result = com.codingagent.agent.ChatApproval.tryApprove(agent, "approve")
         assertTrue(result is com.codingagent.agent.AgentRuntimeResult.Failed)
+        assertEquals(2, agent.pendingProposals().size)
+        assertEquals("fun main() = 1\n", root.resolve("Main.kt").readText())
+    }
+
+    @Test
+    fun resumeRefusesWhenMultipleProposalsArePending() {
+        val root = Files.createTempDirectory("chat-ambiguous-resume").toFile()
+        root.resolve("Main.kt").writeText("fun main() = 1\n")
+        val agent = AutonomousAgent(root, emptyKnowledge, gateway = null)
+
+        agent.run("replace fun main() = 1 with fun main() = 2 in Main.kt")
+        agent.run("replace fun main() = 1 with fun main() = 3 in Main.kt")
+        val pending = agent.pendingProposals()
+        assertEquals(2, pending.size)
+
+        val result = PendingWorkResume.tryResume(agent, "continue", null)
+
+        assertTrue(result is com.codingagent.agent.AgentRuntimeResult.Failed)
+        val failed = result as com.codingagent.agent.AgentRuntimeResult.Failed
+        assertEquals("resume-ambiguous", failed.task.status)
+        assertTrue(failed.task.summary.contains(pending[0].id))
+        assertTrue(failed.task.summary.contains(pending[1].id))
         assertEquals(2, agent.pendingProposals().size)
         assertEquals("fun main() = 1\n", root.resolve("Main.kt").readText())
     }
@@ -126,7 +148,6 @@ class ChatWorkspaceTest {
         assertTrue(history.any { it.role == ChatRole.USER && it.content == "Use Kotlin" })
         assertTrue(history.any { it.role == ChatRole.USER && it.content == "status" })
         assertTrue(history.size >= 4)
-        // Second agent reply should be a status-style report (direct lane), proving follow-up ran.
         val lastAgent = history.last { it.role == ChatRole.AGENT }
         assertTrue(
             lastAgent.content.contains("Status", ignoreCase = true) ||
