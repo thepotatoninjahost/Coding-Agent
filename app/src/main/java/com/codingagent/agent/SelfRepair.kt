@@ -20,8 +20,6 @@ import com.codingagent.workspace.VerificationReport
  */
 object SelfRepair {
 
-    const val CONTRACT_STAMP = "SELF_REPAIR_CONTRACT"
-
     val PRIORITY_FILES = listOf(
         "ChatWorkspace.kt",
         "AutonomousAgent.kt",
@@ -118,7 +116,6 @@ object SelfRepair {
         appendLine(" * ONE JOB: Detect self-repair requests against the agent source tree.")
         appendLine(" */")
         appendLine("object SelfRepair {")
-        appendLine("    const val CONTRACT_STAMP = \"$CONTRACT_STAMP\"")
         appendLine()
         appendLine("    private val PHRASES = Regex(")
         appendLine("        \"\\b(fix yourself|modify yourself|self[-\\s]?repair|repair yourself|update yourself|improve yourself)\\b\",")
@@ -127,6 +124,5 @@ object SelfRepair {
         appendLine()
         appendLine("    fun isRequest(text: String): Boolean = PHRASES.containsMatchIn(text)")
         appendLine("}")
-        appendLine("// $CONTRACT_STAMP: agent-reviewed")
     }
 }
