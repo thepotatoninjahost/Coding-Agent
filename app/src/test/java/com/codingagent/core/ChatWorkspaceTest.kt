@@ -3,6 +3,7 @@ package com.codingagent.core
 import java.nio.file.Files
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import java.util.concurrent.atomic.AtomicBoolean
 import org.junit.Test
 import com.codingagent.agent.AgentKnowledge
 import com.codingagent.agent.AutonomousAgent
@@ -32,6 +33,29 @@ class ChatWorkspaceTest {
         assertEquals(2, workspace.history().size)
         assertEquals("hello", workspace.history().first().content)
         assertTrue(workspace.history().last().content.isNotBlank())
+    }
+
+    @Test
+    fun cancelPropagatesToActiveAgentGateway() {
+        val root = Files.createTempDirectory("chat-cancel").toFile()
+        root.resolve("Main.kt").writeText("fun main() = 1\n")
+        val cancelled = AtomicBoolean(false)
+        val gateway = object : com.codingagent.model.ModelGateway {
+            override fun complete(request: com.codingagent.model.ModelRequest): com.codingagent.model.ModelResponse =
+                com.codingagent.model.ModelResponse.Text("unused")
+
+            override fun cancel() {
+                cancelled.set(true)
+            }
+        }
+        val store = MemoryChatStore()
+        val agent = AutonomousAgent(root, emptyKnowledge, gateway = gateway)
+        val workspace = ChatWorkspace(store, runtimeProvider = { agent })
+
+        workspace.cancel()
+
+        assertTrue(cancelled.get())
+        assertTrue(agent.isCancelled())
     }
 
     @Test
