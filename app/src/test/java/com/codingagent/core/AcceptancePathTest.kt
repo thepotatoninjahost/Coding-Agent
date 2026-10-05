@@ -17,6 +17,7 @@ import com.codingagent.workspace.MutationApprovalResult
 import com.codingagent.workspace.MutationCoordinator
 import com.codingagent.workspace.MutationProposeResult
 import com.codingagent.workspace.ProjectWorkspace
+import com.codingagent.workspace.PendingProposalStore
 
 /**
  * Path A acceptance: offline explicit create/replace → dual approve → disk changed.
@@ -105,6 +106,29 @@ class AcceptancePathTest {
         assertEquals(2, applied.proposal.approvalCount)
         assertEquals(listOf(1, 2), applied.proposal.approvals.map { it.confirmationNumber })
         assertEquals("fun main() = 2\n", root.resolve("Main.kt").readText())
+    }
+
+    @Test
+    fun pendingProposalStoreReplacesStateAtomicallyAndLeavesNoTemporaryFiles() {
+        val root = Files.createTempDirectory("accept-pending-store").toFile()
+        root.resolve("Main.kt").writeText("fun main() = 1\n")
+        val coordinator = MutationCoordinator(ProjectWorkspace(root))
+        val proposed = coordinator.propose(
+            "persist pending state",
+            listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 2\n"))
+        ) as MutationProposeResult.Proposed
+
+        PendingProposalStore.save(root, listOf(proposed.proposal))
+        assertEquals(1, PendingProposalStore.load(root).size)
+
+        PendingProposalStore.save(root, emptyList())
+        assertEquals(emptyList<Any>(), PendingProposalStore.load(root))
+        assertEquals("[]", PendingProposalStore.file(root).readText())
+        assertTrue(
+            root.resolve(".coding-agent").listFiles()
+                .orEmpty()
+                .none { it.name.startsWith("pending-proposals-") && it.name.endsWith(".tmp") }
+        )
     }
 
     @Test
