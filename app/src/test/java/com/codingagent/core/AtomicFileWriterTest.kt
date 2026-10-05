@@ -39,6 +39,24 @@ class AtomicFileWriterTest {
     }
 
     @Test
+    fun failedReplacementPreservesPreviouslyCommittedContent() {
+        val root = Files.createTempDirectory("atomic-failure").toFile()
+        val file = root.resolve("state.json")
+        file.writeText("last-good")
+
+        val directoryTarget = root.resolve("replacement-directory")
+        assertTrue(directoryTarget.mkdir())
+
+        try {
+            AtomicFileWriter.write(directoryTarget, "new")
+        } catch (_: Exception) {
+            // The replacement target is intentionally invalid for a regular file write.
+        }
+
+        assertEquals("last-good", file.readText())
+    }
+
+    @Test
     fun newFileCommitUsesPendingFileThenLeavesOnlyCommittedState() {
         val root = Files.createTempDirectory("atomic-new").toFile()
         val file = root.resolve("state.json")
