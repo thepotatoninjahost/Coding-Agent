@@ -1,7 +1,6 @@
 package com.codingagent.agent
 
 import java.io.File
-import java.io.RandomAccessFile
 
 /**
  * ONE JOB: Persist per-task outcomes to experience.tsv for later sessions.
@@ -24,31 +23,15 @@ class ExperienceRecorder(private val root: File) {
 
     fun all(): List<String> {
         if (!file.isFile) return emptyList()
-        val limit = MAX_LINES
-        val result = ArrayDeque<String>(limit)
-        RandomAccessFile(file, "r").use { raf ->
-            var position = raf.length() - 1
-            val bytes = java.io.ByteArrayOutputStream()
-            while (position >= 0 && result.size < limit) {
-                raf.seek(position--)
-                val value = raf.read()
-                if (value == '\n'.code) {
-                    val line = bytes.toByteArray().reversedArray().toString(Charsets.UTF_8).trim()
-                    if (line.isNotBlank()) {
-                        result.addFirst(line)
-                        if (result.size > limit) result.removeFirst()
-                    }
-                    bytes.reset()
-                } else {
-                    bytes.write(value)
-                }
-            }
-            if (bytes.size() > 0 && result.size < limit) {
-                val line = bytes.toByteArray().reversedArray().toString(Charsets.UTF_8).trim()
-                if (line.isNotBlank()) result.addFirst(line)
+        val recent = ArrayDeque<String>(MAX_LINES)
+        file.useLines { lines ->
+            lines.forEach { line ->
+                if (line.isBlank()) return@forEach
+                if (recent.size == MAX_LINES) recent.removeFirst()
+                recent.addLast(line)
             }
         }
-        return result.asReversed()
+        return recent.toList()
     }
 
     companion object {
