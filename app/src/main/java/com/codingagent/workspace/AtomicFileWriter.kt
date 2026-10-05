@@ -82,6 +82,21 @@ internal object AtomicFileWriter {
     }
 
     @Synchronized
+    fun delete(file: File) {
+        if (!file.delete() && file.exists()) {
+            throw IllegalStateException("Atomic delete failed: " + file)
+        }
+        val backup = backup(file)
+        val pending = pending(file)
+        if (!backup.delete() && backup.exists()) {
+            throw IllegalStateException("Atomic delete failed for backup: " + backup)
+        }
+        if (!pending.delete() && pending.exists()) {
+            throw IllegalStateException("Atomic delete failed for pending file: " + pending)
+        }
+    }
+
+    @Synchronized
     fun readTextIfExists(file: File): String? {
         recover(file)
         return if (file.isFile) file.readText(Charsets.UTF_8) else null
