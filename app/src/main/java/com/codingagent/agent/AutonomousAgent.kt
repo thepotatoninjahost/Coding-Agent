@@ -57,7 +57,8 @@ class AutonomousAgent(
     // created a second, divergent instance that could silently drift from mutations.workspace.
     private val workspace: ProjectWorkspace get() = mutations.workspace
     private val files = ProjectFileService(workspace)
-    private val terminal = TerminalSession(root, config.commandTimeoutSeconds)
+    // Reuse the workspace-owned session so terminal commands, verification checks, and Stop share one cancellation boundary.
+    private val terminal = workspace.terminal()
     private val journal = AgentJournal(root)
     // Wired in: was previously dead code. Records every task outcome to
     // .coding-agent/experience.tsv via recordTask() below (defensive: never crashes a run).
@@ -77,6 +78,7 @@ class AutonomousAgent(
     )
     private val running = AtomicBoolean(false)
     private val cancellationGeneration = AtomicLong(0L)
+    private val lifecycleLock = Any()
     @Volatile
     private var activeRunGeneration: Long = -1L
 
@@ -92,8 +94,12 @@ class AutonomousAgent(
     fun isRunning(): Boolean = running.get()
 
     fun cancel(reason: String = "Stopped by owner") {
-        cancellationGeneration.incrementAndGet()
-        lastCancelReason = reason
+        synchronized(lifecycleLock) {
+            cancellationGeneration.incrementAndGet()
+            lastCancelReason = reason
+        }
+        // Cancel every owned blocking lane, not only the model connection.
+        terminal.cancel(reason)
         gateway?.cancel()
     }
 
@@ -139,9 +145,12 @@ class AutonomousAgent(
     fun rejectProposal(id: String): Boolean = mutations.reject(id)
 
     fun run(request: String, onEvent: (AutonomousAgentEvent) -> Unit = {}): List<AutonomousAgentEvent> {
-        check(running.compareAndSet(false, true)) { "Agent is already running" }
-        val runGeneration = cancellationGeneration.get()
-        activeRunGeneration = runGeneration
+        val runGeneration: Long
+        synchronized(lifecycleLock) {
+            check(running.compareAndSet(false, true)) { "Agent is already running" }
+            runGeneration = cancellationGeneration.get()
+            activeRunGeneration = runGeneration
+        }
         try {
             changeSets.clear()
             lastResearchProgress = "not started"
