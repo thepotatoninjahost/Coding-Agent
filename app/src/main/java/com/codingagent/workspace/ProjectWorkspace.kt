@@ -241,8 +241,11 @@ class ProjectWorkspace(private val root: File) {
 
     private fun persist(changeSet: ChangeSet) {
         val file = transactionDir.resolve("${changeSet.createdAt}_${changeSet.id}.tsv")
-        val lines = listOf("${changeSet.id}\t${changeSet.createdAt}\t${sanitize(changeSet.reason)}") + changeSet.changes.map { listOf(it.path, it.operation, it.beforeChecksum, it.afterChecksum, sanitize(it.reason)).joinToString("\t") }
-        Files.write(file.toPath(), (lines.joinToString("\n") + "\n").toByteArray(Charsets.UTF_8))
+        val lines = listOf("${changeSet.id}\t${changeSet.createdAt}\t${sanitize(changeSet.reason)}") +
+            changeSet.changes.map {
+                listOf(it.path, it.operation, it.beforeChecksum, it.afterChecksum, sanitize(it.reason)).joinToString("\t")
+            }
+        writeAtomically(file, lines.joinToString("\n") + "\n")
     }
 
     fun verify(): VerificationReport {
