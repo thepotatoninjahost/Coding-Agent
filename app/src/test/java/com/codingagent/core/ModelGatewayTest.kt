@@ -27,6 +27,30 @@ class ModelGatewayTest {
     }
 
     @Test
+    fun `cancellation prevents empty-response retry`() {
+        var connections = 0
+        lateinit var gateway: RemoteHttpGateway
+        gateway = RemoteHttpGateway(
+            "http://127.0.0.1:8080/v1", "", "local",
+            connectionFactory = {
+                connections++
+                fakeConnection("", onRequest = { gateway.cancel() })
+            }
+        )
+
+        val result = gateway.complete(
+            ModelRequest(
+                "system",
+                "inspect",
+                listOf(ModelToolDefinition("read_file", "read", "{\"type\":\"object\"}"))
+            )
+        )
+
+        assertEquals(ModelResponse.Failure("Cancelled"), result)
+        assertEquals("cancellation must prevent the fallback request", 1, connections)
+    }
+
+    @Test
     fun `streamed tool call arguments are accumulated instead of treated as text`() {
         val gateway = RemoteHttpGateway("http://127.0.0.1:8080/v1", "", "local", connectionFactory = { _ ->
             fakeConnection("""data: {"choices":[{"delta":{"tool_calls":[{"id":"call_1","index":0,"function":{"name":"read_file","arguments":"{\"path\":\"src/"}}]}}]}
