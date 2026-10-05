@@ -48,12 +48,14 @@ class AtomicFileWriterTest {
         assertTrue(pending.mkdir())
         File(pending, "blocker").writeText("keep this directory non-empty")
 
+        var failed = false
         try {
             AtomicFileWriter.write(file, "new")
         } catch (_: Exception) {
-            // A blocked pending path must not destroy the last committed file.
+            failed = true
         }
 
+        assertTrue(failed)
         assertEquals("last-good", file.readText())
         assertTrue(pending.isDirectory())
         assertTrue(File(pending, "blocker").exists())
