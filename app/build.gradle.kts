@@ -1,17 +1,7 @@
-import java.util.Base64
-
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
-}
-
-val debugKeystoreFile = file("debug.keystore")
-val debugKeystoreB64 = file("debug-signing.keystore.b64")
-if (!debugKeystoreFile.exists() && debugKeystoreB64.exists()) {
-    debugKeystoreFile.writeBytes(
-        Base64.getDecoder().decode(debugKeystoreB64.readText().trim())
-    )
 }
 
 val ciBuildNumber = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull()
@@ -33,21 +23,7 @@ android {
         vectorDrawables { useSupportLibrary = true }
     }
 
-    signingConfigs {
-        getByName("debug") {
-            if (debugKeystoreFile.exists()) {
-                storeFile = debugKeystoreFile
-                storePassword = "android"
-                keyAlias = "androiddebugkey"
-                keyPassword = "android"
-            }
-        }
-    }
-
     buildTypes {
-        debug {
-            signingConfig = signingConfigs.getByName("debug")
-        }
         release {
             isMinifyEnabled = true
             proguardFiles(
