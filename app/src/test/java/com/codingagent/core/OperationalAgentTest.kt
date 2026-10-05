@@ -5,6 +5,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import com.codingagent.agent.AgentKnowledge
+import com.codingagent.agent.ChatApproval
 import com.codingagent.agent.AgentRuntimeResult
 import com.codingagent.agent.AutonomousAgent
 import com.codingagent.agent.AutonomousAgentEvent
@@ -142,6 +143,20 @@ class OperationalAgentTest {
         assertTrue(approval.proposal.id.isNotBlank())
         assertEquals("fun main() = 1\n", root.resolve("src/Main.kt").readText())
         assertEquals(1, spine.pendingProposals().size)
+    }
+
+    @Test
+    fun chatApprovalPhraseCannotGrantOwnerAuthority() {
+        val root = Files.createTempDirectory("agent-chat-approval").toFile()
+        root.resolve("Main.kt").writeText("fun main() = 1\n")
+        val spine = agent(root)
+        val staged = spine.execute("replace = 1 with = 2 in Main.kt")
+        assertTrue(staged is AgentRuntimeResult.NeedsApproval)
+
+        val result = ChatApproval.tryApprove(spine, "approve")
+        assertTrue(result is AgentRuntimeResult.NeedsApproval)
+        assertEquals(0, spine.pendingProposals().single().approvalCount)
+        assertEquals("fun main() = 1\n", root.resolve("Main.kt").readText())
     }
 
     @Test
