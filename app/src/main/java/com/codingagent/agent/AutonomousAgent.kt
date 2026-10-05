@@ -1,6 +1,7 @@
 package com.codingagent.agent
 import com.codingagent.workspace.AgentPlan
 import com.codingagent.workspace.AgentStep
+import com.codingagent.workspace.OwnerApprovalToken
 
 import org.json.JSONObject
 import java.time.Instant
@@ -142,7 +143,7 @@ class AutonomousAgent(
     }
 
     fun pendingProposals(): List<PendingChangeProposal> = mutations.pending()
-    fun approveProposal(id: String, ownerVerified: Boolean, ownerLabel: String): MutationApprovalResult = mutations.approve(id, ownerVerified, ownerLabel)
+    fun approveProposal(id: String, ownerApproval: OwnerApprovalToken): MutationApprovalResult = mutations.approve(id, ownerApproval)
     fun rejectProposal(id: String): Boolean = mutations.reject(id)
 
     fun run(request: String, onEvent: (AutonomousAgentEvent) -> Unit = {}): List<AutonomousAgentEvent> {
