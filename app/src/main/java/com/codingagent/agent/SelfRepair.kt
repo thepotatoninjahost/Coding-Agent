@@ -1,22 +1,17 @@
 package com.codingagent.agent
 
 import java.time.Instant
-import com.codingagent.intake.OperationKind
-import com.codingagent.intake.TaskOperation
 import com.codingagent.workspace.AgentTask
 import com.codingagent.workspace.MutationCoordinator
 import com.codingagent.workspace.MutationProposeResult
-import com.codingagent.workspace.ProjectFileService
 import com.codingagent.workspace.ProjectWorkspace
-import com.codingagent.workspace.VerificationReport
 
 /**
  * ONE JOB: Detect and stage self-repair requests — mutations to the agent's own source tree.
  *
  * "fix yourself" / "modify yourself" is not a toy file drop. When the imported project
- * already contains agent sources, this stages a dual-approval replace on the first
- * unstamped priority file. When every priority file is already stamped, this returns
- * null so the model loop can do the real edit. An empty project only bootstraps
+ * already contains agent sources, this returns null so the normal model/tool repair
+ * path can diagnose and edit the requested source. An empty project only bootstraps
  * src/SelfRepair.kt so dual-approval still has a concrete first change.
  */
 object SelfRepair {
@@ -41,17 +36,6 @@ object SelfRepair {
     fun isRequest(text: String): Boolean = PHRASES.containsMatchIn(text)
 
     /**
-     * Self-repair must never mutate source merely to mark it as "reviewed".
-     * Real self-repair is driven by the autonomous diagnose -> repair -> verify
-     * recovery path. Returning null here deliberately falls through to that path.
-     */
-    fun chooseOperation(
-        workspace: ProjectWorkspace,
-        files: ProjectFileService,
-        verification: VerificationReport
-    ): TaskOperation? = null
-
-    /**
      * Stage a self-repair proposal for dual-owner approval, or return null so the
      * autonomous loop can edit the agent's own sources with tools.
      */
@@ -63,19 +47,6 @@ object SelfRepair {
         files: ProjectFileService,
         mutations: MutationCoordinator
     ): AgentTask? {
-        val targeted = chooseOperation(workspace, files, workspace.verify())
-        if (targeted != null) {
-            return propose(
-                taskId = taskId,
-                request = request,
-                plan = plan,
-                mutations = mutations,
-                operations = listOf(targeted),
-                reason = "Self-repair: stamp ${targeted.path}",
-                summary = "Self-repair proposal staged for ${targeted.path}. Confirm twice to apply."
-            )
-        }
-
         val hasAgentSources = workspace.summary().files.any { indexed ->
             PRIORITY_FILES.any { name -> indexed.path == name || indexed.path.endsWith("/$name") }
         }
