@@ -4,6 +4,8 @@ import java.net.HttpURLConnection
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import com.codingagent.model.ModelRequest
 import com.codingagent.model.ModelResponse
 import com.codingagent.model.ModelToolDefinition
@@ -15,12 +17,18 @@ class ModelGatewayTest {
     fun `cancellation prevents model rotation`() {
         var firstCalls = 0
         var secondCalls = 0
+        val entered = CountDownLatch(1)
+        val cancelled = CountDownLatch(1)
         val first = object : com.codingagent.model.ModelGateway {
             override fun complete(request: ModelRequest): ModelResponse {
                 firstCalls++
+                entered.countDown()
+                cancelled.await(2, TimeUnit.SECONDS)
                 return ModelResponse.Failure("429 rate limit")
             }
-            override fun cancel() = Unit
+            override fun cancel() {
+                cancelled.countDown()
+            }
         }
         val second = object : com.codingagent.model.ModelGateway {
             override fun complete(request: ModelRequest): ModelResponse {
@@ -35,12 +43,19 @@ class ModelGatewayTest {
                 RotatingModelGateway.Entry("second", second)
             )
         )
+        val resultHolder = arrayOfNulls<ModelResponse>(1)
+        val worker = Thread {
+            resultHolder[0] = gateway.complete(ModelRequest("system", "test", emptyList()))
+        }
+        worker.start()
+
+        assertTrue("first model was never invoked", entered.await(2, TimeUnit.SECONDS))
         gateway.cancel()
 
-        val result = gateway.complete(ModelRequest("system", "test", emptyList()))
-
-        assertEquals(ModelResponse.Failure("Cancelled"), result)
-        assertEquals(0, firstCalls)
+        worker.join(2_000)
+        assertTrue("rotation did not stop after cancellation", !worker.isAlive)
+        assertEquals(ModelResponse.Failure("Cancelled"), resultHolder[0])
+        assertEquals(1, firstCalls)
         assertEquals(0, secondCalls)
     }
 
