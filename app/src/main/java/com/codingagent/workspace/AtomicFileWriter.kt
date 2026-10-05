@@ -7,12 +7,12 @@ import java.io.IOException
 /**
  * Crash-safe text persistence for app-private filesystem state.
  *
- * Existing files are moved to a same-directory backup before replacement.
- * New bytes are synced before the backup is discarded. A leftover backup is
- * always treated as an incomplete write and restored before reads.
+ * New bytes are written and synced to a same-directory pending file before
+ * that file is renamed into the committed path. A leftover pending file is
+ * discarded during recovery. A leftover legacy backup is restored before reads.
  *
- * This follows Android AtomicFile's recovery model without depending on
- * android.jar, so JVM tests exercise the same persistence protocol.
+ * This follows Android AtomicFile's pending-file commit model without depending
+ * on android.jar, so JVM tests exercise the same persistence protocol.
  */
 internal object AtomicFileWriter {
     private fun backup(file: File): File = File(file.path + ".bak")
