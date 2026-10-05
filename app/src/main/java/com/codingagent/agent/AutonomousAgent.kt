@@ -293,7 +293,7 @@ class AutonomousAgent(
             synthesizeFromEvidence = ::synthesizeFromEvidence,
             recordTask = ::recordTask,
             emit = { emit(it) },
-            isCancelled = { cancelled.get() }
+            isCancelled = { isCancelled() }
         )
 
         for (turn in 0 until config.maxTurns) {
