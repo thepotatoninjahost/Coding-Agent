@@ -37,6 +37,7 @@ class SelfRepairTest {
         assertEquals("needs-approval", task!!.status)
         assertEquals("src/SelfRepair.kt", task.changes.single().path)
         assertTrue(mutations.pending().isNotEmpty())
+        assertFalse(task.changes.single().text.orEmpty().contains("SELF_REPAIR_CONTRACT"))
     }
 
     @Test
