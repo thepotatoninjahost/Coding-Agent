@@ -8,8 +8,42 @@ import com.codingagent.model.ModelRequest
 import com.codingagent.model.ModelResponse
 import com.codingagent.model.ModelToolDefinition
 import com.codingagent.model.RemoteHttpGateway
+import com.codingagent.model.RotatingModelGateway
 
 class ModelGatewayTest {
+    @Test
+    fun `cancellation prevents model rotation`() {
+        var firstCalls = 0
+        var secondCalls = 0
+        val first = object : com.codingagent.model.ModelGateway {
+            override fun complete(request: ModelRequest): ModelResponse {
+                firstCalls++
+                return ModelResponse.Failure("429 rate limit")
+            }
+            override fun cancel() = Unit
+        }
+        val second = object : com.codingagent.model.ModelGateway {
+            override fun complete(request: ModelRequest): ModelResponse {
+                secondCalls++
+                return ModelResponse.Text("should not run")
+            }
+            override fun cancel() = Unit
+        }
+        val gateway = RotatingModelGateway(
+            listOf(
+                RotatingModelGateway.Entry("first", first),
+                RotatingModelGateway.Entry("second", second)
+            )
+        )
+        gateway.cancel()
+
+        val result = gateway.complete(ModelRequest("system", "test"))
+
+        assertEquals(ModelResponse.Failure("Cancelled"), result)
+        assertEquals(0, firstCalls)
+        assertEquals(0, secondCalls)
+    }
+
     @Test
     fun `remote http request sends tool schemas and parses a tool call`() {
         var requestBody = ""
