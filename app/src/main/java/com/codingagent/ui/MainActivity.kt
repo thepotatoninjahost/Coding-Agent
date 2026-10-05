@@ -316,6 +316,7 @@ private fun CodingAgentApp(privateDir: File) {
     }
 
     fun stopAgent() {
+        chat?.cancel()
         tools?.cancelTerminal()
         activeJob?.cancel()
         activeJob = null
