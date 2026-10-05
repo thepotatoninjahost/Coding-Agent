@@ -47,6 +47,26 @@ class DeepResearchTest {
         assertTrue(!opened)
     }
 
+    @Test fun researchFetcherHonorsCancellationBeforeReadingBody() {
+        var cancelled = false
+        var disconnected = false
+        val connection = object : HttpURLConnection(java.net.URL("https://example.com/mock")) {
+            override fun connect() = Unit
+            override fun disconnect() { disconnected = true }
+            override fun usingProxy() = false
+            override fun getResponseCode() = 200
+            override fun getInputStream() = "kotlin networking body".byteInputStream()
+        }
+        val result = ArticleExtractor.fetch(
+            "https://example.com/cancel",
+            connectionFactory = { connection },
+            isCancelled = { cancelled },
+            onConnection = { cancelled = true }
+        )
+        assertEquals(null, result)
+        assertTrue(disconnected)
+    }
+
     @Test fun researchFetcherRejectsOversizedResponses() {
         val oversized = "x".repeat(2 * 1024 * 1024 + 1)
         val result = ArticleExtractor.fetch(
