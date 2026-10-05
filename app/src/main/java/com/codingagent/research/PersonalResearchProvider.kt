@@ -96,6 +96,7 @@ class PersonalResearchProvider(
                     onConnection = { connection ->
                     activeConnection.set(connection)
                 }
+                )
             }.getOrNull()
             activeConnection.set(null)
             if (fetched == null) {
