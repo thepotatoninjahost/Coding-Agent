@@ -1,6 +1,9 @@
 package com.codingagent.workspace
 
 import java.io.File
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
+import java.nio.file.StandardOpenOption
 import org.json.JSONArray
 import org.json.JSONObject
 import com.codingagent.agent.ApprovalRecord
@@ -17,7 +20,28 @@ object PendingProposalStore {
         f.parentFile?.mkdirs()
         val arr = JSONArray()
         proposals.forEach { arr.put(toJson(it)) }
-        f.writeText(arr.toString())
+        val target = f.toPath()
+        val temporary = Files.createTempFile(f.parentFile.toPath(), "pending-proposals-", ".tmp")
+        try {
+            Files.writeString(
+                temporary,
+                arr.toString(),
+                Charsets.UTF_8,
+                StandardOpenOption.TRUNCATE_EXISTING
+            )
+            try {
+                Files.move(
+                    temporary,
+                    target,
+                    StandardCopyOption.ATOMIC_MOVE,
+                    StandardCopyOption.REPLACE_EXISTING
+                )
+            } catch (_: java.nio.file.AtomicMoveNotSupportedException) {
+                Files.move(temporary, target, StandardCopyOption.REPLACE_EXISTING)
+            }
+        } finally {
+            Files.deleteIfExists(temporary)
+        }
     }
 
     @Synchronized
