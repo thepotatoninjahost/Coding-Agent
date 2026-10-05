@@ -142,6 +142,26 @@ class TerminalCancelTest {
     }
 
     @Test
+    fun workspaceVerificationUsesCancellableTerminalRunner() {
+        val root = Files.createTempDirectory("term-check-cancel").toFile()
+        val workspace = ProjectWorkspace(root)
+        val resultRef = AtomicReference<com.codingagent.workspace.VerificationReport>()
+        val started = CountDownLatch(1)
+        val thread = Thread {
+            started.countDown()
+            resultRef.set(workspace.runChecks(listOf(listOf("sh", "-c", "sleep 30")), timeoutSeconds = 60))
+        }
+        thread.start()
+        assertTrue(started.await(2, TimeUnit.SECONDS))
+        Thread.sleep(200)
+        workspace.terminal().cancel("verification-stop")
+        thread.join(5_000)
+        val report = resultRef.get()
+        assertTrue(report != null)
+        assertEquals(130, report.commandResults.single().exitCode)
+    }
+
+    @Test
     fun workspaceSharesOneSessionWithAgentTools() {
         val root = Files.createTempDirectory("term-share").toFile()
         root.resolve("README.md").writeText("demo\n")
