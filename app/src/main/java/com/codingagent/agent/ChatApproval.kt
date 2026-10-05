@@ -18,8 +18,8 @@ object ChatApproval {
         if (!isApprovalPhrase(text)) return null
         val pending = agent.pendingProposals()
         if (pending.isEmpty()) return null
-        if (pending.size > 1) {
-            return AgentRuntimeResult.Failed(
+        val proposal = pending.singleOrNull()
+            ?: return AgentRuntimeResult.Failed(
                 task(
                     request = text,
                     summary = "Approval is ambiguous because multiple proposals are pending. Open Review and approve the intended proposal there.",
@@ -27,61 +27,17 @@ object ChatApproval {
                     proposalId = pending.joinToString(",") { it.id }
                 )
             )
-        }
-        val proposal = pending.single()
-        return when (val result = agent.approveProposal(proposal.id, ownerVerified = true, ownerLabel = "owner")) {
-            is MutationApprovalResult.AwaitingSecond ->
-                AgentRuntimeResult.NeedsApproval(
-                    task(
-                        request = text,
-                        summary = "First approval recorded. Type approve or confirm once more to write the files.",
-                        status = "waiting-approval",
-                        proposalId = proposal.id
-                    ),
-                    "First approval recorded. Type approve or confirm once more to write the files.",
-                    proposal.id
-                )
-            is MutationApprovalResult.RepairRequired ->
-                AgentRuntimeResult.NeedsApproval(
-                    task(
-                        request = text,
-                        summary = "The approved change failed verification and was rolled back. A repair proposal is staged for dual approval: ${result.proposal.id}",
-                        status = "repair-waiting-approval",
-                        proposalId = result.proposal.id
-                    ),
-                    "The failed change was rolled back. Review and approve the staged repair proposal, then confirm again.",
-                    result.proposal.id
-                )
-            is MutationApprovalResult.Applied -> {
-                val paths = result.changeSet.changes.map { it.path }.distinct()
-                AgentRuntimeResult.Completed(
-                    AgentTask(
-                        id = UUID.randomUUID().toString(),
-                        request = text,
-                        status = "completed",
-                        plan = AgentPlan(text, emptyList(), emptyList()),
-                        changes = result.changeSet.changes,
-                        verification = VerificationReport(true, emptyList()),
-                        events = listOf("applied ${proposal.id}"),
-                        summary = "APPLIED to disk after dual approval.\nFiles:\n" +
-                            paths.joinToString("\n") { "- $it" }
-                    )
-                )
-            }
-            is MutationApprovalResult.Rejected ->
-                AgentRuntimeResult.Failed(
-                    AgentTask(
-                        id = UUID.randomUUID().toString(),
-                        request = text,
-                        status = "failed",
-                        plan = AgentPlan(text, emptyList(), emptyList()),
-                        changes = emptyList(),
-                        verification = VerificationReport(false, emptyList()),
-                        events = emptyList(),
-                        summary = "Approval rejected: ${result.reason}"
-                    )
-                )
-        }
+
+        return AgentRuntimeResult.NeedsApproval(
+            task(
+                request = text,
+                summary = "Owner authentication is required before a proposal can be approved. Use the Confirm button in Review.",
+                status = "waiting-owner-authentication",
+                proposalId = proposal.id
+            ),
+            "Approval must be completed through the authenticated Review confirmation. Chat text cannot grant owner authority.",
+            proposal.id
+        )
     }
 
     private fun task(
