@@ -176,7 +176,7 @@ class DurableDeepResearchProvider(
         )
         persist(session)
         onProgress(DeepResearchProgress("learned", sources.size, sources.size.coerceAtLeast(1), sources.size, failed))
-        check(!isCancelled()) { "Research cancelled" }
+        check(!isCancelled(runGeneration)) { "Research cancelled" }
         return session
     }
 
