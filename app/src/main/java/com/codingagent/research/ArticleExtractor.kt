@@ -49,7 +49,9 @@ object ArticleExtractor {
         url: String,
         connectionFactory: (String) -> HttpURLConnection = { URL(it).openConnection() as HttpURLConnection },
         timeoutMillis: Int = 15_000,
-        urlValidator: (String) -> String? = ResearchUrlSafety::validatePublicHttpUrl
+        urlValidator: (String) -> String? = ResearchUrlSafety::validatePublicHttpUrl,
+        isCancelled: () -> Boolean = { false },
+        onConnection: (HttpURLConnection) -> Unit = {}
     ): Extracted? {
         if (urlValidator(url) != null) return null
         val connection = connectionFactory(url).apply {
@@ -61,12 +63,15 @@ object ArticleExtractor {
             setRequestProperty("Accept", "text/html,application/xhtml+xml")
         }
         return try {
+            onConnection(connection)
+            if (isCancelled()) return null
             if (connection.responseCode !in 200..299) return null
             val html = connection.inputStream.use { input ->
                 val bytes = ByteArrayOutputStream()
                 val buffer = ByteArray(8 * 1024)
                 var total = 0
                 while (true) {
+                    if (isCancelled()) return null
                     val count = input.read(buffer)
                     if (count < 0) break
                     total += count
