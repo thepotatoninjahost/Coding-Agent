@@ -121,7 +121,7 @@ class MutationCoordinator(
     }
 
     @Synchronized
-    fun approve(id: String, ownerVerified: Boolean, ownerLabel: String): MutationApprovalResult {
+    fun approve(id: String, ownerApproval: OwnerApprovalToken): MutationApprovalResult {
         clearExpired()
         val proposal = pending[id] ?: return MutationApprovalResult.Rejected("Change proposal does not exist")
         val timestamp = now()
@@ -130,18 +130,19 @@ class MutationCoordinator(
                 "Change proposal approval window expired. Open Review, reject, and the agent will restage the same files."
             )
         }
-        if (!ownerVerified) return MutationApprovalResult.Rejected("Owner verification is required for every approval")
-        if (ownerLabel.isBlank()) return MutationApprovalResult.Rejected("An approval identity is required for every approval")
+        if (!ownerApproval.consume(proposal.id, timestamp)) {
+            return MutationApprovalResult.Rejected("A fresh authenticated owner approval is required for this proposal")
+        }
         if (proposal.approvalCount >= 2) {
             return MutationApprovalResult.Rejected("This proposal already has the required two approvals")
         }
         val confirmationNumber = proposal.approvalCount + 1
-        val approval = ledger.record(id, ownerLabel.trim(), timestamp, confirmationNumber)
+        val approval = ledger.record(id, "device-owner", timestamp, confirmationNumber)
         val candidate = proposal.copy(approvals = proposal.approvals + approval)
         val action = AgentAction(
             description = proposal.request,
             category = AgentActionCategory.CODE_CHANGE,
-            ownerVerified = ownerVerified,
+            ownerVerified = true,
             approvalCount = candidate.approvalCount,
             sandboxPassed = proposal.verification.passed,
             clearPermission = true
