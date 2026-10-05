@@ -170,7 +170,6 @@ object OpenJobStore {
             } catch (error: AtomicMoveNotSupportedException) {
                 throw IllegalStateException("Atomic replacement is required for open-job state", error)
             }
-            }
             val onDisk = Files.readAllBytes(file.toPath())
             require(onDisk.contentEquals(bytes)) {
                 "Integrity: open-job write did not persist expected bytes for " + file.name
