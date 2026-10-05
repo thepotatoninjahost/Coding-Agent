@@ -26,6 +26,7 @@ object PendingProposalStore {
             Files.write(
                 temporary,
                 arr.toString().toByteArray(Charsets.UTF_8),
+                StandardOpenOption.WRITE,
                 StandardOpenOption.TRUNCATE_EXISTING
             )
             try {
@@ -37,6 +38,11 @@ object PendingProposalStore {
                 )
             } catch (_: java.nio.file.AtomicMoveNotSupportedException) {
                 Files.move(temporary, target, StandardCopyOption.REPLACE_EXISTING)
+            }
+            val onDisk = Files.readAllBytes(target)
+            val expected = arr.toString().toByteArray(Charsets.UTF_8)
+            require(onDisk.contentEquals(expected)) {
+                "Integrity: pending-proposals write did not persist expected bytes for ${f.name}"
             }
         } finally {
             Files.deleteIfExists(temporary)
