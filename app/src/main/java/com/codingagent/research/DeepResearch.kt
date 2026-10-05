@@ -129,11 +129,15 @@ class DurableDeepResearchProvider(
                 onProgress(DeepResearchProgress("fetching", index + 1, diverse.size, sources.size, failed))
                 return@forEachIndexed
             }
-            check(!isCancelled()) { "Research cancelled" }
+            check(!isCancelled(runGeneration)) { "Research cancelled" }
             val fetched = runCatching {
-                ArticleExtractor.fetch(candidate.url, connectionFactory, pageTimeoutMillis, { isCancelled(runGeneration) }) { connection ->
-                    activeConnection.set(connection)
-                }
+                ArticleExtractor.fetch(
+                    url = candidate.url,
+                    connectionFactory = connectionFactory,
+                    timeoutMillis = pageTimeoutMillis,
+                    isCancelled = { isCancelled(runGeneration) },
+                    onConnection = { connection -> activeConnection.set(connection) }
+                )
             }.getOrNull()
             activeConnection.set(null)
             if (fetched != null &&
