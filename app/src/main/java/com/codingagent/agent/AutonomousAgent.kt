@@ -100,6 +100,7 @@ class AutonomousAgent(
         }
         // Cancel every owned blocking lane, not only the model connection.
         terminal.cancel(reason)
+        research.cancel()
         gateway?.cancel()
     }
 
