@@ -106,7 +106,7 @@ class DurableDeepResearchProvider(
         if (candidates.size < effectiveTarget) {
             val focused = QueryLanes.focusedFallbacks(normalized)
             val fallback = focused.flatMap { fq ->
-                check(!isCancelled()) { "Research cancelled" }
+                check(!isCancelled(runGeneration)) { "Research cancelled" }
                 searchProvider.search(fq, 12).hits
                     .filter { hit -> SourceQuality.isAcceptable(hit.url, hit.title, hit.excerpt) }
                     .filter { hit -> SourceQuality.hasQueryRelevance(queryTerms, hit.title, hit.excerpt, hit.url) }
