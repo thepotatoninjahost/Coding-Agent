@@ -72,6 +72,25 @@ class ChatWorkspaceTest {
         assertTrue(!agent.isRunning())
     }
 
+
+    @Test
+    fun chatApprovalRefusesWhenMultipleProposalsArePending() {
+        val root = Files.createTempDirectory("chat-ambiguous-approval").toFile()
+        root.resolve("Main.kt").writeText("fun main() = 1\n")
+        val agent = AutonomousAgent(root, emptyKnowledge, gateway = null)
+
+        val first = agent.run("replace fun main() = 1 with fun main() = 2 in Main.kt")
+        val second = agent.run("replace fun main() = 1 with fun main() = 3 in Main.kt")
+        assertTrue(first.any { it is com.codingagent.agent.AutonomousAgentEvent.ApprovalRequired })
+        assertTrue(second.any { it is com.codingagent.agent.AutonomousAgentEvent.ApprovalRequired })
+        assertEquals(2, agent.pendingProposals().size)
+
+        val result = com.codingagent.agent.ChatApproval.tryApprove(agent, "approve")
+        assertTrue(result is com.codingagent.agent.AgentRuntimeResult.Failed)
+        assertEquals(2, agent.pendingProposals().size)
+        assertEquals("fun main() = 1\n", root.resolve("Main.kt").readText())
+    }
+
     @Test
     fun continueRestartsPersistedOpenJobInsteadOfReportingDroppedWork() {
         val root = Files.createTempDirectory("chat-resume-open-job").toFile()
