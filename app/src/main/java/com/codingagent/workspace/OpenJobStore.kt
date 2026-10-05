@@ -51,9 +51,9 @@ object OpenJobStore {
     fun load(root: File): OpenJob? {
         bind(root)
         val f = file(root)
-        if (!f.isFile) return null
+        val text = AtomicFileWriter.readTextIfExists(f) ?: return null
         return runCatching {
-            val o = JSONObject(f.readText())
+            val o = JSONObject(text)
             OpenJob(
                 id = o.getString("id"),
                 goal = o.getString("goal"),
