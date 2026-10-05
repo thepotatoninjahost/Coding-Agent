@@ -249,11 +249,11 @@ class AutonomousAgent(
             val mode = ResearchModeDetector.detect(focus)
             val session = runCatching {
                 research.deepResearch(focus, 8, mode) { progress ->
-                    if (cancelled.get()) return@deepResearch
+                    if (isCancelled()) return@deepResearch
                     emit(AutonomousAgentEvent.Phase("RESEARCH", "${progress.stage}: ${progress.completed}/${progress.total}; learned ${progress.successful}, failed ${progress.failed}"))
                 }
             }.getOrNull()
-            if (cancelled.get()) return stopNow(taskId, normalized, plan, events) { emit(it) }
+            if (isCancelled()) return stopNow(taskId, normalized, plan, events) { emit(it) }
             if (session != null && session.sources.isNotEmpty()) {
                 val brief = ResearchBriefBuilder.build(session)
                 researchEvidence = "\n\nResearch brief:\n${brief.evidence}"
@@ -297,7 +297,7 @@ class AutonomousAgent(
         )
 
         for (turn in 0 until config.maxTurns) {
-            if (cancelled.get()) return stopNow(taskId, normalized, plan, events) { emit(it) }
+            if (isCancelled()) return stopNow(taskId, normalized, plan, events) { emit(it) }
             emit(AutonomousAgentEvent.Phase("MODEL", "Decision turn ${turn + 1}/${config.maxTurns}"))
             val decision = LoopControl.decide(
                 turn = turn,
@@ -343,10 +343,10 @@ class AutonomousAgent(
                         researchRequired = false
                     )
                 },
-                isCancelled = { cancelled.get() },
+                isCancelled = { isCancelled() },
                 onPhase = { emit(AutonomousAgentEvent.Phase("MODEL", it)) }
             ) ?: return stopNow(taskId, normalized, plan, events) { emit(it) }
-            if (cancelled.get()) return stopNow(taskId, normalized, plan, events) { emit(it) }
+            if (isCancelled()) return stopNow(taskId, normalized, plan, events) { emit(it) }
             // Some providers (NVIDIA NIM and others) never populate structured tool_calls and
             // instead emit the tool call as XML inside the text body. Recover that BEFORE the
             // dispatch below so it goes through the exact same ToolCall handling (proposal
@@ -589,7 +589,7 @@ class AutonomousAgent(
                     researchRequired = false
                 )
             },
-            isCancelled = { cancelled.get() },
+            isCancelled = { isCancelled() },
             onPhase = { }
         ) ?: return null
         val call = when (response) {
