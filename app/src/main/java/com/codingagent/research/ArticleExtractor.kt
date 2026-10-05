@@ -2,6 +2,7 @@ package com.codingagent.research
 
 import java.net.HttpURLConnection
 import java.net.URL
+import java.io.ByteArrayOutputStream
 
 /**
  * ONE JOB: URL/HTML → clean text and code blocks for research.
@@ -36,6 +37,8 @@ object ResearchUrlSafety {
 }
 
 object ArticleExtractor {
+    private const val MAX_RESPONSE_BYTES = 2 * 1024 * 1024
+
     data class Extracted(val title: String, val text: String, val wordCount: Int, val codeBlocks: List<String>) {
         val code: List<String> get() = codeBlocks
     }
@@ -59,7 +62,19 @@ object ArticleExtractor {
         }
         return try {
             if (connection.responseCode !in 200..299) return null
-            val html = connection.inputStream.bufferedReader().use { it.readText() }
+            val html = connection.inputStream.use { input ->
+                val bytes = ByteArrayOutputStream()
+                val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                var total = 0
+                while (true) {
+                    val count = input.read(buffer)
+                    if (count < 0) break
+                    total += count
+                    if (total > MAX_RESPONSE_BYTES) return null
+                    bytes.write(buffer, 0, count)
+                }
+                bytes.toString(Charsets.UTF_8.name())
+            }
             parse(html, url)
         } catch (_: Exception) {
             null
