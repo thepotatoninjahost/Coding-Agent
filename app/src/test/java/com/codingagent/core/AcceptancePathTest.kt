@@ -80,6 +80,50 @@ class AcceptancePathTest {
     }
 
     @Test
+    fun persistedFirstApprovalSurvivesCoordinatorRestartAndSecondConfirmationIsNumberedTwo() {
+        val root = Files.createTempDirectory("accept-approval-restart").toFile()
+        root.resolve("Main.kt").writeText("fun main() = 1\n")
+
+        val firstCoordinator = MutationCoordinator(ProjectWorkspace(root))
+        val proposed = firstCoordinator.propose(
+            "persist approval",
+            listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 2\n"))
+        ) as MutationProposeResult.Proposed
+
+        val first = firstCoordinator.approve(proposed.proposal.id, true, "owner")
+        assertTrue(first is MutationApprovalResult.AwaitingSecond)
+        assertEquals(1, (first as MutationApprovalResult.AwaitingSecond).approval.confirmationNumber)
+
+        val restartedCoordinator = MutationCoordinator(ProjectWorkspace(root))
+        val restored = restartedCoordinator.pending().single()
+        assertEquals(1, restored.approvalCount)
+        assertEquals(1, restored.approvals.single().confirmationNumber)
+
+        val second = restartedCoordinator.approve(restored.id, true, "owner")
+        assertTrue(second is MutationApprovalResult.Applied)
+        val applied = second as MutationApprovalResult.Applied
+        assertEquals(2, applied.proposal.approvalCount)
+        assertEquals(listOf(1, 2), applied.proposal.approvals.map { it.confirmationNumber })
+        assertEquals("fun main() = 2\n", root.resolve("Main.kt").readText())
+    }
+
+    @Test
+    fun approvalRequiresAnExplicitIdentityLabel() {
+        val root = Files.createTempDirectory("accept-approval-identity").toFile()
+        root.resolve("Main.kt").writeText("fun main() = 1\n")
+        val coordinator = MutationCoordinator(ProjectWorkspace(root))
+        val proposal = (coordinator.propose(
+            "identity required",
+            listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 2\n"))
+        ) as MutationProposeResult.Proposed).proposal
+
+        val result = coordinator.approve(proposal.id, ownerVerified = true, ownerLabel = " ")
+        assertTrue(result is MutationApprovalResult.Rejected)
+        assertEquals(0, coordinator.pending().single().approvalCount)
+        assertEquals("fun main() = 1\n", root.resolve("Main.kt").readText())
+    }
+
+    @Test
     fun createFileRequiresDualApprovalBeforeDiskWrite() {
         val root = Files.createTempDirectory("accept-create").toFile()
         root.resolve("src").mkdirs()
