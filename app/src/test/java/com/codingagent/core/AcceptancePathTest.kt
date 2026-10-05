@@ -56,7 +56,7 @@ class AcceptancePathTest {
         assertTrue(first is MutationApprovalResult.AwaitingSecond)
         assertEquals("fun a() = 1\n", root.resolve("src/A.kt").readText())
 
-        val second = coordinator.approve(proposal.id, ownerVerified = true, ownerLabel = "owner")
+        val second = coordinator.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id))
         assertTrue(second is MutationApprovalResult.Applied)
         assertEquals("fun a() = 2\n", root.resolve("src/A.kt").readText())
         assertEquals("fun b() = 2\n", root.resolve("src/B.kt").readText())
