@@ -342,7 +342,14 @@ class ProjectWorkspace(private val root: File) {
     fun runChecks(commands: List<List<String>>, timeoutSeconds: Long = 90): VerificationReport {
         // Use the workspace-owned terminal runner so owner cancellation reaches
         // verification commands instead of leaving an independent process behind.
-        val commandResults = commands.map { terminalSession.executeRaw(it, timeoutSeconds) }
+        // A cancellation is terminal for this verification batch: do not start the
+        // next check after the owner has explicitly stopped the current one.
+        val commandResults = mutableListOf<CommandResult>()
+        for (command in commands) {
+            val result = terminalSession.executeRaw(command, timeoutSeconds)
+            commandResults += result
+            if (result.exitCode == 130 && result.stderr.contains("cancelled", ignoreCase = true)) break
+        }
         val issues = commandResults.filter { it.timedOut || it.exitCode != 0 }.map { VerificationIssue("<command>", 0, "${it.command}: exit=${it.exitCode} ${it.stderr.take(400)}") }
         val staticReport = verify()
         return VerificationReport(staticReport.passed && issues.isEmpty(), staticReport.issues + issues, commandResults)
