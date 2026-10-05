@@ -1,10 +1,14 @@
 package com.codingagent.agent
 
 import java.time.Instant
+import com.codingagent.intake.OperationKind
+import com.codingagent.intake.TaskOperation
 import com.codingagent.workspace.AgentTask
 import com.codingagent.workspace.MutationCoordinator
 import com.codingagent.workspace.MutationProposeResult
+import com.codingagent.workspace.ProjectFileService
 import com.codingagent.workspace.ProjectWorkspace
+import com.codingagent.workspace.VerificationReport
 
 /**
  * ONE JOB: Detect and stage self-repair requests — mutations to the agent's own source tree.
