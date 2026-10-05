@@ -47,6 +47,15 @@ class DeepResearchTest {
         assertTrue(!opened)
     }
 
+    @Test fun researchFetcherRejectsOversizedResponses() {
+        val oversized = "x".repeat(2 * 1024 * 1024 + 1)
+        val result = ArticleExtractor.fetch(
+            "https://example.com/oversized",
+            connectionFactory = { fakeConnectionWithBody(oversized) }
+        )
+        assertEquals(null, result)
+    }
+
     @Test fun deepResearchFetchesManyUniqueSourcesAndPersistsLearning() {
         val root = Files.createTempDirectory("deep-research").toFile()
         val search = object : WebResearchProvider {
