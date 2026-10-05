@@ -158,7 +158,7 @@ class AgentToolDispatch(
             is MutationProposeResult.Proposed ->
                 "PROPOSAL_READY id=${result.proposal.id} path=$path " +
                     "changes=${result.proposal.changeSet.changes.size} approval_required=2 " +
-                    "Confirm twice in Review or chat to APPLY this file to disk."
+                    "Confirm twice in the authenticated Review flow to APPLY this file to disk."
             is MutationProposeResult.Rejected ->
                 "ERROR: create_file proposal rejected — ${result.reason}"
         }
