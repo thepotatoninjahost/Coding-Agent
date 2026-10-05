@@ -340,7 +340,9 @@ class ProjectWorkspace(private val root: File) {
     }
 
     fun runChecks(commands: List<List<String>>, timeoutSeconds: Long = 90): VerificationReport {
-        val commandResults = commands.map { CommandRunner(root).run(it, timeoutSeconds) }
+        // Use the workspace-owned terminal runner so owner cancellation reaches
+        // verification commands instead of leaving an independent process behind.
+        val commandResults = commands.map { terminalSession.executeRaw(it, timeoutSeconds) }
         val issues = commandResults.filter { it.timedOut || it.exitCode != 0 }.map { VerificationIssue("<command>", 0, "${it.command}: exit=${it.exitCode} ${it.stderr.take(400)}") }
         val staticReport = verify()
         return VerificationReport(staticReport.passed && issues.isEmpty(), staticReport.issues + issues, commandResults)
