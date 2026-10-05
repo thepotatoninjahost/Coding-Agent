@@ -1,10 +1,6 @@
 package com.codingagent.workspace
 
 import java.io.File
-import java.nio.file.AtomicMoveNotSupportedException
-import java.nio.file.Files
-import java.nio.file.StandardCopyOption
-import java.nio.file.StandardOpenOption
 import java.security.MessageDigest
 import java.time.Instant
 import java.util.UUID
@@ -204,7 +200,7 @@ class ProjectWorkspace(private val root: File) {
         else writeAtomically(file, record.before)
     }
 
-    private fun diskContent(path: String): String? = requireSafePath(path).takeIf { it.isFile }?.readText()
+    private fun diskContent(path: String): String? = AtomicFileWriter.readTextIfExists(requireSafePath(path))
 
     private fun requireSafePath(path: String): File {
         require(path.isNotBlank() && !path.startsWith('/') && !path.contains("..") && !path.contains('\\')) { "Unsafe project path" }
@@ -213,30 +209,7 @@ class ProjectWorkspace(private val root: File) {
         return file
     }
 
-    private fun writeAtomically(file: File, content: String) {
-        file.parentFile?.mkdirs()
-        val temporary = File(file.parentFile ?: root, ".${file.name}.${UUID.randomUUID()}.tmp")
-        Files.write(
-            temporary.toPath(),
-            content.toByteArray(Charsets.UTF_8),
-            StandardOpenOption.CREATE_NEW,
-            StandardOpenOption.WRITE
-        )
-        try {
-            try {
-                Files.move(temporary.toPath(), file.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
-            } catch (error: AtomicMoveNotSupportedException) {
-                throw IllegalStateException("Atomic replacement is required for ProjectWorkspace", error)
-            }
-            val onDisk = Files.readAllBytes(file.toPath())
-            val expected = content.toByteArray(Charsets.UTF_8)
-            require(onDisk.contentEquals(expected)) {
-                "Integrity: atomic write did not persist expected bytes for ${file.name} (wrote ${expected.size}, disk ${onDisk.size})"
-            }
-        } finally {
-            temporary.delete()
-        }
-    }
+    private fun writeAtomically(file: File, content: String) = AtomicFileWriter.write(file, content)
 
     private fun checksum(content: String?): String = content?.let {
         MessageDigest.getInstance("SHA-256").digest(it.toByteArray(Charsets.UTF_8)).joinToString("") { byte -> "%02x".format(byte) }
