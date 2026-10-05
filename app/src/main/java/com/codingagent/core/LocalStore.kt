@@ -5,6 +5,7 @@ import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import org.json.JSONObject
 import java.io.File
+import java.util.ArrayDeque
 import com.codingagent.agent.ChatMessage
 import com.codingagent.agent.ChatMessageStore
 import com.codingagent.agent.ChatRole
@@ -144,9 +145,20 @@ class LocalStore(context: Context) : ChatMessageStore {
     }
 
     private fun read(file: File, limit: Int): List<JSONObject> {
-        if (!file.exists()) return emptyList()
-        return file.useLines { lines ->
-            lines.toList().asReversed().take(limit).mapNotNull { line -> runCatching { JSONObject(line) }.getOrNull() }
+        if (!file.exists() || limit <= 0) return emptyList()
+
+        // Keep only the requested physical tail. Parsing happens after the tail is
+        // selected so malformed recent records preserve the previous semantics.
+        val tail = ArrayDeque<String>(limit)
+        file.useLines { lines ->
+            lines.forEach { line ->
+                if (tail.size == limit) tail.removeFirst()
+                tail.addLast(line)
+            }
         }
+
+        return tail.toList()
+            .asReversed()
+            .mapNotNull { line -> runCatching { JSONObject(line) }.getOrNull() }
     }
 }
