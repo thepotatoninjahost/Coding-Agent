@@ -5,6 +5,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.fragment.app.FragmentActivity
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
 import androidx.core.content.ContextCompat
@@ -107,7 +108,7 @@ import com.codingagent.model.ProbeResult
 /**
  * ONE JOB: Host activity and system entry for the coding workbench.
  */
-class MainActivity : ComponentActivity() {
+class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent { CodingAgentApp(filesDir) }
@@ -351,7 +352,7 @@ private fun CodingAgentApp(privateDir: File) {
         }
 
         approvalPromptOpen = true
-        val activity = context as? ComponentActivity ?: run {
+        val activity = context as? FragmentActivity ?: run {
             approvalPromptOpen = false
             status = AgentStatus.FAILED
             detail = "Owner authentication is unavailable in this UI context."
