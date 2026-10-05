@@ -32,7 +32,7 @@ class OwnerApprovalToken private constructor(
          * flow has reported success. Callers must not invoke this before that
          * callback.
          */
-        fun authenticated(proposalId: String, now: Long = System.currentTimeMillis()): OwnerApprovalToken {
+        internal fun authenticated(proposalId: String, now: Long = System.currentTimeMillis()): OwnerApprovalToken {
             require(proposalId.isNotBlank()) { "Proposal id is required" }
             return OwnerApprovalToken(proposalId, now, UUID.randomUUID().toString())
         }
