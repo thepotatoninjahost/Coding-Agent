@@ -36,8 +36,9 @@ object PendingProposalStore {
                     StandardCopyOption.ATOMIC_MOVE,
                     StandardCopyOption.REPLACE_EXISTING
                 )
-            } catch (_: java.nio.file.AtomicMoveNotSupportedException) {
-                Files.move(temporary, target, StandardCopyOption.REPLACE_EXISTING)
+            } catch (error: java.nio.file.AtomicMoveNotSupportedException) {
+                throw IllegalStateException("Atomic replacement is required for pending proposals", error)
+            }
             }
             val onDisk = Files.readAllBytes(target)
             val expected = arr.toString().toByteArray(Charsets.UTF_8)
