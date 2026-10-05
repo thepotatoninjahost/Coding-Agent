@@ -26,6 +26,12 @@ class AgentToolDispatch(
     private val maxOutputCharacters: Int,
     private val onResearchProgress: (String) -> Unit
 ) {
+    @Volatile
+    private var requestContext: String = ""
+
+    fun setRequestContext(request: String) {
+        requestContext = request.trim()
+    }
 
     fun execute(name: String, rawArguments: String): String {
         return try {
@@ -116,7 +122,7 @@ class AgentToolDispatch(
     private fun replaceText(arguments: JSONObject): String {
         val path = arguments.getString("path")
         return when (val result = mutations.propose(
-            request = "replace_text $path",
+            request = requestContext.ifBlank { "replace_text $path" },
             operations = listOf(
                 TaskOperation(
                     OperationKind.REPLACE,
@@ -139,7 +145,7 @@ class AgentToolDispatch(
     private fun createFile(arguments: JSONObject): String {
         val path = arguments.getString("path")
         return when (val result = mutations.propose(
-            request = "create_file $path",
+            request = requestContext.ifBlank { "create_file $path" },
             operations = listOf(
                 TaskOperation(
                     OperationKind.CREATE_FILE,
