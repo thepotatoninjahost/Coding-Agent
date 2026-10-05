@@ -131,7 +131,12 @@ class MutationCoordinator(
             )
         }
         if (!ownerVerified) return MutationApprovalResult.Rejected("Owner verification is required for every approval")
-        val approval = ledger.record(id, ownerLabel, timestamp)
+        if (ownerLabel.isBlank()) return MutationApprovalResult.Rejected("An approval identity is required for every approval")
+        if (proposal.approvalCount >= 2) {
+            return MutationApprovalResult.Rejected("This proposal already has the required two approvals")
+        }
+        val confirmationNumber = proposal.approvalCount + 1
+        val approval = ledger.record(id, ownerLabel.trim(), timestamp, confirmationNumber)
         val candidate = proposal.copy(approvals = proposal.approvals + approval)
         val action = AgentAction(
             description = proposal.request,
