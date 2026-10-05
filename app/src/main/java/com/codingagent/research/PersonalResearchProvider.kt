@@ -88,7 +88,12 @@ class PersonalResearchProvider(
             if (isCancelled(runGeneration)) return@forEachIndexed
             if (sources.size >= target) return@forEachIndexed
             val fetched = runCatching {
-                ArticleExtractor.fetch(hit.url, connectionFactory, pageTimeoutMillis, { isCancelled(runGeneration) }) { connection ->
+                ArticleExtractor.fetch(
+                    url = hit.url,
+                    connectionFactory = connectionFactory,
+                    timeoutMillis = pageTimeoutMillis,
+                    isCancelled = { isCancelled(runGeneration) },
+                    onConnection = { connection ->
                     activeConnection.set(connection)
                 }
             }.getOrNull()
