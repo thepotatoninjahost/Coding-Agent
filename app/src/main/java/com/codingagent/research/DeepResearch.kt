@@ -9,6 +9,7 @@ import java.net.URL
 import java.util.LinkedHashMap
 import java.util.UUID
 import java.util.regex.Pattern
+import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 import com.codingagent.workspace.DeepResearchProgress
 import com.codingagent.workspace.ResearchHit
@@ -55,11 +56,12 @@ class DurableDeepResearchProvider(
 ) : DeepResearchProvider {
 
     private val activeConnection = AtomicReference<HttpURLConnection?>(null)
+    private val cancellationGeneration = AtomicLong(0L)
     private val personalProvider = PersonalResearchProvider(researchRoot, pageTimeoutMillis, connectionFactory, searchProvider)
     private val sessionsDir = File(researchRoot, "sessions").apply { mkdirs() }
 
     override fun cancel() {
-        cancelled = true
+        cancellationGeneration.incrementAndGet()
         activeConnection.getAndSet(null)?.disconnect()
         personalProvider.cancel()
     }
@@ -70,10 +72,10 @@ class DurableDeepResearchProvider(
         mode: ResearchMode,
         onProgress: (DeepResearchProgress) -> Unit
     ): ResearchSession {
-        cancelled = false
+        val runGeneration = cancellationGeneration.get()
         val normalized = query.trim()
         require(normalized.isNotBlank()) { "Research query is required" }
-        check(!isCancelled()) { "Research cancelled" }
+        check(!isCancelled(runGeneration)) { "Research cancelled" }
         if (mode == ResearchMode.BROAD) {
             return personalProvider.deepResearch(query, targetSources, mode, onProgress)
         }
@@ -85,7 +87,7 @@ class DurableDeepResearchProvider(
 
         val queryTerms = SourceQuality.queryTerms(normalized)
         val candidates = lanes.flatMap { lane ->
-            check(!isCancelled()) { "Research cancelled" }
+            check(!isCancelled(runGeneration)) { "Research cancelled" }
             searchProvider.search(lane.query, 16).hits
                 .filter { hit -> SourceQuality.isAcceptable(hit.url, hit.title, hit.excerpt) }
                 .filter { hit -> SourceQuality.hasQueryRelevance(queryTerms, hit.title, hit.excerpt, hit.url) }
@@ -129,7 +131,7 @@ class DurableDeepResearchProvider(
             }
             check(!isCancelled()) { "Research cancelled" }
             val fetched = runCatching {
-                ArticleExtractor.fetch(candidate.url, connectionFactory, pageTimeoutMillis, isCancelled) { connection ->
+                ArticleExtractor.fetch(candidate.url, connectionFactory, pageTimeoutMillis, { isCancelled(runGeneration) }) { connection ->
                     activeConnection.set(connection)
                 }
             }.getOrNull()
@@ -174,9 +176,7 @@ class DurableDeepResearchProvider(
         return session
     }
 
-    private fun isCancelled(): Boolean = activeConnection.get() == null && cancelled
-
-    @Volatile private var cancelled: Boolean = false
+    private fun isCancelled(runGeneration: Long): Boolean = cancellationGeneration.get() != runGeneration
 
     fun recent(limit: Int = 20): List<ResearchSession> {
         if (!sessionsDir.exists()) return emptyList()
