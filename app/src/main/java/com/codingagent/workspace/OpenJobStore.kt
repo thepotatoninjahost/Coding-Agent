@@ -1,10 +1,6 @@
 package com.codingagent.workspace
 
 import java.io.File
-import java.nio.file.AtomicMoveNotSupportedException
-import java.nio.file.Files
-import java.nio.file.StandardCopyOption
-import java.nio.file.StandardOpenOption
 import java.util.UUID
 import org.json.JSONArray
 import org.json.JSONObject
@@ -148,34 +144,6 @@ object OpenJobStore {
         file(root).delete()
     }
 
-    private fun writeAtomically(file: File, content: String) {
-        val parent = file.parentFile ?: error("Open-job file must have a parent directory")
-        parent.mkdirs()
-        val temporary = File(parent, ".${file.name}.${UUID.randomUUID()}.tmp")
-        val bytes = content.toByteArray(Charsets.UTF_8)
-        try {
-            Files.write(
-                temporary.toPath(),
-                bytes,
-                StandardOpenOption.CREATE_NEW,
-                StandardOpenOption.WRITE
-            )
-            try {
-                Files.move(
-                    temporary.toPath(),
-                    file.toPath(),
-                    StandardCopyOption.ATOMIC_MOVE,
-                    StandardCopyOption.REPLACE_EXISTING
-                )
-            } catch (error: AtomicMoveNotSupportedException) {
-                throw IllegalStateException("Atomic replacement is required for open-job state", error)
-            }
-            val onDisk = Files.readAllBytes(file.toPath())
-            require(onDisk.contentEquals(bytes)) {
-                "Integrity: open-job write did not persist expected bytes for " + file.name
-            }
-        } finally {
-            temporary.delete()
-        }
-    }
+    private fun writeAtomically(file: File, content: String) = AtomicFileWriter.write(file, content)
+
 }
