@@ -351,9 +351,15 @@ private fun CodingAgentApp(privateDir: File) {
         }
 
         approvalPromptOpen = true
-        val executor = ContextCompat.getMainExecutor(context)
+        val activity = context as? ComponentActivity ?: run {
+            approvalPromptOpen = false
+            status = AgentStatus.FAILED
+            detail = "Owner authentication is unavailable in this UI context."
+            return
+        }
+        val executor = ContextCompat.getMainExecutor(activity)
         val prompt = BiometricPrompt(
-            context as ComponentActivity,
+            activity,
             executor,
             object : BiometricPrompt.AuthenticationCallback() {
                 override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
