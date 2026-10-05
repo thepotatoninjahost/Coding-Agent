@@ -158,7 +158,7 @@ class TerminalCancelTest {
         thread.join(5_000)
         val report = resultRef.get()
         assertTrue(report != null)
-        assertEquals(130, report.commandResults.single().exitCode)
+        assertEquals(130, report.commands.single().exitCode)
     }
 
     @Test
@@ -187,8 +187,8 @@ class TerminalCancelTest {
         thread.join(5_000)
         val report = resultRef.get()
         assertTrue(report != null)
-        assertEquals(1, report.commandResults.size)
-        assertEquals(130, report.commandResults.single().exitCode)
+        assertEquals(1, report.commands.size)
+        assertEquals(130, report.commands.single().exitCode)
         assertTrue(!secondCheck.exists())
     }
 
