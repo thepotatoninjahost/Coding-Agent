@@ -75,7 +75,7 @@ class DurableDeepResearchProvider(
         require(normalized.isNotBlank()) { "Research query is required" }
         check(!isCancelled()) { "Research cancelled" }
         if (mode == ResearchMode.BROAD) {
-            return personalProvider.deepResearch(query, targetSources, mode, onProgress, ::isCancelled)
+            return personalProvider.deepResearch(query, targetSources, mode, onProgress)
         }
         val effectiveTarget = targetSources.coerceIn(2, 30)
         val alreadyLearned = recent(50).flatMap { it.sources }.map { it.url.substringBefore('#').lowercase() }.toSet()
