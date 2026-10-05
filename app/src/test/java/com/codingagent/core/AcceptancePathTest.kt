@@ -225,7 +225,7 @@ class AcceptancePathTest {
         assertTrue(proposed is MutationProposeResult.Proposed)
         val original = (proposed as MutationProposeResult.Proposed).proposal
         assertTrue(coordinator.approve(original.id, OwnerApprovalToken.authenticated(original.id)) is MutationApprovalResult.AwaitingSecond)
-        val result = coordinator.approve(original.id, true, "owner")
+        val result = coordinator.approve(original.id, OwnerApprovalToken.authenticated(original.id))
         assertTrue(result is MutationApprovalResult.RepairRequired)
         val repair = (result as MutationApprovalResult.RepairRequired).proposal
         assertEquals("fun main() = 1\n", root.resolve("Main.kt").readText())
@@ -262,15 +262,15 @@ class AcceptancePathTest {
         ) as MutationProposeResult.Proposed
         var proposal = proposed.proposal
 
-        coordinator.approve(proposal.id, true, "owner")
-        var result = coordinator.approve(proposal.id, true, "owner")
+        coordinator.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id))
+        var result = coordinator.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id))
         assertTrue("Unexpected first repair result: $result", result is MutationApprovalResult.RepairRequired)
         proposal = (result as MutationApprovalResult.RepairRequired).proposal
         assertEquals(1, proposal.repairAttempt)
         assertEquals("Self-repair attempt 1 after failed change: run the tests", proposal.request)
 
-        coordinator.approve(proposal.id, true, "owner")
-        result = coordinator.approve(proposal.id, true, "owner")
+        coordinator.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id))
+        result = coordinator.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id))
         assertTrue(result is MutationApprovalResult.RepairRequired)
         proposal = (result as MutationApprovalResult.RepairRequired).proposal
         assertEquals(2, proposal.repairAttempt)
