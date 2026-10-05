@@ -157,7 +157,7 @@ class ProjectWorkspace(private val root: File) {
     private fun writeAtomically(file: File, content: String) {
         file.parentFile?.mkdirs()
         val temporary = File(file.parentFile ?: root, ".${file.name}.${UUID.randomUUID()}.tmp")
-        Files.write(temporary.toPath(), content.toByteArray(Charsets.UTF_8), StandardOpenOption.CREATE_NEW)
+        Files.write(\n            temporary.toPath(),\n            content.toByteArray(Charsets.UTF_8),\n            StandardOpenOption.CREATE_NEW,\n            StandardOpenOption.WRITE\n        )
         try {
             try {
                 Files.move(temporary.toPath(), file.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
