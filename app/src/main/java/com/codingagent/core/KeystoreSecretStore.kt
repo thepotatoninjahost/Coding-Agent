@@ -104,11 +104,16 @@ internal object LegacyEncryptedPreferencesMigration {
         if (target.getString(MIGRATED_MARKER) == "true") return
 
         val legacy = appContext.getSharedPreferences(LEGACY_FILE, Context.MODE_PRIVATE)
-        val entries = legacy.all.filterKeys { it != KEY_KEYSET_ALIAS && it != VALUE_KEYSET_ALIAS }
+        val allLegacyEntries = legacy.all
+        val entries = allLegacyEntries.filterKeys { it != KEY_KEYSET_ALIAS && it != VALUE_KEYSET_ALIAS }
         if (entries.isEmpty()) {
             // A partially-created legacy file may contain only Tink keysets. Remove both
             // the file and its Keystore master key before marking migration complete.
-            runCatching { appContext.deleteSharedPreferences(LEGACY_FILE) }
+            if (allLegacyEntries.isNotEmpty()) {
+                check(appContext.deleteSharedPreferences(LEGACY_FILE)) {
+                    "Unable to remove legacy encrypted preferences during cleanup"
+                }
+            }
             deleteLegacyMasterKey()
             target.putString(MIGRATED_MARKER, "true")
             return
