@@ -800,3 +800,14 @@ class AutonomousAgent(
         id: String,
         request: String,
         plan: AgentPlan,
+        message: String,
+        changes: List<ChangeRecord>
+    ): AgentTask = AgentTaskBuilders.failed(id, request, plan, message, changes)
+
+    private fun approvalTask(
+        id: String,
+        request: String,
+        plan: AgentPlan,
+        proposal: PendingChangeProposal
+    ): AgentTask = AgentTaskBuilders.approval(id, request, plan, proposal)
+}
