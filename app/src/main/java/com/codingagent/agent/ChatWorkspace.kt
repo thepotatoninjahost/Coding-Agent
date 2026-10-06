@@ -254,8 +254,8 @@ class ChatWorkspace(
                     "I do not have any saved user preferences yet."
                 } else {
                     buildString {
-                        append("Saved user preferences:\\n")
-                        memories.take(20).forEach { append("- ").append(it.text).append('\\n') }
+                        append("Saved user preferences:\n")
+                        memories.take(20).forEach { append("- ").append(it.text).append('\n') }
                     }.trimEnd()
                 }
             }
@@ -264,7 +264,7 @@ class ChatWorkspace(
                 if (removed == 0) {
                     "I did not find a saved memory matching that."
                 } else {
-                    "Removed $removed saved memory item" + if (removed == 1) "" else "s" + "."
+                    "Removed $removed saved memory item" + (if (removed == 1) "" else "s") + "."
                 }
             }
         }
