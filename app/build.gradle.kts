@@ -4,6 +4,14 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+val debugKeystoreFile = file("debug.keystore")
+val debugKeystoreB64 = file("debug-signing.keystore.b64")
+if (!debugKeystoreFile.exists() && debugKeystoreB64.exists()) {
+    debugKeystoreFile.writeBytes(
+        java.util.Base64.getDecoder().decode(debugKeystoreB64.readText().trim())
+    )
+}
+
 val ciBuildNumber = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull()
 val resolvedVersionCode = ciBuildNumber ?: 2
 
@@ -23,7 +31,21 @@ android {
         vectorDrawables { useSupportLibrary = true }
     }
 
+    signingConfigs {
+        getByName("debug") {
+            if (debugKeystoreFile.exists()) {
+                storeFile = debugKeystoreFile
+                storePassword = "android"
+                keyAlias = "androiddebugkey"
+                keyPassword = "android"
+            }
+        }
+    }
+
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("debug")
+        }
         release {
             isMinifyEnabled = true
             proguardFiles(
