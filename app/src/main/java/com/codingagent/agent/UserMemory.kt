@@ -153,22 +153,31 @@ class UserMemoryIndex(
     fun relevant(existing: List<UserMemory>, query: String, limit: Int): List<UserMemory> {
         if (limit <= 0) return emptyList()
         val queryTokens = tokens(query)
-        if (queryTokens.isEmpty()) return emptyList()
-        return existing
-            .map { memory ->
-                val memoryTokens = tokens(memory.text)
-                val overlap = memoryTokens.intersect(queryTokens).size.toDouble() /
-                    queryTokens.union(memoryTokens).size.coerceAtLeast(1)
-                val score = overlap * 100.0 + memory.importance / 100.0 * 12.0
-                memory to score
-            }
-            .filter { (_, score) -> score >= 28.0 }
-            .sortedWith(
-                compareByDescending<Pair<UserMemory, Double>> { it.second }
-                    .thenByDescending { it.first.updatedAt }
-            )
-            .take(limit)
-            .map { it.first }
+        val stable = existing
+            .filter { it.kind == UserMemory.Kind.WORKFLOW && it.importance >= 80 }
+            .sortedWith(compareByDescending<UserMemory> { it.importance }.thenByDescending { it.updatedAt })
+            .take(2)
+
+        val scored = if (queryTokens.isEmpty()) {
+            emptyList()
+        } else {
+            existing
+                .filterNot { it.id in stable.map(UserMemory::id).toSet() }
+                .map { memory ->
+                    val memoryTokens = tokens(memory.text)
+                    val overlap = memoryTokens.intersect(queryTokens).size.toDouble() /
+                        queryTokens.union(memoryTokens).size.coerceAtLeast(1)
+                    val score = overlap * 100.0 + memory.importance / 100.0 * 12.0
+                    memory to score
+                }
+                .filter { (_, score) -> score >= 28.0 }
+                .sortedWith(
+                    compareByDescending<Pair<UserMemory, Double>> { it.second }
+                        .thenByDescending { it.first.updatedAt }
+                )
+                .map { it.first }
+        }
+        return (stable + scored).distinctBy(UserMemory::id).take(limit)
     }
 
     fun forget(existing: List<UserMemory>, query: String): List<UserMemory> {
