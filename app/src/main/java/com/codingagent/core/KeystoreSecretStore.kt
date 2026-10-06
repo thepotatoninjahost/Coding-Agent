@@ -92,6 +92,7 @@ internal class KeystoreSecretStore(context: Context) {
         const val PROJECT_PATH = "project_path"
         const val LAST_RESEARCH = "last_research_query"
         const val MODEL_SETTINGS = "model_settings_v1"
+        const val USER_MEMORY = "user_memory_v1"
     }
 }
 
