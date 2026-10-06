@@ -2,106 +2,51 @@ package com.codingagent.core
 
 import android.content.Context
 import com.codingagent.agent.UserMemory
+import com.codingagent.agent.UserMemoryIndex
 import com.codingagent.agent.UserMemoryStore
-import java.util.Locale
-import java.util.UUID
 import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * ONE JOB: Persist and selectively retrieve the local user's durable memories.
- *
- * Memory is deliberately separate from the system prompt, chat history, and project task history.
- * The encrypted payload is bounded so long-term learning cannot consume unbounded storage or context.
+ * ONE JOB: Persist the local user's durable memories in encrypted app-private storage.
  */
 internal class DeviceUserMemoryStore(context: Context) : UserMemoryStore {
     private val securePrefs = KeystoreSecretStore(context)
+    private val index = UserMemoryIndex()
     private val lock = Any()
 
     override fun remember(
         text: String,
         kind: UserMemory.Kind,
         importance: Int
-    ): UserMemory? {
-        val clean = text.replace(Regex("\\s+"), " ").trim().trimEnd('.', '!', '?')
-        if (clean.length < 3 || clean.length > MAX_MEMORY_CHARS) return null
-        synchronized(lock) {
-            val now = System.currentTimeMillis()
-            val current = load()
-            val match = current.maxByOrNull { similarity(it.text, clean) }
-            val next = if (match != null && similarity(match.text, clean) >= MERGE_THRESHOLD) {
-                current.map {
-                    if (it.id == match.id) {
-                        it.copy(
-                            text = clean,
-                            kind = kind,
-                            importance = maxOf(it.importance, importance.coerceIn(1, 99)),
-                            updatedAt = now
-                        )
-                    } else {
-                        it
-                    }
-                }
-            } else {
-                current + UserMemory(
-                    id = UUID.randomUUID().toString(),
-                    text = clean,
-                    kind = kind,
-                    importance = importance.coerceIn(1, 99),
-                    createdAt = now,
-                    updatedAt = now
-                )
-            }
-            save(compact(next))
-            return load().firstOrNull { it.text == clean }
-        }
+    ): UserMemory? = synchronized(lock) {
+        val current = load()
+        val next = index.remember(
+            existing = current,
+            text = text,
+            kind = kind,
+            importance = importance,
+            now = System.currentTimeMillis()
+        )
+        if (next == current) return null
+        save(next)
+        next.firstOrNull { it.text == text.replace(Regex("\\s+"), " ").trim().trimEnd('.', '!', '?') }
     }
 
-    override fun relevant(query: String, limit: Int): List<UserMemory> {
-        if (limit <= 0) return emptyList()
-        val queryTokens = tokens(query)
-        synchronized(lock) {
-            val memories = load()
-            return memories
-                .map { memory ->
-                    val overlap = if (queryTokens.isEmpty()) 0.0 else {
-                        val memoryTokens = tokens(memory.text)
-                        memoryTokens.intersect(queryTokens).size.toDouble() /
-                            queryTokens.union(memoryTokens).size.coerceAtLeast(1)
-                    }
-                    val stableBonus = memory.importance / 100.0
-                    val score = overlap * 100.0 + stableBonus * 12.0
-                    memory to score
-                }
-                .filter { (_, score) ->
-                    queryTokens.isNotEmpty() && score >= MIN_RELEVANCE_SCORE
-                }
-                .sortedWith(
-                    compareByDescending<Pair<UserMemory, Double>> { it.second }
-                        .thenByDescending { it.first.updatedAt }
-                )
-                .take(limit)
-                .map { it.first }
-        }
+    override fun relevant(query: String, limit: Int): List<UserMemory> = synchronized(lock) {
+        index.relevant(load(), query, limit)
     }
 
     override fun all(): List<UserMemory> = synchronized(lock) {
         load().sortedByDescending { it.updatedAt }
     }
 
-    override fun forget(query: String): Int {
-        val clean = query.trim()
-        if (clean.isBlank()) return 0
-        synchronized(lock) {
-            val before = load()
-            val kept = before.filterNot { memory ->
-                memory.text.contains(clean, ignoreCase = true) ||
-                    similarity(memory.text, clean) >= FORGET_THRESHOLD
-            }
-            val removed = before.size - kept.size
-            if (removed > 0) save(kept)
-            removed
-        }
+    override fun forget(query: String): Int = synchronized(lock) {
+        val current = load()
+        val next = index.forget(current, query)
+        val removed = current.size - next.size
+        if (removed > 0) save(next)
+        removed
     }
 
     private fun load(): List<UserMemory> {
@@ -140,37 +85,5 @@ internal class DeviceUserMemoryStore(context: Context) : UserMemoryStore {
             )
         }
         securePrefs.putString(KeystoreSecretStore.USER_MEMORY, array.toString())
-    }
-
-    private fun compact(memories: List<UserMemory>): List<UserMemory> =
-        memories
-            .sortedWith(compareByDescending<UserMemory> { it.importance }.thenByDescending { it.updatedAt })
-            .take(MAX_MEMORY_ENTRIES)
-
-    private fun similarity(a: String, b: String): Double {
-        val left = tokens(a)
-        val right = tokens(b)
-        if (left.isEmpty() || right.isEmpty()) return 0.0
-        val intersection = left.intersect(right).size.toDouble()
-        return intersection / left.union(right).size.toDouble()
-    }
-
-    private fun tokens(text: String): Set<String> =
-        text.lowercase(Locale.ROOT)
-            .split(Regex("[^a-z0-9]+"))
-            .filter { it.length >= 3 && it !in STOP_WORDS }
-            .toSet()
-
-    companion object {
-        private const val MAX_MEMORY_ENTRIES = 64
-        private const val MAX_MEMORY_CHARS = 500
-        private const val MERGE_THRESHOLD = 0.55
-        private const val FORGET_THRESHOLD = 0.75
-        private const val MIN_RELEVANCE_SCORE = 28.0
-        private val STOP_WORDS = setOf(
-            "the", "and", "for", "that", "this", "with", "from", "you",
-            "your", "are", "have", "has", "not", "but", "can", "will",
-            "should", "would", "could", "please", "want", "like", "prefer"
-        )
     }
 }
