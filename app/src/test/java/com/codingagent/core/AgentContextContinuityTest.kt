@@ -1,0 +1,50 @@
+package com.codingagent.core
+
+import com.codingagent.agent.AgentKnowledge
+import com.codingagent.agent.AutonomousAgent
+import com.codingagent.model.ModelGateway
+import com.codingagent.model.ModelRequest
+import com.codingagent.model.ModelResponse
+import com.codingagent.workspace.KnowledgeHit
+import java.nio.file.Files
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class AgentContextContinuityTest {
+    @Test
+    fun liveAgentIntakeKeepsOpenJobAndPriorOwnerConstraint() {
+        val root = Files.createTempDirectory("agent-context-live").toFile()
+        val captured = mutableListOf<ModelRequest>()
+        val gateway = object : ModelGateway {
+            override fun complete(request: ModelRequest): ModelResponse {
+                captured += request
+                return ModelResponse.Text("I understand the request and can continue.")
+            }
+
+            override fun cancel() = Unit
+        }
+        val knowledge = object : AgentKnowledge {
+            override fun search(query: String, limit: Int): List<KnowledgeHit> = emptyList()
+        }
+        val agent = AutonomousAgent(root, knowledge, gateway = gateway)
+
+        agent.run(
+            """
+            - status: open
+            - goal: Build me a compiler
+            - staged paths:
+            Conversation so far (oldest first).
+            OWNER: Build me a compiler
+            AGENT: Which languages should it support?
+            OWNER: Do not create sample files.
+            Current request:
+            Kotlin and Python
+            """.trimIndent()
+        )
+
+        val prompt = captured.firstOrNull()?.user.orEmpty()
+        assertTrue(prompt.contains("Build me a compiler", ignoreCase = true))
+        assertTrue(prompt.contains("Kotlin and Python", ignoreCase = true))
+        assertTrue(prompt.contains("Do not create sample files", ignoreCase = true))
+    }
+}
