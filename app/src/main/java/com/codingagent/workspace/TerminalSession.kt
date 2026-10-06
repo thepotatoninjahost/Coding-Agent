@@ -58,6 +58,19 @@ class TerminalSession(
         runner.cancel(reason)
     }
 
+    /**
+     * Execute a verification command through this session's shared runner.
+     * Keeping verification on the same runner makes the UI Stop action cancel
+     * verification just like an interactive terminal command.
+     */
+    fun executeRaw(
+        command: List<String>,
+        timeoutSeconds: Long = this.timeoutSeconds
+    ): CommandResult {
+        require(command.isNotEmpty()) { "A terminal command is required" }
+        return runner.run(command, timeoutSeconds)
+    }
+
     companion object {
         fun resolveShell(): String {
             val candidates = listOf(

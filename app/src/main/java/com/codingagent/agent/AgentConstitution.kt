@@ -103,9 +103,15 @@ class ApprovalLedger {
     private val records = mutableMapOf<String, MutableList<ApprovalRecord>>()
 
     @Synchronized
-    fun record(actionId: String, ownerLabel: String, at: Long = System.currentTimeMillis()): ApprovalRecord {
+    fun record(
+        actionId: String,
+        ownerLabel: String,
+        at: Long = System.currentTimeMillis(),
+        confirmationNumber: Int? = null
+    ): ApprovalRecord {
         val current = records.getOrPut(actionId) { mutableListOf() }
-        val record = ApprovalRecord(actionId, at, ownerLabel, current.size + 1)
+        val number = confirmationNumber ?: (current.size + 1)
+        val record = ApprovalRecord(actionId, at, ownerLabel, number)
         current += record
         return record
     }

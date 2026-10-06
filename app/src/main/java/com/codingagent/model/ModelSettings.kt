@@ -12,6 +12,30 @@ enum class ModelBackend {
     REMOTE
 }
 
+object ModelEndpointPolicy {
+    fun validate(raw: String): String? {
+        val value = raw.trim()
+        if (value.isBlank()) return "Base URL is required for remote models"
+        val uri = runCatching { java.net.URI(value) }.getOrNull()
+            ?: return "Base URL is not a valid URI"
+        val scheme = uri.scheme?.lowercase()
+            ?: return "Base URL must include http:// or https://"
+        if (scheme != "http" && scheme != "https") return "Base URL must use http:// or https://"
+        if (uri.userInfo != null) return "Base URL must not contain embedded credentials"
+        if (uri.host.isNullOrBlank()) return "Base URL must contain a hostname"
+        if (scheme == "http" && !isLocalEndpoint(value)) {
+            return "Remote model endpoints must use HTTPS; HTTP is allowed only for localhost or loopback"
+        }
+        return null
+    }
+
+    fun isLocalEndpoint(raw: String): Boolean {
+        val uri = runCatching { java.net.URI(raw.trim()) }.getOrNull() ?: return false
+        val host = uri.host?.lowercase() ?: return false
+        return host == "localhost" || host == "127.0.0.1" || host == "::1" || host == "[::1]"
+    }
+}
+
 data class ModelSettings(
     val backend: ModelBackend = ModelBackend.REMOTE,
     val baseUrl: String = "",
@@ -75,12 +99,9 @@ data class ModelSettings(
     fun validationErrors(): List<String> {
         val s = normalized()
         return buildList {
-            if (s.baseUrl.isBlank()) add("Base URL is required for remote models")
-            else if (!s.baseUrl.startsWith("http://") && !s.baseUrl.startsWith("https://")) {
-                add("Base URL must start with http:// or https://")
-            }
+            ModelEndpointPolicy.validate(s.baseUrl)?.let(::add)
             if (s.modelName.isBlank()) add("Model name is required")
-            val local = s.baseUrl.startsWith("http://127.0.0.1") || s.baseUrl.startsWith("http://localhost")
+            val local = ModelEndpointPolicy.isLocalEndpoint(s.baseUrl)
             if (s.apiKey.isBlank() && !local) add("API key is required (except localhost endpoints)")
         }
     }

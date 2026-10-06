@@ -32,20 +32,35 @@ object PendingWorkResume {
 
     fun tryResume(agent: AutonomousAgent, text: String, recentAgentText: String?): AgentRuntimeResult? {
         if (!isResumeRequest(text)) return null
-        val pending = agent.pendingProposals().firstOrNull()
-        if (pending != null) {
-            val body = ChangeDiff.ownerReviewText(pending)
+        val pending = agent.pendingProposals()
+        if (pending.size > 1) {
+            val ids = pending.joinToString(", ") { it.id }
+            val task = AgentTask(
+                id = UUID.randomUUID().toString(),
+                request = text,
+                status = "resume-ambiguous",
+                plan = AgentPlan(text, emptyList(), emptyList()),
+                changes = emptyList(),
+                verification = VerificationReport(true, emptyList()),
+                events = pending.map { "pending proposal ${it.id}" },
+                summary = "Resume is ambiguous because multiple proposals are pending ($ids). Open Review and select the intended proposal."
+            )
+            return AgentRuntimeResult.Failed(task)
+        }
+        val pendingProposal = pending.singleOrNull()
+        if (pendingProposal != null) {
+            val body = ChangeDiff.ownerReviewText(pendingProposal)
             val task = AgentTask(
                 id = UUID.randomUUID().toString(),
                 request = text,
                 status = "waiting-approval",
                 plan = AgentPlan(text, emptyList(), emptyList()),
-                changes = pending.changeSet.changes,
-                verification = pending.verification,
-                events = listOf("resumed pending proposal ${pending.id}"),
+                changes = pendingProposal.changeSet.changes,
+                verification = pendingProposal.verification,
+                events = listOf("resumed pending proposal ${pendingProposal.id}"),
                 summary = body
             )
-            return AgentRuntimeResult.NeedsApproval(task, body, pending.id)
+            return AgentRuntimeResult.NeedsApproval(task, body, pendingProposal.id)
         }
         if (recentAgentText != null && ModelFailure.isRateLimit(recentAgentText)) {
             return AgentRuntimeResult.Failed(

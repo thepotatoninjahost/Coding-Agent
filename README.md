@@ -73,7 +73,7 @@ Execution path:
 6. `CodeSynthesisEngine` creates a proposal when the request does not contain an explicit operation.
 7. `ProjectWorkspace` + `MutationCoordinator` apply edits through typed transactions. Dual owner approval is required before a write hits disk.
 8. `VerificationReport` records static unfinished-work scans and command-check evidence. Verification never reports a fake pass.
-9. Not currently wired: `CompilerTestRepairCycle` (diagnose/repair/rollback on failed verification) exists but nothing calls it — an applied change that fails verification is not auto-repaired or rolled back today.
+9. `CompilerTestRepairCycle` now participates in failed-change recovery: failed approved changes roll back, a model-synthesized repair is staged, and the repair must pass the same dual-approval flow before recheck.
 10. `AgentJournal`, lessons, and `LocalStore` persist task evidence and chat for later work.
 
 Unit tests currently live under `app/src/test/java/com/codingagent/core/` even though production code is package-split as above.
@@ -170,7 +170,7 @@ The project currently verifies:
 - Goal interpretation and task intake
 - Code-synthesis proposals
 - Project indexing and exact mutation behavior
-- Typed transaction records and checksum-backed rollback (`ProjectWorkspace.rollback` — not `CompilerTestRepairCycle`, which is unwired; see execution path above)
+- Typed transaction records, checksum-backed rollback, and owner-approved repair staging
 - Live module and live model updates
 - Android lint
 - Debug APK assembly

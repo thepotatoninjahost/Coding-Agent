@@ -6,6 +6,8 @@ import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 import java.nio.charset.StandardCharsets
+import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * ONE JOB: HTTP OpenAI-compatible /chat/completions.
@@ -16,23 +18,34 @@ class RemoteHttpGateway(
     private val model: String,
     private val timeoutMillis: Int = 60_000,
     private val connectionFactory: (String) -> HttpURLConnection = { URL(it).openConnection() as HttpURLConnection },
-    private val extraHeaders: Map<String, String> = emptyMap()
+    private val extraHeaders: Map<String, String> = emptyMap(),
+    private val activeConnection: AtomicReference<HttpURLConnection?> = AtomicReference(null),
+    private val cancellationGeneration: AtomicLong = AtomicLong(0L)
 ) : ModelGateway {
+    override fun cancel() {
+        cancellationGeneration.incrementAndGet()
+        activeConnection.getAndSet(null)?.disconnect()
+    }
     override fun stream(request: ModelRequest, onDelta: (String) -> Unit): ModelResponse {
-        val first = streamOnce(request, onDelta)
+        val generation = cancellationGeneration.get()
+        if (isCancelled(generation)) return ModelResponse.Failure("Cancelled")
+        val first = streamOnce(request, onDelta, generation)
+        if (isCancelled(generation)) return ModelResponse.Failure("Cancelled")
         if (first is ModelResponse.Failure && isEmptyContentFailure(first.message) && request.tools.isNotEmpty()) {
-            return streamOnce(request.copy(tools = emptyList()), onDelta)
+            return streamOnce(request.copy(tools = emptyList()), onDelta, generation)
         }
         return first
     }
 
-    private fun streamOnce(request: ModelRequest, onDelta: (String) -> Unit): ModelResponse {
-        val connection = openConnection() ?: return ModelResponse.Failure("Model gateway configuration is incomplete")
+    private fun streamOnce(request: ModelRequest, onDelta: (String) -> Unit, generation: Long): ModelResponse {
+        if (isCancelled(generation)) return ModelResponse.Failure("Cancelled")
+        val connection = openConnection(generation) ?: return if (isCancelled(generation)) ModelResponse.Failure("Cancelled") else ModelResponse.Failure("Model gateway configuration is incomplete")
         return try {
             configure(connection)
             val body = requestBody(request)
             body.put("stream", true)
             connection.outputStream.use { it.write(body.toString().toByteArray(StandardCharsets.UTF_8)) }
+            if (isCancelled(generation)) return ModelResponse.Failure("Cancelled")
             if (connection.responseCode !in 200..299) return failure(connection)
             parseStreamedBody(connection.inputStream, onDelta)
         } catch (error: IOException) {
@@ -40,6 +53,7 @@ class RemoteHttpGateway(
         } catch (error: Exception) {
             ModelResponse.Failure("Model response could not be processed: ${error.message.orEmpty().ifBlank { error.javaClass.simpleName }}")
         } finally {
+            activeConnection.compareAndSet(connection, null)
             connection.disconnect()
         }
     }
@@ -105,18 +119,23 @@ class RemoteHttpGateway(
     }
 
     override fun complete(request: ModelRequest): ModelResponse {
-        val first = completeOnce(request)
+        val generation = cancellationGeneration.get()
+        if (isCancelled(generation)) return ModelResponse.Failure("Cancelled")
+        val first = completeOnce(request, generation)
+        if (isCancelled(generation)) return ModelResponse.Failure("Cancelled")
         if (first is ModelResponse.Failure && isEmptyContentFailure(first.message) && request.tools.isNotEmpty()) {
-            return completeOnce(request.copy(tools = emptyList()))
+            return completeOnce(request.copy(tools = emptyList()), generation)
         }
         return first
     }
 
-    private fun completeOnce(request: ModelRequest): ModelResponse {
-        val connection = openConnection() ?: return ModelResponse.Failure("Model gateway configuration is incomplete")
+    private fun completeOnce(request: ModelRequest, generation: Long): ModelResponse {
+        if (isCancelled(generation)) return ModelResponse.Failure("Cancelled")
+        val connection = openConnection(generation) ?: return if (isCancelled(generation)) ModelResponse.Failure("Cancelled") else ModelResponse.Failure("Model gateway configuration is incomplete")
         return try {
             configure(connection)
             connection.outputStream.use { it.write(requestBody(request).toString().toByteArray(StandardCharsets.UTF_8)) }
+            if (isCancelled(generation)) return ModelResponse.Failure("Cancelled")
             if (connection.responseCode !in 200..299) return failure(connection)
             parseCompletionBody(connection.inputStream.bufferedReader().use { it.readText() })
         } catch (error: IOException) {
@@ -124,6 +143,7 @@ class RemoteHttpGateway(
         } catch (error: Exception) {
             ModelResponse.Failure("Model response could not be processed: ${error.message.orEmpty().ifBlank { error.javaClass.simpleName }}")
         } finally {
+            activeConnection.compareAndSet(connection, null)
             connection.disconnect()
         }
     }
@@ -149,10 +169,23 @@ class RemoteHttpGateway(
             "no streamed message content" in lower
     }
 
-    private fun openConnection(): HttpURLConnection? {
+    private fun isCancelled(generation: Long): Boolean = cancellationGeneration.get() != generation
+
+    private fun openConnection(generation: Long): HttpURLConnection? {
         if (endpoint.isBlank() || model.isBlank()) return null
-        if (apiKey.isBlank() && !endpoint.startsWith("http://127.0.0.1") && !endpoint.startsWith("http://localhost")) return null
-        return connectionFactory(endpoint.trimEnd('/') + "/chat/completions")
+        if (ModelEndpointPolicy.validate(endpoint) != null) return null
+        if (apiKey.isBlank() && !ModelEndpointPolicy.isLocalEndpoint(endpoint)) return null
+        val connection = connectionFactory(endpoint.trimEnd('/') + "/chat/completions")
+        if (isCancelled(generation)) {
+            connection.disconnect()
+            return null
+        }
+        activeConnection.set(connection)
+        if (isCancelled(generation) && activeConnection.compareAndSet(connection, null)) {
+            connection.disconnect()
+            return null
+        }
+        return connection
     }
 
     private fun configure(connection: HttpURLConnection) {

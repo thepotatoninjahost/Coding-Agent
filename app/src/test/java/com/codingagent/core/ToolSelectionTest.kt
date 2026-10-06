@@ -7,6 +7,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import com.codingagent.agent.ToolInvocation
 import com.codingagent.agent.ToolKind
+import com.codingagent.agent.ToolStepStatus
 import com.codingagent.agent.ToolSelectionLoop
 import com.codingagent.agent.ToolSelectionPlan
 import com.codingagent.agent.ToolSelector
@@ -42,6 +43,66 @@ class ToolSelectionTest {
         assertEquals(null, loop.next())
         assertEquals("complete", loop.currentStatus())
         assertTrue(loop.history().flatMap { it.tools }.any { it.evidence == "indexed 3 files" })
+    }
+
+    @Test
+    fun productionGateRejectsMutationUntilProjectEvidence() {
+        val plan = ToolSelectionPlan(
+            "change",
+            listOf(
+                ToolInvocation("index", ToolKind.INDEX_REPOSITORY, "index"),
+                ToolInvocation("search", ToolKind.SEARCH_PROJECT, "search", listOf("index")),
+                ToolInvocation("synth", ToolKind.SYNTHESIZE_CODE, "synthesize", listOf("search")),
+                ToolInvocation("apply", ToolKind.APPLY_CHANGES, "apply", listOf("synth"))
+            ),
+            "test"
+        )
+        val loop = ToolSelectionLoop(plan)
+        loop.completeKind(ToolKind.INDEX_REPOSITORY, "indexed")
+        assertTrue(loop.authorize("replace_text", ToolKind.APPLY_CHANGES)!!.contains("blocked"))
+        loop.completeKind(ToolKind.SEARCH_PROJECT, "found target")
+        loop.completeKind(ToolKind.SYNTHESIZE_CODE, "proposal")
+        assertEquals(null, loop.authorize("replace_text", ToolKind.APPLY_CHANGES))
+    }
+
+    @Test
+    fun failedMutationDoesNotConsumeSynthesisPhase() {
+        val plan = ToolSelectionPlan(
+            "change",
+            listOf(
+                ToolInvocation("index", ToolKind.INDEX_REPOSITORY, "index"),
+                ToolInvocation("search", ToolKind.SEARCH_PROJECT, "search", listOf("index")),
+                ToolInvocation("synth", ToolKind.SYNTHESIZE_CODE, "synthesize", listOf("search")),
+                ToolInvocation("apply", ToolKind.APPLY_CHANGES, "apply", listOf("synth"))
+            ),
+            "test"
+        )
+        val loop = ToolSelectionLoop(plan)
+        loop.completeKind(ToolKind.INDEX_REPOSITORY, "indexed")
+        loop.completeKind(ToolKind.SEARCH_PROJECT, "found target")
+
+        assertEquals(null, loop.authorize("replace_text", ToolKind.APPLY_CHANGES))
+        loop.recordFailure("replace_text", ToolKind.APPLY_CHANGES, "workspace rejected proposal")
+
+        assertEquals(ToolStepStatus.PENDING, loop.currentTools().first { it.kind == ToolKind.SYNTHESIZE_CODE }.status)
+        assertEquals(ToolStepStatus.PENDING, loop.currentTools().first { it.kind == ToolKind.APPLY_CHANGES }.status)
+    }
+
+    @Test
+    fun repeatedProjectReadsRemainAuthorizedAfterFirstSearch() {
+        val plan = ToolSelectionPlan(
+            "inspect",
+            listOf(
+                ToolInvocation("index", ToolKind.INDEX_REPOSITORY, "index"),
+                ToolInvocation("search", ToolKind.SEARCH_PROJECT, "search", listOf("index"))
+            ),
+            "test"
+        )
+        val loop = ToolSelectionLoop(plan)
+        loop.completeKind(ToolKind.INDEX_REPOSITORY, "indexed")
+        assertEquals(null, loop.authorize("search_project", ToolKind.SEARCH_PROJECT))
+        loop.completeKind(ToolKind.SEARCH_PROJECT, "first result")
+        assertEquals(null, loop.authorize("read_file", ToolKind.SEARCH_PROJECT))
     }
 
     @Test

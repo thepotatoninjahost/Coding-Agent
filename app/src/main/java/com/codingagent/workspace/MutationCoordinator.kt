@@ -9,7 +9,9 @@ import com.codingagent.agent.ApprovalRecord
 import com.codingagent.agent.ConstitutionRule
 import com.codingagent.agent.SelfEvolution
 import com.codingagent.agent.SelfRepair
+import com.codingagent.agent.RepairCycleConfig
 import com.codingagent.intake.TaskOperation
+import com.codingagent.intake.TaskIntakeParser
 
 /**
  * ONE JOB: Dual-approval staging, constitution checks, and apply/reject of code changes.
@@ -22,6 +24,7 @@ sealed class MutationProposeResult {
 sealed class MutationApprovalResult {
     data class AwaitingSecond(val proposal: PendingChangeProposal, val approval: ApprovalRecord) : MutationApprovalResult()
     data class Applied(val proposal: PendingChangeProposal, val changeSet: ChangeSet) : MutationApprovalResult()
+    data class RepairRequired(val proposal: PendingChangeProposal, val failure: String) : MutationApprovalResult()
     data class Rejected(val reason: String) : MutationApprovalResult()
 }
 
@@ -32,7 +35,9 @@ data class PendingChangeProposal(
     val verification: VerificationReport,
     val createdAt: Long,
     val expiresAt: Long,
-    val approvals: List<ApprovalRecord> = emptyList()
+    val approvals: List<ApprovalRecord> = emptyList(),
+    val repairAttempt: Int = 0,
+    val repairRootRequest: String = request
 ) {
     val approvalCount: Int get() = approvals.size
 }
@@ -40,14 +45,21 @@ data class PendingChangeProposal(
 class MutationCoordinator(
     internal val workspace: ProjectWorkspace,
     private val ledger: ApprovalLedger = ApprovalLedger(),
-    private val now: () -> Long = { System.currentTimeMillis() }
+    private val now: () -> Long = { System.currentTimeMillis() },
+    private val repairConfig: RepairCycleConfig = RepairCycleConfig()
 ) {
     private val pending = linkedMapOf<String, PendingChangeProposal>()
     private val evolution = SelfEvolution(workspace.projectRoot())
+    @Volatile private var repairProvider: ((String, Int) -> ChangeSet?)? = null
+
+    fun setRepairProvider(provider: ((String, Int) -> ChangeSet?)?) {
+        repairProvider = provider
+    }
 
     init {
         OpenJobStore.bind(workspace.projectRoot())
         PendingProposalStore.load(workspace.projectRoot()).forEach { pending[it.id] = it }
+        clearExpired()
     }
 
     @Synchronized
@@ -56,6 +68,7 @@ class MutationCoordinator(
         operations: List<TaskOperation>,
         reason: String = request
     ): MutationProposeResult {
+        clearExpired()
         if (request.isBlank()) return MutationProposeResult.Rejected("A mutation request is required")
         if (operations.isEmpty()) return MutationProposeResult.Rejected("At least one mutation operation is required")
 
@@ -102,10 +115,14 @@ class MutationCoordinator(
     }
 
     @Synchronized
-    fun get(id: String): PendingChangeProposal? = pending[id]
+    fun get(id: String): PendingChangeProposal? {
+        clearExpired()
+        return pending[id]
+    }
 
     @Synchronized
-    fun approve(id: String, ownerVerified: Boolean, ownerLabel: String): MutationApprovalResult {
+    fun approve(id: String, ownerApproval: OwnerApprovalToken): MutationApprovalResult {
+        clearExpired()
         val proposal = pending[id] ?: return MutationApprovalResult.Rejected("Change proposal does not exist")
         val timestamp = now()
         if (timestamp > proposal.expiresAt) {
@@ -113,13 +130,19 @@ class MutationCoordinator(
                 "Change proposal approval window expired. Open Review, reject, and the agent will restage the same files."
             )
         }
-        if (!ownerVerified) return MutationApprovalResult.Rejected("Owner verification is required for every approval")
-        val approval = ledger.record(id, ownerLabel, timestamp)
+        if (!ownerApproval.consume(proposal.id, timestamp)) {
+            return MutationApprovalResult.Rejected("A fresh authenticated owner approval is required for this proposal")
+        }
+        if (proposal.approvalCount >= 2) {
+            return MutationApprovalResult.Rejected("This proposal already has the required two approvals")
+        }
+        val confirmationNumber = proposal.approvalCount + 1
+        val approval = ledger.record(id, "device-owner", timestamp, confirmationNumber)
         val candidate = proposal.copy(approvals = proposal.approvals + approval)
         val action = AgentAction(
             description = proposal.request,
             category = AgentActionCategory.CODE_CHANGE,
-            ownerVerified = ownerVerified,
+            ownerVerified = true,
             approvalCount = candidate.approvalCount,
             sandboxPassed = proposal.verification.passed,
             clearPermission = true
@@ -141,6 +164,61 @@ class MutationCoordinator(
         }
         return try {
             val applied = workspace.applyApproved(proposal.changeSet)
+            val intake = TaskIntakeParser(workspace.projectRoot()).parse(proposal.request)
+            val postApply = if (intake.verificationCommands.isEmpty()) {
+                workspace.verify()
+            } else {
+                workspace.runChecks(intake.verificationCommands, 180)
+            }
+            if (!postApply.passed) {
+                val rollback = workspace.rollback(applied)
+                if (rollback == RollbackResult.Restored) {
+                    pending.remove(id)
+                    persist()
+                    OpenJobStore.markReady(workspace.projectRoot())
+                }
+                val details = buildString {
+                    append("Approved change failed post-apply checks")
+                    if (postApply.commands.isNotEmpty()) {
+                        append(". Commands: ")
+                        append(postApply.commands.joinToString("; ") { result ->
+                            "${result.command} (exit ${result.exitCode})"
+                        })
+                    }
+                    if (postApply.issues.isNotEmpty()) {
+                        append(". Issues: ")
+                        append(postApply.issues.joinToString { "${it.path}:${it.line}: ${it.message}" })
+                    }
+                }
+                if (rollback == RollbackResult.Restored) {
+                    val nextRepairAttempt = proposal.repairAttempt + 1
+                    if (nextRepairAttempt <= repairConfig.maxRepairAttempts) {
+                        val repair = runCatching {
+                            repairProvider?.let { provider ->
+                                com.codingagent.agent.CompilerTestRepairCycle(workspace).prepareRepair(
+                                    postApply,
+                                    attempt = nextRepairAttempt,
+                                    repair = provider
+                                )
+                            }
+                        }.getOrNull()
+                        if (repair != null) {
+                            val repairProposal = stageRepairProposal(
+                                rootRequest = proposal.repairRootRequest,
+                                repairAttempt = nextRepairAttempt,
+                                changeSet = repair
+                            )
+                            if (repairProposal != null) {
+                                return MutationApprovalResult.RepairRequired(repairProposal, details)
+                            }
+                        }
+                    }
+                    return MutationApprovalResult.Rejected("$details; changes were rolled back")
+                }
+                return MutationApprovalResult.Rejected(
+                    "$details; rollback was incomplete: $rollback"
+                )
+            }
             pending.remove(id)
             persist()
             OpenJobStore.markApplied(workspace.projectRoot())
@@ -152,33 +230,80 @@ class MutationCoordinator(
     }
 
     @Synchronized
-    fun pending(): List<PendingChangeProposal> = pending.values.toList()
+    fun pending(): List<PendingChangeProposal> {
+        clearExpired()
+        return pending.values.toList()
+    }
 
     @Synchronized
     fun clear(id: String): Boolean {
         val gone = pending.remove(id) != null
-        if (gone) persist()
+        if (gone) {
+            persist()
+            OpenJobStore.markReady(workspace.projectRoot())
+        }
         return gone
     }
 
     @Synchronized
     fun reject(id: String): Boolean {
         val gone = pending.remove(id) != null
-        if (gone) persist()
+        if (gone) {
+            persist()
+            OpenJobStore.markReady(workspace.projectRoot())
+        }
         return gone
     }
 
     @Synchronized
     fun clearExpired() {
+        val timestamp = now()
+        val expiredIds = pending.values
+            .filter { timestamp > it.expiresAt }
+            .map { it.id }
+        if (expiredIds.isEmpty()) return
+        expiredIds.forEach { pending.remove(it) }
+        persist()
+        OpenJobStore.markReady(workspace.projectRoot())
     }
 
     @Synchronized
     fun refreshExpiry(id: String): PendingChangeProposal? {
+        clearExpired()
         val current = pending[id] ?: return null
         val refreshed = current.copy(expiresAt = now() + AgentConstitution.APPROVAL_EXPIRATION_MS)
         pending[id] = refreshed
         persist()
         return refreshed
+    }
+
+    private fun stageRepairProposal(
+        rootRequest: String,
+        repairAttempt: Int,
+        changeSet: ChangeSet
+    ): PendingChangeProposal? {
+        val verification = runCatching { workspace.verifyProposal(changeSet) }.getOrNull() ?: return null
+        if (!verification.passed || changeSet.changes.isEmpty()) return null
+        val timestamp = now()
+        val proposal = PendingChangeProposal(
+            id = UUID.randomUUID().toString(),
+            request = "Self-repair attempt $repairAttempt after failed change: ${rootRequest.take(180)}",
+            changeSet = changeSet,
+            verification = verification,
+            createdAt = timestamp,
+            expiresAt = timestamp + AgentConstitution.APPROVAL_EXPIRATION_MS,
+            repairAttempt = repairAttempt,
+            repairRootRequest = rootRequest
+        )
+        pending[proposal.id] = proposal
+        persist()
+        OpenJobStore.markWaiting(
+            workspace.projectRoot(),
+            proposal.id,
+            changeSet.changes.map { it.path }.distinct(),
+            proposal.request
+        )
+        return proposal
     }
 
     private fun recordEvolution(proposal: PendingChangeProposal, changeSet: ChangeSet) {

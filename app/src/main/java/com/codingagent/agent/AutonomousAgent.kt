@@ -1,11 +1,13 @@
 package com.codingagent.agent
 import com.codingagent.workspace.AgentPlan
 import com.codingagent.workspace.AgentStep
+import com.codingagent.workspace.OwnerApprovalToken
 
 import org.json.JSONObject
 import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 import com.codingagent.intake.OperationKind
 import com.codingagent.intake.TaskIntake
 import com.codingagent.intake.TaskIntakeParser
@@ -56,7 +58,8 @@ class AutonomousAgent(
     // created a second, divergent instance that could silently drift from mutations.workspace.
     private val workspace: ProjectWorkspace get() = mutations.workspace
     private val files = ProjectFileService(workspace)
-    private val terminal = TerminalSession(root, config.commandTimeoutSeconds)
+    // Reuse the workspace-owned session so terminal commands, verification checks, and Stop share one cancellation boundary.
+    private val terminal = workspace.terminal()
     private val journal = AgentJournal(root)
     // Wired in: was previously dead code. Records every task outcome to
     // .coding-agent/experience.tsv via recordTask() below (defensive: never crashes a run).
@@ -72,20 +75,40 @@ class AutonomousAgent(
         mutations = mutations,
         terminal = terminal,
         maxOutputCharacters = config.maxOutputCharacters,
-        onResearchProgress = { lastResearchProgress = it },
-        onApplied = { changeSets += it }
+        onResearchProgress = { lastResearchProgress = it }
     )
-    private val cancelled = AtomicBoolean(false)
+    private val running = AtomicBoolean(false)
+    private val cancellationGeneration = AtomicLong(0L)
+    private val lifecycleLock = Any()
+    @Volatile
+    private var activeRunGeneration: Long = -1L
 
     @Volatile
     private var lastCancelReason: String = "Stopped by owner"
 
-    fun cancel(reason: String = "Stopped by owner") {
-        cancelled.set(true)
-        lastCancelReason = reason
+    init {
+        mutations.setRepairProvider { diagnosis, attempt ->
+            synthesizeRepairChangeSet(diagnosis, attempt)
+        }
     }
 
-    fun isCancelled(): Boolean = cancelled.get()
+    fun isRunning(): Boolean = running.get()
+
+    fun cancel(reason: String = "Stopped by owner") {
+        synchronized(lifecycleLock) {
+            cancellationGeneration.incrementAndGet()
+            lastCancelReason = reason
+        }
+        // Cancel every owned blocking lane, not only the model connection.
+        terminal.cancel(reason)
+        research.cancel()
+        gateway?.cancel()
+    }
+
+    fun isCancelled(): Boolean {
+        val active = activeRunGeneration
+        return active >= 0L && cancellationGeneration.get() != active
+    }
 
     /**
      * Replace the model gateway without recreating the agent. Safe to call from the UI thread
@@ -120,11 +143,27 @@ class AutonomousAgent(
     }
 
     fun pendingProposals(): List<PendingChangeProposal> = mutations.pending()
-    fun approveProposal(id: String, ownerVerified: Boolean, ownerLabel: String): MutationApprovalResult = mutations.approve(id, ownerVerified, ownerLabel)
+    fun approveProposal(id: String, ownerApproval: OwnerApprovalToken): MutationApprovalResult = mutations.approve(id, ownerApproval)
     fun rejectProposal(id: String): Boolean = mutations.reject(id)
 
     fun run(request: String, onEvent: (AutonomousAgentEvent) -> Unit = {}): List<AutonomousAgentEvent> {
-        cancelled.set(false)
+        val runGeneration: Long
+        synchronized(lifecycleLock) {
+            check(running.compareAndSet(false, true)) { "Agent is already running" }
+            runGeneration = cancellationGeneration.get()
+            activeRunGeneration = runGeneration
+        }
+        try {
+            changeSets.clear()
+            lastResearchProgress = "not started"
+            return runInternal(request, onEvent)
+        } finally {
+            activeRunGeneration = -1L
+            running.set(false)
+        }
+    }
+
+    private fun runInternal(request: String, onEvent: (AutonomousAgentEvent) -> Unit): List<AutonomousAgentEvent> {
         val normalized = request.trim()
         require(normalized.isNotEmpty()) { "A coding request is required" }
         val taskId = UUID.randomUUID().toString()
@@ -136,16 +175,22 @@ class AutonomousAgent(
         emit(AutonomousAgentEvent.Phase("INTAKE", "Inspecting the request and repository"))
         // Strip chat-history wrapper so intent matches the current user line only.
         val focus = currentRequestFocus(normalized)
+        tools.setRequestContext(focus)
         val intake = TaskIntakeParser(root).parse(focus)
         val plan = AgentPlanner(workspace).plan(intake)
         // Wired in: was previously dead code. Every call below is defensively wrapped
         // (runCatching) — PlanningLoop can at worst no-op, never crash a live run, since
         // this file can't be compiled/tested in this environment before shipping.
         val planningLoop = PlanningLoop(plan)
-        // Wired in: was previously dead code. Tracks the model's actual tool calls against
-        // an ideal fixed tool sequence for observability/journaling only — it never drives
-        // or gates the real turn loop below, which stays fully model-directed.
         val toolSelectionLoop = ToolSelectionLoop(ToolSelector().select(intake))
+        // Intake and the initial repository view are real execution prerequisites, not
+        // observational plan entries. Complete them only after the same workspace instance
+        // used by mutations has produced its repository summary.
+        runCatching { workspace.summary() }.onSuccess {
+            planningLoop.completePhase("intake", "request parsed")
+            planningLoop.completePhase("understand", "repository summary established")
+            toolSelectionLoop.completeKind(ToolKind.INDEX_REPOSITORY, "repository summary established")
+        }
         emit(AutonomousAgentEvent.Phase("PLAN", plan.steps.joinToString(" → ") { it.phase }))
 
         // Direct lanes: do not force the full tool loop for social / status / explicit read.
@@ -211,16 +256,16 @@ class AutonomousAgent(
         var researchEvidence = ""
         val wantsResearch = shouldResearch(focus, intake)
         if (wantsResearch) {
-            if (cancelled.get()) return stopNow(taskId, normalized, plan, events) { emit(it) }
+            if (isCancelled()) return stopNow(taskId, normalized, plan, events) { emit(it) }
             emit(AutonomousAgentEvent.Phase("RESEARCH", "Looking up external sources"))
             val mode = ResearchModeDetector.detect(focus)
             val session = runCatching {
                 research.deepResearch(focus, 8, mode) { progress ->
-                    if (cancelled.get()) return@deepResearch
+                    if (isCancelled()) return@deepResearch
                     emit(AutonomousAgentEvent.Phase("RESEARCH", "${progress.stage}: ${progress.completed}/${progress.total}; learned ${progress.successful}, failed ${progress.failed}"))
                 }
             }.getOrNull()
-            if (cancelled.get()) return stopNow(taskId, normalized, plan, events) { emit(it) }
+            if (isCancelled()) return stopNow(taskId, normalized, plan, events) { emit(it) }
             if (session != null && session.sources.isNotEmpty()) {
                 val brief = ResearchBriefBuilder.build(session)
                 researchEvidence = "\n\nResearch brief:\n${brief.evidence}"
@@ -260,11 +305,11 @@ class AutonomousAgent(
             synthesizeFromEvidence = ::synthesizeFromEvidence,
             recordTask = ::recordTask,
             emit = { emit(it) },
-            isCancelled = { cancelled.get() }
+            isCancelled = { isCancelled() }
         )
 
         for (turn in 0 until config.maxTurns) {
-            if (cancelled.get()) return stopNow(taskId, normalized, plan, events) { emit(it) }
+            if (isCancelled()) return stopNow(taskId, normalized, plan, events) { emit(it) }
             emit(AutonomousAgentEvent.Phase("MODEL", "Decision turn ${turn + 1}/${config.maxTurns}"))
             val decision = LoopControl.decide(
                 turn = turn,
@@ -310,10 +355,10 @@ class AutonomousAgent(
                         researchRequired = false
                     )
                 },
-                isCancelled = { cancelled.get() },
+                isCancelled = { isCancelled() },
                 onPhase = { emit(AutonomousAgentEvent.Phase("MODEL", it)) }
             ) ?: return stopNow(taskId, normalized, plan, events) { emit(it) }
-            if (cancelled.get()) return stopNow(taskId, normalized, plan, events) { emit(it) }
+            if (isCancelled()) return stopNow(taskId, normalized, plan, events) { emit(it) }
             // Some providers (NVIDIA NIM and others) never populate structured tool_calls and
             // instead emit the tool call as XML inside the text body. Recover that BEFORE the
             // dispatch below so it goes through the exact same ToolCall handling (proposal
@@ -528,6 +573,61 @@ class AutonomousAgent(
     private fun buildPrompt(request: String, intake: TaskIntake, evidence: String): String =
         AgentPrompt.build(request, intake, evidence, config.maxOutputCharacters)
 
+    private fun synthesizeRepairChangeSet(diagnosis: String, attempt: Int): ChangeSet? {
+        val model = gateway ?: return null
+        val repairTools = AgentModelProtocol.tools().filter { it.name == "replace_text" || it.name == "create_file" }
+        val evidence = buildString {
+            append("Repair attempt ").append(attempt).append(".\n")
+            append("Failure diagnosis: ").append(diagnosis.take(8_000)).append("\n")
+            append("Current repository map:\n").append(repoMapSummary()).append("\n")
+            workspace.verify().issues.take(20).forEach { issue ->
+                val content = runCatching { files.read(issue.path).content }.getOrNull()
+                if (content != null) {
+                    append("\nFILE ").append(issue.path).append("\n")
+                    append(content.take(12_000)).append("\n")
+                }
+            }
+        }
+        val response = ModelCallWithRetry.call(
+            gateway = model,
+            request = {
+                ModelRequest(
+                    AgentModelProtocol.SYSTEM,
+                    "You are repairing a failed approved code change. $evidence\n" +
+                        "Return exactly one replace_text or create_file tool call that fixes the diagnosed failure. " +
+                        "Do not explain. Do not use any other tool. Never weaken tests or safety controls.",
+                    repairTools,
+                    emptyList(),
+                    researchRequired = false
+                )
+            },
+            isCancelled = { isCancelled() },
+            onPhase = { }
+        ) ?: return null
+        val call = when (response) {
+            is ModelResponse.ToolCall -> response
+            is ModelResponse.Text -> JsonModelResponseParser().parse(response.content) as? ModelResponse.ToolCall
+            else -> null
+        } ?: return null
+        return runCatching {
+            val args = JSONObject(call.arguments)
+            val operation = when (call.name) {
+                "replace_text" -> TaskOperation(
+                    OperationKind.REPLACE,
+                    args.getString("path"),
+                    args.getString("oldText"),
+                    args.getString("newText")
+                )
+                "create_file" -> TaskOperation(
+                    OperationKind.CREATE_FILE,
+                    args.getString("path"),
+                    text = args.getString("content")
+                )
+                else -> return@runCatching null
+            }
+            workspace.preview(listOf(operation), "Self-repair attempt $attempt: $diagnosis")
+        }.getOrNull()
+    }
     private fun executeTool(name: String, rawArguments: String): String {
         return tools.execute(name, rawArguments)
     }

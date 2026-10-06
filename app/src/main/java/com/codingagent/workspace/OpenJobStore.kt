@@ -51,9 +51,9 @@ object OpenJobStore {
     fun load(root: File): OpenJob? {
         bind(root)
         val f = file(root)
-        if (!f.isFile) return null
+        val text = AtomicFileWriter.readTextIfExists(f) ?: return null
         return runCatching {
-            val o = JSONObject(f.readText())
+            val o = JSONObject(text)
             OpenJob(
                 id = o.getString("id"),
                 goal = o.getString("goal"),
@@ -81,7 +81,7 @@ object OpenJobStore {
         val paths = JSONArray()
         job.paths.forEach { paths.put(it) }
         o.put("paths", paths)
-        f.writeText(o.toString())
+        writeAtomically(f, o.toString())
     }
 
     @Synchronized
@@ -122,11 +122,28 @@ object OpenJobStore {
     fun markApplied(root: File) {
         bind(root)
         val current = load(root) ?: return
-        save(root, current.copy(status = "applied", updatedAt = System.currentTimeMillis()))
+        save(root, current.copy(status = "applied", proposalId = null, updatedAt = System.currentTimeMillis()))
+    }
+
+    @Synchronized
+    fun markReady(root: File) {
+        bind(root)
+        val current = load(root) ?: return
+        save(
+            root,
+            current.copy(
+                status = "open",
+                proposalId = null,
+                updatedAt = System.currentTimeMillis()
+            )
+        )
     }
 
     @Synchronized
     fun clear(root: File) {
-        file(root).delete()
+        AtomicFileWriter.delete(file(root))
     }
+
+    private fun writeAtomically(file: File, content: String) = AtomicFileWriter.write(file, content)
+
 }

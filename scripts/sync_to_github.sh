@@ -5,7 +5,9 @@
 # Usage:
 #   scripts/sync_to_github.sh [--owner OWNER] [--repo REPO] [--branch BRANCH] [--dry-run]
 #
-# Default mapping: the three core files that were corrupted by placeholder pushes.
+# Default mapping: the two current core files that this script can safely sync.
+# LiveModules.kt was split into several runtime/store/bootstrap files; pass an
+# explicit --file or SYNC_FILES mapping for whichever current file is intended.
 # Override with SYNC_FILES env (newline-separated "repo/path=local/path" lines)
 # or pass extra --file repo/path=local/path args.
 set -euo pipefail
@@ -52,9 +54,8 @@ if [[ ! -f "$SKILL_BUILD" ]]; then
 fi
 
 DEFAULT_FILES=(
-  "app/src/main/java/com/codingagent/core/ProjectWorkspace.kt=${ROOT}/app/src/main/java/com/codingagent/core/ProjectWorkspace.kt"
-  "app/src/main/java/com/codingagent/core/AutonomousAgent.kt=${ROOT}/app/src/main/java/com/codingagent/core/AutonomousAgent.kt"
-  "app/src/main/java/com/codingagent/core/LiveModules.kt=${ROOT}/app/src/main/java/com/codingagent/core/LiveModules.kt"
+  "app/src/main/java/com/codingagent/workspace/ProjectWorkspace.kt=${ROOT}/app/src/main/java/com/codingagent/workspace/ProjectWorkspace.kt"
+  "app/src/main/java/com/codingagent/agent/AutonomousAgent.kt=${ROOT}/app/src/main/java/com/codingagent/agent/AutonomousAgent.kt"
 )
 
 FILE_ARGS=()

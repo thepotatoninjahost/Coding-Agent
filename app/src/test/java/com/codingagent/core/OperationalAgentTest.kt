@@ -5,6 +5,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import com.codingagent.agent.AgentKnowledge
+import com.codingagent.agent.ChatApproval
 import com.codingagent.agent.AgentRuntimeResult
 import com.codingagent.agent.AutonomousAgent
 import com.codingagent.agent.AutonomousAgentEvent
@@ -14,6 +15,7 @@ import com.codingagent.model.ModelRequest
 import com.codingagent.model.ModelResponse
 import com.codingagent.workspace.ChangeOperation
 import com.codingagent.workspace.MutationApprovalResult
+import com.codingagent.workspace.OwnerApprovalToken
 import com.codingagent.workspace.MutationCoordinator
 import com.codingagent.workspace.MutationProposeResult
 import com.codingagent.workspace.ProjectFileService
@@ -47,8 +49,8 @@ class OperationalAgentTest {
         val proposal = (saveResult as MutationProposeResult.Proposed).proposal
         assertEquals(ChangeOperation.REPLACE, proposal.changeSet.changes.single().operation)
         assertEquals("fun main() = 1\n", files.read("src/Main.kt").content)
-        assertTrue(coordinator.approve(proposal.id, true, "test") is MutationApprovalResult.AwaitingSecond)
-        assertTrue(coordinator.approve(proposal.id, true, "test") is MutationApprovalResult.Applied)
+        assertTrue(coordinator.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id)) is MutationApprovalResult.AwaitingSecond)
+        assertTrue(coordinator.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id)) is MutationApprovalResult.Applied)
         assertEquals("fun main() = 2\n", files.read("src/Main.kt").content)
     }
 
@@ -87,8 +89,8 @@ class OperationalAgentTest {
         assertTrue(result.proposalId.isNotBlank())
         assertEquals("fun main() = 1\n", root.resolve("src/Main.kt").readText())
 
-        assertTrue(spine.approveProposal(result.proposalId, true, "owner") is MutationApprovalResult.AwaitingSecond)
-        assertTrue(spine.approveProposal(result.proposalId, true, "owner") is MutationApprovalResult.Applied)
+        assertTrue(spine.approveProposal(result.proposalId, OwnerApprovalToken.authenticated(result.proposalId)) is MutationApprovalResult.AwaitingSecond)
+        assertTrue(spine.approveProposal(result.proposalId, OwnerApprovalToken.authenticated(result.proposalId)) is MutationApprovalResult.Applied)
         assertEquals("fun main() = 2\n", root.resolve("src/Main.kt").readText())
     }
 
@@ -103,8 +105,8 @@ class OperationalAgentTest {
         assertTrue(result.proposalId.isNotBlank())
         assertTrue(!root.resolve("src/Helper.kt").exists())
 
-        assertTrue(spine.approveProposal(result.proposalId, true, "owner") is MutationApprovalResult.AwaitingSecond)
-        assertTrue(spine.approveProposal(result.proposalId, true, "owner") is MutationApprovalResult.Applied)
+        assertTrue(spine.approveProposal(result.proposalId, OwnerApprovalToken.authenticated(result.proposalId)) is MutationApprovalResult.AwaitingSecond)
+        assertTrue(spine.approveProposal(result.proposalId, OwnerApprovalToken.authenticated(result.proposalId)) is MutationApprovalResult.Applied)
         val written = root.resolve("src/Helper.kt").readText()
         assertTrue(written.contains("class Helper"))
         assertTrue(written.contains("fun run"))
@@ -141,6 +143,20 @@ class OperationalAgentTest {
         assertTrue(approval.proposal.id.isNotBlank())
         assertEquals("fun main() = 1\n", root.resolve("src/Main.kt").readText())
         assertEquals(1, spine.pendingProposals().size)
+    }
+
+    @Test
+    fun chatApprovalPhraseCannotGrantOwnerAuthority() {
+        val root = Files.createTempDirectory("agent-chat-approval").toFile()
+        root.resolve("Main.kt").writeText("fun main() = 1\n")
+        val spine = agent(root)
+        val staged = spine.execute("replace = 1 with = 2 in Main.kt")
+        assertTrue(staged is AgentRuntimeResult.NeedsApproval)
+
+        val result = ChatApproval.tryApprove(spine, "approve")
+        assertTrue(result is AgentRuntimeResult.NeedsApproval)
+        assertEquals(0, spine.pendingProposals().single().approvalCount)
+        assertEquals("fun main() = 1\n", root.resolve("Main.kt").readText())
     }
 
     @Test

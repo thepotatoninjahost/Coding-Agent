@@ -7,6 +7,7 @@ import com.codingagent.agent.AgentPlan
 import com.codingagent.agent.AgentStep
 import com.codingagent.agent.PlanStepStatus
 import com.codingagent.agent.PlanningLoop
+import com.codingagent.agent.ToolKind
 
 class PlanningLoopTest {
     private fun plan(vararg phases: String) = AgentPlan(
@@ -37,6 +38,20 @@ class PlanningLoopTest {
         assertEquals(PlanStepStatus.COMPLETE, loop.currentSteps().first().status)
         assertTrue(loop.currentSteps().any { it.phase == "diagnose" })
         assertEquals("diagnose", loop.next()!!.phase)
+    }
+
+    @Test fun toolAuthorizationFollowsRealEvidencePhases() {
+        val loop = PlanningLoop(plan("intake", "understand", "target", "change", "verify"))
+        loop.completePhase("intake", "parsed")
+        loop.completePhase("understand", "indexed")
+        assertEquals(null, loop.authorizeTool("search_project", ToolKind.SEARCH_PROJECT))
+        assertTrue(loop.authorizeTool("replace_text", ToolKind.APPLY_CHANGES)!!.contains("blocked"))
+        loop.recordSuccess("search_project", ToolKind.SEARCH_PROJECT, "target found")
+        assertEquals(null, loop.authorizeTool("replace_text", ToolKind.APPLY_CHANGES))
+        assertEquals(PlanStepStatus.COMPLETE, loop.currentSteps().first { it.phase == "understand" }.status)
+        assertEquals(PlanStepStatus.PENDING, loop.currentSteps().first { it.phase == "change" }.status)
+        loop.recordSuccess("replace_text", ToolKind.APPLY_CHANGES, "proposal staged")
+        assertEquals(null, loop.authorizeTool("verify", ToolKind.VERIFY))
     }
 
     @Test fun iterationLimitStopsRunawayPlanning() {

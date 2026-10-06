@@ -17,14 +17,13 @@ object PendingProposalStore {
         f.parentFile?.mkdirs()
         val arr = JSONArray()
         proposals.forEach { arr.put(toJson(it)) }
-        f.writeText(arr.toString())
+        AtomicFileWriter.write(f, arr.toString())
     }
 
     @Synchronized
     fun load(root: File): List<PendingChangeProposal> {
         val f = file(root)
-        if (!f.isFile) return emptyList()
-        val text = f.readText().trim()
+        val text = AtomicFileWriter.readTextIfExists(f)?.trim() ?: return emptyList()
         if (text.isEmpty()) return emptyList()
         return runCatching {
             val arr = JSONArray(text)
@@ -72,6 +71,8 @@ object PendingProposalStore {
             .put("request", p.request)
             .put("createdAt", p.createdAt)
             .put("expiresAt", p.expiresAt)
+            .put("repairAttempt", p.repairAttempt)
+            .put("repairRootRequest", p.repairRootRequest)
             .put("changeSetId", p.changeSet.id)
             .put("changeSetCreatedAt", p.changeSet.createdAt)
             .put("changeSetReason", p.changeSet.reason)
@@ -122,7 +123,9 @@ object PendingProposalStore {
             verification = VerificationReport(o.optBoolean("verificationPassed", true), issues),
             createdAt = o.getLong("createdAt"),
             expiresAt = o.getLong("expiresAt"),
-            approvals = approvals
+            approvals = approvals,
+            repairAttempt = o.optInt("repairAttempt", 0),
+            repairRootRequest = o.optString("repairRootRequest").ifBlank { o.getString("request") }
         )
     }
 }

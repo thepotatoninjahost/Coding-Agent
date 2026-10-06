@@ -35,6 +35,47 @@ class DeepResearchTest {
         assertEquals("fun main() = 42", result.code.single())
     }
 
+    @Test fun researchFetcherRejectsPrivateAndMetadataTargetsBeforeConnection() {
+        var opened = false
+        val factory: (String) -> HttpURLConnection = {
+            opened = true
+            fakeConnection(it)
+        }
+        assertEquals(null, ArticleExtractor.fetch("http://127.0.0.1:8080/admin", factory))
+        assertEquals(null, ArticleExtractor.fetch("http://localhost/admin", factory))
+        assertEquals(null, ArticleExtractor.fetch("http://169.254.169.254/latest/meta-data", factory))
+        assertTrue(!opened)
+    }
+
+    @Test fun researchFetcherHonorsCancellationBeforeReadingBody() {
+        var cancelled = false
+        var disconnected = false
+        val connection = object : HttpURLConnection(java.net.URL("https://example.com/mock")) {
+            override fun connect() = Unit
+            override fun disconnect() { disconnected = true }
+            override fun usingProxy() = false
+            override fun getResponseCode() = 200
+            override fun getInputStream() = "kotlin networking body".byteInputStream()
+        }
+        val result = ArticleExtractor.fetch(
+            "https://example.com/cancel",
+            connectionFactory = { connection },
+            isCancelled = { cancelled },
+            onConnection = { cancelled = true }
+        )
+        assertEquals(null, result)
+        assertTrue(disconnected)
+    }
+
+    @Test fun researchFetcherRejectsOversizedResponses() {
+        val oversized = "x".repeat(2 * 1024 * 1024 + 1)
+        val result = ArticleExtractor.fetch(
+            "https://example.com/oversized",
+            connectionFactory = { fakeConnectionWithBody(oversized) }
+        )
+        assertEquals(null, result)
+    }
+
     @Test fun deepResearchFetchesManyUniqueSourcesAndPersistsLearning() {
         val root = Files.createTempDirectory("deep-research").toFile()
         val search = object : WebResearchProvider {

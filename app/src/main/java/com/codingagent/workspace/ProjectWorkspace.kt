@@ -1,10 +1,6 @@
 package com.codingagent.workspace
 
 import java.io.File
-import java.nio.file.AtomicMoveNotSupportedException
-import java.nio.file.Files
-import java.nio.file.StandardCopyOption
-import java.nio.file.StandardOpenOption
 import java.security.MessageDigest
 import java.time.Instant
 import java.util.UUID
@@ -86,6 +82,9 @@ class ProjectWorkspace(private val root: File) {
         val written = mutableListOf<ChangeRecord>()
         try {
             changeSet.changes.forEach { record ->
+                // Register before the write: an atomic replacement can succeed while the
+                // subsequent integrity read fails, and that file must then be rolled back.
+                written += record
                 writeAtomically(requireSafePath(record.path), requireNotNull(record.after))
                 val onDisk = requireSafePath(record.path).readText(Charsets.UTF_8)
                 require(checksum(onDisk) == record.afterChecksum) {
@@ -95,7 +94,6 @@ class ProjectWorkspace(private val root: File) {
                 require(integrity.isEmpty()) {
                     "Integrity: applied file failed checks: ${integrity.joinToString { it.message }}"
                 }
-                written += record
             }
             persist(changeSet)
             return changeSet
@@ -202,7 +200,7 @@ class ProjectWorkspace(private val root: File) {
         else writeAtomically(file, record.before)
     }
 
-    private fun diskContent(path: String): String? = requireSafePath(path).takeIf { it.isFile }?.readText()
+    private fun diskContent(path: String): String? = AtomicFileWriter.readTextIfExists(requireSafePath(path))
 
     private fun requireSafePath(path: String): File {
         require(path.isNotBlank() && !path.startsWith('/') && !path.contains("..") && !path.contains('\\')) { "Unsafe project path" }
@@ -211,25 +209,7 @@ class ProjectWorkspace(private val root: File) {
         return file
     }
 
-    private fun writeAtomically(file: File, content: String) {
-        file.parentFile?.mkdirs()
-        val temporary = File(file.parentFile ?: root, ".${file.name}.${UUID.randomUUID()}.tmp")
-        Files.write(temporary.toPath(), content.toByteArray(Charsets.UTF_8), StandardOpenOption.CREATE_NEW)
-        try {
-            try {
-                Files.move(temporary.toPath(), file.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
-            } catch (_: AtomicMoveNotSupportedException) {
-                Files.move(temporary.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING)
-            }
-            val onDisk = Files.readAllBytes(file.toPath())
-            val expected = content.toByteArray(Charsets.UTF_8)
-            require(onDisk.contentEquals(expected)) {
-                "Integrity: atomic write did not persist expected bytes for ${file.name} (wrote ${expected.size}, disk ${onDisk.size})"
-            }
-        } finally {
-            temporary.delete()
-        }
-    }
+    private fun writeAtomically(file: File, content: String) = AtomicFileWriter.write(file, content)
 
     private fun checksum(content: String?): String = content?.let {
         MessageDigest.getInstance("SHA-256").digest(it.toByteArray(Charsets.UTF_8)).joinToString("") { byte -> "%02x".format(byte) }
@@ -241,8 +221,11 @@ class ProjectWorkspace(private val root: File) {
 
     private fun persist(changeSet: ChangeSet) {
         val file = transactionDir.resolve("${changeSet.createdAt}_${changeSet.id}.tsv")
-        val lines = listOf("${changeSet.id}\t${changeSet.createdAt}\t${sanitize(changeSet.reason)}") + changeSet.changes.map { listOf(it.path, it.operation, it.beforeChecksum, it.afterChecksum, sanitize(it.reason)).joinToString("\t") }
-        Files.write(file.toPath(), (lines.joinToString("\n") + "\n").toByteArray(Charsets.UTF_8))
+        val lines = listOf("${changeSet.id}\t${changeSet.createdAt}\t${sanitize(changeSet.reason)}") +
+            changeSet.changes.map {
+                listOf(it.path, it.operation, it.beforeChecksum, it.afterChecksum, sanitize(it.reason)).joinToString("\t")
+            }
+        writeAtomically(file, lines.joinToString("\n") + "\n")
     }
 
     fun verify(): VerificationReport {
@@ -340,7 +323,16 @@ class ProjectWorkspace(private val root: File) {
     }
 
     fun runChecks(commands: List<List<String>>, timeoutSeconds: Long = 90): VerificationReport {
-        val commandResults = commands.map { CommandRunner(root).run(it, timeoutSeconds) }
+        // Use the workspace-owned terminal runner so owner cancellation reaches
+        // verification commands instead of leaving an independent process behind.
+        // A cancellation is terminal for this verification batch: do not start the
+        // next check after the owner has explicitly stopped the current one.
+        val commandResults = mutableListOf<CommandResult>()
+        for (command in commands) {
+            val result = terminalSession.executeRaw(command, timeoutSeconds)
+            commandResults += result
+            if (result.exitCode == 130 && result.stderr.contains("cancelled", ignoreCase = true)) break
+        }
         val issues = commandResults.filter { it.timedOut || it.exitCode != 0 }.map { VerificationIssue("<command>", 0, "${it.command}: exit=${it.exitCode} ${it.stderr.take(400)}") }
         val staticReport = verify()
         return VerificationReport(staticReport.passed && issues.isEmpty(), staticReport.issues + issues, commandResults)

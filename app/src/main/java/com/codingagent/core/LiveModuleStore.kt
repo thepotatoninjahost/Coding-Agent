@@ -39,7 +39,12 @@ class LiveModuleStore(private val root: File) {
     init { moduleRoot.mkdirs() }
 
     fun install(source: String, kind: String, version: Int = 1, action: AgentAction, evaluation: VerificationReport): ModuleInstallResult {
-        val violations = AgentConstitution.check(action.copy(sandboxPassed = true, ownerVerified = true, approvalCount = maxOf(2, action.approvalCount), clearPermission = true))
+        if (!evaluation.passed) {
+            return ModuleInstallResult.Rejected(
+                "Module evaluation failed: ${evaluation.issues.joinToString { "${it.path}:${it.line}: ${it.message}" }}"
+            )
+        }
+        val violations = AgentConstitution.check(action.copy(sandboxPassed = evaluation.passed))
         if (violations.isNotEmpty()) return ModuleInstallResult.Rejected(violations.joinToString("; ") { "${it.rule}: ${it.message}" })
         val parsed = runCatching { parse(source) }.getOrElse { return ModuleInstallResult.Rejected("Invalid module: ${it.message}") }
         if (parsed.kind != kind) return ModuleInstallResult.Rejected("Module kind does not match requested kind")
@@ -92,26 +97,30 @@ class LiveModuleStore(private val root: File) {
     }
 
     fun parse(source: String): ParsedModule {
-        fun field(name: String, text: String): String {
-            val pattern = Regex("\"$name\"\\s*:\\s*\"([^\"]*)\"")
-            return pattern.find(text)?.groupValues?.get(1)
-                ?: error("Module field $name is missing")
+        val root = org.json.JSONObject(source)
+        val kind = root.optString("kind").trim().takeIf { it.isNotBlank() }
+            ?: error("Module field kind is missing")
+        if (!root.has("version")) error("Module version is missing")
+        val version = root.optInt("version", Int.MIN_VALUE)
+        if (version == Int.MIN_VALUE) error("Module version must be an integer")
+        val stepsArray = root.optJSONArray("steps")
+            ?: error("Module field steps is missing")
+        val steps = buildList {
+            for (index in 0 until stepsArray.length()) {
+                val item = stepsArray.optJSONObject(index)
+                    ?: error("Module step $index must be an object")
+                val op = item.optString("op").trim()
+                if (op.isBlank()) error("Module step $index is missing op")
+                add(
+                    ModuleStep(
+                        operation = op,
+                        value = item.optString("value", ""),
+                        argument = item.optString("argument", "")
+                    )
+                )
+            }
         }
-        val kind = field("kind", source)
-        val version = Regex("\"version\"\\s*:\\s*(\\d+)")
-            .find(source)?.groupValues?.get(1)?.toInt()
-            ?: error("Module version is missing")
-        val steps = Regex("""\{([^{}]*)\}""").findAll(source).mapNotNull { match ->
-            val item = match.value
-            if (!item.contains("\"op\"")) return@mapNotNull null
-            ModuleStep(field("op", item), fieldOrEmpty("value", item), fieldOrEmpty("argument", item))
-        }.toList()
         return ParsedModule(kind, version, steps)
-    }
-
-    private fun fieldOrEmpty(name: String, text: String): String {
-        val pattern = Regex("\"$name\"\\s*:\\s*\"([^\"]*)\"")
-        return pattern.find(text)?.groupValues?.get(1) ?: ""
     }
 
     private fun checksum(value: String): String = MessageDigest.getInstance("SHA-256").digest(value.toByteArray()).joinToString("") { "%02x".format(it) }

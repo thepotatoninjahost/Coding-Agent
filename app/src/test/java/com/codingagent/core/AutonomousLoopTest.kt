@@ -22,7 +22,7 @@ class AutonomousLoopTest {
         val names = AgentModelProtocol.tools().map { it.name }.toSet()
         val required = setOf(
             "list_files", "read_file", "search_project", "search_knowledge", "research_web",
-            "replace_text", "create_file", "approve_change", "reject_change", "run_command", "verify"
+            "replace_text", "create_file", "run_command", "verify"
         )
         assertTrue(names.containsAll(required))
     }
@@ -207,7 +207,7 @@ class AutonomousLoopTest {
         // Always returns the same run_command tool call — guarantees abort path is reached.
         val gateway = object : ModelGateway {
             override fun complete(request: ModelRequest): ModelResponse =
-                ModelResponse.ToolCall("run_command", """{"command":"echo hi"}""")
+                ModelResponse.ToolCall("run_command", """{"command":"printf agent"}""")
             override fun stream(request: ModelRequest, onDelta: (String) -> Unit): ModelResponse =
                 complete(request)
         }
@@ -222,7 +222,7 @@ class AutonomousLoopTest {
         // DEBUG intent (contains "bug"/"fix") → changeWork=true → writeNow stays false
         // while successfulGathers < gatherCap, keeping tools open for the repeat-abort path.
         val events = agent.run("Fix the bug by running the same diagnostic command repeatedly")
-        assertTrue(events.last() is AutonomousAgentEvent.Failed)
+        if (events.last() !is AutonomousAgentEvent.Failed) throw AssertionError(events.joinToString("\n"))
         assertTrue((events.last() as AutonomousAgentEvent.Failed).message.contains("repeated"))
     }
 }

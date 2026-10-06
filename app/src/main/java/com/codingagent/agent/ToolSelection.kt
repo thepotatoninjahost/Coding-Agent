@@ -43,32 +43,53 @@ data class ToolLoopSnapshot(
 class ToolSelector {
     fun select(intake: TaskIntake): ToolSelectionPlan {
         val tools = mutableListOf<ToolInvocation>()
-        fun add(kind: ToolKind, purpose: String) {
-            val dependency = tools.lastOrNull()?.id?.let(::listOf).orEmpty()
-            tools += ToolInvocation("${tools.size + 1}-${kind.name.lowercase()}", kind, purpose, dependency)
-        }
-        fun addAfter(kind: ToolKind, purpose: String, dependencyId: String) {
-            tools += ToolInvocation("${tools.size + 1}-${kind.name.lowercase()}", kind, purpose, listOf(dependencyId))
+        fun add(kind: ToolKind, purpose: String, dependencies: List<String> = emptyList()): String {
+            val id = (tools.size + 1).toString() + "-" + kind.name.lowercase()
+            tools += ToolInvocation(id, kind, purpose, dependencies)
+            return id
         }
 
-        add(ToolKind.INDEX_REPOSITORY, "Build the repository file, symbol, import, and checksum view")
-        val indexId = tools.last().id
-        if (intake.contract.targetPaths.isNotEmpty() || intake.contract.targetSymbols.isNotEmpty() || intake.intent in setOf(TaskIntent.INSPECT, TaskIntent.DEBUG, TaskIntent.REFACTOR)) {
-            add(ToolKind.SEARCH_PROJECT, "Locate target files, symbols, and relevant project evidence")
-        }
-        val searchId = tools.last().id
-        addAfter(ToolKind.SEARCH_KNOWLEDGE, "Retrieve relevant local coding references and lessons", indexId)
-        val knowledgeId = tools.last().id
-        if (intake.intent in setOf(TaskIntent.CHANGE, TaskIntent.CREATE, TaskIntent.REFACTOR, TaskIntent.DEBUG)) {
-            addAfter(ToolKind.SYNTHESIZE_CODE, "Produce a structured, testable change proposal", knowledgeId)
-            addAfter(ToolKind.APPLY_CHANGES, "Apply the selected proposal through the workspace mutation API", tools.last().id)
-        }
-        if (intake.verificationCommands.isNotEmpty()) {
-            addAfter(ToolKind.RUN_CHECKS, "Run the project checks selected during intake", tools.last().id)
-        }
-        addAfter(ToolKind.VERIFY, "Run static verification and evaluate acceptance evidence", tools.last().id)
-        addAfter(ToolKind.RECORD_LESSON, "Persist the selected tools, result, and reusable evidence", tools.last().id)
-        return ToolSelectionPlan(intake.originalRequest, tools, "Tools selected from intent, targets, constraints, and available project checks")
+        val indexId = add(ToolKind.INDEX_REPOSITORY, "Build the repository file, symbol, import, and checksum view")
+        val needsProjectEvidence =
+            intake.contract.targetPaths.isNotEmpty() ||
+                intake.contract.targetSymbols.isNotEmpty() ||
+                intake.intent in setOf(TaskIntent.INSPECT, TaskIntent.DEBUG, TaskIntent.REFACTOR, TaskIntent.CHANGE, TaskIntent.CREATE)
+        val searchId = if (needsProjectEvidence) {
+            add(ToolKind.SEARCH_PROJECT, "Locate target files, symbols, and relevant project evidence", listOf(indexId))
+        } else null
+        add(ToolKind.SEARCH_KNOWLEDGE, "Retrieve relevant local coding references and lessons", listOf(indexId))
+        val changeWork = intake.intent in setOf(TaskIntent.CHANGE, TaskIntent.CREATE, TaskIntent.REFACTOR, TaskIntent.DEBUG)
+        val synthesisId = if (changeWork) {
+            add(ToolKind.SYNTHESIZE_CODE, "Produce a structured, testable change proposal", listOf(indexId))
+        } else null
+        val applyId = if (changeWork) {
+            add(ToolKind.APPLY_CHANGES, "Stage the selected proposal through the workspace mutation API", listOf(synthesisId!!))
+        } else null
+        val checksId = if (intake.verificationCommands.isNotEmpty() || changeWork) {
+            add(ToolKind.RUN_CHECKS, "Run project diagnostics and selected verification checks", listOf(indexId))
+        } else null
+        val verifyId = add(
+            ToolKind.VERIFY,
+            "Run static verification and evaluate acceptance evidence",
+            listOf(checksId ?: if (changeWork) applyId!! else searchId ?: indexId)
+        )
+        add(ToolKind.RECORD_LESSON, "Persist the selected tools, result, and reusable evidence", listOf(verifyId))
+        return ToolSelectionPlan(
+            intake.originalRequest,
+            tools,
+            "Tools selected from intent, targets, constraints, and available project checks"
+        )
+    }
+}
+
+object ToolKindMapper {
+    fun kindFor(toolName: String): ToolKind? = when (toolName) {
+        "list_files", "read_file", "search_project" -> ToolKind.SEARCH_PROJECT
+        "search_knowledge", "research_web" -> ToolKind.SEARCH_KNOWLEDGE
+        "replace_text", "create_file" -> ToolKind.APPLY_CHANGES
+        "run_command" -> ToolKind.RUN_CHECKS
+        "verify" -> ToolKind.VERIFY
+        else -> null
     }
 }
 
@@ -83,6 +104,61 @@ class ToolSelectionLoop(plan: ToolSelectionPlan, private val maxIterations: Int 
     init { snapshot() }
 
     @Synchronized
+    fun completeKind(toolKind: ToolKind, evidence: String = "") {
+        val target = tools.firstOrNull { it.kind == toolKind } ?: return
+        val dependenciesComplete = target.dependsOn.all { dependency ->
+            tools.firstOrNull { it.id == dependency }?.status == ToolStepStatus.COMPLETE
+        }
+        if (dependenciesComplete && (target.status == ToolStepStatus.PENDING || target.status == ToolStepStatus.ACTIVE)) {
+            replace(target.copy(status = ToolStepStatus.COMPLETE, evidence = evidence))
+            activeId = null
+            reason = "completed " + target.id
+            snapshot()
+        }
+    }
+
+    fun authorize(toolName: String, toolKind: ToolKind): String? {
+        val target = tools.firstOrNull { it.kind == toolKind }
+            ?: return "Tool " + toolName + " is not part of the active execution plan"
+        val blockedDependency = target.dependsOn.firstOrNull { dependency ->
+            val dependencyTool = tools.firstOrNull { it.id == dependency }
+            val synthesisProvidedByApply = toolKind == ToolKind.APPLY_CHANGES &&
+                dependencyTool?.kind == ToolKind.SYNTHESIZE_CODE &&
+                dependencyTool.dependsOn.all { synthesisDependency ->
+                    tools.firstOrNull { it.id == synthesisDependency }?.status == ToolStepStatus.COMPLETE
+                }
+            dependencyTool?.status != ToolStepStatus.COMPLETE && !synthesisProvidedByApply
+        }
+        return blockedDependency?.let { dependency ->
+            "Tool " + toolName + " is blocked until planned tool " + dependency + " completes"
+        }
+    }
+
+    fun recordSuccess(toolName: String, toolKind: ToolKind, evidence: String = "") {
+        if (toolKind == ToolKind.APPLY_CHANGES) {
+            completeKind(ToolKind.SYNTHESIZE_CODE, "Concrete mutation supplied by " + toolName)
+        }
+        val target = tools.firstOrNull { it.kind == toolKind } ?: return
+        if (target.status == ToolStepStatus.ACTIVE || target.status == ToolStepStatus.PENDING) {
+            replace(target.copy(status = ToolStepStatus.COMPLETE, evidence = evidence))
+            activeId = null
+            reason = "completed " + target.id + " from " + toolName
+            snapshot()
+        }
+    }
+
+    fun recordFailure(toolName: String, toolKind: ToolKind, message: String) {
+        val target = tools.firstOrNull { it.kind == toolKind } ?: return
+        if (target.status == ToolStepStatus.ACTIVE || target.status == ToolStepStatus.PENDING) {
+            // A tool failure is recoverable: keep the gate pending so the model can
+            // change arguments or approach. The autonomous loop owns retry limits.
+            replace(target.copy(status = ToolStepStatus.PENDING, evidence = message))
+            activeId = null
+            reason = target.id + " failed via " + toolName + ": " + message + " (recoverable)"
+            snapshot()
+        }
+    }
+
     fun next(): ToolInvocation? {
         if (status != "running") return null
         if (iteration >= maxIterations) {

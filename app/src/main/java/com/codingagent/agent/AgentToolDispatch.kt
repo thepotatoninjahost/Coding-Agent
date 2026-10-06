@@ -7,8 +7,6 @@ import com.codingagent.research.DeepResearchProvider
 import com.codingagent.research.ResearchBriefBuilder
 import com.codingagent.research.ResearchMode
 import com.codingagent.research.ResearchModeDetector
-import com.codingagent.workspace.ChangeSet
-import com.codingagent.workspace.MutationApprovalResult
 import com.codingagent.workspace.MutationCoordinator
 import com.codingagent.workspace.MutationProposeResult
 import com.codingagent.workspace.ProjectFileService
@@ -26,16 +24,14 @@ class AgentToolDispatch(
     private val mutations: MutationCoordinator,
     private val terminal: TerminalSession,
     private val maxOutputCharacters: Int,
-    private val onResearchProgress: (String) -> Unit,
-    private val onApplied: (ChangeSet) -> Unit
+    private val onResearchProgress: (String) -> Unit
 ) {
-    // Wired in: was previously dead code. Every disk write that clears the full dual-owner
-    // approval gate below also gets staged and promoted through SelfEvolution, so successful
-    // changes are recorded for later sessions. This reuses the SAME approval already granted
-    // for the write (ownerVerified + approvalCount>=2 + sandboxPassed, all enforced above by
-    // MutationCoordinator via AgentConstitution) — it does not grant any new authority, and
-    // AgentConstitution.check runs again inside promoteSource as a second, independent gate.
-    private val evolution = SelfEvolution(workspace.projectRoot())
+    @Volatile
+    private var requestContext: String = ""
+
+    fun setRequestContext(request: String) {
+        requestContext = request.trim()
+    }
 
     fun execute(name: String, rawArguments: String): String {
         return try {
@@ -64,37 +60,12 @@ class AgentToolDispatch(
                     }
                     "passed=${report.passed}\n$issues".take(maxOutputCharacters)
                 }
-                "approve_change" -> approveChange(arguments)
-                "reject_change" -> {
-                    val id = arguments.getString("id")
-                    if (mutations.reject(id)) "REJECTED id=$id" else "ERROR: Change proposal does not exist"
-                }
+                "approve_change" -> ownerOnlyMutationControl("approve_change")
+                "reject_change" -> ownerOnlyMutationControl("reject_change")
                 else -> "ERROR: Unknown tool '$name'"
             }
         } catch (error: Exception) {
             "ERROR: ${error.message ?: error.javaClass.simpleName}"
-        }
-    }
-
-    // Best-effort: promotion failing must never affect the write that already succeeded above.
-    private fun promoteAppliedChanges(result: MutationApprovalResult.Applied) {
-        runCatching {
-            val proposal = result.proposal
-            val latestApproval = proposal.approvals.maxOfOrNull { it.approvedAt }
-            result.changeSet.changes.forEach { change ->
-                val file = workspace.projectRoot().resolve(change.path)
-                if (!file.isFile) return@forEach
-                val staged = evolution.stageSource(file, kind = change.operation.name)
-                val action = AgentAction(
-                    description = proposal.request,
-                    category = AgentActionCategory.CODE_CHANGE,
-                    ownerVerified = true,
-                    approvalCount = proposal.approvalCount,
-                    sandboxPassed = proposal.verification.passed,
-                    clearPermission = true
-                )
-                evolution.promoteSource(staged, change.operation.name, proposal.verification, action, latestApproval)
-            }
         }
     }
 
@@ -151,7 +122,7 @@ class AgentToolDispatch(
     private fun replaceText(arguments: JSONObject): String {
         val path = arguments.getString("path")
         return when (val result = mutations.propose(
-            request = "replace_text $path",
+            request = requestContext.ifBlank { "replace_text $path" },
             operations = listOf(
                 TaskOperation(
                     OperationKind.REPLACE,
@@ -165,7 +136,7 @@ class AgentToolDispatch(
             is MutationProposeResult.Proposed ->
                 "PROPOSAL_READY id=${result.proposal.id} path=$path " +
                     "changes=${result.proposal.changeSet.changes.size} approval_required=2 " +
-                    "Confirm twice in Review or chat to APPLY this change to disk."
+                    "Confirm twice in the authenticated Review flow to APPLY this change to disk."
             is MutationProposeResult.Rejected ->
                 "ERROR: replace_text proposal rejected — ${result.reason}"
         }
@@ -174,7 +145,7 @@ class AgentToolDispatch(
     private fun createFile(arguments: JSONObject): String {
         val path = arguments.getString("path")
         return when (val result = mutations.propose(
-            request = "create_file $path",
+            request = requestContext.ifBlank { "create_file $path" },
             operations = listOf(
                 TaskOperation(
                     OperationKind.CREATE_FILE,
@@ -187,27 +158,14 @@ class AgentToolDispatch(
             is MutationProposeResult.Proposed ->
                 "PROPOSAL_READY id=${result.proposal.id} path=$path " +
                     "changes=${result.proposal.changeSet.changes.size} approval_required=2 " +
-                    "Confirm twice in Review or chat to APPLY this file to disk."
+                    "Confirm twice in the authenticated Review flow to APPLY this file to disk."
             is MutationProposeResult.Rejected ->
                 "ERROR: create_file proposal rejected — ${result.reason}"
         }
     }
 
-    private fun approveChange(arguments: JSONObject): String {
-        val result = mutations.approve(
-            id = arguments.getString("id"),
-            ownerVerified = arguments.optBoolean("ownerVerified", false),
-            ownerLabel = arguments.optString("ownerLabel", "owner")
-        )
-        return when (result) {
-            is MutationApprovalResult.AwaitingSecond ->
-                "AWAITING_SECOND_APPROVAL id=${result.proposal.id} approvals=${result.proposal.approvalCount}"
-            is MutationApprovalResult.Applied -> {
-                onApplied(result.changeSet)
-                promoteAppliedChanges(result)
-                "APPLIED id=${result.proposal.id} changes=${result.changeSet.changes.size}"
-            }
-            is MutationApprovalResult.Rejected -> "ERROR: ${result.reason}"
-        }
-    }
+    private fun ownerOnlyMutationControl(name: String): String =
+        "ERROR: $name is owner-only. Use Review or chat for owner-controlled proposal decisions."
+
+
 }

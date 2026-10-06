@@ -14,9 +14,11 @@ import com.codingagent.model.ModelSettings
 import com.codingagent.model.RemoteHttpGateway
 import com.codingagent.workspace.ChangeDiff
 import com.codingagent.workspace.MutationApprovalResult
+import com.codingagent.workspace.OwnerApprovalToken
 import com.codingagent.workspace.MutationCoordinator
 import com.codingagent.workspace.MutationProposeResult
 import com.codingagent.workspace.ProjectWorkspace
+import com.codingagent.workspace.PendingProposalStore
 
 /**
  * Path A acceptance: offline explicit create/replace → dual approve → disk changed.
@@ -50,11 +52,11 @@ class AcceptancePathTest {
         assertEquals("fun a() = 1\n", root.resolve("src/A.kt").readText())
         assertEquals("fun b() = 1\n", root.resolve("src/B.kt").readText())
 
-        val first = coordinator.approve(proposal.id, ownerVerified = true, ownerLabel = "owner")
+        val first = coordinator.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id))
         assertTrue(first is MutationApprovalResult.AwaitingSecond)
         assertEquals("fun a() = 1\n", root.resolve("src/A.kt").readText())
 
-        val second = coordinator.approve(proposal.id, ownerVerified = true, ownerLabel = "owner")
+        val second = coordinator.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id))
         assertTrue(second is MutationApprovalResult.Applied)
         assertEquals("fun a() = 2\n", root.resolve("src/A.kt").readText())
         assertEquals("fun b() = 2\n", root.resolve("src/B.kt").readText())
@@ -80,6 +82,145 @@ class AcceptancePathTest {
     }
 
     @Test
+    fun persistedFirstApprovalSurvivesCoordinatorRestartAndSecondConfirmationIsNumberedTwo() {
+        val root = Files.createTempDirectory("accept-approval-restart").toFile()
+        root.resolve("Main.kt").writeText("fun main() = 1\n")
+
+        val firstCoordinator = MutationCoordinator(ProjectWorkspace(root))
+        val proposed = firstCoordinator.propose(
+            "persist approval",
+            listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 2\n"))
+        ) as MutationProposeResult.Proposed
+
+        val first = firstCoordinator.approve(proposed.proposal.id, OwnerApprovalToken.authenticated(proposed.proposal.id))
+        assertTrue(first is MutationApprovalResult.AwaitingSecond)
+        assertEquals(1, (first as MutationApprovalResult.AwaitingSecond).approval.confirmationNumber)
+
+        val restartedCoordinator = MutationCoordinator(ProjectWorkspace(root))
+        val restored = restartedCoordinator.pending().single()
+        assertEquals(1, restored.approvalCount)
+        assertEquals(1, restored.approvals.single().confirmationNumber)
+
+        val second = restartedCoordinator.approve(restored.id, OwnerApprovalToken.authenticated(restored.id))
+        assertTrue(second is MutationApprovalResult.Applied)
+        val applied = second as MutationApprovalResult.Applied
+        assertEquals(2, applied.proposal.approvalCount)
+        assertEquals(listOf(1, 2), applied.proposal.approvals.map { it.confirmationNumber })
+        assertEquals("fun main() = 2\n", root.resolve("Main.kt").readText())
+    }
+
+    @Test
+    fun pendingProposalStoreReplacesStateAtomicallyAndLeavesNoTemporaryFiles() {
+        val root = Files.createTempDirectory("accept-pending-store").toFile()
+        root.resolve("Main.kt").writeText("fun main() = 1\n")
+        val coordinator = MutationCoordinator(ProjectWorkspace(root))
+        val proposed = coordinator.propose(
+            "persist pending state",
+            listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 2\n"))
+        ) as MutationProposeResult.Proposed
+
+        PendingProposalStore.save(root, listOf(proposed.proposal))
+        assertEquals(1, PendingProposalStore.load(root).size)
+
+        PendingProposalStore.save(root, emptyList())
+        assertEquals(emptyList<Any>(), PendingProposalStore.load(root))
+        assertEquals("[]", PendingProposalStore.file(root).readText())
+        assertTrue(
+            root.resolve(".coding-agent").listFiles()
+                .orEmpty()
+                .none { it.name.startsWith("pending-proposals-") && it.name.endsWith(".tmp") }
+        )
+    }
+
+    @Test
+    fun approvalTokenMustBeBoundToThePendingProposal() {
+        val root = Files.createTempDirectory("accept-approval-identity").toFile()
+        root.resolve("Main.kt").writeText("fun main() = 1\n")
+        val coordinator = MutationCoordinator(ProjectWorkspace(root))
+        val proposal = (coordinator.propose(
+            "identity required",
+            listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 2\n"))
+        ) as MutationProposeResult.Proposed).proposal
+
+        val result = coordinator.approve(
+            proposal.id,
+            OwnerApprovalToken.authenticated("different-proposal")
+        )
+        assertTrue(result is MutationApprovalResult.Rejected)
+        assertEquals(0, coordinator.pending().single().approvalCount)
+        assertEquals("fun main() = 1\n", root.resolve("Main.kt").readText())
+    }
+
+    @Test
+    fun approvalTokenCannotBeReplayed() {
+        val root = Files.createTempDirectory("accept-approval-replay").toFile()
+        root.resolve("Main.kt").writeText("fun main() = 1\n")
+        val coordinator = MutationCoordinator(ProjectWorkspace(root))
+        val proposal = (coordinator.propose(
+            "replay protected",
+            listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 2\n"))
+        ) as MutationProposeResult.Proposed).proposal
+        val token = OwnerApprovalToken.authenticated(proposal.id)
+
+        assertTrue(coordinator.approve(proposal.id, token) is MutationApprovalResult.AwaitingSecond)
+        assertTrue(coordinator.approve(proposal.id, token) is MutationApprovalResult.Rejected)
+        assertEquals(1, coordinator.pending().single().approvalCount)
+    }
+
+    @Test
+    fun expiredProposalCannotBeApprovedOrWritten() {
+        val root = Files.createTempDirectory("accept-approval-expiry").toFile()
+        root.resolve("Main.kt").writeText("fun main() = 1\n")
+        var now = 1_000L
+        val coordinator = MutationCoordinator(
+            ProjectWorkspace(root),
+            now = { now }
+        )
+        val proposal = (coordinator.propose(
+            "expired edit",
+            listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 2\n"))
+        ) as MutationProposeResult.Proposed).proposal
+
+        now = proposal.expiresAt + 1L
+        val result = coordinator.approve(
+            proposal.id,
+            OwnerApprovalToken.authenticated(proposal.id, now = now)
+        )
+
+        assertTrue(result is MutationApprovalResult.Rejected)
+        assertEquals(0, coordinator.pending().size)
+        assertEquals("fun main() = 1\n", root.resolve("Main.kt").readText())
+    }
+
+    @Test
+    fun approvalCannotSurviveExternalChangeBeforeExecution() {
+        val root = Files.createTempDirectory("accept-approval-toctou").toFile()
+        root.resolve("Main.kt").writeText("fun main() = 1\n")
+        val coordinator = MutationCoordinator(ProjectWorkspace(root))
+        val proposal = (coordinator.propose(
+            "protected edit",
+            listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 2\n"))
+        ) as MutationProposeResult.Proposed).proposal
+
+        assertTrue(
+            coordinator.approve(
+                proposal.id,
+                OwnerApprovalToken.authenticated(proposal.id)
+            ) is MutationApprovalResult.AwaitingSecond
+        )
+
+        root.resolve("Main.kt").writeText("fun main() = 99\n")
+        val result = coordinator.approve(
+            proposal.id,
+            OwnerApprovalToken.authenticated(proposal.id)
+        )
+
+        assertTrue(result is MutationApprovalResult.Rejected)
+        assertEquals("fun main() = 99\n", root.resolve("Main.kt").readText())
+        assertEquals(1, coordinator.pending().single().approvalCount)
+    }
+
+    @Test
     fun createFileRequiresDualApprovalBeforeDiskWrite() {
         val root = Files.createTempDirectory("accept-create").toFile()
         root.resolve("src").mkdirs()
@@ -94,9 +235,9 @@ class AcceptancePathTest {
         val proposal = (proposeResult as MutationProposeResult.Proposed).proposal
 
         assertFalse(root.resolve("src/New.kt").exists())
-        coordinator.approve(proposal.id, true, "owner")
+        coordinator.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id))
         assertFalse(root.resolve("src/New.kt").exists())
-        val applied = coordinator.approve(proposal.id, true, "owner")
+        val applied = coordinator.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id))
         assertTrue(applied is MutationApprovalResult.Applied)
         assertEquals("class New\n", root.resolve("src/New.kt").readText())
     }
@@ -114,6 +255,101 @@ class AcceptancePathTest {
             listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 1\n"))
         )
         assertTrue("Propose should be rejected when content is identical", result is MutationProposeResult.Rejected)
+    }
+
+    @Test
+    fun failedApprovedChangeStagesRepairAfterRollback() {
+        val root = Files.createTempDirectory("accept-repair").toFile()
+        root.resolve("gradlew").writeText("#!/bin/sh\nexit 1\n")
+        root.resolve("gradlew").setExecutable(true)
+        root.resolve("Main.kt").writeText("fun main() = 1\n")
+        val workspace = ProjectWorkspace(root)
+        val coordinator = MutationCoordinator(workspace)
+        coordinator.setRepairProvider { _, _ ->
+            workspace.preview(
+                listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 2\n")),
+                "repair"
+            )
+        }
+        val proposed = coordinator.propose(
+            "run the tests",
+            listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = broken\n"))
+        )
+        assertTrue(proposed is MutationProposeResult.Proposed)
+        val original = (proposed as MutationProposeResult.Proposed).proposal
+        assertTrue(coordinator.approve(original.id, OwnerApprovalToken.authenticated(original.id)) is MutationApprovalResult.AwaitingSecond)
+        val result = coordinator.approve(original.id, OwnerApprovalToken.authenticated(original.id))
+        assertTrue(result is MutationApprovalResult.RepairRequired)
+        val repair = (result as MutationApprovalResult.RepairRequired).proposal
+        assertEquals("fun main() = 1\n", root.resolve("Main.kt").readText())
+        assertEquals("Self-repair attempt 1 after failed change: run the tests", repair.request)
+        assertEquals("fun main() = 1\n", repair.changeSet.changes.single().before)
+        assertEquals("fun main() = 2\n", repair.changeSet.changes.single().after)
+        assertEquals(1, coordinator.pending().size)
+    }
+    @Test
+    fun failedRepairStagesNextAttemptAndPreservesRootRequest() {
+        val root = Files.createTempDirectory("accept-repair-retry").toFile()
+        root.resolve("gradlew").writeText("#!/bin/sh\nexit 1\n")
+        root.resolve("gradlew").setExecutable(true)
+        root.resolve("Main.kt").writeText("fun main() = 1\n")
+        val workspace = ProjectWorkspace(root)
+        val coordinator = MutationCoordinator(workspace)
+        coordinator.setRepairProvider { _, attempt ->
+            workspace.preview(
+                listOf(
+                    TaskOperation(
+                        OperationKind.REPLACE,
+                        "Main.kt",
+                        "fun main() = 1\n",
+                        "fun main() = ${attempt + 1}\n"
+                    )
+                ),
+                "repair attempt $attempt"
+            )
+        }
+
+        val proposed = coordinator.propose(
+            "run the tests",
+            listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = broken\n"))
+        ) as MutationProposeResult.Proposed
+        var proposal = proposed.proposal
+
+        coordinator.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id))
+        var result = coordinator.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id))
+        assertTrue("Unexpected first repair result: $result", result is MutationApprovalResult.RepairRequired)
+        proposal = (result as MutationApprovalResult.RepairRequired).proposal
+        assertEquals(1, proposal.repairAttempt)
+        assertEquals("Self-repair attempt 1 after failed change: run the tests", proposal.request)
+
+        coordinator.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id))
+        result = coordinator.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id))
+        assertTrue(result is MutationApprovalResult.RepairRequired)
+        proposal = (result as MutationApprovalResult.RepairRequired).proposal
+        assertEquals(2, proposal.repairAttempt)
+        assertEquals("Self-repair attempt 2 after failed change: run the tests", proposal.request)
+        assertEquals("run the tests", proposal.repairRootRequest)
+        assertEquals("fun main() = 1\n", root.resolve("Main.kt").readText())
+    }
+
+    @Test
+    fun mutationProposalRetainsVerificationIntent() {
+        val root = Files.createTempDirectory("accept-request-context").toFile()
+        root.resolve("gradlew").writeText("#!/bin/sh\nexit 1\n")
+        root.resolve("gradlew").setExecutable(true)
+        root.resolve("Main.kt").writeText("fun main() = 1\n")
+        val workspace = ProjectWorkspace(root)
+        val coordinator = MutationCoordinator(workspace)
+        val result = coordinator.propose(
+            "run ./gradlew test after changing Main.kt",
+            listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 2\n")),
+            "model mutation"
+        )
+        assertTrue(result is MutationProposeResult.Proposed)
+        assertEquals(
+            "run ./gradlew test after changing Main.kt",
+            (result as MutationProposeResult.Proposed).proposal.request
+        )
     }
 
     @Test
@@ -148,7 +384,7 @@ class AcceptancePathTest {
         assertEquals(
             listOf(
                 "list_files", "read_file", "search_project", "search_knowledge", "research_web",
-                "replace_text", "create_file", "approve_change", "reject_change", "run_command", "verify"
+                "replace_text", "create_file", "run_command", "verify"
             ),
             names
         )

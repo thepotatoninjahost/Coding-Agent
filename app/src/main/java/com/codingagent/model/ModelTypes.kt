@@ -6,6 +6,7 @@ package com.codingagent.model
 interface ModelGateway {
     fun complete(request: ModelRequest): ModelResponse
     fun stream(request: ModelRequest, onDelta: (String) -> Unit): ModelResponse = complete(request)
+    fun cancel() {}
 }
 
 data class ModelRequest(

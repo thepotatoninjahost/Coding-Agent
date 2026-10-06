@@ -41,6 +41,11 @@ class ChatWorkspace(
 ) {
     fun history(limit: Int = 100): List<ChatMessage> = store.recentChatMessages(limit).asReversed()
 
+    fun cancel() {
+        runtimeProvider()?.cancel("Stopped by owner")
+    }
+
+
     fun send(request: String): ChatTurn {
         val trimmed = request.trim()
         require(trimmed.isNotEmpty()) { "A message is required" }
@@ -55,13 +60,23 @@ class ChatWorkspace(
             return persist(result = approval)
         }
         val lastAgent = store.recentChatMessages(20).firstOrNull { it.role == ChatRole.AGENT }?.content
-        val resumed = agent?.let { PendingWorkResume.tryResume(it, trimmed, lastAgent) }
+        val openJob = OpenJobStore.loadBound()
+        val resumeOpenJob = agent != null &&
+            isContinuationCommand(trimmed) &&
+            agent.pendingProposals().isEmpty() &&
+            openJob?.status == "open"
+        val resumed = if (resumeOpenJob) {
+            null
+        } else {
+            agent?.let { PendingWorkResume.tryResume(it, trimmed, lastAgent) }
+        }
         if (resumed != null) {
             progressListener?.onProgress("RESUME", "Local pending work / rate-limit gate")
             return persist(result = resumed)
         }
         progressListener?.onProgress("PLANNING", "Starting request")
-        val packaged = packageWithMemory(trimmed)
+        val executionRequest = if (resumeOpenJob) openJob!!.goal else trimmed
+        val packaged = packageWithMemory(executionRequest)
         val workLog = mutableListOf<String>()
         val result = if (agent == null) {
             null
@@ -156,6 +171,12 @@ class ChatWorkspace(
         store.recordChatMessage(response)
         return ChatTurn(response, result)
     }
+
+    private fun isContinuationCommand(text: String): Boolean =
+        text.trim().lowercase() in setOf(
+            "continue", "retry", "again", "resume",
+            "try again", "try it again", "keep going"
+        )
 
     private fun looksLikeNewGoal(text: String): Boolean {
         val t = text.lowercase()

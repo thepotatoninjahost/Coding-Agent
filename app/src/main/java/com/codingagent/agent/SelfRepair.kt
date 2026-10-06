@@ -14,14 +14,11 @@ import com.codingagent.workspace.VerificationReport
  * ONE JOB: Detect and stage self-repair requests — mutations to the agent's own source tree.
  *
  * "fix yourself" / "modify yourself" is not a toy file drop. When the imported project
- * already contains agent sources, this stages a dual-approval replace on the first
- * unstamped priority file. When every priority file is already stamped, this returns
- * null so the model loop can do the real edit. An empty project only bootstraps
+ * already contains agent sources, this returns null so the normal model/tool repair
+ * path can diagnose and edit the requested source. An empty project only bootstraps
  * src/SelfRepair.kt so dual-approval still has a concrete first change.
  */
 object SelfRepair {
-
-    const val CONTRACT_STAMP = "SELF_REPAIR_CONTRACT"
 
     val PRIORITY_FILES = listOf(
         "ChatWorkspace.kt",
@@ -41,32 +38,6 @@ object SelfRepair {
     fun isRequest(text: String): Boolean = PHRASES.containsMatchIn(text)
 
     /**
-     * Choose the best repair operation for the current workspace state.
-     * Priority: well-known agent files that lack the contract stamp.
-     */
-    fun chooseOperation(
-        workspace: ProjectWorkspace,
-        files: ProjectFileService,
-        verification: VerificationReport
-    ): TaskOperation? {
-        val indexed = workspace.summary().files
-        for (candidate in PRIORITY_FILES) {
-            val found = indexed.firstOrNull { it.path == candidate || it.path.endsWith("/$candidate") }
-                ?: continue
-            val content = runCatching { files.read(found.path).content }.getOrNull() ?: continue
-            if (content.contains(CONTRACT_STAMP)) continue
-            val stamped = content.trimEnd() + "\n// $CONTRACT_STAMP: agent-reviewed\n"
-            return TaskOperation(
-                kind = OperationKind.REPLACE,
-                path = found.path,
-                oldText = content,
-                newText = stamped
-            )
-        }
-        return null
-    }
-
-    /**
      * Stage a self-repair proposal for dual-owner approval, or return null so the
      * autonomous loop can edit the agent's own sources with tools.
      */
@@ -78,19 +49,6 @@ object SelfRepair {
         files: ProjectFileService,
         mutations: MutationCoordinator
     ): AgentTask? {
-        val targeted = chooseOperation(workspace, files, workspace.verify())
-        if (targeted != null) {
-            return propose(
-                taskId = taskId,
-                request = request,
-                plan = plan,
-                mutations = mutations,
-                operations = listOf(targeted),
-                reason = "Self-repair: stamp ${targeted.path}",
-                summary = "Self-repair proposal staged for ${targeted.path}. Confirm twice to apply."
-            )
-        }
-
         val hasAgentSources = workspace.summary().files.any { indexed ->
             PRIORITY_FILES.any { name -> indexed.path == name || indexed.path.endsWith("/$name") }
         }
@@ -158,7 +116,6 @@ object SelfRepair {
         appendLine(" * ONE JOB: Detect self-repair requests against the agent source tree.")
         appendLine(" */")
         appendLine("object SelfRepair {")
-        appendLine("    const val CONTRACT_STAMP = \"$CONTRACT_STAMP\"")
         appendLine()
         appendLine("    private val PHRASES = Regex(")
         appendLine("        \"\\b(fix yourself|modify yourself|self[-\\s]?repair|repair yourself|update yourself|improve yourself)\\b\",")
@@ -167,6 +124,5 @@ object SelfRepair {
         appendLine()
         appendLine("    fun isRequest(text: String): Boolean = PHRASES.containsMatchIn(text)")
         appendLine("}")
-        appendLine("// $CONTRACT_STAMP: agent-reviewed")
     }
 }

@@ -40,6 +40,30 @@ class ModelSettingsTest {
     }
 
     @Test
+    fun remoteHttpRequiresHttpsAndDoesNotTrustHostnamePrefixes() {
+        val insecure = ModelSettings(
+            baseUrl = "http://example.com/v1",
+            apiKey = "key",
+            modelName = "model"
+        )
+        assertTrue(insecure.validationErrors().any { it.contains("HTTPS") })
+
+        val lookalike = ModelSettings(
+            baseUrl = "http://localhost.evil.example/v1",
+            apiKey = "",
+            modelName = "model"
+        )
+        assertTrue(lookalike.validationErrors().any { it.contains("HTTPS") || it.contains("API key") })
+
+        val loopback = ModelSettings(
+            baseUrl = "http://127.0.0.1:8080/v1",
+            apiKey = "",
+            modelName = "model"
+        )
+        assertTrue(loopback.validationErrors().isEmpty())
+    }
+
+    @Test
     fun jsonRoundTripPreservesFieldsWithoutLoggingKeyInSummary() {
         val original = ModelSettings(
             backend = ModelBackend.REMOTE,
