@@ -9,9 +9,7 @@ import androidx.fragment.app.FragmentActivity
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
 import androidx.core.content.ContextCompat
-import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -109,6 +107,32 @@ import com.codingagent.model.ProbeResult
  * ONE JOB: Host activity and system entry for the coding workbench.
  */
 class MainActivity : FragmentActivity() {
+    companion object {
+        private const val FOLDER_PICKER_REQUEST_CODE = 1001
+    }
+
+    private var folderPickerCallback: ((Uri?) -> Unit)? = null
+
+    fun launchFolderPicker(onResult: (Uri?) -> Unit) {
+        folderPickerCallback = onResult
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+            addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+            addFlags(Intent.FLAG_GRANT_PREFIX_URI_PERMISSION)
+        }
+        startActivityForResult(intent, FOLDER_PICKER_REQUEST_CODE)
+    }
+
+    @Deprecated("Use Activity Result APIs for new integrations; retained here with a bounded legacy request code for this FragmentActivity.")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != FOLDER_PICKER_REQUEST_CODE) return
+        val callback = folderPickerCallback
+        folderPickerCallback = null
+        callback?.invoke(if (resultCode == RESULT_OK) data?.data else null)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent { CodingAgentApp(filesDir) }
@@ -274,16 +298,14 @@ private fun CodingAgentApp(privateDir: File) {
         )
     }
 
-    val folderPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
-        if (uri == null) return@rememberLauncherForActivityResult
+    fun handleFolderPickerResult(uri: Uri?) {
+        if (uri == null) return
         runCatching { context.contentResolver.takePersistableUriPermission(uri, ImportFlags) }
             .onFailure { status = AgentStatus.STOPPED; detail = "Folder permission failed" }
         scope.launch(Dispatchers.IO) {
             runCatching { importProject(context, privateDir, uri) }
                 .onSuccess { imported ->
                     withContext(Dispatchers.Main) {
-                        // Inline mount: local fun mountProject is declared later in this composable
-                        // and is not in scope at folderPicker construction time.
                         val mounted = ProjectWorkspace(imported)
                         workspace = mounted
                         fileList = mounted.summary().files.map { it.path }.sorted()
@@ -304,6 +326,8 @@ private fun CodingAgentApp(privateDir: File) {
                 }
         }
     }
+
+
 
 
     fun onChangeApplied(result: MutationApprovalResult.Applied) {
@@ -625,7 +649,7 @@ private fun CodingAgentApp(privateDir: File) {
             containerColor = Canvas,
             topBar = {
                 CompactStatusBar(status, detail, workspace != null, modelStatus, modelProgress,
-                    onImport = { folderPicker.launch(null) },
+                    onImport = { (context as? MainActivity)?.launchFolderPicker(::handleFolderPickerResult) },
                     onNewProject = { startNewProject(null) },
                     onModelImport = {
                         draftApiKey = modelSettings.apiKey
