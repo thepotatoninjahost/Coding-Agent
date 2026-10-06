@@ -44,8 +44,9 @@ class AgentContextContinuityTest {
         )
 
         val prompt = captured.firstOrNull()?.user.orEmpty()
-        assertTrue(prompt.contains("Build me a compiler", ignoreCase = true))
-        assertTrue(prompt.contains("Kotlin and Python", ignoreCase = true))
-        assertTrue(prompt.contains("Do not create sample files", ignoreCase = true))
+        assertTrue("No model prompt captured: $captured".let { it }, captured.isNotEmpty())
+        assertTrue("Missing active job in prompt: $prompt", prompt.contains("Build me a compiler", ignoreCase = true))
+        assertTrue("Missing follow-up in prompt: $prompt", prompt.contains("Kotlin and Python", ignoreCase = true))
+        assertTrue("Missing owner constraint in prompt: $prompt", prompt.contains("Do not create sample files", ignoreCase = true))
     }
 }
