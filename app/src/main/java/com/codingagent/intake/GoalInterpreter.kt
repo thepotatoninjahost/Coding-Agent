@@ -84,11 +84,11 @@ class GoalInterpreter(private val root: File) {
      * constraints before the model sees it.
      */
     private fun effectiveRequest(request: String, current: String): String {
-        val jobGoal = Regex("(?m)^- goal:\\s*(.+)$")
+        val jobGoal = Regex("- goal:\\s*(.+?)(?=\\s+- staged paths:|\\s+Conversation so far:|\\s+Current request:|$)")
             .find(request)?.groupValues?.getOrNull(1)?.trim()
         if (jobGoal.isNullOrBlank()) return current
 
-        val ownerTurns = Regex("(?m)^OWNER:\\s*(.+)$")
+        val ownerTurns = Regex("OWNER:\\s*(.+?)(?=\\s+AGENT:|\\s+OWNER:|\\s+Current request:|$)")
             .findAll(request)
             .map { it.groupValues[1].trim() }
             .filter { it.isNotBlank() }
