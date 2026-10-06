@@ -44,8 +44,6 @@ object UserMemoryExtractor {
         "i don't want you to ",
         "i do not want you to ",
         "please always ",
-        "always ",
-        "never ",
         "do not ever ",
         "don't ever "
     )
