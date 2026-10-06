@@ -250,6 +250,7 @@ private fun CodingAgentApp(privateDir: File) {
     val chat = remember(agent, workspace, modelLoadError) {
         ChatWorkspace(
             store = store,
+            memoryStore = store.userMemoryStore(),
             runtimeProvider = { agent },
             unavailableMessageProvider = {
                 when {
