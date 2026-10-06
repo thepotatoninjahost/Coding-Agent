@@ -118,6 +118,12 @@ class GoalInterpreter(private val root: File) {
         if (matches(request, "keep tests|preserve tests|backward compatible|no breaking")) add("preserve existing behavior and tests")
         if (matches(request, "minimal|smallest change")) add("prefer the smallest change")
         if (matches(request, "offline|no internet|local only")) add("do not use network resources")
+        Regex("(?i)(?:^|[.!?\\n])\\s*((?:do not|don't|never)\\b[^.!?\\n]{2,200})")
+            .findAll(request)
+            .map { it.groupValues[1].trim() }
+            .filter { it.isNotBlank() }
+            .distinct()
+            .forEach { add("owner constraint: $it") }
     }
 
     private fun acceptance(request: String, intent: TaskIntent): List<String> = buildList {
