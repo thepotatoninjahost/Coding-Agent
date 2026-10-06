@@ -1,6 +1,7 @@
 package com.codingagent.agent
 
 import java.util.Locale
+import java.util.UUID
 
 /**
  * ONE JOB: Define durable user memory as user-scoped facts/preferences separate from system instructions.
