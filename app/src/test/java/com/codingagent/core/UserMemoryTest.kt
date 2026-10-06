@@ -27,7 +27,7 @@ class UserMemoryTest {
             UserMemoryExtractor.extract("Never create sample files.")
         )
         assertEquals(
-            "Never create sample files",
+            "never create sample files",
             UserMemoryExtractor.extract("Remember never create sample files.")
         )
         assertEquals(
