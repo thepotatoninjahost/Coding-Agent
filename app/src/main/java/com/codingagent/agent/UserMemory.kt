@@ -105,3 +105,102 @@ object UserMemoryExtractor {
         }
     }
 }
+
+
+/**
+ * ONE JOB: Apply deterministic memory consolidation and relevance rules without Android dependencies.
+ */
+class UserMemoryIndex(
+    private val maxEntries: Int = 64
+) {
+    fun remember(
+        existing: List<UserMemory>,
+        text: String,
+        kind: UserMemory.Kind,
+        importance: Int,
+        now: Long
+    ): List<UserMemory> {
+        val clean = text.replace(Regex("\\s+"), " ").trim().trimEnd('.', '!', '?')
+        if (clean.length < 3 || clean.length > 500) return existing
+        val match = existing.maxByOrNull { similarity(it.text, clean) }
+        val next = if (match != null && similarity(match.text, clean) >= 0.55) {
+            existing.map {
+                if (it.id == match.id) {
+                    it.copy(
+                        text = clean,
+                        kind = kind,
+                        importance = maxOf(it.importance, importance.coerceIn(1, 99)),
+                        updatedAt = now
+                    )
+                } else {
+                    it
+                }
+            }
+        } else {
+            existing + UserMemory(
+                id = UUID.randomUUID().toString(),
+                text = clean,
+                kind = kind,
+                importance = importance.coerceIn(1, 99),
+                createdAt = now,
+                updatedAt = now
+            )
+        }
+        return compact(next)
+    }
+
+    fun relevant(existing: List<UserMemory>, query: String, limit: Int): List<UserMemory> {
+        if (limit <= 0) return emptyList()
+        val queryTokens = tokens(query)
+        if (queryTokens.isEmpty()) return emptyList()
+        return existing
+            .map { memory ->
+                val memoryTokens = tokens(memory.text)
+                val overlap = memoryTokens.intersect(queryTokens).size.toDouble() /
+                    queryTokens.union(memoryTokens).size.coerceAtLeast(1)
+                val score = overlap * 100.0 + memory.importance / 100.0 * 12.0
+                memory to score
+            }
+            .filter { (_, score) -> score >= 28.0 }
+            .sortedWith(
+                compareByDescending<Pair<UserMemory, Double>> { it.second }
+                    .thenByDescending { it.first.updatedAt }
+            )
+            .take(limit)
+            .map { it.first }
+    }
+
+    fun forget(existing: List<UserMemory>, query: String): List<UserMemory> {
+        val clean = query.trim()
+        if (clean.isBlank()) return existing
+        return existing.filterNot { memory ->
+            memory.text.contains(clean, ignoreCase = true) || similarity(memory.text, clean) >= 0.75
+        }
+    }
+
+    private fun compact(memories: List<UserMemory>): List<UserMemory> =
+        memories
+            .sortedWith(compareByDescending<UserMemory> { it.importance }.thenByDescending { it.updatedAt })
+            .take(maxEntries)
+
+    private fun similarity(a: String, b: String): Double {
+        val left = tokens(a)
+        val right = tokens(b)
+        if (left.isEmpty() || right.isEmpty()) return 0.0
+        return left.intersect(right).size.toDouble() / left.union(right).size.toDouble()
+    }
+
+    private fun tokens(text: String): Set<String> =
+        text.lowercase(Locale.ROOT)
+            .split(Regex("[^a-z0-9]+"))
+            .filter { it.length >= 3 && it !in STOP_WORDS }
+            .toSet()
+
+    companion object {
+        private val STOP_WORDS = setOf(
+            "the", "and", "for", "that", "this", "with", "from", "you",
+            "your", "are", "have", "has", "not", "but", "can", "will",
+            "should", "would", "could", "please", "want", "like", "prefer"
+        )
+    }
+}
