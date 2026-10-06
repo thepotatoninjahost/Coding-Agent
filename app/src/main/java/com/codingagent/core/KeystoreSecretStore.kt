@@ -37,10 +37,14 @@ internal class KeystoreSecretStore(context: Context) {
     }
 
     private fun encrypt(key: String, value: String): String {
-        val iv = ByteArray(GCM_IV_BYTES).also { java.security.SecureRandom().nextBytes(it) }
         val cipher = Cipher.getInstance(TRANSFORMATION)
-        cipher.init(Cipher.ENCRYPT_MODE, secretKey(), GCMParameterSpec(GCM_TAG_BITS, iv))
+        // Android Keystore requires GCM encryption to choose the IV itself when
+        // randomized encryption is enabled. Supplying an IV here causes
+        // InvalidAlgorithmParameterException on affected Android Keystore implementations.
+        cipher.init(Cipher.ENCRYPT_MODE, secretKey())
         cipher.updateAAD(key.toByteArray(UTF_8))
+        val iv = cipher.iv
+        check(iv.size == GCM_IV_BYTES) { "Unexpected GCM IV size: ${iv.size}" }
         return Base64.encodeToString(
             iv + cipher.doFinal(value.toByteArray(UTF_8)),
             Base64.NO_WRAP
