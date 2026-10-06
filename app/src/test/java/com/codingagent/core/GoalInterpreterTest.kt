@@ -99,4 +99,38 @@ class GoalInterpreterTest {
         assertEquals(TaskIntent.CHANGE, intake.intent)
         assertTrue(intake.executionReady)
     }
+
+    @Test fun followUpClarificationPreservesActiveJobAndOwnerConstraints() {
+        val root = Files.createTempDirectory("goal-followup").toFile()
+        val wrapped = """
+            OPEN JOB (do not claim there is no prior task):
+            - id: job-1
+            - status: open
+            - goal: Build me a compiler
+            - staged paths:
+
+            Conversation so far (oldest first).
+            OWNER: Build me a compiler
+            AGENT: I need to know what languages you want.
+            OWNER: Do not ever create a hello world file or app.
+
+            Current request:
+            Kotlin and Python
+        """.trimIndent()
+
+        val contract = GoalInterpreter(root).interpret(wrapped)
+        assertEquals(TaskIntent.CREATE, contract.intent)
+        assertTrue(contract.goal.contains("Build me a compiler", ignoreCase = true))
+        assertTrue(contract.goal.contains("Kotlin and Python", ignoreCase = true))
+        assertTrue(contract.constraints.any {
+            it.contains("do not ever create a hello world file", ignoreCase = true)
+        })
+    }
+
+    @Test fun buildMeACompilerIsCreateNotProjectTest() {
+        val root = Files.createTempDirectory("goal-compiler").toFile()
+        val contract = GoalInterpreter(root).interpret("Build me a compiler")
+        assertEquals(TaskIntent.CREATE, contract.intent)
+        assertTrue(contract.ready)
+    }
 }
