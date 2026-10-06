@@ -14,29 +14,28 @@ object ToolPurpose {
         val reason = args?.optString("reason").orEmpty().trim()
         return when (name) {
             "list_files" ->
-                "Purpose: list project files${if (path.isNotBlank()) " under $path" else " at the repo root"} so later reads use real paths"
+                "Checking the project files${if (path.isNotBlank()) " under $path" else ""}."
             "read_file" ->
-                "Purpose: read ${path.ifBlank { "the named file" }} before reviewing or changing it"
+                "Reading ${path.ifBlank { "the requested file" }} before I review or change it."
             "search_project" ->
-                "Purpose: search the project for ${query.ifBlank { "the requested symbol or text" }}"
+                "Searching the project for ${query.ifBlank { "the requested code or text" }}."
             "search_knowledge" ->
-                "Purpose: look up local reference material for ${query.ifBlank { "this request" }}"
+                "Checking the local reference material."
             "research_web" ->
-                "Purpose: fetch current docs for ${query.ifBlank { "an external API or error" }}"
+                "Checking current documentation for ${query.ifBlank { "the technical question" }}."
             "replace_text" ->
-                "Purpose: stage an exact edit in ${path.ifBlank { "the target file" }}" +
-                    if (reason.isNotBlank()) " ($reason)" else " (dual approval still required)"
+                "Preparing an edit to ${path.ifBlank { "the requested file" }} for your approval."
             "create_file" ->
-                "Purpose: stage a new file at ${path.ifBlank { "the requested path" }} (dual approval still required)"
+                "Preparing ${path.ifBlank { "the requested file" }} for your approval."
             "run_command" ->
-                "Purpose: run in the project terminal: ${command.ifBlank { "(command)" }}"
+                "Running the requested project check."
             "verify" ->
-                "Purpose: run static verification on the current tree"
+                "Checking the current changes."
             "approve_change" ->
-                "Purpose: record one owner approval on a pending proposal"
+                "Recording your approval."
             "reject_change" ->
-                "Purpose: reject a pending proposal"
-            else -> "Purpose: $name"
+                "Rejecting the pending change."
+            else -> "Working on the request."
         }
     }
 }
