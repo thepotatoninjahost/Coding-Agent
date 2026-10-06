@@ -76,7 +76,6 @@ object AgentPrompt {
         appendLine("10. Owner constraints are binding. Never create, modify, or delete something prohibited by them; if a constraint conflicts with the requested work, stop and ask.")
         appendLine("11. Preserve the active job goal across follow-up clarifications; a short follow-up supplies missing details, it does not replace the task.")
         appendLine("12. Lead with the conclusion. Do not dump chain-of-thought or <think> blocks. Every project claim must appear in the evidence below.")
-        appendLine("12. Lead with the conclusion. Do not dump chain-of-thought or <think> blocks. Every project claim must appear in the evidence below.")
         if (AgentRequestKind.isWholeProjectReview(request)) {
             appendLine("13. This is a whole-project review. After real evidence, write concrete improvements.")
         }
