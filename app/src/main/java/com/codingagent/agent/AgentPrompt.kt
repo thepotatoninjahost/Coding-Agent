@@ -50,6 +50,18 @@ object AgentPrompt {
         val targets = intake.contract.targetPaths.joinToString().ifBlank { "none yet" }
         appendLine("Intent: ${intake.intent}")
         appendLine("Target paths: $targets")
+        if (intake.contract.constraints.isNotEmpty()) {
+            appendLine("Owner constraints — binding requirements:")
+            intake.contract.constraints.distinct().forEach { constraint ->
+                appendLine("- $constraint")
+            }
+        }
+        if (intake.contract.acceptanceCriteria.isNotEmpty()) {
+            appendLine("Acceptance criteria:")
+            intake.contract.acceptanceCriteria.distinct().forEach { criterion ->
+                appendLine("- $criterion")
+            }
+        }
         appendLine()
         appendLine("Operating rules for this turn:")
         appendLine("1. Gather real evidence with tools. Never invent file contents or paths.")
@@ -61,12 +73,14 @@ object AgentPrompt {
         appendLine("7. Persist until the goal is met. Only stop early for a specific missing user input.")
         appendLine("8. After real file reads or project search hits, WRITE THE ANSWER. Do not keep listing.")
         appendLine("9. Prefer research_web over guessing external APIs. Prefer project files over inventing local paths.")
+        appendLine("10. Owner constraints are binding. Never create, modify, or delete something prohibited by them; if a constraint conflicts with the requested work, stop and ask.")
+        appendLine("11. Preserve the active job goal across follow-up clarifications; a short follow-up supplies missing details, it does not replace the task.")
         appendLine("12. Lead with the conclusion. Do not dump chain-of-thought or <think> blocks. Every project claim must appear in the evidence below.")
         if (AgentRequestKind.isWholeProjectReview(request)) {
-            appendLine("10. This is a whole-project review. After real evidence, write concrete improvements.")
+            appendLine("13. This is a whole-project review. After real evidence, write concrete improvements.")
         }
         if (intake.intent in setOf(TaskIntent.CHANGE, TaskIntent.CREATE, TaskIntent.REFACTOR, TaskIntent.DEBUG)) {
-            appendLine("11. This is change work. A review alone is not the work. After reading the target, stage replace_text or create_file. Use run_command when a shell check is cheaper than guessing.")
+            appendLine("14. This is change work. A review alone is not the work. After reading the target, stage replace_text or create_file. Use run_command when a shell check is cheaper than guessing.")
         }
         if (lessons.isNotBlank()) {
             appendLine()

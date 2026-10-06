@@ -23,16 +23,17 @@ class GoalInterpreter(private val root: File) {
         val normalized = request.replace(Regex("\\s+"), " ").trim()
         require(normalized.isNotEmpty()) { "A coding request is required" }
         val focus = currentRequestFocus(normalized)
-        val paths = pathTokens(focus).distinct()
-        val symbols = symbolTokens(focus).distinct()
-        val intent = intent(focus, operation)
-        val constraints = constraints(focus)
-        val acceptance = acceptance(focus, intent)
+        val effectiveRequest = effectiveRequest(normalized, focus)
+        val paths = pathTokens(effectiveRequest).distinct()
+        val symbols = symbolTokens(effectiveRequest).distinct()
+        val intent = intent(effectiveRequest, operation)
+        val constraints = constraints(effectiveRequest)
+        val acceptance = acceptance(effectiveRequest, intent)
         val ambiguity = softAmbiguity(focus, intent)
         val confidence = score(intent, operation, paths, symbols, ambiguity)
         return GoalContract(
             request = normalized,
-            goal = focus.take(500),
+            goal = effectiveRequest.take(500),
             intent = intent,
             targetPaths = paths,
             targetSymbols = symbols,
@@ -54,8 +55,8 @@ class GoalInterpreter(private val root: File) {
             }
         }
         return when {
-            matches(request, "create|add|new file|write a|generate") -> TaskIntent.CREATE
-            matches(request, "test|tests|testing|verify|build") -> TaskIntent.TEST
+            matches(request, "create|add|new file|write a|generate|build\\s+(?:me|a|an)\\s+") -> TaskIntent.CREATE
+            matches(request, "test|tests|testing|verify|build\\s+(?:the|this|my)\\s+(?:project|app|application|module)") -> TaskIntent.TEST
             matches(request, "fix|debug|broken|error|crash|bug|repair|patch") -> TaskIntent.DEBUG
             matches(request, "refactor|restructure|rename|clean up|cleanup") -> TaskIntent.REFACTOR
             matches(
@@ -76,6 +77,33 @@ class GoalInterpreter(private val root: File) {
         return if (idx >= 0) request.substring(idx + marker.length).trim().ifBlank { request } else request
     }
 
+    /**
+     * Follow-up turns are not standalone tasks. When ChatWorkspace supplies an open job,
+     * carry the durable job goal and prior owner turns into deterministic intake so a
+     * clarification such as "Kotlin and Python" cannot erase the original task or its
+     * constraints before the model sees it.
+     */
+    private fun effectiveRequest(request: String, current: String): String {
+        val jobGoal = Regex("- goal:\\s*(.+?)(?=\\s+- staged paths:|\\s+Conversation so far:|\\s+Current request:|$)")
+            .find(request)?.groupValues?.getOrNull(1)?.trim()
+        if (jobGoal.isNullOrBlank()) return current
+
+        val ownerTurns = Regex("OWNER:\\s*(.+?)(?=\\s+AGENT:|\\s+OWNER:|\\s+Current request:|$)")
+            .findAll(request)
+            .map { it.groupValues[1].trim() }
+            .filter { it.isNotBlank() }
+            .toList()
+
+        return buildString {
+            append("Active job: ").append(jobGoal)
+            if (ownerTurns.isNotEmpty()) {
+                append("\\nPrior owner instructions:")
+                ownerTurns.forEach { append("\\n- ").append(it) }
+            }
+            append("\\nCurrent owner follow-up: ").append(current)
+        }
+    }
+
     private fun isGreetingOrChat(request: String): Boolean {
         val t = request.trim()
         if (t.length <= 24 && !matches(t, "file|class|function|bug|test|build|code|kotlin|java|project|src/|app/")) {
@@ -90,6 +118,12 @@ class GoalInterpreter(private val root: File) {
         if (matches(request, "keep tests|preserve tests|backward compatible|no breaking")) add("preserve existing behavior and tests")
         if (matches(request, "minimal|smallest change")) add("prefer the smallest change")
         if (matches(request, "offline|no internet|local only")) add("do not use network resources")
+        Regex("(?i)\\b((?:do not|don't|never)\\b[^.!?]{2,200})")
+            .findAll(request)
+            .map { it.groupValues[1].trim() }
+            .filter { it.isNotBlank() }
+            .distinct()
+            .forEach { add("owner constraint: $it") }
     }
 
     private fun acceptance(request: String, intent: TaskIntent): List<String> = buildList {
