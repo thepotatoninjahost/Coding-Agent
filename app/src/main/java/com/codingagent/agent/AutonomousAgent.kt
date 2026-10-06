@@ -177,7 +177,9 @@ class AutonomousAgent(
         // extracts the active job and prior owner instructions before the model sees them.
         // The current-turn focus remains the execution-facing request for direct lanes.
         val focus = currentRequestFocus(normalized)
-        tools.setRequestContext(focus)
+        // Tool mutations must retain the full packaged conversation so proposal records keep
+        // the active job and owner constraints.
+        tools.setRequestContext(normalized)
         val intake = TaskIntakeParser(root).parse(normalized)
         val plan = AgentPlanner(workspace).plan(intake)
         // Wired in: was previously dead code. Every call below is defensively wrapped
