@@ -14,6 +14,7 @@ class AgentContextContinuityTest {
     @Test
     fun liveAgentIntakeKeepsOpenJobAndPriorOwnerConstraint() {
         val root = Files.createTempDirectory("agent-context-live").toFile()
+        root.resolve("Existing.kt").writeText("class Existing")
         val captured = mutableListOf<ModelRequest>()
         val gateway = object : ModelGateway {
             override fun complete(request: ModelRequest): ModelResponse {
