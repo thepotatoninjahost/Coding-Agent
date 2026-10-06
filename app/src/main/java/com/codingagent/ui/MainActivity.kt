@@ -328,8 +328,6 @@ private fun CodingAgentApp(privateDir: File) {
         }
     }
 
-
-
     fun onChangeApplied(result: MutationApprovalResult.Applied) {
         val paths = result.changeSet.changes.map { it.path }.distinct()
         workspace?.let { ws ->
