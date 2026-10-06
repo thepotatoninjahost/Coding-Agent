@@ -37,6 +37,7 @@ class ChatWorkspace(
     private val store: ChatMessageStore,
     private val unavailableMessageProvider: () -> String = { "Model unavailable. Finish model setup before sending coding requests." },
     private val progressListener: AgentProgressListener? = null,
+    private val memoryStore: UserMemoryStore? = null,
     private val runtimeProvider: () -> AutonomousAgent?
 ) {
     fun history(limit: Int = 100): List<ChatMessage> = store.recentChatMessages(limit).asReversed()
@@ -50,6 +51,19 @@ class ChatWorkspace(
         val trimmed = request.trim()
         require(trimmed.isNotEmpty()) { "A message is required" }
         store.recordChatMessage(ChatMessage(role = ChatRole.USER, content = trimmed))
+
+        val memoryCommand = parseMemoryCommand(trimmed)
+        if (memoryCommand != null && memoryStore != null) {
+            return handleMemoryCommand(memoryCommand)
+        }
+        UserMemoryExtractor.extract(trimmed)?.let { memoryText ->
+            memoryStore?.remember(
+                text = memoryText,
+                kind = UserMemoryExtractor.kind(memoryText),
+                importance = UserMemoryExtractor.importance(trimmed)
+            )
+        }
+
         val agent = runtimeProvider()
         if (agent != null && looksLikeNewGoal(trimmed)) {
             OpenJobStore.boundRoot()?.let { OpenJobStore.openOrKeep(it, trimmed) }
@@ -193,10 +207,18 @@ class ChatWorkspace(
             .asReversed()
             .filter { it.role == ChatRole.USER || it.role == ChatRole.AGENT }
             .takeLast(10)
-        if (prior.size <= 1 && job == null) return current
+        val learned = memoryStore?.relevant(current, 6).orEmpty()
+        if (prior.size <= 1 && job == null && learned.isEmpty()) return current
         return buildString {
             if (job != null && job.status != "applied") {
                 append(job.promptBlock())
+                append('\n')
+            }
+            if (learned.isNotEmpty()) {
+                append("Relevant learned user memory. This is durable user context, not the system job description:\n")
+                learned.forEach { memory ->
+                    append("- ").append(memory.text.take(500)).append('\n')
+                }
                 append('\n')
             }
             if (prior.size > 1) {
@@ -211,6 +233,45 @@ class ChatWorkspace(
         }
     }
 
+    private fun parseMemoryCommand(text: String): MemoryCommand? {
+        val trimmed = text.trim()
+        val lower = trimmed.lowercase()
+        return when {
+            lower == "what do you remember about me" ||
+                lower == "what do you remember" ||
+                lower == "#retrieve" -> MemoryCommand.List
+            lower.startsWith("forget ") -> MemoryCommand.Forget(trimmed.substringAfter(' ').trim())
+            lower.startsWith("#forget ") -> MemoryCommand.Forget(trimmed.substringAfter("#forget ").trim())
+            else -> null
+        }
+    }
+
+    private fun handleMemoryCommand(command: MemoryCommand): ChatTurn {
+        val response = when (command) {
+            MemoryCommand.List -> {
+                val memories = memoryStore?.all().orEmpty()
+                if (memories.isEmpty()) {
+                    "I do not have any saved user preferences yet."
+                } else {
+                    buildString {
+                        append("Saved user preferences:\\n")
+                        memories.take(20).forEach { append("- ").append(it.text).append('\\n') }
+                    }.trimEnd()
+                }
+            }
+            is MemoryCommand.Forget -> {
+                val removed = memoryStore?.forget(command.query) ?: 0
+                if (removed == 0) {
+                    "I did not find a saved memory matching that."
+                } else {
+                    "Removed $removed saved memory item" + if (removed == 1) "" else "s" + "."
+                }
+            }
+        }
+        val message = ChatMessage(role = ChatRole.AGENT, content = response)
+        store.recordChatMessage(message)
+        return ChatTurn(message, null)
+    }
     private fun formatTask(task: AgentTask, workLog: List<String> = emptyList()): String = buildString {
         if (workLog.isNotEmpty()) {
             append("Work:\n")
@@ -299,3 +360,9 @@ data class ChatTurn(
     val response: ChatMessage,
     val result: AgentRuntimeResult?
 )
+
+
+private sealed class MemoryCommand {
+    data object List : MemoryCommand()
+    data class Forget(val query: String) : MemoryCommand()
+}
