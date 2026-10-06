@@ -351,7 +351,7 @@ class AutonomousAgent(
                 request = {
                     ModelRequest(
                         AgentModelProtocol.SYSTEM,
-                        buildPrompt(focus, intake, state.lastEvidence),
+                        buildPrompt(normalized, intake, state.lastEvidence),
                         toolsThisTurn,
                         transcript.toList(),
                         researchRequired = false
