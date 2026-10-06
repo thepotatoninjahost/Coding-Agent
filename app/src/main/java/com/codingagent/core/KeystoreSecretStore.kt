@@ -106,6 +106,10 @@ internal object LegacyEncryptedPreferencesMigration {
         val legacy = appContext.getSharedPreferences(LEGACY_FILE, Context.MODE_PRIVATE)
         val entries = legacy.all.filterKeys { it != KEY_KEYSET_ALIAS && it != VALUE_KEYSET_ALIAS }
         if (entries.isEmpty()) {
+            // A partially-created legacy file may contain only Tink keysets. Remove both
+            // the file and its Keystore master key before marking migration complete.
+            runCatching { appContext.deleteSharedPreferences(LEGACY_FILE) }
+            deleteLegacyMasterKey()
             target.putString(MIGRATED_MARKER, "true")
             return
         }
@@ -118,11 +122,14 @@ internal object LegacyEncryptedPreferencesMigration {
                     "Secure settings migration verification failed for $key"
                 }
             }
-            target.putString(MIGRATED_MARKER, "true")
             check(appContext.deleteSharedPreferences(LEGACY_FILE)) {
                 "Unable to remove legacy encrypted preferences after migration"
             }
+            // Only declare migration complete after both the ciphertext/keysets and their
+            // legacy master key have been removed. A cleanup failure must be retried rather
+            // than leaving sensitive legacy material behind while suppressing migration.
             deleteLegacyMasterKey()
+            target.putString(MIGRATED_MARKER, "true")
         } catch (e: Exception) {
             throw IllegalStateException(
                 "Unable to migrate existing encrypted settings without data loss", e
