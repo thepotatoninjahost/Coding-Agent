@@ -168,6 +168,59 @@ class AcceptancePathTest {
     }
 
     @Test
+    fun expiredProposalCannotBeApprovedOrWritten() {
+        val root = Files.createTempDirectory("accept-approval-expiry").toFile()
+        root.resolve("Main.kt").writeText("fun main() = 1\n")
+        var now = 1_000L
+        val coordinator = MutationCoordinator(
+            ProjectWorkspace(root),
+            now = { now }
+        )
+        val proposal = (coordinator.propose(
+            "expired edit",
+            listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 2\n"))
+        ) as MutationProposeResult.Proposed).proposal
+
+        now = proposal.expiresAt + 1L
+        val result = coordinator.approve(
+            proposal.id,
+            OwnerApprovalToken.authenticated(proposal.id, now = now)
+        )
+
+        assertTrue(result is MutationApprovalResult.Rejected)
+        assertEquals(0, coordinator.pending().size)
+        assertEquals("fun main() = 1\n", root.resolve("Main.kt").readText())
+    }
+
+    @Test
+    fun approvalCannotSurviveExternalChangeBeforeExecution() {
+        val root = Files.createTempDirectory("accept-approval-toctou").toFile()
+        root.resolve("Main.kt").writeText("fun main() = 1\n")
+        val coordinator = MutationCoordinator(ProjectWorkspace(root))
+        val proposal = (coordinator.propose(
+            "protected edit",
+            listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 2\n"))
+        ) as MutationProposeResult.Proposed).proposal
+
+        assertTrue(
+            coordinator.approve(
+                proposal.id,
+                OwnerApprovalToken.authenticated(proposal.id)
+            ) is MutationApprovalResult.AwaitingSecond
+        )
+
+        root.resolve("Main.kt").writeText("fun main() = 99\n")
+        val result = coordinator.approve(
+            proposal.id,
+            OwnerApprovalToken.authenticated(proposal.id)
+        )
+
+        assertTrue(result is MutationApprovalResult.Rejected)
+        assertEquals("fun main() = 99\n", root.resolve("Main.kt").readText())
+        assertEquals(1, coordinator.pending().single().approvalCount)
+    }
+
+    @Test
     fun createFileRequiresDualApprovalBeforeDiskWrite() {
         val root = Files.createTempDirectory("accept-create").toFile()
         root.resolve("src").mkdirs()
