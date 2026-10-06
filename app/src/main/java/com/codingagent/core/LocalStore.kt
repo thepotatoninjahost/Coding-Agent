@@ -20,6 +20,7 @@ class LocalStore(context: Context) : ChatMessageStore {
     private val lessonsFile = File(root, "lessons.jsonl")
     private val docsFile = File(root, "documents.jsonl")
     private val chatFile = File(root, "chat.jsonl")
+    private val userMemoryStore = DeviceUserMemoryStore(context)
 
     // Model settings include the user's API key. Values are encrypted with an AES-256-GCM key
     // that remains inside Android Keystore; only ciphertext is persisted in SharedPreferences.
@@ -85,6 +86,8 @@ class LocalStore(context: Context) : ChatMessageStore {
         .put("createdAt", message.createdAt)
         .put("taskId", message.taskId)
         .toString())
+
+    fun userMemoryStore(): com.codingagent.agent.UserMemoryStore = userMemoryStore
 
     override fun recentChatMessages(limit: Int): List<ChatMessage> = read(chatFile, limit).mapNotNull {
         runCatching {
