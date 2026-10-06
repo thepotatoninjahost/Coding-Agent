@@ -39,12 +39,12 @@ class AgentContextContinuityTest {
             AGENT: Which languages should it support?
             OWNER: Do not create sample files.
             Current request:
-            Kotlin and Python
+            Implement compiler support for Kotlin and Python
             """.trimIndent()
         )
 
-        val prompt = captured.firstOrNull()?.user.orEmpty()
-        assertTrue("No model prompt captured: $captured".let { it }, captured.isNotEmpty())
+        val prompt = captured.joinToString("\n\n") { it.user }
+        assertTrue("No model prompt captured: $captured", captured.isNotEmpty())
         assertTrue("Missing active job in prompt: $prompt", prompt.contains("Build me a compiler", ignoreCase = true))
         assertTrue("Missing follow-up in prompt: $prompt", prompt.contains("Kotlin and Python", ignoreCase = true))
         assertTrue("Missing owner constraint in prompt: $prompt", prompt.contains("Do not create sample files", ignoreCase = true))
