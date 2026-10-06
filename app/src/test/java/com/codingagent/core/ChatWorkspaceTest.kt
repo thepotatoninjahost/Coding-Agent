@@ -13,6 +13,8 @@ import com.codingagent.agent.ChatMessage
 import com.codingagent.agent.ChatMessageStore
 import com.codingagent.agent.ChatRole
 import com.codingagent.agent.ChatWorkspace
+import com.codingagent.agent.UserMemory
+import com.codingagent.agent.UserMemoryStore
 import com.codingagent.agent.PendingWorkResume
 import com.codingagent.workspace.KnowledgeHit
 import com.codingagent.workspace.OpenJobStore
@@ -134,6 +136,40 @@ class ChatWorkspaceTest {
     }
 
     @Test
+    fun learnsUserPreferenceAndRetrievesItForARelevantLaterRequest() {
+        val root = Files.createTempDirectory("chat-memory").toFile()
+        root.resolve("Main.kt").writeText("fun main() = 1\n")
+        val store = MemoryChatStore()
+        val memory = FakeUserMemoryStore()
+        val prompts = mutableListOf<String>()
+        val gateway = object : com.codingagent.model.ModelGateway {
+            override fun complete(request: com.codingagent.model.ModelRequest): com.codingagent.model.ModelResponse {
+                prompts += request.user
+                return com.codingagent.model.ModelResponse.Text("Understood.")
+            }
+
+            override fun cancel() = Unit
+        }
+        val agent = AutonomousAgent(root, emptyKnowledge, gateway = gateway)
+        val workspace = ChatWorkspace(
+            store = store,
+            memoryStore = memory,
+            runtimeProvider = { agent }
+        )
+
+        workspace.send("Remember that I prefer concise explanations.")
+        workspace.send("Explain the project structure.")
+
+        assertTrue(memory.all().any { it.text.contains("concise explanations", ignoreCase = true) })
+        assertTrue(
+            prompts.any {
+                it.contains("Relevant learned user memory", ignoreCase = true) &&
+                    it.contains("concise explanations", ignoreCase = true)
+            }
+        )
+    }
+
+    @Test
     fun includesPreviousConversationInFollowUpRequest() {
         val root = Files.createTempDirectory("chat-context").toFile()
         root.resolve("Main.kt").writeText("fun main() = 1\n")
@@ -154,6 +190,35 @@ class ChatWorkspaceTest {
                 lastAgent.content.contains("indexed", ignoreCase = true) ||
                 lastAgent.content.isNotBlank()
         )
+    }
+
+    private class FakeUserMemoryStore : UserMemoryStore {
+        private val memories = mutableListOf<UserMemory>()
+
+        override fun remember(text: String, kind: UserMemory.Kind, importance: Int): UserMemory? {
+            val memory = UserMemory(
+                id = memories.size.toString(),
+                text = text,
+                kind = kind,
+                importance = importance,
+                createdAt = memories.size.toLong(),
+                updatedAt = memories.size.toLong()
+            )
+            memories.removeAll { it.text.equals(text, ignoreCase = true) }
+            memories += memory
+            return memory
+        }
+
+        override fun relevant(query: String, limit: Int): List<UserMemory> =
+            memories.filter { query.contains("project", ignoreCase = true) || it.text.contains("concise", ignoreCase = true) }.take(limit)
+
+        override fun all(): List<UserMemory> = memories.toList()
+
+        override fun forget(query: String): Int {
+            val before = memories.size
+            memories.removeAll { it.text.contains(query, ignoreCase = true) }
+            return before - memories.size
+        }
     }
 
     private class MemoryChatStore : ChatMessageStore {
