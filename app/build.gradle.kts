@@ -10,7 +10,7 @@ val debugKeystoreFile = file("debug.keystore")
 val debugKeystoreB64 = file("debug-signing.keystore.b64")
 if (!debugKeystoreFile.exists() && debugKeystoreB64.exists()) {
     debugKeystoreFile.writeBytes(
-        java.util.Base64.getDecoder().decode(debugKeystoreB64.readText().trim())
+        Base64.getDecoder().decode(debugKeystoreB64.readText().trim())
     )
 }
 
