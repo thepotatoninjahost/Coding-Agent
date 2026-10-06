@@ -51,12 +51,12 @@ object UserMemoryExtractor {
     )
 
     private val transientScope = Regex(
-        "\b(for now|for this task|for this request|in this project|in this conversation|this time|today only|just this once)\b",
+        "\\b(for now|for this task|for this request|in this project|in this conversation|this time|today only|just this once)\\b",
         RegexOption.IGNORE_CASE
     )
 
     private val secretPattern = Regex(
-        "\b(api[ _-]?key|access[ _-]?token|password|passphrase|secret|private[ _-]?key|credit[ _-]?card)\b",
+        "\\b(api[ _-]?key|access[ _-]?token|password|passphrase|secret|private[ _-]?key|credit[ _-]?card)\\b",
         RegexOption.IGNORE_CASE
     )
 
@@ -82,7 +82,7 @@ object UserMemoryExtractor {
                 lower.contains("format") ||
                 lower.contains("style") ||
                 lower.contains("tone") ||
-                lower.contains("explain") -> UserMemory.Kind.WORKFLOW
+                (lower.contains("explain") || lower.contains("explanation")) -> UserMemory.Kind.WORKFLOW
             lower.startsWith("my ") ||
                 lower.startsWith("i use ") ||
                 lower.startsWith("i work ") -> UserMemory.Kind.FACT
@@ -124,7 +124,10 @@ class UserMemoryIndex(
         val clean = text.replace(Regex("\\s+"), " ").trim().trimEnd('.', '!', '?')
         if (clean.length < 3 || clean.length > 500) return existing
         val match = existing.maxByOrNull { similarity(it.text, clean) }
-        val next = if (match != null && similarity(match.text, clean) >= 0.55) {
+        val next = if (match != null && (
+            similarity(match.text, clean) >= 0.55 ||
+                sameDirectiveTopic(match.text, clean)
+            )) {
             existing.map {
                 if (it.id == match.id) {
                     it.copy(
@@ -192,6 +195,23 @@ class UserMemoryIndex(
         memories
             .sortedWith(compareByDescending<UserMemory> { it.importance }.thenByDescending { it.updatedAt })
             .take(maxEntries)
+
+    private fun sameDirectiveTopic(a: String, b: String): Boolean {
+        val left = directiveTopic(a)
+        val right = directiveTopic(b)
+        return left.isNotBlank() && left == right
+    }
+
+    private fun directiveTopic(text: String): String {
+        val stripped = text.lowercase(Locale.ROOT)
+            .replace(
+                Regex(
+                    "^(remember that|remember|from now on|i prefer|i like|i don't like|i do not like|i hate|i want you to|i don't want you to|i do not want you to|please always|always|never|do not ever|don't ever)\\s+"
+                ),
+                ""
+            )
+        return tokens(stripped).firstOrNull().orEmpty()
+    }
 
     private fun similarity(a: String, b: String): Double {
         val left = tokens(a)
