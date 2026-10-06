@@ -24,6 +24,14 @@ class UserMemoryTest {
         )
         assertEquals(
             null,
+            UserMemoryExtractor.extract("Never create sample files.")
+        )
+        assertEquals(
+            "Never create sample files",
+            UserMemoryExtractor.extract("Remember never create sample files.")
+        )
+        assertEquals(
+            null,
             UserMemoryExtractor.extract("Remember my API key is abc123.")
         )
     }
