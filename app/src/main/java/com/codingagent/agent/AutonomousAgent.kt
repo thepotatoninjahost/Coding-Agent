@@ -173,10 +173,12 @@ class AutonomousAgent(
             onEvent(event)
         }
         emit(AutonomousAgentEvent.Phase("INTAKE", "Inspecting the request and repository"))
-        // Strip chat-history wrapper so intent matches the current user line only.
+        // Keep the full packaged conversation for deterministic intake. GoalInterpreter
+        // extracts the active job and prior owner instructions before the model sees them.
+        // The current-turn focus remains the execution-facing request for direct lanes.
         val focus = currentRequestFocus(normalized)
         tools.setRequestContext(focus)
-        val intake = TaskIntakeParser(root).parse(focus)
+        val intake = TaskIntakeParser(root).parse(normalized)
         val plan = AgentPlanner(workspace).plan(intake)
         // Wired in: was previously dead code. Every call below is defensively wrapped
         // (runCatching) — PlanningLoop can at worst no-op, never crash a live run, since
@@ -349,7 +351,7 @@ class AutonomousAgent(
                 request = {
                     ModelRequest(
                         AgentModelProtocol.SYSTEM,
-                        buildPrompt(focus, intake, state.lastEvidence),
+                        buildPrompt(normalized, intake, state.lastEvidence),
                         toolsThisTurn,
                         transcript.toList(),
                         researchRequired = false
