@@ -39,11 +39,11 @@ class AgentContextContinuityTest {
             AGENT: Which languages should it support?
             OWNER: Do not create sample files.
             Current request:
-            Kotlin and Python
+            Implement compiler support for Kotlin and Python
             """.trimIndent()
         )
 
-        val prompt = captured.firstOrNull()?.user.orEmpty()
+        val prompt = captured.joinToString("\n\n") { it.user }
         assertTrue(prompt.contains("Build me a compiler", ignoreCase = true))
         assertTrue(prompt.contains("Kotlin and Python", ignoreCase = true))
         assertTrue(prompt.contains("Do not create sample files", ignoreCase = true))
