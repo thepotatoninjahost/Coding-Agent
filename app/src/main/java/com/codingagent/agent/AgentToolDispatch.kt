@@ -48,11 +48,7 @@ class AgentToolDispatch(
                 "research_web" -> researchWeb(arguments)
                 "replace_text" -> replaceText(arguments)
                 "create_file" -> createFile(arguments)
-                "run_command" -> {
-                    val entry = terminal.execute(arguments.getString("command"))
-                    "exit=${entry.exitCode} timeout=${entry.timedOut}\n${entry.stdout}\n${entry.stderr}"
-                        .take(maxOutputCharacters)
-                }
+                "run_command" -> runCommand(arguments)
                 "verify" -> {
                     val report = workspace.verify()
                     val issues = report.issues.joinToString("\n") { issue ->
@@ -162,6 +158,16 @@ class AgentToolDispatch(
             is MutationProposeResult.Rejected ->
                 "ERROR: create_file proposal rejected — ${result.reason}"
         }
+    }
+
+    private fun runCommand(arguments: JSONObject): String {
+        val command = arguments.getString("command")
+        AgentCommandPolicy.rejectionReason(command)?.let { reason ->
+            return "ERROR: run_command blocked — $reason"
+        }
+        val entry = terminal.execute(command)
+        return "exit=${entry.exitCode} timeout=${entry.timedOut}\n${entry.stdout}\n${entry.stderr}"
+            .take(maxOutputCharacters)
     }
 
     private fun ownerOnlyMutationControl(name: String): String =
