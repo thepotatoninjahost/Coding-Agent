@@ -187,6 +187,8 @@ class ChatWorkspaceTest {
         assertTrue(!failed.task.verification.passed)
         assertTrue(failed.task.summary.contains("pending proposal", ignoreCase = true))
         assertTrue(failed.task.summary.contains("fix Main.kt and run the tests"))
+        assertTrue(failed.task.summary.contains("project state is not assumed to be unchanged"))
+        assertTrue(!failed.task.summary.contains("No files were changed"))
         assertEquals("fun main() = 1\n", root.resolve("Main.kt").readText())
     }
 
