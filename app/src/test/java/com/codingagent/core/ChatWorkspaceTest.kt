@@ -109,6 +109,7 @@ class ChatWorkspaceTest {
         assertTrue(result is com.codingagent.agent.AgentRuntimeResult.Failed)
         val failed = result as com.codingagent.agent.AgentRuntimeResult.Failed
         assertEquals("resume-ambiguous", failed.task.status)
+        assertFalse(failed.task.verification.passed)
         assertTrue(failed.task.summary.contains(pending[0].id))
         assertTrue(failed.task.summary.contains(pending[1].id))
         assertEquals(2, agent.pendingProposals().size)
