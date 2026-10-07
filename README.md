@@ -23,7 +23,7 @@ The repository contains the modular backend and an Android workbench with a pers
 The current APK supports:
 - Project import via Storage Access Framework and indexing
 - Source search and local knowledge search
-- Autonomous model loop with real tool calling (list_files, read_file, search_project, verify, mutations with dual approval, etc.)
+- Autonomous model loop with real tool calling (list_files, read_file, search_project, run_command, verify, and transactional mutations)
 - Always-on static verification (unfinished-work marker scan) — never reports a fake pass
 - Evidence requirement: inspect/error/analyze requests must actually read or search project files before a final answer is accepted
 - Model settings UI for any OpenAI-compatible provider (Groq, SambaNova, OpenRouter, local, etc.)
@@ -56,7 +56,7 @@ Production source is split by job under `app/src/main/java/com/codingagent/`:
 |---|---|
 | `agent` | Single spine (`AutonomousAgent`), constitution, tool dispatch (`AgentToolDispatch`), planning (`AgentPlanner`), chat workspace, journal |
 | `intake` | Free text → typed goal (`TaskIntakeParser`, `GoalInterpreter`, `CodeSynthesisEngine`) |
-| `workspace` | Project import, index (`ProjectIndexer`), files, diffs, dual-approval mutations, terminal, verification, checksum rollback (`ProjectWorkspace`) |
+| `workspace` | Project import, index (`ProjectIndexer`), files, diffs, transactional mutations, terminal, verification, checksum rollback (`ProjectWorkspace`) |
 | `model` | User-configured OpenAI-compatible HTTP gateway (`RemoteHttpGateway`), settings, streamed SSE tool calls. No vendor is hardcoded. |
 | `research` | Web evidence (`WebResearchProvider`, `DurableDeepResearchProvider`, `PersonalResearchProvider`, `SourceQuality`, `QueryLanes`) |
 | `knowledge` | Local searchable chunks behind `AgentKnowledge` / `KnowledgeProvider` |
@@ -71,9 +71,9 @@ Execution path:
 4. `ProjectIndexer` inventories project files, languages, imports, symbols, and checksums.
 5. `AgentKnowledge` supplies local evidence. `WebResearchProvider` / deep-research providers supply internet evidence when the request requires it. Empty research fails closed.
 6. `CodeSynthesisEngine` creates a proposal when the request does not contain an explicit operation.
-7. `ProjectWorkspace` + `MutationCoordinator` apply edits through typed transactions. Dual owner approval is required before a write hits disk.
+7. `ProjectWorkspace` + `MutationCoordinator` apply edits through typed transactions. An owner-started autonomous run may apply its verified changes directly; interactive proposals retain dual owner approval.
 8. `VerificationReport` records static unfinished-work scans and command-check evidence. Verification never reports a fake pass.
-9. `CompilerTestRepairCycle` now participates in failed-change recovery: failed approved changes roll back, a model-synthesized repair is staged, and the repair must pass the same dual-approval flow before recheck.
+9. `CompilerTestRepairCycle` participates in failed-change recovery: failed changes roll back, a model-synthesized repair is prepared, and the active execution mode determines whether it is applied autonomously or staged for owner approval.
 10. `AgentJournal`, lessons, and `LocalStore` persist task evidence and chat for later work.
 
 Unit tests currently live under `app/src/test/java/com/codingagent/core/` even though production code is package-split as above.
@@ -140,11 +140,11 @@ The Terminal tab and the agent `run_command` tool use the same underlying runner
 - Timeout: 180 seconds (Stop sends `destroy` / `destroyForcibly`)
 - Output: stdout and stderr, each capture capped at 256 KiB
 
-The **Terminal tab is the owner-controlled terminal** and remains unrestricted. The **agent `run_command` tool is restricted** to project inspection and standard verification commands. Model commands cannot delete or modify files, chain shell commands, redirect output, access parent/absolute paths, use network tools, or change global Gradle configuration.
+The **Terminal tab is the owner-controlled terminal** and remains unrestricted. The **agent `run_command` tool is bounded** rather than read-only. It can inspect, build, test, and perform limited project file operations. Command chaining, redirection, parent/absolute paths, network tools, protected metadata, wildcard destructive operations, and dangerous global Gradle options remain blocked.
 
 This is the stock Android `sh` (toybox/toolbox on current devices). It is not bash, not a login shell, and not Termux. Typical available commands are basic Unix utilities already on the device (`ls`, `pwd`, `cat`, `echo`, limited `grep`). There is usually **no** JDK, **no** Gradle, **no** `git`, and **no** package manager. A command such as `./gradlew testDebugUnitTest` will fail on a normal phone unless those binaries are already on `PATH`.
 
-A passing shell command is not a file write. Source mutations still go through dual owner approval and checksum-backed transactions.
+A passing shell command is evidence, not completion. Source mutations still go through checksum-backed transactions; an owner-started autonomous run can apply them and the transaction performs post-apply verification and rollback on failure.
 
 ## Local development
 
