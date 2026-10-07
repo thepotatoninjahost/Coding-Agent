@@ -103,8 +103,9 @@ class MutationCoordinator(
             createdAt = timestamp,
             expiresAt = timestamp + AgentConstitution.APPROVAL_EXPIRATION_MS
         )
-        pending[proposal.id] = proposal
-        persist()
+        if (!persistState(pending + (proposal.id to proposal))) {
+            return MutationProposeResult.Rejected("Unable to persist the change proposal safely")
+        }
         OpenJobStore.markWaiting(
             workspace.projectRoot(),
             proposal.id,
@@ -149,8 +150,11 @@ class MutationCoordinator(
         )
         val violations = AgentConstitution.check(action, timestamp, proposal.createdAt)
         if (violations.isNotEmpty()) {
-            pending[id] = candidate
-            persist()
+            if (!persistState(pending + (id to candidate))) {
+                return MutationApprovalResult.Rejected(
+                    "Approval could not be persisted safely; the proposal was not advanced"
+                )
+            }
             return if (candidate.approvalCount < 2 && violations.none {
                     it.rule == ConstitutionRule.OWNER_LOCK ||
                         it.rule == ConstitutionRule.SANDBOX_FIRST ||
@@ -171,12 +175,6 @@ class MutationCoordinator(
                 workspace.runChecks(intake.verificationCommands, 180)
             }
             if (!postApply.passed) {
-                val rollback = workspace.rollback(applied)
-                if (rollback == RollbackResult.Restored) {
-                    pending.remove(id)
-                    persist()
-                    OpenJobStore.markReady(workspace.projectRoot())
-                }
                 val details = buildString {
                     append("Approved change failed post-apply checks")
                     if (postApply.commands.isNotEmpty()) {
@@ -190,7 +188,14 @@ class MutationCoordinator(
                         append(postApply.issues.joinToString { "${it.path}:${it.line}: ${it.message}" })
                     }
                 }
+                val rollback = workspace.rollback(applied)
                 if (rollback == RollbackResult.Restored) {
+                    if (!persistState(pending - id)) {
+                        return MutationApprovalResult.Rejected(
+                            "$details; changes were rolled back, but pending-state persistence failed"
+                        )
+                    }
+                    OpenJobStore.markReady(workspace.projectRoot())
                     val nextRepairAttempt = proposal.repairAttempt + 1
                     if (nextRepairAttempt <= repairConfig.maxRepairAttempts) {
                         val repair = runCatching {
@@ -219,8 +224,16 @@ class MutationCoordinator(
                     "$details; rollback was incomplete: $rollback"
                 )
             }
-            pending.remove(id)
-            persist()
+            if (!persistState(pending - id)) {
+                val rollback = workspace.rollback(applied)
+                return MutationApprovalResult.Rejected(
+                    if (rollback == RollbackResult.Restored) {
+                        "Approved change could not be durably committed; changes were rolled back"
+                    } else {
+                        "Approved change could not be durably committed and rollback was incomplete: $rollback"
+                    }
+                )
+            }
             OpenJobStore.markApplied(workspace.projectRoot())
             recordEvolution(candidate, applied)
             MutationApprovalResult.Applied(candidate, applied)
@@ -237,22 +250,18 @@ class MutationCoordinator(
 
     @Synchronized
     fun clear(id: String): Boolean {
-        val gone = pending.remove(id) != null
-        if (gone) {
-            persist()
-            OpenJobStore.markReady(workspace.projectRoot())
-        }
-        return gone
+        if (!pending.containsKey(id)) return false
+        if (!persistState(pending - id)) return false
+        OpenJobStore.markReady(workspace.projectRoot())
+        return true
     }
 
     @Synchronized
     fun reject(id: String): Boolean {
-        val gone = pending.remove(id) != null
-        if (gone) {
-            persist()
-            OpenJobStore.markReady(workspace.projectRoot())
-        }
-        return gone
+        if (!pending.containsKey(id)) return false
+        if (!persistState(pending - id)) return false
+        OpenJobStore.markReady(workspace.projectRoot())
+        return true
     }
 
     @Synchronized
@@ -262,8 +271,7 @@ class MutationCoordinator(
             .filter { timestamp > it.expiresAt }
             .map { it.id }
         if (expiredIds.isEmpty()) return
-        expiredIds.forEach { pending.remove(it) }
-        persist()
+        if (!persistState(pending.filterKeys { it !in expiredIds })) return
         OpenJobStore.markReady(workspace.projectRoot())
     }
 
@@ -272,8 +280,7 @@ class MutationCoordinator(
         clearExpired()
         val current = pending[id] ?: return null
         val refreshed = current.copy(expiresAt = now() + AgentConstitution.APPROVAL_EXPIRATION_MS)
-        pending[id] = refreshed
-        persist()
+        if (!persistState(pending + (id to refreshed))) return current
         return refreshed
     }
 
@@ -295,8 +302,7 @@ class MutationCoordinator(
             repairAttempt = repairAttempt,
             repairRootRequest = rootRequest
         )
-        pending[proposal.id] = proposal
-        persist()
+        if (!persistState(pending + (proposal.id to proposal))) return null
         OpenJobStore.markWaiting(
             workspace.projectRoot(),
             proposal.id,
@@ -327,7 +333,14 @@ class MutationCoordinator(
         }
     }
 
-    private fun persist() {
-        runCatching { PendingProposalStore.save(workspace.projectRoot(), pending.values.toList()) }
+    private fun persistState(next: Map<String, PendingChangeProposal>): Boolean {
+        return try {
+            PendingProposalStore.save(workspace.projectRoot(), next.values.toList())
+            pending.clear()
+            pending.putAll(next)
+            true
+        } catch (_: Exception) {
+            false
+        }
     }
 }
