@@ -103,7 +103,7 @@ class MutationCoordinator(
             createdAt = timestamp,
             expiresAt = timestamp + AgentConstitution.APPROVAL_EXPIRATION_MS
         )
-        if (!persistWith(proposal.id, proposal)) {
+        if (!persistState(pending + (proposal.id to proposal))) {
             return MutationProposeResult.Rejected("Unable to persist the change proposal safely")
         }
         OpenJobStore.markWaiting(
@@ -150,7 +150,7 @@ class MutationCoordinator(
         )
         val violations = AgentConstitution.check(action, timestamp, proposal.createdAt)
         if (violations.isNotEmpty()) {
-            if (!persistWith(id, candidate)) {
+            if (!persistState(pending + (id to candidate))) {
                 return MutationApprovalResult.Rejected(
                     "Approval could not be persisted safely; the proposal was not advanced"
                 )
@@ -177,9 +177,9 @@ class MutationCoordinator(
             if (!postApply.passed) {
                 val rollback = workspace.rollback(applied)
                 if (rollback == RollbackResult.Restored) {
-                    pending.remove(id)
-                    persist()
-                    OpenJobStore.markReady(workspace.projectRoot())
+                    if (persistState(pending - id)) {
+                        OpenJobStore.markReady(workspace.projectRoot())
+                    }
                 }
                 val details = buildString {
                     append("Approved change failed post-apply checks")
@@ -223,8 +223,11 @@ class MutationCoordinator(
                     "$details; rollback was incomplete: $rollback"
                 )
             }
-            pending.remove(id)
-            persist()
+            if (!persistState(pending - id)) {
+                return MutationApprovalResult.Rejected(
+                    "Approved change was applied, but its pending state could not be persisted safely"
+                )
+            }
             OpenJobStore.markApplied(workspace.projectRoot())
             recordEvolution(candidate, applied)
             MutationApprovalResult.Applied(candidate, applied)
@@ -241,22 +244,18 @@ class MutationCoordinator(
 
     @Synchronized
     fun clear(id: String): Boolean {
-        val gone = pending.remove(id) != null
-        if (gone) {
-            persist()
-            OpenJobStore.markReady(workspace.projectRoot())
-        }
-        return gone
+        if (!pending.containsKey(id)) return false
+        if (!persistState(pending - id)) return false
+        OpenJobStore.markReady(workspace.projectRoot())
+        return true
     }
 
     @Synchronized
     fun reject(id: String): Boolean {
-        val gone = pending.remove(id) != null
-        if (gone) {
-            persist()
-            OpenJobStore.markReady(workspace.projectRoot())
-        }
-        return gone
+        if (!pending.containsKey(id)) return false
+        if (!persistState(pending - id)) return false
+        OpenJobStore.markReady(workspace.projectRoot())
+        return true
     }
 
     @Synchronized
@@ -266,8 +265,7 @@ class MutationCoordinator(
             .filter { timestamp > it.expiresAt }
             .map { it.id }
         if (expiredIds.isEmpty()) return
-        expiredIds.forEach { pending.remove(it) }
-        persist()
+        if (!persistState(pending.filterKeys { it !in expiredIds })) return
         OpenJobStore.markReady(workspace.projectRoot())
     }
 
@@ -276,8 +274,7 @@ class MutationCoordinator(
         clearExpired()
         val current = pending[id] ?: return null
         val refreshed = current.copy(expiresAt = now() + AgentConstitution.APPROVAL_EXPIRATION_MS)
-        pending[id] = refreshed
-        persist()
+        if (!persistState(pending + (id to refreshed))) return current
         return refreshed
     }
 
@@ -299,8 +296,7 @@ class MutationCoordinator(
             repairAttempt = repairAttempt,
             repairRootRequest = rootRequest
         )
-        pending[proposal.id] = proposal
-        persist()
+        if (!persistState(pending + (proposal.id to proposal))) return null
         OpenJobStore.markWaiting(
             workspace.projectRoot(),
             proposal.id,
@@ -331,20 +327,13 @@ class MutationCoordinator(
         }
     }
 
-    private fun persistWith(id: String, proposal: PendingChangeProposal): Boolean {
-        val previous = pending[id]
-        pending[id] = proposal
+    private fun persistState(next: Map<String, PendingChangeProposal>): Boolean {
         return try {
-            PendingProposalStore.save(workspace.projectRoot(), pending.values.toList())
+            PendingProposalStore.save(workspace.projectRoot(), next.values.toList())
+            pending.clear()
+            pending.putAll(next)
             true
         } catch (_: Exception) {
-            if (previous == null) pending.remove(id) else pending[id] = previous
             false
         }
     }
-
-    private fun persistCurrent(): Boolean =
-        runCatching {
-            PendingProposalStore.save(workspace.projectRoot(), pending.values.toList())
-        }.isSuccess
-}
