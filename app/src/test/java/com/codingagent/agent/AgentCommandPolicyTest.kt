@@ -11,6 +11,10 @@ class AgentCommandPolicyTest {
         assertNull(AgentCommandPolicy.rejectionReason("find app -type f"))
         assertNull(AgentCommandPolicy.rejectionReason("rg UserMemory app/src"))
         assertNull(AgentCommandPolicy.rejectionReason("cat app/src/main/AndroidManifest.xml"))
+        assertNull(AgentCommandPolicy.rejectionReason("mkdir scratch"))
+        assertNull(AgentCommandPolicy.rejectionReason("cp README.md scratch/README.md"))
+        assertNull(AgentCommandPolicy.rejectionReason("mv scratch/README.md scratch/README2.md"))
+        assertNull(AgentCommandPolicy.rejectionReason("rm scratch/README2.md"))
     }
 
     @Test
@@ -37,6 +41,8 @@ class AgentCommandPolicyTest {
     @Test
     fun blocksWriteAndNetworkCommands() {
         assertNotNull(AgentCommandPolicy.rejectionReason("rm -rf build"))
+        assertNotNull(AgentCommandPolicy.rejectionReason("rm *"))
+        assertNotNull(AgentCommandPolicy.rejectionReason("rm .coding-agent/lessons.tsv"))
         assertNotNull(AgentCommandPolicy.rejectionReason("curl https://example.com"))
         assertNotNull(AgentCommandPolicy.rejectionReason("python -c print(1)"))
         assertNotNull(AgentCommandPolicy.rejectionReason("git reset --hard"))
