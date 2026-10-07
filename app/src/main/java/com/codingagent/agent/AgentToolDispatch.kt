@@ -183,15 +183,19 @@ class AgentToolDispatch(
         val taskId = autonomousTaskId
         val grant = autonomousGrant
         if (taskId.isNullOrBlank() || grant == null) return staged()
-        return when (val result = mutations.applyAutonomous(proposalId, taskId, grant)) {
-            is com.codingagent.workspace.MutationApprovalResult.Applied ->
-                "APPLIED id=${result.proposal.id} changes=${result.changeSet.changes.size} verified=true"
-            is com.codingagent.workspace.MutationApprovalResult.RepairRequired ->
-                "REPAIR_REQUIRED id=${result.proposal.id} reason=${result.failure}"
-            is com.codingagent.workspace.MutationApprovalResult.Rejected ->
-                "ERROR: autonomous mutation failed — ${result.reason}"
-            is com.codingagent.workspace.MutationApprovalResult.AwaitingSecond ->
-                "ERROR: autonomous mutation unexpectedly requires interactive approval"
+        var currentProposalId = proposalId
+        while (true) {
+            when (val result = mutations.applyAutonomous(currentProposalId, taskId, grant)) {
+                is com.codingagent.workspace.MutationApprovalResult.Applied ->
+                    return "APPLIED id=${result.proposal.id} changes=${result.changeSet.changes.size} verified=true"
+                is com.codingagent.workspace.MutationApprovalResult.RepairRequired -> {
+                    currentProposalId = result.proposal.id
+                }
+                is com.codingagent.workspace.MutationApprovalResult.Rejected ->
+                    return "ERROR: autonomous mutation failed — ${result.reason}"
+                is com.codingagent.workspace.MutationApprovalResult.AwaitingSecond ->
+                    return "ERROR: autonomous mutation unexpectedly requires interactive approval"
+            }
         }
     }
 
