@@ -147,7 +147,6 @@ class AcceptancePathTest {
 
         PendingProposalStore.save(root, listOf(proposed.proposal))
         val envelope = JSONObject(PendingProposalStore.file(root).readText())
-        val payload = JSONObject(envelope.getString("payload"))
         // Mutating authenticated payload without updating its Keystore-backed MAC
         // must invalidate the entire persisted approval state.
         val payloadArray = org.json.JSONArray(envelope.getString("payload"))
