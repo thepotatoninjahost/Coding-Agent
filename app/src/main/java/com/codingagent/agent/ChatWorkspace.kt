@@ -150,15 +150,17 @@ class ChatWorkspace(
         val root = OpenJobStore.boundRoot()
         if (root != null) {
             when (result) {
-                is AgentRuntimeResult.NeedsApproval -> OpenJobStore.markWaiting(
-                    root,
-                    result.proposalId,
-                    result.task.changes.map { it.path }.distinct(),
-                    result.task.request
-                )
+                is AgentRuntimeResult.NeedsApproval -> runCatching {
+                    OpenJobStore.markWaiting(
+                        root,
+                        result.proposalId,
+                        result.task.changes.map { it.path }.distinct(),
+                        result.task.request
+                    )
+                }
                 is AgentRuntimeResult.Completed -> {
                     if (result.task.status.contains("applied", ignoreCase = true)) {
-                        OpenJobStore.markApplied(root)
+                        runCatching { OpenJobStore.markApplied(root) }
                     }
                 }
                 else -> Unit
