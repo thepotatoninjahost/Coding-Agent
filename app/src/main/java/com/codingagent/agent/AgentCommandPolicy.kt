@@ -1,16 +1,19 @@
 package com.codingagent.agent
 
 /**
- * ONE JOB: Limit model-invoked shell commands to read-only inspection and ordinary
- * project verification. The interactive owner terminal remains unrestricted.
+ * ONE JOB: Give the autonomous model a useful project shell without giving it
+ * unrestricted access to the device.
  *
- * The model is remote/untrusted input. It must not be able to turn run_command into
- * arbitrary shell execution, command chaining, file deletion, network exfiltration,
- * or global Gradle configuration changes.
+ * The shell still runs inside the Android app's own process sandbox. We allow
+ * common development/file commands, but keep command chaining, redirection,
+ * parent/absolute paths, network tools, privilege changes, and broad recursive
+ * deletion out of the model's command surface.
  */
 object AgentCommandPolicy {
-    private val shellMetacharacters = Regex("""[;&|><`\$'"\n\r]""")
+    private val shellMetacharacters = Regex("""[;&|><\`\$'"\n\r]""")
     private val forbiddenPathTokens = Regex("""(^|/|\\)\.\.(?:/|\\|$)""")
+    private val globCharacters = Regex("""[*?\[]""")
+    private val protectedTargets = setOf(".", "./", ".git", ".coding-agent")
 
     fun rejectionReason(raw: String): String? {
         val command = raw.trim()
@@ -31,8 +34,11 @@ object AgentCommandPolicy {
             "git" -> validateGit(tokens)
             "find" -> validateFind(tokens)
             "sed" -> validateSed(tokens)
-            "cat", "head", "tail", "wc", "file", "grep", "rg", "ls", "pwd", "printf" -> null
-            else -> "Model command '$executable' is not permitted; use project inspection tools or a standard verification command"
+            "rm" -> validateRemove(tokens)
+            "cp", "mv" -> validateCopyMove(tokens)
+            "mkdir", "rmdir", "touch" -> validateSimpleFileCommand(tokens)
+            "cat", "head", "tail", "wc", "file", "grep", "rg", "ls", "pwd", "printf", "diff", "sort", "uniq", "cut", "tr" -> null
+            else -> "Model command '$executable' is not permitted; use project tools or a standard development command"
         }
     }
 
@@ -45,8 +51,42 @@ object AgentCommandPolicy {
 
     private fun validateSed(tokens: List<String>): String? {
         return if (tokens.drop(1).any { it == "-i" || it.startsWith("-i") }) {
-            "sed in-place writes are not allowed for model commands"
+            "sed in-place writes are not allowed; use replace_text for code changes"
         } else null
+    }
+
+    private fun validateRemove(tokens: List<String>): String? {
+        if (tokens.drop(1).any { it in setOf("-r", "-R", "--recursive") }) {
+            return "Recursive deletion is not allowed for model commands"
+        }
+        if (tokens.drop(1).any { it in protectedTargets || it.startsWith(".git/") || it.startsWith(".coding-agent/") }) {
+            return "Protected project metadata cannot be deleted by model commands"
+        }
+        if (tokens.drop(1).any { globCharacters.containsMatchIn(it) }) {
+            return "Broad wildcard deletion is not allowed for model commands"
+        }
+        return null
+    }
+
+    private fun validateCopyMove(tokens: List<String>): String? {
+        if (tokens.size < 3) return "A source and destination are required"
+        if (tokens.drop(1).any { it in protectedTargets || it.startsWith(".git/") || it.startsWith(".coding-agent/") }) {
+            return "Protected project metadata cannot be modified by model commands"
+        }
+        if (tokens.drop(1).any { globCharacters.containsMatchIn(it) }) {
+            return "Wildcard copy/move is not allowed for model commands"
+        }
+        return null
+    }
+
+    private fun validateSimpleFileCommand(tokens: List<String>): String? {
+        if (tokens.drop(1).any { it in protectedTargets || it.startsWith(".git/") || it.startsWith(".coding-agent/") }) {
+            return "Protected project metadata cannot be modified by model commands"
+        }
+        if (tokens.drop(1).any { globCharacters.containsMatchIn(it) }) {
+            return "Wildcard file operations are not allowed for model commands"
+        }
+        return null
     }
 
     private fun validateGit(tokens: List<String>): String? {
