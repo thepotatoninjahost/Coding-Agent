@@ -342,7 +342,7 @@ private fun CodingAgentApp(privateDir: File) {
         store.recordChatMessage(
             ChatMessage(
                 role = ChatRole.SYSTEM,
-                content = "APPLIED to disk after dual approval.\nFiles:\n" +
+                content = "APPLIED to disk after verified autonomous execution or owner approval.\nFiles:\n" +
                     paths.joinToString("\n") { "- $it" } +
                     "\nRequest: ${result.proposal.request.take(200)}"
             )
