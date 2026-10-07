@@ -84,6 +84,11 @@ object OpenJobStore {
         writeAtomically(f, o.toString())
     }
 
+    /**
+     * Continue the existing job when the caller explicitly intends continuation.
+     * New owner goals must use [startNew] so stale persisted work cannot leak
+     * into an unrelated request.
+     */
     @Synchronized
     fun openOrKeep(root: File, goal: String): OpenJob {
         bind(root)
@@ -91,9 +96,20 @@ object OpenJobStore {
         if (existing != null && existing.status != "applied" && existing.status != "abandoned") {
             return existing
         }
+        return startNew(root, goal)
+    }
+
+    /**
+     * Start a distinct owner job. This deliberately replaces any prior open job.
+     */
+    @Synchronized
+    fun startNew(root: File, goal: String): OpenJob {
+        bind(root)
+        val normalized = goal.trim()
+        require(normalized.isNotEmpty()) { "A job goal is required" }
         val job = OpenJob(
             id = UUID.randomUUID().toString(),
-            goal = goal.trim(),
+            goal = normalized,
             status = "open",
             proposalId = null,
             paths = emptyList(),
