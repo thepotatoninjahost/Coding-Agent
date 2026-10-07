@@ -104,7 +104,10 @@ class MutationCoordinator(
             expiresAt = timestamp + AgentConstitution.APPROVAL_EXPIRATION_MS
         )
         pending[proposal.id] = proposal
-        persist()
+        if (!persist()) {
+            pending.remove(proposal.id)
+            return MutationProposeResult.Rejected("Could not durably persist the change proposal; no mutation was staged")
+        }
         OpenJobStore.markWaiting(
             workspace.projectRoot(),
             proposal.id,
@@ -149,8 +152,12 @@ class MutationCoordinator(
         )
         val violations = AgentConstitution.check(action, timestamp, proposal.createdAt)
         if (violations.isNotEmpty()) {
+            val previous = pending[id]
             pending[id] = candidate
-            persist()
+            if (!persist()) {
+                if (previous != null) pending[id] = previous else pending.remove(id)
+                return MutationApprovalResult.Rejected("Could not durably persist owner approval; approval was not accepted")
+            }
             return if (candidate.approvalCount < 2 && violations.none {
                     it.rule == ConstitutionRule.OWNER_LOCK ||
                         it.rule == ConstitutionRule.SANDBOX_FIRST ||
@@ -171,12 +178,6 @@ class MutationCoordinator(
                 workspace.runChecks(intake.verificationCommands, 180)
             }
             if (!postApply.passed) {
-                val rollback = workspace.rollback(applied)
-                if (rollback == RollbackResult.Restored) {
-                    pending.remove(id)
-                    persist()
-                    OpenJobStore.markReady(workspace.projectRoot())
-                }
                 val details = buildString {
                     append("Approved change failed post-apply checks")
                     if (postApply.commands.isNotEmpty()) {
@@ -189,6 +190,17 @@ class MutationCoordinator(
                         append(". Issues: ")
                         append(postApply.issues.joinToString { "${it.path}:${it.line}: ${it.message}" })
                     }
+                }
+                val rollback = workspace.rollback(applied)
+                if (rollback == RollbackResult.Restored) {
+                    pending.remove(id)
+                    if (!persist()) {
+                        pending[id] = proposal
+                        return MutationApprovalResult.Rejected(
+                            "$details; rollback restored files, but pending-state persistence failed"
+                        )
+                    }
+                    OpenJobStore.markReady(workspace.projectRoot())
                 }
                 if (rollback == RollbackResult.Restored) {
                     val nextRepairAttempt = proposal.repairAttempt + 1
@@ -220,7 +232,17 @@ class MutationCoordinator(
                 )
             }
             pending.remove(id)
-            persist()
+            if (!persist()) {
+                pending[id] = proposal
+                val rollback = runCatching { workspace.rollback(applied) }.getOrElse { RollbackResult.Rejected(it.message.orEmpty()) }
+                return if (rollback == RollbackResult.Restored) {
+                    MutationApprovalResult.Rejected("Change was rolled back because approved-state persistence failed")
+                } else {
+                    MutationApprovalResult.Rejected(
+                        "CRITICAL: change was applied but could not be durably persisted or rolled back: $rollback"
+                    )
+                }
+            }
             OpenJobStore.markApplied(workspace.projectRoot())
             recordEvolution(candidate, applied)
             MutationApprovalResult.Applied(candidate, applied)
@@ -238,8 +260,10 @@ class MutationCoordinator(
     @Synchronized
     fun clear(id: String): Boolean {
         val gone = pending.remove(id) != null
+        if (gone && !persist()) {
+            return false
+        }
         if (gone) {
-            persist()
             OpenJobStore.markReady(workspace.projectRoot())
         }
         return gone
@@ -248,8 +272,10 @@ class MutationCoordinator(
     @Synchronized
     fun reject(id: String): Boolean {
         val gone = pending.remove(id) != null
+        if (gone && !persist()) {
+            return false
+        }
         if (gone) {
-            persist()
             OpenJobStore.markReady(workspace.projectRoot())
         }
         return gone
@@ -262,8 +288,11 @@ class MutationCoordinator(
             .filter { timestamp > it.expiresAt }
             .map { it.id }
         if (expiredIds.isEmpty()) return
-        expiredIds.forEach { pending.remove(it) }
-        persist()
+        val expired = expiredIds.mapNotNull { id -> pending.remove(id)?.let { id to it } }
+        if (!persist()) {
+            expired.forEach { (id, proposal) -> pending[id] = proposal }
+            return
+        }
         OpenJobStore.markReady(workspace.projectRoot())
     }
 
@@ -273,7 +302,10 @@ class MutationCoordinator(
         val current = pending[id] ?: return null
         val refreshed = current.copy(expiresAt = now() + AgentConstitution.APPROVAL_EXPIRATION_MS)
         pending[id] = refreshed
-        persist()
+        if (!persist()) {
+            pending[id] = current
+            return current
+        }
         return refreshed
     }
 
@@ -296,7 +328,10 @@ class MutationCoordinator(
             repairRootRequest = rootRequest
         )
         pending[proposal.id] = proposal
-        persist()
+        if (!persist()) {
+            pending.remove(proposal.id)
+            return null
+        }
         OpenJobStore.markWaiting(
             workspace.projectRoot(),
             proposal.id,
@@ -327,7 +362,9 @@ class MutationCoordinator(
         }
     }
 
-    private fun persist() {
-        runCatching { PendingProposalStore.save(workspace.projectRoot(), pending.values.toList()) }
-    }
+    private fun persist(): Boolean =
+        runCatching {
+            PendingProposalStore.save(workspace.projectRoot(), pending.values.toList())
+            true
+        }.getOrElse { false }
 }

@@ -66,7 +66,7 @@ class ChatWorkspace(
 
         val agent = runtimeProvider()
         if (agent != null && looksLikeNewGoal(trimmed)) {
-            OpenJobStore.boundRoot()?.let { OpenJobStore.openOrKeep(it, trimmed) }
+            OpenJobStore.boundRoot()?.let { OpenJobStore.startNew(it, trimmed) }
         }
         val approval = agent?.let { ChatApproval.tryApprove(it, trimmed) }
         if (approval != null) {

@@ -20,9 +20,9 @@ class ToolSelectionTest {
         val intake = TaskIntakeParser(root).parse("create a Kotlin helper in src/Helper.kt")
         val plan = ToolSelector().select(intake)
         assertEquals(ToolKind.INDEX_REPOSITORY, plan.tools.first().kind)
-        assertTrue(plan.tools.any { it.kind == ToolKind.SYNTHESIZE_CODE })
-        assertTrue(plan.tools.any { it.kind == ToolKind.APPLY_CHANGES })
-        assertEquals(plan.tools[0].id, plan.tools[1].dependsOn.single())
+        assertTrue(plan.tools.none { it.kind == ToolKind.SYNTHESIZE_CODE })
+        val apply = plan.tools.first { it.kind == ToolKind.APPLY_CHANGES }
+        assertEquals(ToolKind.SEARCH_PROJECT, plan.tools.first { it.id == apply.dependsOn.single() }.kind)
     }
 
     @Test
@@ -52,8 +52,7 @@ class ToolSelectionTest {
             listOf(
                 ToolInvocation("index", ToolKind.INDEX_REPOSITORY, "index"),
                 ToolInvocation("search", ToolKind.SEARCH_PROJECT, "search", listOf("index")),
-                ToolInvocation("synth", ToolKind.SYNTHESIZE_CODE, "synthesize", listOf("search")),
-                ToolInvocation("apply", ToolKind.APPLY_CHANGES, "apply", listOf("synth"))
+                ToolInvocation("apply", ToolKind.APPLY_CHANGES, "apply", listOf("search"))
             ),
             "test"
         )
@@ -61,19 +60,17 @@ class ToolSelectionTest {
         loop.completeKind(ToolKind.INDEX_REPOSITORY, "indexed")
         assertTrue(loop.authorize("replace_text", ToolKind.APPLY_CHANGES)!!.contains("blocked"))
         loop.completeKind(ToolKind.SEARCH_PROJECT, "found target")
-        loop.completeKind(ToolKind.SYNTHESIZE_CODE, "proposal")
         assertEquals(null, loop.authorize("replace_text", ToolKind.APPLY_CHANGES))
     }
 
     @Test
-    fun failedMutationDoesNotConsumeSynthesisPhase() {
+    fun failedMutationLeavesTheRealApplyGatePending() {
         val plan = ToolSelectionPlan(
             "change",
             listOf(
                 ToolInvocation("index", ToolKind.INDEX_REPOSITORY, "index"),
                 ToolInvocation("search", ToolKind.SEARCH_PROJECT, "search", listOf("index")),
-                ToolInvocation("synth", ToolKind.SYNTHESIZE_CODE, "synthesize", listOf("search")),
-                ToolInvocation("apply", ToolKind.APPLY_CHANGES, "apply", listOf("synth"))
+                ToolInvocation("apply", ToolKind.APPLY_CHANGES, "apply", listOf("search"))
             ),
             "test"
         )
@@ -84,7 +81,6 @@ class ToolSelectionTest {
         assertEquals(null, loop.authorize("replace_text", ToolKind.APPLY_CHANGES))
         loop.recordFailure("replace_text", ToolKind.APPLY_CHANGES, "workspace rejected proposal")
 
-        assertEquals(ToolStepStatus.PENDING, loop.currentTools().first { it.kind == ToolKind.SYNTHESIZE_CODE }.status)
         assertEquals(ToolStepStatus.PENDING, loop.currentTools().first { it.kind == ToolKind.APPLY_CHANGES }.status)
     }
 
