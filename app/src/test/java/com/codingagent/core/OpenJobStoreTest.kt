@@ -23,6 +23,18 @@ class OpenJobStoreTest {
     }
 
     @Test
+    fun startNewReplacesExistingOpenJob() {
+        val root = Files.createTempDirectory("open-job-new-goal").toFile()
+        val first = OpenJobStore.openOrKeep(root, "fix the parser")
+        val second = OpenJobStore.startNew(root, "build the terminal tool")
+
+        assertTrue(first.id != second.id)
+        assertEquals("build the terminal tool", second.goal)
+        assertEquals("open", second.status)
+        assertEquals(null, second.proposalId)
+    }
+
+    @Test
     fun saveReplacesJobAtomicallyAndLeavesNoTemporaryFiles() {
         val root = Files.createTempDirectory("open-job-atomic").toFile()
         val first = OpenJobStore.openOrKeep(root, "first goal")
