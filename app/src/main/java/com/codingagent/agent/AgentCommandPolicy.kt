@@ -58,6 +58,56 @@ object AgentCommandPolicy {
         if (tokens.any { it == "-o" || it == "--output" || it.startsWith("--output=") }) {
             return "Writing git output to files is not allowed for model commands"
         }
+        if (subcommand == "branch") {
+            return validateGitBranch(tokens)
+        }
+        return null
+    }
+
+    private fun validateGitBranch(tokens: List<String>): String? {
+        val args = tokens.drop(2)
+        if (args.isEmpty()) return null
+
+        val forbidden = setOf(
+            "-d", "--delete", "-D",
+            "-m", "--move", "-M",
+            "-c", "--copy", "-C",
+            "-f", "--force",
+            "-u", "--set-upstream-to", "--unset-upstream",
+            "--track", "--no-track",
+            "--edit-description", "--create-reflog",
+            "--delete-merged"
+        )
+        if (args.any { token ->
+                token in forbidden ||
+                    token.startsWith("--set-upstream-to=") ||
+                    token.startsWith("--delete-merged=")
+            }) {
+            return "git branch mutations are not permitted for model commands"
+        }
+
+        val readModes = setOf(
+            "-l", "--list", "--show-current",
+            "-r", "--remotes", "-a", "--all",
+            "--merged", "--no-merged", "--contains", "--no-contains",
+            "--points-at", "--format",
+            "--sort", "--column", "--no-column",
+            "-v", "-vv", "--verbose",
+            "--abbrev", "--no-abbrev",
+            "--color", "--no-color", "--omit-empty",
+            "--ignore-case", "--forked"
+        )
+        val hasReadMode = args.any { token ->
+            token in readModes ||
+                token.startsWith("--format=") ||
+                token.startsWith("--sort=") ||
+                token.startsWith("--column=") ||
+                token.startsWith("--abbrev=") ||
+                token.startsWith("--color=")
+        }
+        if (!hasReadMode) {
+            return "git branch creation and other mutating forms are not permitted for model commands"
+        }
         return null
     }
 
