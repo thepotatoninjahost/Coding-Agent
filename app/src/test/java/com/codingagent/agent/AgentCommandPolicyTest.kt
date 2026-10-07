@@ -67,5 +67,6 @@ class AgentCommandPolicyTest {
     fun blocksFindAndSedWrites() {
         assertNotNull(AgentCommandPolicy.rejectionReason("find app -exec rm {} ;"))
         assertNotNull(AgentCommandPolicy.rejectionReason("sed -i s/old/new/ file.txt"))
+        assertNotNull(AgentCommandPolicy.rejectionReason("sed s/old/new/ file.txt"))
     }
 }
