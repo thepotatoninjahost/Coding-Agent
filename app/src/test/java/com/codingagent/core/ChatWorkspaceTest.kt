@@ -134,6 +134,25 @@ class ChatWorkspaceTest {
     }
 
     @Test
+    fun resumePreservesWaitingJobWhenProposalCannotBeRecovered() {
+        val root = Files.createTempDirectory("chat-resume-missing-proposal").toFile()
+        root.resolve("Main.kt").writeText("fun main() = 1\n")
+        OpenJobStore.startNew(root, "fix Main.kt and run the tests")
+        OpenJobStore.markWaiting(root, "missing-proposal", listOf("Main.kt"), "fix Main.kt and run the tests")
+        val agent = AutonomousAgent(root, emptyKnowledge, gateway = null)
+
+        val result = PendingWorkResume.tryResume(agent, "continue", null)
+
+        assertTrue(result is com.codingagent.agent.AgentRuntimeResult.Failed)
+        val failed = result as com.codingagent.agent.AgentRuntimeResult.Failed
+        assertEquals("resume-unverified", failed.task.status)
+        assertTrue(!failed.task.verification.passed)
+        assertTrue(failed.task.summary.contains("pending proposal", ignoreCase = true))
+        assertTrue(failed.task.summary.contains("fix Main.kt and run the tests"))
+        assertEquals("fun main() = 1\n", root.resolve("Main.kt").readText())
+    }
+
+    @Test
     fun includesPreviousConversationInFollowUpRequest() {
         val root = Files.createTempDirectory("chat-context").toFile()
         root.resolve("Main.kt").writeText("fun main() = 1\n")
