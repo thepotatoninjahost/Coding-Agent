@@ -177,9 +177,12 @@ class MutationCoordinator(
             if (!postApply.passed) {
                 val rollback = workspace.rollback(applied)
                 if (rollback == RollbackResult.Restored) {
-                    if (persistState(pending - id)) {
-                        OpenJobStore.markReady(workspace.projectRoot())
+                    if (!persistState(pending - id)) {
+                        return MutationApprovalResult.Rejected(
+                            "$details; changes were rolled back, but pending-state persistence failed"
+                        )
                     }
+                    OpenJobStore.markReady(workspace.projectRoot())
                 }
                 val details = buildString {
                     append("Approved change failed post-apply checks")
@@ -224,8 +227,13 @@ class MutationCoordinator(
                 )
             }
             if (!persistState(pending - id)) {
+                val rollback = workspace.rollback(applied)
                 return MutationApprovalResult.Rejected(
-                    "Approved change was applied, but its pending state could not be persisted safely"
+                    if (rollback == RollbackResult.Restored) {
+                        "Approved change could not be durably committed; changes were rolled back"
+                    } else {
+                        "Approved change could not be durably committed and rollback was incomplete: $rollback"
+                    }
                 )
             }
             OpenJobStore.markApplied(workspace.projectRoot())
