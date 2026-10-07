@@ -68,6 +68,34 @@ object PendingWorkResume {
             )
             return AgentRuntimeResult.NeedsApproval(task, body, pendingProposal.id)
         }
+        val openJob = com.codingagent.workspace.OpenJobStore.loadBound()
+        if (openJob != null && openJob.status != "applied" && openJob.status != "abandoned") {
+            val detail = when (openJob.status) {
+                "waiting-approval" -> "The saved job still expects owner approval, but its pending proposal is unavailable or failed integrity validation."
+                else -> "The saved job is still active, but its executable state is unavailable."
+            }
+            val task = AgentTask(
+                id = UUID.randomUUID().toString(),
+                request = text,
+                status = "resume-unverified",
+                plan = AgentPlan(text, emptyList(), emptyList()),
+                changes = emptyList(),
+                verification = VerificationReport(false, listOf(
+                    com.codingagent.workspace.VerificationIssue(
+                        "open-job",
+                        0,
+                        detail
+                    )
+                )),
+                events = listOf(
+                    "saved job " + openJob.id + " remains " + openJob.status,
+                    "proposal state could not be recovered"
+                ),
+                summary = detail + "\nSaved job: " + openJob.goal.take(1_200) + "\n" +
+                    "This resume attempt started no new mutation. The on-disk project state is not assumed to be unchanged. Inspect the current project state before approving or starting anything."
+            )
+            return AgentRuntimeResult.Failed(task)
+        }
         if (recentAgentText != null && ModelFailure.isRateLimit(recentAgentText)) {
             return AgentRuntimeResult.Failed(
                 AgentTask(

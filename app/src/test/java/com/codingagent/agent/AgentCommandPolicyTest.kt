@@ -50,11 +50,25 @@ class AgentCommandPolicyTest {
         assertNotNull(AgentCommandPolicy.rejectionReason("./gradlew test --scan"))
         assertNotNull(AgentCommandPolicy.rejectionReason("./gradlew test -Dfoo=bar"))
         assertNotNull(AgentCommandPolicy.rejectionReason("./gradlew :exfiltrate"))
+        assertNotNull(AgentCommandPolicy.rejectionReason("./gradlew testExfiltrate"))
+        assertNotNull(AgentCommandPolicy.rejectionReason("./gradlew :app:testExfiltrate"))
+    }
+
+    @Test
+    fun blocksMutatingGitBranchOperations() {
+        assertNotNull(AgentCommandPolicy.rejectionReason("git branch feature"))
+        assertNotNull(AgentCommandPolicy.rejectionReason("git branch -D feature"))
+        assertNotNull(AgentCommandPolicy.rejectionReason("git branch -m old new"))
+        assertNotNull(AgentCommandPolicy.rejectionReason("git branch -f feature"))
+        assertNull(AgentCommandPolicy.rejectionReason("git branch"))
+        assertNull(AgentCommandPolicy.rejectionReason("git branch --list feature"))
+        assertNull(AgentCommandPolicy.rejectionReason("git branch --merged main"))
     }
 
     @Test
     fun blocksFindAndSedWrites() {
         assertNotNull(AgentCommandPolicy.rejectionReason("find app -exec rm {} ;"))
         assertNotNull(AgentCommandPolicy.rejectionReason("sed -i s/old/new/ file.txt"))
+        assertNotNull(AgentCommandPolicy.rejectionReason("sed s/old/new/ file.txt"))
     }
 }

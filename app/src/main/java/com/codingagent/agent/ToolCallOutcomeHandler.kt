@@ -75,8 +75,7 @@ class ToolCallOutcomeHandler(
     ): ToolTurnOutcome {
         if (writeNow) {
             val mutationTool = response.name == "replace_text" ||
-                response.name == "create_file" ||
-                response.name == "verify"
+                response.name == "create_file"
             if (!(changeWork && mutationTool)) {
                 state.writeNowRefusals++
                 if (changeWork) {

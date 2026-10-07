@@ -30,7 +30,6 @@ object AgentCommandPolicy {
             "gradlew", "gradlew.bat", "gradle" -> validateGradle(tokens)
             "git" -> validateGit(tokens)
             "find" -> validateFind(tokens)
-            "sed" -> validateSed(tokens)
             "cat", "head", "tail", "wc", "file", "grep", "rg", "ls", "pwd", "printf" -> null
             else -> "Model command '$executable' is not permitted; use project inspection tools or a standard verification command"
         }
@@ -43,12 +42,6 @@ object AgentCommandPolicy {
         } else null
     }
 
-    private fun validateSed(tokens: List<String>): String? {
-        return if (tokens.drop(1).any { it == "-i" || it.startsWith("-i") }) {
-            "sed in-place writes are not allowed for model commands"
-        } else null
-    }
-
     private fun validateGit(tokens: List<String>): String? {
         val subcommand = tokens.getOrNull(1)?.removePrefix("-") ?: return "git requires a read-only subcommand"
         val allowed = setOf("status", "diff", "log", "branch", "rev-parse", "ls-files", "show", "grep")
@@ -57,6 +50,56 @@ object AgentCommandPolicy {
         }
         if (tokens.any { it == "-o" || it == "--output" || it.startsWith("--output=") }) {
             return "Writing git output to files is not allowed for model commands"
+        }
+        if (subcommand == "branch") {
+            return validateGitBranch(tokens)
+        }
+        return null
+    }
+
+    private fun validateGitBranch(tokens: List<String>): String? {
+        val args = tokens.drop(2)
+        if (args.isEmpty()) return null
+
+        val forbidden = setOf(
+            "-d", "--delete", "-D",
+            "-m", "--move", "-M",
+            "-c", "--copy", "-C",
+            "-f", "--force",
+            "-u", "--set-upstream-to", "--unset-upstream",
+            "--track", "--no-track",
+            "--edit-description", "--create-reflog",
+            "--delete-merged"
+        )
+        if (args.any { token ->
+                token in forbidden ||
+                    token.startsWith("--set-upstream-to=") ||
+                    token.startsWith("--delete-merged=")
+            }) {
+            return "git branch mutations are not permitted for model commands"
+        }
+
+        val readModes = setOf(
+            "-l", "--list", "--show-current",
+            "-r", "--remotes", "-a", "--all",
+            "--merged", "--no-merged", "--contains", "--no-contains",
+            "--points-at", "--format",
+            "--sort", "--column", "--no-column",
+            "-v", "-vv", "--verbose",
+            "--abbrev", "--no-abbrev",
+            "--color", "--no-color", "--omit-empty",
+            "--ignore-case", "--forked"
+        )
+        val hasReadMode = args.any { token ->
+            token in readModes ||
+                token.startsWith("--format=") ||
+                token.startsWith("--sort=") ||
+                token.startsWith("--column=") ||
+                token.startsWith("--abbrev=") ||
+                token.startsWith("--color=")
+        }
+        if (!hasReadMode) {
+            return "git branch creation and other mutating forms are not permitted for model commands"
         }
         return null
     }
@@ -96,11 +139,31 @@ object AgentCommandPolicy {
         val taskTokens = tokens.drop(1).filterNot { it.startsWith("-") }
         if (taskTokens.isEmpty()) return null
 
-        val safeTask = Regex(
-            """^:?(?:[A-Za-z0-9_-]+:)*(?:build|assemble|check|test|lint|compile[A-Za-z0-9_-]*|test[A-Za-z0-9_-]*|lint[A-Za-z0-9_-]*|assemble[A-Za-z0-9_-]*|check[A-Za-z0-9_-]*|verify[A-Za-z0-9_-]*|tasks|projects|dependencies|properties)$"""
+        val safeTasks = setOf(
+            "build",
+            "assemble",
+            "check",
+            "test",
+            "tasks",
+            "projects",
+            "dependencies",
+            "properties",
+            ":app:build",
+            ":app:assemble",
+            ":app:assembleDebug",
+            ":app:assembleRelease",
+            ":app:check",
+            ":app:test",
+            ":app:testDebugUnitTest",
+            ":app:testReleaseUnitTest",
+            ":app:lint",
+            ":app:lintDebug",
+            ":app:lintRelease",
+            ":app:compileDebugKotlin",
+            ":app:compileReleaseKotlin"
         )
-        if (taskTokens.any { !safeTask.matches(it) }) {
-            return "Only standard build, test, lint, compile, verification, and Gradle inspection tasks are allowed"
+        if (taskTokens.any { it !in safeTasks }) {
+            return "Only explicitly allowlisted build, test, lint, compile, verification, and Gradle inspection tasks are allowed"
         }
         return null
     }

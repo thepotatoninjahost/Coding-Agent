@@ -64,6 +64,30 @@ class AcceptancePathTest {
     }
 
     @Test
+    fun openJobMetadataFailureCannotTurnAppliedMutationIntoRejection() {
+        val root = Files.createTempDirectory("accept-open-job-failure").toFile()
+        root.resolve("Main.kt").writeText("fun main() = 1\n")
+        val codingDir = root.resolve(".coding-agent")
+        codingDir.mkdirs()
+        codingDir.resolve("open-job.json").mkdirs()
+
+        val coordinator = MutationCoordinator(ProjectWorkspace(root))
+        val proposed = coordinator.propose(
+            "apply despite recovery metadata failure",
+            listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 2\n"))
+        )
+        assertTrue(proposed is MutationProposeResult.Proposed)
+        val proposal = (proposed as MutationProposeResult.Proposed).proposal
+
+        assertTrue(coordinator.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id)) is MutationApprovalResult.AwaitingSecond)
+        val result = coordinator.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id))
+
+        assertTrue(result is MutationApprovalResult.Applied)
+        assertEquals("fun main() = 2\n", root.resolve("Main.kt").readText())
+        assertTrue(coordinator.pending().isEmpty())
+    }
+
+    @Test
     fun rejectLeavesDiskUnchanged() {
         val root = Files.createTempDirectory("accept-reject").toFile()
         root.resolve("Main.kt").writeText("fun main() = 1\n")
