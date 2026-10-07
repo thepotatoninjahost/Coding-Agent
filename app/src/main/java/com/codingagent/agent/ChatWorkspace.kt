@@ -65,13 +65,23 @@ class ChatWorkspace(
         }
 
         val agent = runtimeProvider()
-        if (agent != null && looksLikeNewGoal(trimmed)) {
-            OpenJobStore.boundRoot()?.let { OpenJobStore.startNew(it, trimmed) }
-        }
         val approval = agent?.let { ChatApproval.tryApprove(it, trimmed) }
         if (approval != null) {
             progressListener?.onProgress("APPROVAL", approval.toString().take(80))
             return persist(result = approval)
+        }
+        // Never replace the persisted open job while an older mutation proposal is still
+        // awaiting owner action. A new goal must not orphan that proposal or cause its eventual
+        // apply/markApplied transition to be recorded against the wrong job.
+        if (agent != null && looksLikeNewGoal(trimmed) && agent.pendingProposals().isNotEmpty()) {
+            val pending = PendingWorkResume.tryResume(agent, "review proposal", recentAgentText = null)
+            if (pending != null) {
+                progressListener?.onProgress("RESUME", "Pending proposal must be resolved before starting a new coding goal")
+                return persist(result = pending)
+            }
+        }
+        if (agent != null && looksLikeNewGoal(trimmed)) {
+            OpenJobStore.boundRoot()?.let { OpenJobStore.startNew(it, trimmed) }
         }
         val lastAgent = store.recentChatMessages(20).firstOrNull { it.role == ChatRole.AGENT }?.content
         val openJob = OpenJobStore.loadBound()
