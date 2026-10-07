@@ -17,7 +17,12 @@ object PendingProposalStore {
         f.parentFile?.mkdirs()
         val arr = JSONArray()
         proposals.forEach { arr.put(toJson(it)) }
-        AtomicFileWriter.write(f, arr.toString())
+        val payload = arr.toString()
+        val envelope = JSONObject()
+            .put("version", 1)
+            .put("payload", payload)
+            .put("mac", ProposalIntegrity.mac(payload))
+        AtomicFileWriter.write(f, envelope.toString())
     }
 
     @Synchronized
@@ -26,9 +31,19 @@ object PendingProposalStore {
         val text = AtomicFileWriter.readTextIfExists(f)?.trim() ?: return emptyList()
         if (text.isEmpty()) return emptyList()
         return runCatching {
-            val arr = JSONArray(text)
-            (0 until arr.length()).mapNotNull { i ->
-                runCatching { fromJson(arr.getJSONObject(i)) }.getOrNull()
+            val envelope = JSONObject(text)
+            val version = envelope.optInt("version", 0)
+            if (version == 1) {
+                val payload = envelope.getString("payload")
+                val mac = envelope.getString("mac")
+                if (!ProposalIntegrity.verify(payload, mac)) return emptyList()
+                parsePayload(payload)
+            } else {
+                // One-time migration from the pre-integrity format. Once loaded,
+                // immediately rewrite it in the authenticated envelope.
+                val legacy = parsePayload(text)
+                if (legacy.isNotEmpty()) save(root, legacy)
+                legacy
             }
         }.getOrDefault(emptyList())
     }
@@ -80,6 +95,13 @@ object PendingProposalStore {
             .put("verificationPassed", p.verification.passed)
             .put("issues", issues)
             .put("approvals", approvals)
+    }
+
+    private fun parsePayload(payload: String): List<PendingChangeProposal> {
+        val arr = JSONArray(payload)
+        return (0 until arr.length()).mapNotNull { i ->
+            runCatching { fromJson(arr.getJSONObject(i)) }.getOrNull()
+        }
     }
 
     private fun fromJson(o: JSONObject): PendingChangeProposal {
