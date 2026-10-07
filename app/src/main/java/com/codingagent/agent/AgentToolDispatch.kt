@@ -9,6 +9,7 @@ import com.codingagent.research.ResearchMode
 import com.codingagent.research.ResearchModeDetector
 import com.codingagent.workspace.MutationCoordinator
 import com.codingagent.workspace.MutationProposeResult
+import com.codingagent.workspace.AutonomousExecutionGrant
 import com.codingagent.workspace.ProjectFileService
 import com.codingagent.workspace.ProjectWorkspace
 import com.codingagent.workspace.TerminalSession
@@ -24,7 +25,9 @@ class AgentToolDispatch(
     private val mutations: MutationCoordinator,
     private val terminal: TerminalSession,
     private val maxOutputCharacters: Int,
-    private val onResearchProgress: (String) -> Unit
+    private val onResearchProgress: (String) -> Unit,
+    private val autonomousTaskId: String? = null,
+    private val autonomousGrant: AutonomousExecutionGrant? = null
 ) {
     @Volatile
     private var requestContext: String = ""
@@ -129,10 +132,11 @@ class AgentToolDispatch(
             ),
             reason = arguments.optString("reason", "Autonomous model proposal")
         )) {
-            is MutationProposeResult.Proposed ->
+            is MutationProposeResult.Proposed -> autonomousApplyOrStage(result.proposal.id) {
                 "PROPOSAL_READY id=${result.proposal.id} path=$path " +
                     "changes=${result.proposal.changeSet.changes.size} approval_required=2 " +
                     "Confirm twice in the authenticated Review flow to APPLY this change to disk."
+            }
             is MutationProposeResult.Rejected ->
                 "ERROR: replace_text proposal rejected — ${result.reason}"
         }
@@ -151,12 +155,29 @@ class AgentToolDispatch(
             ),
             reason = arguments.optString("reason", "Autonomous model proposal")
         )) {
-            is MutationProposeResult.Proposed ->
+            is MutationProposeResult.Proposed -> autonomousApplyOrStage(result.proposal.id) {
                 "PROPOSAL_READY id=${result.proposal.id} path=$path " +
                     "changes=${result.proposal.changeSet.changes.size} approval_required=2 " +
                     "Confirm twice in the authenticated Review flow to APPLY this file to disk."
+            }
             is MutationProposeResult.Rejected ->
                 "ERROR: create_file proposal rejected — ${result.reason}"
+        }
+    }
+
+    private fun autonomousApplyOrStage(proposalId: String, staged: () -> String): String {
+        val taskId = autonomousTaskId
+        val grant = autonomousGrant
+        if (taskId.isNullOrBlank() || grant == null) return staged()
+        return when (val result = mutations.applyAutonomous(proposalId, taskId, grant)) {
+            is com.codingagent.workspace.MutationApprovalResult.Applied ->
+                "APPLIED id=${result.proposal.id} changes=${result.changeSet.changes.size} verified=true"
+            is com.codingagent.workspace.MutationApprovalResult.RepairRequired ->
+                "REPAIR_REQUIRED id=${result.proposal.id} reason=${result.failure}"
+            is com.codingagent.workspace.MutationApprovalResult.Rejected ->
+                "ERROR: autonomous mutation failed — ${result.reason}"
+            is com.codingagent.workspace.MutationApprovalResult.AwaitingSecond ->
+                "ERROR: autonomous mutation unexpectedly requires interactive approval"
         }
     }
 
