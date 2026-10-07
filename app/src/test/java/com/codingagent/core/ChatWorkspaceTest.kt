@@ -2,6 +2,7 @@ package com.codingagent.core
 
 import java.nio.file.Files
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.CountDownLatch
