@@ -207,7 +207,7 @@ class AutonomousLoopTest {
         // Always returns the same run_command tool call — guarantees abort path is reached.
         val gateway = object : ModelGateway {
             override fun complete(request: ModelRequest): ModelResponse =
-                ModelResponse.ToolCall("run_command", """{"command":"printf agent"}""")
+                ModelResponse.ToolCall("run_command", """{"command":"pwd"}""")
             override fun stream(request: ModelRequest, onDelta: (String) -> Unit): ModelResponse =
                 complete(request)
         }
