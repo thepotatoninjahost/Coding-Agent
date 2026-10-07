@@ -1,6 +1,7 @@
 package com.codingagent.core
 
 import java.nio.file.Files
+import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -124,12 +125,37 @@ class AcceptancePathTest {
 
         PendingProposalStore.save(root, emptyList())
         assertEquals(emptyList<Any>(), PendingProposalStore.load(root))
-        assertEquals("[]", PendingProposalStore.file(root).readText())
+        val envelope = JSONObject(PendingProposalStore.file(root).readText())
+        assertEquals(1, envelope.getInt("version"))
+        assertTrue(envelope.getString("mac").isNotBlank())
         assertTrue(
             root.resolve(".coding-agent").listFiles()
                 .orEmpty()
                 .none { it.name.startsWith("pending-proposals-") && it.name.endsWith(".tmp") }
         )
+    }
+
+    @Test
+    fun tamperedPendingProposalIsRejected() {
+        val root = Files.createTempDirectory("accept-pending-tamper").toFile()
+        root.resolve("Main.kt").writeText("fun main() = 1\n")
+        val coordinator = MutationCoordinator(ProjectWorkspace(root))
+        val proposed = coordinator.propose(
+            "protect pending state",
+            listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 2\n"))
+        ) as MutationProposeResult.Proposed
+
+        PendingProposalStore.save(root, listOf(proposed.proposal))
+        val envelope = JSONObject(PendingProposalStore.file(root).readText())
+        // Mutating authenticated payload without updating its Keystore-backed MAC
+        // must invalidate the entire persisted approval state.
+        val payloadArray = org.json.JSONArray(envelope.getString("payload"))
+        val proposalJson = payloadArray.getJSONObject(0)
+        proposalJson.put("request", "attacker changed the approved request")
+        envelope.put("payload", payloadArray.toString())
+        PendingProposalStore.file(root).writeText(envelope.toString())
+
+        assertTrue(PendingProposalStore.load(root).isEmpty())
     }
 
     @Test
