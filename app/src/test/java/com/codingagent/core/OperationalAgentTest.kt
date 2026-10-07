@@ -5,6 +5,8 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import com.codingagent.agent.AgentKnowledge
+import com.codingagent.agent.LoopControl
+import com.codingagent.intake.TaskIntent
 import com.codingagent.agent.ChatApproval
 import com.codingagent.agent.AgentRuntimeResult
 import com.codingagent.agent.AutonomousAgent
@@ -52,6 +54,42 @@ class OperationalAgentTest {
         assertTrue(coordinator.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id)) is MutationApprovalResult.AwaitingSecond)
         assertTrue(coordinator.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id)) is MutationApprovalResult.Applied)
         assertEquals("fun main() = 2\n", files.read("src/Main.kt").content)
+    }
+
+    @Test
+    fun loopControlTransitionsChangeWorkFromEvidenceToExecution() {
+        val gathering = LoopControl.decide(
+            turn = 0,
+            maxTurns = 8,
+            usefulGathers = 0,
+            writeRefusals = 0,
+            intent = TaskIntent.CHANGE,
+            wholeProjectReview = false
+        )
+        assertTrue(gathering.toolsOpen)
+        assertTrue(!gathering.demandWrite)
+
+        val ready = LoopControl.decide(
+            turn = 2,
+            maxTurns = 8,
+            usefulGathers = 1,
+            writeRefusals = 0,
+            intent = TaskIntent.CHANGE,
+            wholeProjectReview = false
+        )
+        assertTrue(!ready.toolsOpen)
+        assertTrue(ready.demandWrite)
+        assertTrue(ready.synthesizeFromEvidence)
+
+        val debugReady = LoopControl.decide(
+            turn = 3,
+            maxTurns = 8,
+            usefulGathers = 2,
+            writeRefusals = 0,
+            intent = TaskIntent.DEBUG,
+            wholeProjectReview = false
+        )
+        assertTrue(debugReady.demandWrite)
     }
 
     @Test
