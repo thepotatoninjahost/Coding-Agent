@@ -105,12 +105,14 @@ class MutationCoordinator(
         )
         pending[proposal.id] = proposal
         persist()
-        OpenJobStore.markWaiting(
-            workspace.projectRoot(),
-            proposal.id,
-            proposal.changeSet.changes.map { it.path }.distinct(),
-            request
-        )
+        runCatching {
+            OpenJobStore.markWaiting(
+                workspace.projectRoot(),
+                proposal.id,
+                proposal.changeSet.changes.map { it.path }.distinct(),
+                request
+            )
+        }
         return MutationProposeResult.Proposed(proposal)
     }
 
@@ -221,7 +223,7 @@ class MutationCoordinator(
             }
             pending.remove(id)
             persist()
-            OpenJobStore.markApplied(workspace.projectRoot())
+            runCatching { OpenJobStore.markApplied(workspace.projectRoot()) }
             recordEvolution(candidate, applied)
             MutationApprovalResult.Applied(candidate, applied)
         } catch (error: Exception) {
@@ -297,12 +299,14 @@ class MutationCoordinator(
         )
         pending[proposal.id] = proposal
         persist()
-        OpenJobStore.markWaiting(
-            workspace.projectRoot(),
-            proposal.id,
-            changeSet.changes.map { it.path }.distinct(),
-            proposal.request
-        )
+        runCatching {
+            OpenJobStore.markWaiting(
+                workspace.projectRoot(),
+                proposal.id,
+                changeSet.changes.map { it.path }.distinct(),
+                proposal.request
+            )
+        }
         return proposal
     }
 
