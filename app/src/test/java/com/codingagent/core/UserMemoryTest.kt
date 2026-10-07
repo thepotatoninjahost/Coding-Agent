@@ -24,6 +24,30 @@ class UserMemoryTest {
         )
         assertEquals(
             null,
+            UserMemoryExtractor.extract("Never create sample files.")
+        )
+        assertEquals(
+            null,
+            UserMemoryExtractor.extract("I want you to fix the parser for this task.")
+        )
+        assertEquals(
+            null,
+            UserMemoryExtractor.extract("I don't want you to rewrite unrelated files.")
+        )
+        assertEquals(
+            null,
+            UserMemoryExtractor.extract("Please always check the current project before editing it.")
+        )
+        assertEquals(
+            null,
+            UserMemoryExtractor.extract("Don't ever change the signing configuration in this task.")
+        )
+        assertEquals(
+            "never create sample files",
+            UserMemoryExtractor.extract("Remember never create sample files.")
+        )
+        assertEquals(
+            null,
             UserMemoryExtractor.extract("Remember my API key is abc123.")
         )
     }
