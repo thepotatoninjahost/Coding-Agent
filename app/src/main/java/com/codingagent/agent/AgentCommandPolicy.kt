@@ -31,7 +31,7 @@ object AgentCommandPolicy {
             "git" -> validateGit(tokens)
             "find" -> validateFind(tokens)
             "sed" -> validateSed(tokens)
-            "cat", "head", "tail", "wc", "file", "grep", "rg", "ls", "pwd" -> null
+            "cat", "head", "tail", "wc", "file", "grep", "rg", "ls", "pwd", "printf" -> null
             else -> "Model command '$executable' is not permitted; use project inspection tools or a standard verification command"
         }
     }
