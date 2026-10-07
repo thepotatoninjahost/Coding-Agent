@@ -133,12 +133,14 @@ Rollback is fail-closed. It returns `RollbackResult.Restored` only when every af
 
 ## Terminal limitations
 
-The Terminal tab and the agent `run_command` tool use the same runner:
+The Terminal tab and the agent `run_command` tool use the same underlying runner:
 
 - Command: `sh -c <your text>`
 - Working directory: the imported project copy in app-private storage
 - Timeout: 180 seconds (Stop sends `destroy` / `destroyForcibly`)
 - Output: stdout and stderr, each capture capped at 256 KiB
+
+The **Terminal tab is the owner-controlled terminal** and remains unrestricted. The **agent `run_command` tool is restricted** to project inspection and standard verification commands. Model commands cannot delete or modify files, chain shell commands, redirect output, access parent/absolute paths, use network tools, or change global Gradle configuration.
 
 This is the stock Android `sh` (toybox/toolbox on current devices). It is not bash, not a login shell, and not Termux. Typical available commands are basic Unix utilities already on the device (`ls`, `pwd`, `cat`, `echo`, limited `grep`). There is usually **no** JDK, **no** Gradle, **no** `git`, and **no** package manager. A command such as `./gradlew testDebugUnitTest` will fail on a normal phone unless those binaries are already on `PATH`.
 
