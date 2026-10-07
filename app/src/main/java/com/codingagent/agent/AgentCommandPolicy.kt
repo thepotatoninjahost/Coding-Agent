@@ -59,7 +59,11 @@ object AgentCommandPolicy {
     }
 
     private fun validateRemove(tokens: List<String>): String? {
-        if (tokens.drop(1).any { it in setOf("-r", "-R", "--recursive") }) {
+        if (tokens.drop(1).any { token ->
+                token == "--recursive" ||
+                    token.startsWith("--recursive=") ||
+                    (token.startsWith("-") && !token.startsWith("--") && token.drop(1).any { flag -> flag == 'r' || flag == 'R' })
+            }) {
             return "Recursive deletion is not allowed for model commands"
         }
         if (tokens.drop(1).any { isProtectedPath(it) }) {
