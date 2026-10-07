@@ -108,12 +108,14 @@ class MutationCoordinator(
             pending.remove(proposal.id)
             return MutationProposeResult.Rejected("Could not durably persist the change proposal; no mutation was staged")
         }
-        OpenJobStore.markWaiting(
-            workspace.projectRoot(),
-            proposal.id,
-            proposal.changeSet.changes.map { it.path }.distinct(),
-            request
-        )
+        runCatching {
+            OpenJobStore.markWaiting(
+                workspace.projectRoot(),
+                proposal.id,
+                proposal.changeSet.changes.map { it.path }.distinct(),
+                request
+            )
+        }
         return MutationProposeResult.Proposed(proposal)
     }
 
@@ -203,7 +205,7 @@ class MutationCoordinator(
                             "$details; rollback restored files, but pending-state persistence failed"
                         )
                     }
-                    OpenJobStore.markReady(workspace.projectRoot())
+                    runCatching { OpenJobStore.markReady(workspace.projectRoot()) }
                 }
                 if (rollback == RollbackResult.Restored) {
                     val nextRepairAttempt = proposal.repairAttempt + 1
@@ -246,7 +248,7 @@ class MutationCoordinator(
                     )
                 }
             }
-            OpenJobStore.markApplied(workspace.projectRoot())
+            runCatching { OpenJobStore.markApplied(workspace.projectRoot()) }
             recordEvolution(candidate, applied)
             MutationApprovalResult.Applied(candidate, applied)
         } catch (error: Exception) {
@@ -335,12 +337,14 @@ class MutationCoordinator(
             pending.remove(proposal.id)
             return null
         }
-        OpenJobStore.markWaiting(
-            workspace.projectRoot(),
-            proposal.id,
-            changeSet.changes.map { it.path }.distinct(),
-            proposal.request
-        )
+        runCatching {
+            OpenJobStore.markWaiting(
+                workspace.projectRoot(),
+                proposal.id,
+                changeSet.changes.map { it.path }.distinct(),
+                proposal.request
+            )
+        }
         return proposal
     }
 
