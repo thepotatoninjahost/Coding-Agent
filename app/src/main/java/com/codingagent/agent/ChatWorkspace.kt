@@ -74,7 +74,7 @@ class ChatWorkspace(
         // awaiting owner action. A new goal must not orphan that proposal or cause its eventual
         // apply/markApplied transition to be recorded against the wrong job.
         if (agent != null && looksLikeNewGoal(trimmed) && agent.pendingProposals().isNotEmpty()) {
-            val pending = PendingWorkResume.tryResume(agent, "review proposal", lastAgentText = null)
+            val pending = PendingWorkResume.tryResume(agent, "review proposal", recentAgentText = null)
             if (pending != null) {
                 progressListener?.onProgress("RESUME", "Pending proposal must be resolved before starting a new coding goal")
                 return persist(result = pending)
