@@ -137,7 +137,7 @@ class ChatWorkspaceTest {
     fun resumePreservesWaitingJobWhenProposalCannotBeRecovered() {
         val root = Files.createTempDirectory("chat-resume-missing-proposal").toFile()
         root.resolve("Main.kt").writeText("fun main() = 1\n")
-        OpenJobStore.startNew(root, "fix Main.kt and run the tests")
+        OpenJobStore.openOrKeep(root, "fix Main.kt and run the tests")
         OpenJobStore.markWaiting(root, "missing-proposal", listOf("Main.kt"), "fix Main.kt and run the tests")
         val agent = AutonomousAgent(root, emptyKnowledge, gateway = null)
 
