@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - coding-agent-hardening-fixes
   pull_request:
     branches:
       - main
