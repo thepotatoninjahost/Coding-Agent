@@ -383,6 +383,83 @@ class AcceptancePathTest {
     }
 
     @Test
+    fun repairApprovalSurvivesCoordinatorRestart() {
+        val root = Files.createTempDirectory("accept-repair-restart").toFile()
+        root.resolve("gradlew").writeText("#!/bin/sh\nexit 1\n")
+        root.resolve("gradlew").setExecutable(true)
+        root.resolve("Main.kt").writeText("fun main() = 1\n")
+        val workspace = ProjectWorkspace(root)
+        val first = MutationCoordinator(workspace)
+        first.setRepairProvider { _, attempt ->
+            workspace.preview(
+                listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = ${attempt + 1}\n")),
+                "repair attempt ${attempt}"
+            )
+        }
+
+        val original = (first.propose(
+            "run the tests",
+            listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = broken\n"))
+        ) as MutationProposeResult.Proposed).proposal
+        first.approve(original.id, OwnerApprovalToken.authenticated(original.id))
+        val repair = (first.approve(original.id, OwnerApprovalToken.authenticated(original.id))
+            as MutationApprovalResult.RepairRequired).proposal
+        assertEquals(1, repair.repairAttempt)
+
+        val restarted = MutationCoordinator(ProjectWorkspace(root))
+        restarted.setRepairProvider { _, attempt ->
+            ProjectWorkspace(root).preview(
+                listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = ${attempt + 1}\n")),
+                "repair attempt ${attempt}"
+            )
+        }
+        val restored = restarted.pending().single()
+        assertEquals(repair.id, restored.id)
+        assertEquals(1, restored.repairAttempt)
+
+        restarted.approve(restored.id, OwnerApprovalToken.authenticated(restored.id))
+        val next = restarted.approve(restored.id, OwnerApprovalToken.authenticated(restored.id))
+        assertTrue(next is MutationApprovalResult.RepairRequired)
+        assertEquals(2, (next as MutationApprovalResult.RepairRequired).proposal.repairAttempt)
+        assertEquals("run the tests", next.proposal.repairRootRequest)
+        assertEquals("fun main() = 1\n", root.resolve("Main.kt").readText())
+    }
+
+    @Test
+    fun repairAttemptsAreBoundedAndStopAfterConfiguredMaximum() {
+        val root = Files.createTempDirectory("accept-repair-bound").toFile()
+        root.resolve("gradlew").writeText("#!/bin/sh\nexit 1\n")
+        root.resolve("gradlew").setExecutable(true)
+        root.resolve("Main.kt").writeText("fun main() = 1\n")
+        val workspace = ProjectWorkspace(root)
+        val coordinator = MutationCoordinator(workspace)
+        coordinator.setRepairProvider { _, attempt ->
+            workspace.preview(
+                listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = ${attempt + 1}\n")),
+                "repair attempt ${attempt}"
+            )
+        }
+
+        var proposal = (coordinator.propose(
+            "run the tests",
+            listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = broken\n"))
+        ) as MutationProposeResult.Proposed).proposal
+
+        repeat(3) { attempt ->
+            coordinator.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id))
+            val result = coordinator.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id))
+            assertTrue("repair attempt ${attempt + 1} should be staged", result is MutationApprovalResult.RepairRequired)
+            proposal = (result as MutationApprovalResult.RepairRequired).proposal
+            assertEquals(attempt + 1, proposal.repairAttempt)
+        }
+
+        coordinator.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id))
+        val terminal = coordinator.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id))
+        assertTrue("fourth repair must not be staged", terminal is MutationApprovalResult.Rejected)
+        assertTrue(coordinator.pending().isEmpty())
+        assertEquals("fun main() = 1\n", root.resolve("Main.kt").readText())
+    }
+    @Test
     fun mutationProposalRetainsVerificationIntent() {
         val root = Files.createTempDirectory("accept-request-context").toFile()
         root.resolve("gradlew").writeText("#!/bin/sh\nexit 1\n")
