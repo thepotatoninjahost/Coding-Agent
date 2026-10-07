@@ -30,7 +30,6 @@ object AgentCommandPolicy {
             "gradlew", "gradlew.bat", "gradle" -> validateGradle(tokens)
             "git" -> validateGit(tokens)
             "find" -> validateFind(tokens)
-            "sed" -> validateSed(tokens)
             "cat", "head", "tail", "wc", "file", "grep", "rg", "ls", "pwd", "printf" -> null
             else -> "Model command '$executable' is not permitted; use project inspection tools or a standard verification command"
         }
@@ -40,12 +39,6 @@ object AgentCommandPolicy {
         val forbidden = setOf("-exec", "-execdir", "-delete", "-ok", "-okdir")
         return if (tokens.any { it.lowercase() in forbidden }) {
             "find execution actions are not allowed for model commands"
-        } else null
-    }
-
-    private fun validateSed(tokens: List<String>): String? {
-        return if (tokens.drop(1).any { it == "-i" || it.startsWith("-i") }) {
-            "sed in-place writes are not allowed for model commands"
         } else null
     }
 
