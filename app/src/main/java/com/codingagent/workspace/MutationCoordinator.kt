@@ -152,22 +152,25 @@ class MutationCoordinator(
         )
         val violations = AgentConstitution.check(action, timestamp, proposal.createdAt)
         if (violations.isNotEmpty()) {
+            val blockingBeyondSecondConfirmation = violations.any {
+                it.blocking && it.rule != ConstitutionRule.DOUBLE_CONFIRMATION
+            }
+            if (blockingBeyondSecondConfirmation) {
+                // A rejected approval is never persisted. The proposal remains exactly as it
+                // was before this attempt, so a later valid approval cannot inherit invalid
+                // authorization state.
+                return MutationApprovalResult.Rejected(
+                    violations.joinToString("; ") { "${it.rule}: ${it.message}" }
+                )
+            }
+
             val previous = pending[id]
             pending[id] = candidate
             if (!persist()) {
                 if (previous != null) pending[id] = previous else pending.remove(id)
                 return MutationApprovalResult.Rejected("Could not durably persist owner approval; approval was not accepted")
             }
-            return if (candidate.approvalCount < 2 && violations.none {
-                    it.rule == ConstitutionRule.OWNER_LOCK ||
-                        it.rule == ConstitutionRule.SANDBOX_FIRST ||
-                        it.rule == ConstitutionRule.PERMISSION_EXPIRATION
-                }
-            ) {
-                MutationApprovalResult.AwaitingSecond(candidate, approval)
-            } else {
-                MutationApprovalResult.Rejected(violations.joinToString("; ") { "${it.rule}: ${it.message}" })
-            }
+            return MutationApprovalResult.AwaitingSecond(candidate, approval)
         }
         return try {
             val applied = workspace.applyApproved(proposal.changeSet)
