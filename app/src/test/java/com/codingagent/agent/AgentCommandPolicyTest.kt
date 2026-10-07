@@ -50,6 +50,8 @@ class AgentCommandPolicyTest {
         assertNotNull(AgentCommandPolicy.rejectionReason("./gradlew test --scan"))
         assertNotNull(AgentCommandPolicy.rejectionReason("./gradlew test -Dfoo=bar"))
         assertNotNull(AgentCommandPolicy.rejectionReason("./gradlew :exfiltrate"))
+        assertNotNull(AgentCommandPolicy.rejectionReason("./gradlew testExfiltrate"))
+        assertNotNull(AgentCommandPolicy.rejectionReason("./gradlew :app:testExfiltrate"))
     }
 
     @Test
