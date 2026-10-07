@@ -16,7 +16,7 @@ object AgentCommandPolicy {
     private val protectedTargets = setOf(".", "./", ".git", ".coding-agent")
 
     private fun isProtectedPath(token: String): Boolean =
-        token.split("/", "\\\\").any { it in setOf(".git", ".coding-agent") } || token in protectedTargets
+        token.split('/', '\\').any { it in setOf(".git", ".coding-agent") } || token in protectedTargets
 
     fun rejectionReason(raw: String): String? {
         val command = raw.trim()
