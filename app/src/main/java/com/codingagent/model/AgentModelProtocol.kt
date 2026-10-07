@@ -91,7 +91,7 @@ list_files, read_file, search_project, search_knowledge, research_web, replace_t
         ),
         ModelToolDefinition(
             "run_command",
-            "Run a shell command in the project root and return stdout/stderr/exit code. Use this for gradle, tests, git, and other real checks instead of guessing.",
+            "Run a restricted project inspection or verification command. Model commands cannot delete files, chain shell commands, redirect output, access parent/absolute paths, use network tools, or change global Gradle configuration.",
             """{"type":"object","properties":{"command":{"type":"string"}},"required":["command"]}"""
         ),
         ModelToolDefinition(
