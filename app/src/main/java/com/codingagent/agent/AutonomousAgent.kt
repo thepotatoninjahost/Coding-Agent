@@ -403,6 +403,31 @@ class AutonomousAgent(
                         continue
                     }
                     emit(AutonomousAgentEvent.ModelMessage(response.content))
+                    // A change/debug/create/refactor task is not complete merely because the
+                    // model produced prose. Once the loop has reached its write gate, a textual
+                    // response before any mutation is a refusal to act, not task completion.
+                    // Keep the execution spine alive long enough for the model to produce the
+                    // required staged mutation, then fail closed if it repeatedly refuses.
+                    if (writeNow && changeWork && !state.mutationOccurred) {
+                        state.writeNowRefusals++
+                        if (state.writeNowRefusals >= 2) {
+                            val msg = "The model reached the execution gate twice without staging the requested change. No code was written."
+                            val task = failedTask(taskId, normalized, plan, msg, changeSets.flatMap { it.changes })
+                            emit(AutonomousAgentEvent.Failed(task, msg))
+                            recordTask(task)
+                            return events
+                        }
+                        transcript += com.codingagent.model.ModelMessage(
+                            "assistant",
+                            response.content.take(1_200)
+                        )
+                        transcript += com.codingagent.model.ModelMessage(
+                            "user",
+                            "SYSTEM: This is a change task and no mutation has been staged yet. " +
+                                "Do not report completion. Call replace_text or create_file now using the evidence already gathered."
+                        )
+                        continue
+                    }
                     val missing = missingEvidenceMessage(intake, state.readPaths, state.searchedProject)
                     if (missing != null) {
                         evidenceRefusals++
