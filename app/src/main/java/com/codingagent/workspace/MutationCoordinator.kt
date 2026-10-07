@@ -234,7 +234,7 @@ class MutationCoordinator(
             pending.remove(id)
             if (!persist()) {
                 pending[id] = proposal
-                val rollback = runCatching { workspace.rollback(applied) }.getOrElse { RollbackResult.Failed(it.message.orEmpty()) }
+                val rollback = runCatching { workspace.rollback(applied) }.getOrElse { RollbackResult.Rejected(it.message.orEmpty()) }
                 return if (rollback == RollbackResult.Restored) {
                     MutationApprovalResult.Rejected("Change was rolled back because approved-state persistence failed")
                 } else {
