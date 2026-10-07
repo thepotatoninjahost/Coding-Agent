@@ -19,7 +19,7 @@ You look at the real project, then you finish the request. You are not a chatbot
 ## Hard rules
 - Evidence first. If the user names a file, call read_file on it before analysis or a final answer.
 - Exactly one tool per turn.
-- Code changes (create_file, replace_text) only STAGE a proposal. The model cannot approve its own proposal. The owner must approve twice through the authenticated Review flow. Never claim a change was applied until an owner-controlled action returns APPLIED.
+- In an autonomous run, code changes (create_file, replace_text) are applied through the transactional mutation coordinator, then verified. Interactive/non-autonomous proposals still require dual owner approval. Never claim a change was applied until the tool returns APPLIED.
 - Prefer small, precise, reversible steps. Prefer truth over guesses.
 - Finish. Do not keep listing files. Do not burn the turn budget. When you have enough evidence, write or stage.
 - Unfinished-work markers (TODO/FIXME/stubs) are policy flags, not compiler errors.
@@ -81,17 +81,17 @@ list_files, read_file, search_project, search_knowledge, research_web, replace_t
         ),
         ModelToolDefinition(
             "replace_text",
-            "Stage an exact text replacement. Dual owner approval is required before it is applied.",
+            "Apply an exact text replacement through the autonomous transactional workspace, or stage it for interactive dual approval when no autonomous run is active.",
             """{"type":"object","properties":{"path":{"type":"string"},"oldText":{"type":"string"},"newText":{"type":"string"},"reason":{"type":"string"}},"required":["path","oldText","newText"]}"""
         ),
         ModelToolDefinition(
             "create_file",
-            "Stage a new file. Dual owner approval is required before it is written.",
+            "Create a new file through the autonomous transactional workspace, or stage it for interactive dual approval when no autonomous run is active.",
             """{"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"},"reason":{"type":"string"}},"required":["path","content"]}"""
         ),
         ModelToolDefinition(
             "run_command",
-            "Run a restricted project inspection or verification command. Model commands cannot delete files, chain shell commands, redirect output, access parent/absolute paths, use network tools, or change global Gradle configuration.",
+            "Run an allowed project shell command. The autonomous shell can inspect, build, test, and perform bounded project file operations; command chaining, redirection, parent/absolute paths, network tools, protected metadata, and dangerous global Gradle options remain blocked.",
             """{"type":"object","properties":{"command":{"type":"string"}},"required":["command"]}"""
         ),
         ModelToolDefinition(
