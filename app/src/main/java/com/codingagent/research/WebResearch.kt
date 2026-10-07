@@ -98,7 +98,7 @@ class SearxResearchProvider(
                 connection.connectTimeout = timeoutMillis
                 connection.readTimeout = timeoutMillis
                 connection.requestMethod = "GET"
-                connection.setRequestProperty("User-Agent", "CodingAgent/0.5 (free research; +https://github.com/codingagent)")
+                connection.setRequestProperty("User-Agent", "Coding-Agent/1.0 (Android; https://github.com/thepotatoninjahost/Coding-Agent)")
                 connection.setRequestProperty("Accept", "application/json")
                 if (connection.responseCode !in 200..299) {
                     errors += "$base HTTP ${connection.responseCode}"
@@ -146,7 +146,7 @@ class MdnResearchProvider(
             connection.connectTimeout = timeoutMillis
             connection.readTimeout = timeoutMillis
             connection.requestMethod = "GET"
-            connection.setRequestProperty("User-Agent", "CodingAgent/0.5")
+            connection.setRequestProperty("User-Agent", "Coding-Agent/1.0 (Android; https://github.com/thepotatoninjahost/Coding-Agent)")
             connection.setRequestProperty("Accept", "application/json")
             if (connection.responseCode !in 200..299) {
                 return ResearchResult(query, emptyList(), "MDN HTTP ${connection.responseCode}")
@@ -248,7 +248,7 @@ class DuckDuckGoResearchProvider(
 
     companion object {
         const val BROWSER_UA =
-            "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
+            "Coding-Agent/1.0 (Android; https://github.com/thepotatoninjahost/Coding-Agent)"
     }
 }
 
@@ -291,7 +291,7 @@ class GitHubResearchProvider(
             connection.connectTimeout = timeoutMillis
             connection.readTimeout = timeoutMillis
             connection.requestMethod = "GET"
-            connection.setRequestProperty("User-Agent", "CodingAgent/0.5")
+            connection.setRequestProperty("User-Agent", "Coding-Agent/1.0 (Android; https://github.com/thepotatoninjahost/Coding-Agent)")
             connection.setRequestProperty("Accept", "application/vnd.github+json")
             if (connection.responseCode !in 200..299) return null
             JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
@@ -323,7 +323,7 @@ class StackOverflowResearchProvider(
             connection.connectTimeout = timeoutMillis
             connection.readTimeout = timeoutMillis
             connection.requestMethod = "GET"
-            connection.setRequestProperty("User-Agent", "CodingAgent/0.5")
+            connection.setRequestProperty("User-Agent", "Coding-Agent/1.0 (Android; https://github.com/thepotatoninjahost/Coding-Agent)")
             connection.setRequestProperty("Accept", "application/json")
             connection.setRequestProperty("Accept-Encoding", "identity")
             if (connection.responseCode !in 200..299) return ResearchResult(query, emptyList(), "StackOverflow HTTP ${connection.responseCode}")
