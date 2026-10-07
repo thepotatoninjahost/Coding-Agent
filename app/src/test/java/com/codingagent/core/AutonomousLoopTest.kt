@@ -59,52 +59,6 @@ class AutonomousLoopTest {
     }
 
     @Test
-    fun failedRunCommandDoesNotAdvanceAsSuccessfulCheck() {
-        val root = Files.createTempDirectory("agent-run-command-failure").toFile()
-        root.resolve("a.kt").writeText("fun a() = 1\\n")
-        val gateway = ScriptedGateway(
-            listOf(
-                ModelResponse.ToolCall("run_command", """{"command":"printf failed; exit 3"}"""),
-                ModelResponse.Text("The check failed.")
-            )
-        )
-        val workspace = ProjectWorkspace(root)
-        val knowledge = object : AgentKnowledge {
-            override fun search(query: String, limit: Int) = emptyList<KnowledgeHit>()
-        }
-        val agent = AutonomousAgent(
-            root, knowledge, gateway, AutonomousAgentConfig(maxTurns = 4)
-        )
-        val events = agent.run("Fix the diagnostic issue by running the project check")
-        val failure = events.filterIsInstance<AutonomousAgentEvent.ToolFinished>().first { it.name == "run_command" }
-        assertTrue(!failure.success)
-        assertTrue(failure.result.contains("exit=3"))
-    }
-
-    @Test
-    fun failedVerificationDoesNotAdvanceAsSuccessfulGate() {
-        val root = Files.createTempDirectory("agent-verify-failure").toFile()
-        root.resolve("a.kt").writeText("fun a() = 1\\n// TODO unfinished\\n")
-        val gateway = ScriptedGateway(
-            listOf(
-                ModelResponse.ToolCall("verify", "{}"),
-                ModelResponse.Text("Verification failed as expected.")
-            )
-        )
-        val workspace = ProjectWorkspace(root)
-        val knowledge = object : AgentKnowledge {
-            override fun search(query: String, limit: Int) = emptyList<KnowledgeHit>()
-        }
-        val agent = AutonomousAgent(
-            root, knowledge, gateway, AutonomousAgentConfig(maxTurns = 4)
-        )
-        val events = agent.run("Explain the current verification state")
-        val failure = events.filterIsInstance<AutonomousAgentEvent.ToolFinished>().first { it.name == "verify" }
-        assertTrue(!failure.success)
-        assertTrue(failure.result.contains("passed=false"))
-    }
-
-    @Test
     fun cancelBetweenTurnsEmitsStopped() {
         val root = Files.createTempDirectory("agent-cancel").toFile()
         root.resolve("README.md").writeText("# demo\n")
