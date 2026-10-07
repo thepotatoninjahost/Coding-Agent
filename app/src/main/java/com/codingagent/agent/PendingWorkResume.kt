@@ -41,7 +41,13 @@ object PendingWorkResume {
                 status = "resume-ambiguous",
                 plan = AgentPlan(text, emptyList(), emptyList()),
                 changes = emptyList(),
-                verification = VerificationReport(true, emptyList()),
+                verification = VerificationReport(false, listOf(
+                    com.codingagent.workspace.VerificationIssue(
+                        "pending-proposals",
+                        0,
+                        "Resume is ambiguous; an owner must select the intended pending proposal"
+                    )
+                )),
                 events = pending.map { "pending proposal ${it.id}" },
                 summary = "Resume is ambiguous because multiple proposals are pending ($ids). Open Review and select the intended proposal."
             )
