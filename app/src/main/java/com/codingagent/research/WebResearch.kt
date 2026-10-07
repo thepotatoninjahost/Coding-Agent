@@ -98,7 +98,7 @@ class SearxResearchProvider(
                 connection.connectTimeout = timeoutMillis
                 connection.readTimeout = timeoutMillis
                 connection.requestMethod = "GET"
-                connection.setRequestProperty("User-Agent", "CodingAgent/0.5 (free research; +https://github.com/codingagent)")
+                connection.setRequestProperty("User-Agent", "Coding-Agent/1.0 (Android; https://github.com/thepotatoninjahost/Coding-Agent)")
                 connection.setRequestProperty("Accept", "application/json")
                 if (connection.responseCode !in 200..299) {
                     errors += "$base HTTP ${connection.responseCode}"
