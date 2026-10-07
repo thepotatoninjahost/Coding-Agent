@@ -66,7 +66,7 @@ class ChatWorkspace(
 
         val agent = runtimeProvider()
         if (agent != null && looksLikeNewGoal(trimmed)) {
-            OpenJobStore.boundRoot()?.let { OpenJobStore.openOrKeep(it, trimmed) }
+            OpenJobStore.boundRoot()?.let { OpenJobStore.startNew(it, trimmed) }
         }
         val approval = agent?.let { ChatApproval.tryApprove(it, trimmed) }
         if (approval != null) {
@@ -95,7 +95,7 @@ class ChatWorkspace(
         val result = if (agent == null) {
             null
         } else {
-            val events = agent.run(packaged) { event ->
+            val events = agent.runAutonomous(packaged) { event ->
                 when (event) {
                     is AutonomousAgentEvent.Phase -> {
                         if (event.name == "PURPOSE" && event.detail.isNotBlank()) workLog += event.detail
