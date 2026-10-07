@@ -178,17 +178,6 @@ class MutationCoordinator(
                 workspace.runChecks(intake.verificationCommands, 180)
             }
             if (!postApply.passed) {
-                val rollback = workspace.rollback(applied)
-                if (rollback == RollbackResult.Restored) {
-                    pending.remove(id)
-                    if (!persist()) {
-                        pending[id] = proposal
-                        return MutationApprovalResult.Rejected(
-                            "$details; rollback restored files, but pending-state persistence failed"
-                        )
-                    }
-                    OpenJobStore.markReady(workspace.projectRoot())
-                }
                 val details = buildString {
                     append("Approved change failed post-apply checks")
                     if (postApply.commands.isNotEmpty()) {
@@ -201,6 +190,17 @@ class MutationCoordinator(
                         append(". Issues: ")
                         append(postApply.issues.joinToString { "${it.path}:${it.line}: ${it.message}" })
                     }
+                }
+                val rollback = workspace.rollback(applied)
+                if (rollback == RollbackResult.Restored) {
+                    pending.remove(id)
+                    if (!persist()) {
+                        pending[id] = proposal
+                        return MutationApprovalResult.Rejected(
+                            "$details; rollback restored files, but pending-state persistence failed"
+                        )
+                    }
+                    OpenJobStore.markReady(workspace.projectRoot())
                 }
                 if (rollback == RollbackResult.Restored) {
                     val nextRepairAttempt = proposal.repairAttempt + 1
