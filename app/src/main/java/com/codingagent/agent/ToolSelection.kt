@@ -59,11 +59,14 @@ class ToolSelector {
         } else null
         add(ToolKind.SEARCH_KNOWLEDGE, "Retrieve relevant local coding references and lessons", listOf(indexId))
         val changeWork = intake.intent in setOf(TaskIntent.CHANGE, TaskIntent.CREATE, TaskIntent.REFACTOR, TaskIntent.DEBUG)
-        val synthesisId = if (changeWork) {
-            add(ToolKind.SYNTHESIZE_CODE, "Produce a structured, testable change proposal", listOf(indexId))
-        } else null
+        // Code synthesis is model reasoning, not a separately executable tool.
+        // The production tool plan must contain only real dispatchable gates.
         val applyId = if (changeWork) {
-            add(ToolKind.APPLY_CHANGES, "Stage the selected proposal through the workspace mutation API", listOf(synthesisId!!))
+            add(
+                ToolKind.APPLY_CHANGES,
+                "Stage the model's selected change through the workspace mutation API",
+                listOf(searchId ?: indexId)
+            )
         } else null
         val checksId = if (intake.verificationCommands.isNotEmpty() || changeWork) {
             add(ToolKind.RUN_CHECKS, "Run project diagnostics and selected verification checks", listOf(indexId))
@@ -122,12 +125,7 @@ class ToolSelectionLoop(plan: ToolSelectionPlan, private val maxIterations: Int 
             ?: return "Tool " + toolName + " is not part of the active execution plan"
         val blockedDependency = target.dependsOn.firstOrNull { dependency ->
             val dependencyTool = tools.firstOrNull { it.id == dependency }
-            val synthesisProvidedByApply = toolKind == ToolKind.APPLY_CHANGES &&
-                dependencyTool?.kind == ToolKind.SYNTHESIZE_CODE &&
-                dependencyTool.dependsOn.all { synthesisDependency ->
-                    tools.firstOrNull { it.id == synthesisDependency }?.status == ToolStepStatus.COMPLETE
-                }
-            dependencyTool?.status != ToolStepStatus.COMPLETE && !synthesisProvidedByApply
+            dependencyTool?.status != ToolStepStatus.COMPLETE
         }
         return blockedDependency?.let { dependency ->
             "Tool " + toolName + " is blocked until planned tool " + dependency + " completes"
@@ -135,9 +133,6 @@ class ToolSelectionLoop(plan: ToolSelectionPlan, private val maxIterations: Int 
     }
 
     fun recordSuccess(toolName: String, toolKind: ToolKind, evidence: String = "") {
-        if (toolKind == ToolKind.APPLY_CHANGES) {
-            completeKind(ToolKind.SYNTHESIZE_CODE, "Concrete mutation supplied by " + toolName)
-        }
         val target = tools.firstOrNull { it.kind == toolKind } ?: return
         if (target.status == ToolStepStatus.ACTIVE || target.status == ToolStepStatus.PENDING) {
             replace(target.copy(status = ToolStepStatus.COMPLETE, evidence = evidence))
