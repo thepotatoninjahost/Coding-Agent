@@ -41,6 +41,11 @@ class AgentToolDispatch(
         autonomousGrant = grant
     }
 
+    fun clearAutonomousExecution() {
+        autonomousTaskId = null
+        autonomousGrant = null
+    }
+
     fun setRequestContext(request: String) {
         requestContext = request.trim()
     }
