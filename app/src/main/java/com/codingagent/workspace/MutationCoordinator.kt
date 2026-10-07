@@ -190,6 +190,12 @@ class MutationCoordinator(
                 }
                 val rollback = workspace.rollback(applied)
                 if (rollback == RollbackResult.Restored) {
+                    if (!persistState(pending - id)) {
+                        return MutationApprovalResult.Rejected(
+                            "$details; changes were rolled back, but pending-state persistence failed"
+                        )
+                    }
+                    OpenJobStore.markReady(workspace.projectRoot())
                     val nextRepairAttempt = proposal.repairAttempt + 1
                     if (nextRepairAttempt <= repairConfig.maxRepairAttempts) {
                         val repair = runCatching {
