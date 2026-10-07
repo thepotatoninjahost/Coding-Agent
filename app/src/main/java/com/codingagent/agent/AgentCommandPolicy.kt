@@ -12,7 +12,9 @@ object AgentCommandPolicy {
     private val shellMetacharacters = Regex("""[;&|><`\$'"\n\r]""")
     private val forbiddenPathTokens = Regex("""(^|/|\\)\.\.(?:/|\\|$)""")
 
-    fun rejectionReason(raw: String): String? {
+    fun rejectionReason(raw: String): String? = rejectionReason(raw, null)
+
+    fun rejectionReason(raw: String, projectRoot: java.io.File?): String? {
         val command = raw.trim()
         if (command.isBlank()) return "Command is empty"
         if (command.length > 1_000) return "Command is too long"
@@ -26,6 +28,9 @@ object AgentCommandPolicy {
         }
 
         val executable = tokens.first().removePrefix("./")
+        if (projectRoot != null) {
+            validateFilesystemOperands(executable, tokens, projectRoot)?.let { return it }
+        }
         return when (executable) {
             "gradlew", "gradlew.bat", "gradle" -> validateGradle(tokens)
             "git" -> validateGit(tokens)
@@ -36,10 +41,32 @@ object AgentCommandPolicy {
     }
 
     private fun validateFind(tokens: List<String>): String? {
-        val forbidden = setOf("-exec", "-execdir", "-delete", "-ok", "-okdir")
+        val forbidden = setOf("-exec", "-execdir", "-delete", "-ok", "-okdir", "-L", "--follow", "--dereference")
         return if (tokens.any { it.lowercase() in forbidden }) {
             "find execution actions are not allowed for model commands"
         } else null
+    }
+
+    private fun validateFilesystemOperands(executable: String, tokens: List<String>, root: java.io.File): String? {
+        val operands = when (executable) {
+            "cat", "head", "tail", "wc", "file", "ls" -> tokens.drop(1).filterNot { it.startsWith("-") }
+            "grep", "rg" -> tokens.drop(2).filterNot { it.startsWith("-") }
+            "find" -> tokens.drop(1).filterNot { it.startsWith("-") }.take(1)
+            else -> emptyList()
+        }
+        val canonicalRoot = runCatching { root.canonicalFile }.getOrElse { return "Project root could not be resolved safely" }
+        for (operand in operands) {
+            if (operand.isBlank()) continue
+            val candidate = root.resolve(operand)
+            if (!candidate.exists()) continue
+            val canonical = runCatching { candidate.canonicalFile }.getOrElse {
+                return "Model commands may not access filesystem paths that cannot be resolved safely"
+            }
+            if (!canonical.toPath().startsWith(canonicalRoot.toPath())) {
+                return "Model commands may not follow a symlink or filesystem path outside the project"
+            }
+        }
+        return null
     }
 
     private fun validateGit(tokens: List<String>): String? {
