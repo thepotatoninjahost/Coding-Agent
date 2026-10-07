@@ -118,6 +118,34 @@ class ChatWorkspaceTest {
     }
 
     @Test
+    fun resumeSurfacesMissingPendingProposalWhenOpenJobStillWaits() {
+        val root = Files.createTempDirectory("chat-resume-missing-proposal").toFile()
+        root.resolve("Main.kt").writeText("fun main() = 1\n")
+        val proposalId = "missing-proposal"
+        OpenJobStore.save(
+            root,
+            com.codingagent.workspace.OpenJob(
+                id = "open-job",
+                goal = "fix Main.kt",
+                status = "waiting-approval",
+                proposalId = proposalId,
+                paths = listOf("Main.kt"),
+                updatedAt = System.currentTimeMillis()
+            )
+        )
+        val agent = AutonomousAgent(root, emptyKnowledge, gateway = null)
+
+        val result = PendingWorkResume.tryResume(agent, "continue", null)
+
+        assertTrue(result is com.codingagent.agent.AgentRuntimeResult.Failed)
+        val failed = result as com.codingagent.agent.AgentRuntimeResult.Failed
+        assertEquals("resume-integrity-failure", failed.task.status)
+        assertFalse(failed.task.verification.passed)
+        assertTrue(failed.task.summary.contains(proposalId))
+        assertTrue(failed.task.summary.contains("waiting for approval"))
+    }
+
+    @Test
     fun continueRestartsPersistedOpenJobInsteadOfReportingDroppedWork() {
         val root = Files.createTempDirectory("chat-resume-open-job").toFile()
         root.resolve("Main.kt").writeText("fun main() = 1\n")
