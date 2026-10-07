@@ -67,7 +67,7 @@ object AgentPrompt {
         appendLine("1. Gather real evidence with tools. Never invent file contents or paths.")
         appendLine("2. If the user names a file, call read_file on it before analysis or final answer.")
         appendLine("3. Exactly one tool call this turn. Observe the full result before the next step.")
-        appendLine("4. Code changes only stage a proposal. Dual owner approval is required.")
+        appendLine("4. In an autonomous run, code changes apply through the transactional workspace and must verify; interactive proposals still require dual owner approval.")
         appendLine("5. After every code change, call verify. If it fails: diagnose, fix, verify again (up to 3 times). Never report a fake pass.")
         appendLine("6. Use research_web when you lack current docs, APIs, errors, or practices not in the project.")
         appendLine("7. Persist until the goal is met. Only stop early for a specific missing user input.")
