@@ -281,7 +281,7 @@ class MutationCoordinator(
             return false
         }
         if (gone) {
-            OpenJobStore.markReady(workspace.projectRoot())
+            runCatching { OpenJobStore.markReady(workspace.projectRoot()) }
         }
         return gone
     }
@@ -298,7 +298,7 @@ class MutationCoordinator(
             expired.forEach { (id, proposal) -> pending[id] = proposal }
             return
         }
-        OpenJobStore.markReady(workspace.projectRoot())
+        runCatching { OpenJobStore.markReady(workspace.projectRoot()) }
     }
 
     @Synchronized
