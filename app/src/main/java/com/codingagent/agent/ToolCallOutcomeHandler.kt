@@ -263,7 +263,16 @@ class ToolCallOutcomeHandler(
         transcript += com.codingagent.model.ModelMessage("assistant", response.thought.ifBlank { "Calling ${response.name}" }, toolCallId, response.name, response.arguments)
         transcript += com.codingagent.model.ModelMessage("tool", "${response.name}: $toolResult", toolCallId)
 
-        val success = !toolResult.startsWith("ERROR:")
+        // Tool transport success is not the same as execution success. A command can return
+        // exit=1/timeout, and verify can return passed=false, without using the ERROR: prefix.
+        // Treat those outcomes as failures so planning gates cannot advance on failed checks.
+        val success = when (response.name) {
+            "run_command" -> !toolResult.startsWith("ERROR:") &&
+                Regex("(?m)^exit=0\\s+timeout=false").containsMatchIn(toolResult)
+            "verify" -> !toolResult.startsWith("ERROR:") &&
+                Regex("(?m)^passed=true(?:\\s|$)").containsMatchIn(toolResult)
+            else -> !toolResult.startsWith("ERROR:")
+        }
 
         if (success) {
             toolSelectionLoop.recordSuccess(response.name, toolKind, toolResult.take(300))
