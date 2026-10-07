@@ -110,6 +110,30 @@ class AcceptancePathTest {
     }
 
     @Test
+    fun proposalIsRejectedWhenPendingStateCannotBePersisted() {
+        val root = Files.createTempDirectory("accept-persistence-failure").toFile()
+        root.resolve("Main.kt").writeText("fun main() = 1\n")
+        root.resolve(".coding-agent").writeText("not-a-directory")
+
+        val coordinator = MutationCoordinator(ProjectWorkspace(root))
+        val result = coordinator.propose(
+            "persist failure",
+            listOf(
+                TaskOperation(
+                    OperationKind.REPLACE,
+                    "Main.kt",
+                    "fun main() = 1\n",
+                    "fun main() = 2\n"
+                )
+            )
+        )
+
+        assertTrue(result is MutationProposeResult.Rejected)
+        assertTrue(coordinator.pending().isEmpty())
+        assertEquals("fun main() = 1\n", root.resolve("Main.kt").readText())
+    }
+
+    @Test
     fun pendingProposalStoreReplacesStateAtomicallyAndLeavesNoTemporaryFiles() {
         val root = Files.createTempDirectory("accept-pending-store").toFile()
         root.resolve("Main.kt").writeText("fun main() = 1\n")
