@@ -87,6 +87,30 @@ class AcceptancePathTest {
     }
 
     @Test
+    fun failedApprovalPersistenceDoesNotAdvanceAuthorization() {
+        val root = Files.createTempDirectory("accept-approval-persist-failure").toFile()
+        root.resolve("Main.kt").writeText("fun main() = 1\n")
+        val coordinator = MutationCoordinator(ProjectWorkspace(root))
+        val proposed = coordinator.propose(
+            "do not lose approval state",
+            listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 2\n"))
+        ) as MutationProposeResult.Proposed
+
+        val pendingFile = PendingProposalStore.file(root)
+        assertTrue(pendingFile.isFile)
+        assertTrue(pendingFile.delete())
+        assertTrue(pendingFile.mkdirs())
+
+        val first = coordinator.approve(
+            proposed.proposal.id,
+            OwnerApprovalToken.authenticated(proposed.proposal.id)
+        )
+        assertTrue(first is MutationApprovalResult.Rejected)
+        assertEquals(0, coordinator.pending().single().approvalCount)
+        assertEquals("fun main() = 1\n", root.resolve("Main.kt").readText())
+    }
+
+    @Test
     fun rejectLeavesDiskUnchanged() {
         val root = Files.createTempDirectory("accept-reject").toFile()
         root.resolve("Main.kt").writeText("fun main() = 1\n")
