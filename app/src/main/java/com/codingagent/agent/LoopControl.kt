@@ -3,8 +3,10 @@ package com.codingagent.agent
 import com.codingagent.intake.TaskIntent
 
 /**
- * ONE JOB: Say whether this turn may use tools.
- * Writes still only stage a proposal. Dual owner approval applies them.
+ * ONE JOB: Govern the model loop's transition from evidence gathering to execution.
+ *
+ * The model remains responsible for choosing the concrete tool, but this gate controls
+ * when the production path stops gathering and is required to act on sufficient evidence.
  */
 data class LoopDecision(
     val toolsOpen: Boolean,
@@ -14,15 +16,49 @@ data class LoopDecision(
 
 object LoopControl {
     fun decide(
-        @Suppress("UNUSED_PARAMETER") turn: Int,
-        @Suppress("UNUSED_PARAMETER") maxTurns: Int,
-        @Suppress("UNUSED_PARAMETER") usefulGathers: Int,
-        @Suppress("UNUSED_PARAMETER") writeRefusals: Int,
-        @Suppress("UNUSED_PARAMETER") intent: TaskIntent,
-        @Suppress("UNUSED_PARAMETER") wholeProjectReview: Boolean
-    ): LoopDecision = LoopDecision(
-        toolsOpen = true,
-        demandWrite = false,
-        synthesizeFromEvidence = false
-    )
+        turn: Int,
+        maxTurns: Int,
+        usefulGathers: Int,
+        writeRefusals: Int,
+        intent: TaskIntent,
+        wholeProjectReview: Boolean
+    ): LoopDecision {
+        val changeWork = intent in setOf(
+            TaskIntent.CHANGE,
+            TaskIntent.CREATE,
+            TaskIntent.REFACTOR,
+            TaskIntent.DEBUG
+        )
+
+        if (!changeWork) {
+            return LoopDecision(
+                toolsOpen = true,
+                demandWrite = false,
+                synthesizeFromEvidence = false
+            )
+        }
+
+        val minimumEvidence = when (intent) {
+            TaskIntent.DEBUG, TaskIntent.REFACTOR -> 2
+            else -> 1
+        }
+        val evidenceReady = usefulGathers >= minimumEvidence
+        val forcedByRefusal = writeRefusals >= 2
+        val lateTurn = turn >= (maxTurns - 2).coerceAtLeast(1)
+        val shouldWrite = evidenceReady || forcedByRefusal || lateTurn
+
+        if (wholeProjectReview && !forcedByRefusal && !lateTurn && usefulGathers < 3) {
+            return LoopDecision(
+                toolsOpen = true,
+                demandWrite = false,
+                synthesizeFromEvidence = false
+            )
+        }
+
+        return LoopDecision(
+            toolsOpen = !shouldWrite,
+            demandWrite = shouldWrite,
+            synthesizeFromEvidence = shouldWrite && evidenceReady
+        )
+    }
 }
