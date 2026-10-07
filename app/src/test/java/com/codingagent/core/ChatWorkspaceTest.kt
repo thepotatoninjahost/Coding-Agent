@@ -153,6 +153,21 @@ class ChatWorkspaceTest {
     }
 
     @Test
+    fun clarificationRemainsNeedsInputInsteadOfCompleted() {
+        val root = Files.createTempDirectory("chat-needs-input").toFile()
+        root.resolve("Main.kt").writeText("fun main() = 1\n")
+        val store = MemoryChatStore()
+        val agent = AutonomousAgent(root, emptyKnowledge, gateway = null)
+        val workspace = ChatWorkspace(store, runtimeProvider = { agent })
+
+        val turn = workspace.send("fix it")
+
+        assertTrue(turn.result is com.codingagent.agent.AgentRuntimeResult.NeedsInput)
+        assertEquals("needs-input", (turn.result as com.codingagent.agent.AgentRuntimeResult.NeedsInput).task.status)
+        assertTrue(turn.response.content.isNotBlank())
+    }
+
+    @Test
     fun includesPreviousConversationInFollowUpRequest() {
         val root = Files.createTempDirectory("chat-context").toFile()
         root.resolve("Main.kt").writeText("fun main() = 1\n")
