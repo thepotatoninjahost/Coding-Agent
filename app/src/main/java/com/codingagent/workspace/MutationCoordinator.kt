@@ -104,7 +104,12 @@ class MutationCoordinator(
             expiresAt = timestamp + AgentConstitution.APPROVAL_EXPIRATION_MS
         )
         pending[proposal.id] = proposal
-        persist()
+        if (!persist()) {
+            pending.remove(proposal.id)
+            return MutationProposeResult.Rejected(
+                "Could not durably persist the change proposal; no mutation was staged"
+            )
+        }
         runCatching {
             OpenJobStore.markWaiting(
                 workspace.projectRoot(),
@@ -179,17 +184,6 @@ class MutationCoordinator(
                 workspace.runChecks(intake.verificationCommands, 180)
             }
             if (!postApply.passed) {
-                val rollback = workspace.rollback(applied)
-                if (rollback == RollbackResult.Restored) {
-                    pending.remove(id)
-                    if (!persist()) {
-                        pending[id] = proposal
-                        return MutationApprovalResult.Rejected(
-                            "$details; rollback restored files, but pending-state persistence failed"
-                        )
-                    }
-                    runCatching { OpenJobStore.markReady(workspace.projectRoot()) }
-                }
                 val details = buildString {
                     append("Approved change failed post-apply checks")
                     if (postApply.commands.isNotEmpty()) {
@@ -202,6 +196,17 @@ class MutationCoordinator(
                         append(". Issues: ")
                         append(postApply.issues.joinToString { "${it.path}:${it.line}: ${it.message}" })
                     }
+                }
+                val rollback = workspace.rollback(applied)
+                if (rollback == RollbackResult.Restored) {
+                    pending.remove(id)
+                    if (!persist()) {
+                        pending[id] = proposal
+                        return MutationApprovalResult.Rejected(
+                            "$details; rollback restored files, but pending-state persistence failed"
+                        )
+                    }
+                    runCatching { OpenJobStore.markReady(workspace.projectRoot()) }
                 }
                 if (rollback == RollbackResult.Restored) {
                     val nextRepairAttempt = proposal.repairAttempt + 1
@@ -358,7 +363,9 @@ class MutationCoordinator(
         }
     }
 
-    private fun persist() {
-        runCatching { PendingProposalStore.save(workspace.projectRoot(), pending.values.toList()) }
-    }
+    private fun persist(): Boolean =
+        runCatching {
+            PendingProposalStore.save(workspace.projectRoot(), pending.values.toList())
+            true
+        }.getOrDefault(false)
 }
