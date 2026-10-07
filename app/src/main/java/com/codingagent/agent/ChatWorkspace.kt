@@ -140,6 +140,9 @@ class ChatWorkspace(
                 return AgentRuntimeResult.NeedsApproval(task, ChangeDiff.ownerReviewText(proposal), proposal.id)
             }
         }
+        if (task.status == "needs-input") {
+            return AgentRuntimeResult.NeedsInput(task, task.summary)
+        }
         return AgentRuntimeResult.Completed(task)
     }
 
