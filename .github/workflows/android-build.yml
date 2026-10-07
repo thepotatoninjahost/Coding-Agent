@@ -46,7 +46,7 @@ jobs:
             echo "ERROR: repository-stored private debug signing material is tracked."
             exit 1
           fi
-          if find . -type f \\( -name "*.keystore" -o -name "*.jks" \\) -not -path "./.git/*" -not -path "./app/build/*" | grep -q .; then
+          if find . -type f \( -name "*.keystore" -o -name "*.jks" \) -not -path "./.git/*" -not -path "./app/build/*" | grep -q .; then
             echo "ERROR: private signing material exists in the source tree."
             exit 1
           fi
