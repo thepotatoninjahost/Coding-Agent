@@ -141,7 +141,7 @@ class AutonomousAgent(
     override fun execute(request: String): AgentRuntimeResult {
         val events = run(request)
         return when (val terminalEvent = events.lastOrNull()) {
-            is AutonomousAgentEvent.ApprovalRequired -> AgentRuntimeResult.NeedsApproval(terminalEvent.task, "Review proposal ${terminalEvent.proposal.id} and confirm twice before applying any code change.", terminalEvent.proposal.id)
+            is AutonomousAgentEvent.ApprovalRequired -> AgentRuntimeResult.NeedsApproval(terminalEvent.task, "Review proposal ${terminalEvent.proposal.id} before applying the change.", terminalEvent.proposal.id)
             is AutonomousAgentEvent.Completed -> AgentRuntimeResult.Completed(terminalEvent.task)
             is AutonomousAgentEvent.Failed -> terminalEvent.task?.let { AgentRuntimeResult.Failed(it) } ?: error(terminalEvent.message)
             is AutonomousAgentEvent.Stopped -> AgentRuntimeResult.Failed(terminalEvent.task)
@@ -165,6 +165,8 @@ class AutonomousAgent(
             lastResearchProgress = "not started"
             return runInternal(request, onEvent)
         } finally {
+            autonomousTaskId = null
+            autonomousGrant = null
             activeRunGeneration = -1L
             running.set(false)
         }
