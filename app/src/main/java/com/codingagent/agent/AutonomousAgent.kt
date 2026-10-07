@@ -2,6 +2,7 @@ package com.codingagent.agent
 import com.codingagent.workspace.AgentPlan
 import com.codingagent.workspace.AgentStep
 import com.codingagent.workspace.OwnerApprovalToken
+import com.codingagent.workspace.AutonomousExecutionGrant
 
 import org.json.JSONObject
 import java.time.Instant
@@ -67,6 +68,10 @@ class AutonomousAgent(
     private val changeSets = mutableListOf<ChangeSet>()
     private var lastResearchProgress: String = "not started"
     private val lanes = AgentDirectLanes(workspace, files, mutations)
+    @Volatile
+    private var autonomousTaskId: String? = null
+    @Volatile
+    private var autonomousGrant: AutonomousExecutionGrant? = null
     private val tools = AgentToolDispatch(
         files = files,
         workspace = workspace,
@@ -75,7 +80,9 @@ class AutonomousAgent(
         mutations = mutations,
         terminal = terminal,
         maxOutputCharacters = config.maxOutputCharacters,
-        onResearchProgress = { lastResearchProgress = it }
+        onResearchProgress = { lastResearchProgress = it },
+        autonomousTaskId = null,
+        autonomousGrant = null
     )
     private val running = AtomicBoolean(false)
     private val cancellationGeneration = AtomicLong(0L)
@@ -168,6 +175,10 @@ class AutonomousAgent(
         require(normalized.isNotEmpty()) { "A coding request is required" }
         val taskId = UUID.randomUUID().toString()
         val events = mutableListOf<AutonomousAgentEvent>(AutonomousAgentEvent.Started(taskId, normalized))
+        val autonomousGrantForRun = AutonomousExecutionGrant.forRun(taskId, root)
+        autonomousTaskId = taskId
+        autonomousGrant = autonomousGrantForRun
+        tools.setAutonomousExecution(taskId, autonomousGrantForRun)
         fun emit(event: AutonomousAgentEvent) {
             events += event
             onEvent(event)
