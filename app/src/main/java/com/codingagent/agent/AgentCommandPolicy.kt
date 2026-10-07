@@ -15,6 +15,9 @@ object AgentCommandPolicy {
     private val globCharacters = Regex("""[*?\[]""")
     private val protectedTargets = setOf(".", "./", ".git", ".coding-agent")
 
+    private fun isProtectedPath(token: String): Boolean =
+        token.split("/", "\\\\").any { it in setOf(".git", ".coding-agent") } || token in protectedTargets
+
     fun rejectionReason(raw: String): String? {
         val command = raw.trim()
         if (command.isBlank()) return "Command is empty"
@@ -59,7 +62,7 @@ object AgentCommandPolicy {
         if (tokens.drop(1).any { it in setOf("-r", "-R", "--recursive") }) {
             return "Recursive deletion is not allowed for model commands"
         }
-        if (tokens.drop(1).any { it in protectedTargets || it.startsWith(".git/") || it.startsWith(".coding-agent/") }) {
+        if (tokens.drop(1).any { isProtectedPath(it) }) {
             return "Protected project metadata cannot be deleted by model commands"
         }
         if (tokens.drop(1).any { globCharacters.containsMatchIn(it) }) {
