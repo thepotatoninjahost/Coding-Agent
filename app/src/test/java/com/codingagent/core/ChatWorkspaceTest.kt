@@ -77,6 +77,29 @@ class ChatWorkspaceTest {
     }
 
     @Test
+    fun newGoalCannotOrphanAnExistingPendingProposal() {
+        val root = Files.createTempDirectory("chat-new-goal-pending").toFile()
+        root.resolve("Main.kt").writeText("fun main() = 1\n")
+        val store = MemoryChatStore()
+        val agent = AutonomousAgent(root, emptyKnowledge, gateway = null)
+        val workspace = ChatWorkspace(store, runtimeProvider = { agent })
+
+        val staged = agent.run("replace fun main() = 1 with fun main() = 2 in Main.kt")
+        assertTrue(staged.any { it is com.codingagent.agent.AutonomousAgentEvent.ApprovalRequired })
+        val proposalId = agent.pendingProposals().single().id
+        assertEquals("waiting-approval", OpenJobStore.load(root)?.status)
+        assertEquals(proposalId, OpenJobStore.load(root)?.proposalId)
+
+        val turn = workspace.send("fix Main.kt to return 3")
+        assertTrue(turn.result is com.codingagent.agent.AgentRuntimeResult.NeedsApproval)
+        assertEquals(1, agent.pendingProposals().size)
+        assertEquals(proposalId, agent.pendingProposals().single().id)
+        assertEquals("waiting-approval", OpenJobStore.load(root)?.status)
+        assertEquals(proposalId, OpenJobStore.load(root)?.proposalId)
+        assertTrue(root.resolve("Main.kt").readText().contains("fun main() = 1"))
+    }
+
+    @Test
     fun chatApprovalRefusesWhenMultipleProposalsArePending() {
         val root = Files.createTempDirectory("chat-ambiguous-approval").toFile()
         root.resolve("Main.kt").writeText("fun main() = 1\n")
