@@ -139,11 +139,31 @@ object AgentCommandPolicy {
         val taskTokens = tokens.drop(1).filterNot { it.startsWith("-") }
         if (taskTokens.isEmpty()) return null
 
-        val safeTask = Regex(
-            """^:?(?:[A-Za-z0-9_-]+:)*(?:build|assemble|check|test|lint|compile[A-Za-z0-9_-]*|test[A-Za-z0-9_-]*|lint[A-Za-z0-9_-]*|assemble[A-Za-z0-9_-]*|check[A-Za-z0-9_-]*|verify[A-Za-z0-9_-]*|tasks|projects|dependencies|properties)$"""
+        val safeTasks = setOf(
+            "build",
+            "assemble",
+            "check",
+            "test",
+            "tasks",
+            "projects",
+            "dependencies",
+            "properties",
+            ":app:build",
+            ":app:assemble",
+            ":app:assembleDebug",
+            ":app:assembleRelease",
+            ":app:check",
+            ":app:test",
+            ":app:testDebugUnitTest",
+            ":app:testReleaseUnitTest",
+            ":app:lint",
+            ":app:lintDebug",
+            ":app:lintRelease",
+            ":app:compileDebugKotlin",
+            ":app:compileReleaseKotlin"
         )
-        if (taskTokens.any { !safeTask.matches(it) }) {
-            return "Only standard build, test, lint, compile, verification, and Gradle inspection tasks are allowed"
+        if (taskTokens.any { it !in safeTasks }) {
+            return "Only explicitly allowlisted build, test, lint, compile, verification, and Gradle inspection tasks are allowed"
         }
         return null
     }
