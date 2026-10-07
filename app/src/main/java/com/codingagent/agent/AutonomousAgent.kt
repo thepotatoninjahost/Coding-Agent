@@ -812,4 +812,6 @@ class AutonomousAgent(
         plan: AgentPlan,
         proposal: PendingChangeProposal
     ): AgentTask = AgentTaskBuilders.approval(id, request, plan, proposal)
+    internal fun projectRoot(): java.io.File = root
+
 }
