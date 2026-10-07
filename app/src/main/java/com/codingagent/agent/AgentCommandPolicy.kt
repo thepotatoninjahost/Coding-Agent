@@ -137,7 +137,7 @@ object AgentCommandPolicy {
         if (taskTokens.isEmpty()) return null
 
         val safeTask = Regex(
-            """^:?(?:[A-Za-z0-9_-]+:)*(?:build|assemble|check|test|lint|compile[A-Za-z0-9_-]*|test[A-Za-z0-9_-]*|lint[A-Za-z0-9_-]*|assemble[A-Za-z0-9_-]*|check[A-Za-z0-9_-]*|verify[A-Za-z0-9_-]*|tasks|projects|dependencies|properties)$"""
+            """^:?(?:[A-Za-z0-9_-]+:)*(?:clean|build|assemble|check|test|lint|compile[A-Za-z0-9_-]*|test[A-Za-z0-9_-]*|lint[A-Za-z0-9_-]*|assemble[A-Za-z0-9_-]*|check[A-Za-z0-9_-]*|verify[A-Za-z0-9_-]*|tasks|projects|dependencies|properties)$"""
         )
         if (taskTokens.any { !safeTask.matches(it) }) {
             return "Only standard build, test, lint, compile, verification, and Gradle inspection tasks are allowed"
