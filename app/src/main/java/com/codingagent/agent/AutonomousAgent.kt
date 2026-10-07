@@ -153,7 +153,19 @@ class AutonomousAgent(
     fun approveProposal(id: String, ownerApproval: OwnerApprovalToken): MutationApprovalResult = mutations.approve(id, ownerApproval)
     fun rejectProposal(id: String): Boolean = mutations.reject(id)
 
-    fun run(request: String, onEvent: (AutonomousAgentEvent) -> Unit = {}): List<AutonomousAgentEvent> {
+    /** Interactive execution: code mutations remain subject to the normal owner-approval flow. */
+    fun run(request: String, onEvent: (AutonomousAgentEvent) -> Unit = {}): List<AutonomousAgentEvent> =
+        runWithMode(request, autonomousExecution = false, onEvent)
+
+    /** Owner-started production coding execution: verified mutations may apply transactionally. */
+    fun runAutonomous(request: String, onEvent: (AutonomousAgentEvent) -> Unit = {}): List<AutonomousAgentEvent> =
+        runWithMode(request, autonomousExecution = true, onEvent)
+
+    private fun runWithMode(
+        request: String,
+        autonomousExecution: Boolean,
+        onEvent: (AutonomousAgentEvent) -> Unit
+    ): List<AutonomousAgentEvent> {
         val runGeneration: Long
         synchronized(lifecycleLock) {
             check(running.compareAndSet(false, true)) { "Agent is already running" }
@@ -163,24 +175,35 @@ class AutonomousAgent(
         try {
             changeSets.clear()
             lastResearchProgress = "not started"
-            return runInternal(request, onEvent)
+            return runInternal(request, autonomousExecution, onEvent)
         } finally {
             autonomousTaskId = null
             autonomousGrant = null
+            tools.clearAutonomousExecution()
             activeRunGeneration = -1L
             running.set(false)
         }
     }
 
-    private fun runInternal(request: String, onEvent: (AutonomousAgentEvent) -> Unit): List<AutonomousAgentEvent> {
+    private fun runInternal(
+        request: String,
+        autonomousExecution: Boolean,
+        onEvent: (AutonomousAgentEvent) -> Unit
+    ): List<AutonomousAgentEvent> {
         val normalized = request.trim()
         require(normalized.isNotEmpty()) { "A coding request is required" }
         val taskId = UUID.randomUUID().toString()
         val events = mutableListOf<AutonomousAgentEvent>(AutonomousAgentEvent.Started(taskId, normalized))
-        val autonomousGrantForRun = AutonomousExecutionGrant.forRun(taskId, root)
-        autonomousTaskId = taskId
-        autonomousGrant = autonomousGrantForRun
-        tools.setAutonomousExecution(taskId, autonomousGrantForRun)
+        if (autonomousExecution) {
+            val autonomousGrantForRun = AutonomousExecutionGrant.forRun(taskId, root)
+            autonomousTaskId = taskId
+            autonomousGrant = autonomousGrantForRun
+            tools.setAutonomousExecution(taskId, autonomousGrantForRun)
+        } else {
+            autonomousTaskId = null
+            autonomousGrant = null
+            tools.clearAutonomousExecution()
+        }
         fun emit(event: AutonomousAgentEvent) {
             events += event
             onEvent(event)
