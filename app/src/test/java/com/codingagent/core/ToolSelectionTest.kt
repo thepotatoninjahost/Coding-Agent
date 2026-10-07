@@ -70,8 +70,7 @@ class ToolSelectionTest {
             listOf(
                 ToolInvocation("index", ToolKind.INDEX_REPOSITORY, "index"),
                 ToolInvocation("search", ToolKind.SEARCH_PROJECT, "search", listOf("index")),
-                ToolInvocation("synth", ToolKind.SYNTHESIZE_CODE, "synthesize", listOf("search")),
-                ToolInvocation("apply", ToolKind.APPLY_CHANGES, "apply", listOf("synth"))
+                ToolInvocation("apply", ToolKind.APPLY_CHANGES, "apply", listOf("search"))
             ),
             "test"
         )
