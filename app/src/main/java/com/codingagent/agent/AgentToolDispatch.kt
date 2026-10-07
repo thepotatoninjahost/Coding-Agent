@@ -26,11 +26,20 @@ class AgentToolDispatch(
     private val terminal: TerminalSession,
     private val maxOutputCharacters: Int,
     private val onResearchProgress: (String) -> Unit,
-    private val autonomousTaskId: String? = null,
-    private val autonomousGrant: AutonomousExecutionGrant? = null
+    autonomousTaskId: String? = null,
+    autonomousGrant: AutonomousExecutionGrant? = null
 ) {
     @Volatile
     private var requestContext: String = ""
+    @Volatile
+    private var autonomousTaskId: String? = autonomousTaskId
+    @Volatile
+    private var autonomousGrant: AutonomousExecutionGrant? = autonomousGrant
+
+    fun setAutonomousExecution(taskId: String, grant: AutonomousExecutionGrant) {
+        autonomousTaskId = taskId
+        autonomousGrant = grant
+    }
 
     fun setRequestContext(request: String) {
         requestContext = request.trim()
