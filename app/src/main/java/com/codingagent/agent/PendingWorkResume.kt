@@ -92,7 +92,7 @@ object PendingWorkResume {
                     "proposal state could not be recovered"
                 ),
                 summary = detail + "\nSaved job: " + openJob.goal.take(1_200) + "\n" +
-                    "No files were changed and no new mutation was started. Re-run the original job or inspect the project state before approving anything."
+                    "This resume attempt started no new mutation. The on-disk project state is not assumed to be unchanged. Inspect the current project state before approving or starting anything."
             )
             return AgentRuntimeResult.Failed(task)
         }
