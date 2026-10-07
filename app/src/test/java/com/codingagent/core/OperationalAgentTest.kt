@@ -102,6 +102,33 @@ class OperationalAgentTest {
     }
 
     @Test
+    fun changeTaskCannotCompleteFromProseBeforeMutation() {
+        val root = Files.createTempDirectory("agent-prose-change").toFile()
+        root.resolve("src").mkdirs()
+        root.resolve("src/Main.kt").writeText("fun main() = 1\n")
+        val responses = ArrayDeque<ModelResponse>().apply {
+            add(ModelResponse.ToolCall(
+                name = "search_project",
+                arguments = """{"query":"Main.kt"}"""
+            ))
+            add(ModelResponse.Text("I reviewed the file and the requested change is straightforward."))
+            add(ModelResponse.ToolCall(
+                name = "replace_text",
+                arguments = """{"path":"src/Main.kt","oldText":"fun main() = 1\n","newText":"fun main() = 2\n","reason":"requested change"}"""
+            ))
+        }
+        val gateway = object : ModelGateway {
+            override fun complete(request: ModelRequest): ModelResponse =
+                responses.removeFirstOrNull() ?: ModelResponse.Text("done")
+        }
+        val spine = agent(root, gateway)
+        val events = spine.run("fix src/Main.kt so main returns 2")
+        assertTrue(events.last() is AutonomousAgentEvent.ApprovalRequired)
+        assertEquals("fun main() = 1\n", root.resolve("src/Main.kt").readText())
+        assertEquals(1, spine.pendingProposals().size)
+    }
+
+    @Test
     fun plainEnglishDebugWithoutModelNeedsInputOrFailsClosed() {
         val root = Files.createTempDirectory("agent-plain").toFile()
         root.resolve("Main.kt").writeText("fun main() = 1\n")
