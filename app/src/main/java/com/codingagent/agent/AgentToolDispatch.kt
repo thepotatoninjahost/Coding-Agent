@@ -162,7 +162,7 @@ class AgentToolDispatch(
 
     private fun runCommand(arguments: JSONObject): String {
         val command = arguments.getString("command")
-        AgentCommandPolicy.rejectionReason(command)?.let { reason ->
+        AgentCommandPolicy.rejectionReason(command, workspace.projectRoot())?.let { reason ->
             return "ERROR: run_command blocked — $reason"
         }
         val entry = terminal.execute(command)
