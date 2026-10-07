@@ -151,18 +151,24 @@ class MutationCoordinator(
         )
         val violations = AgentConstitution.check(action, timestamp, proposal.createdAt)
         if (violations.isNotEmpty()) {
-            pending[id] = candidate
-            persist()
-            return if (candidate.approvalCount < 2 && violations.none {
-                    it.rule == ConstitutionRule.OWNER_LOCK ||
-                        it.rule == ConstitutionRule.SANDBOX_FIRST ||
-                        it.rule == ConstitutionRule.PERMISSION_EXPIRATION
-                }
-            ) {
-                MutationApprovalResult.AwaitingSecond(candidate, approval)
-            } else {
-                MutationApprovalResult.Rejected(violations.joinToString("; ") { "${it.rule}: ${it.message}" })
+            val blocking = violations.filter { it.blocking }
+            val onlySecondConfirmation = blocking.isNotEmpty() &&
+                blocking.all { it.rule == ConstitutionRule.DOUBLE_CONFIRMATION } &&
+                candidate.approvalCount < 2
+            if (!onlySecondConfirmation) {
+                return MutationApprovalResult.Rejected(
+                    violations.joinToString("; ") { "${it.rule}: ${it.message}" }
+                )
             }
+            val previous = pending[id]
+            pending[id] = candidate
+            if (!persist()) {
+                if (previous != null) pending[id] = previous else pending.remove(id)
+                return MutationApprovalResult.Rejected(
+                    "Could not durably persist owner approval; approval was not accepted"
+                )
+            }
+            return MutationApprovalResult.AwaitingSecond(candidate, approval)
         }
         return try {
             val applied = workspace.applyApproved(proposal.changeSet)
@@ -176,8 +182,13 @@ class MutationCoordinator(
                 val rollback = workspace.rollback(applied)
                 if (rollback == RollbackResult.Restored) {
                     pending.remove(id)
-                    persist()
-                    OpenJobStore.markReady(workspace.projectRoot())
+                    if (!persist()) {
+                        pending[id] = proposal
+                        return MutationApprovalResult.Rejected(
+                            "$details; rollback restored files, but pending-state persistence failed"
+                        )
+                    }
+                    runCatching { OpenJobStore.markReady(workspace.projectRoot()) }
                 }
                 val details = buildString {
                     append("Approved change failed post-apply checks")
@@ -222,7 +233,20 @@ class MutationCoordinator(
                 )
             }
             pending.remove(id)
-            persist()
+            if (!persist()) {
+                pending[id] = proposal
+                val rollback = runCatching { workspace.rollback(applied) }
+                    .getOrElse { RollbackResult.Rejected(it.message.orEmpty()) }
+                return if (rollback == RollbackResult.Restored) {
+                    MutationApprovalResult.Rejected(
+                        "Change was rolled back because approved-state persistence failed"
+                    )
+                } else {
+                    MutationApprovalResult.Rejected(
+                        "CRITICAL: change was applied but could not be durably persisted or rolled back: $rollback"
+                    )
+                }
+            }
             runCatching { OpenJobStore.markApplied(workspace.projectRoot()) }
             recordEvolution(candidate, applied)
             MutationApprovalResult.Applied(candidate, applied)
@@ -298,7 +322,10 @@ class MutationCoordinator(
             repairRootRequest = rootRequest
         )
         pending[proposal.id] = proposal
-        persist()
+        if (!persist()) {
+            pending.remove(proposal.id)
+            return null
+        }
         runCatching {
             OpenJobStore.markWaiting(
                 workspace.projectRoot(),
