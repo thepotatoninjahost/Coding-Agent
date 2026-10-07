@@ -162,6 +162,58 @@ class MutationCoordinator(
                 MutationApprovalResult.Rejected(violations.joinToString("; ") { "${it.rule}: ${it.message}" })
             }
         }
+        return applyCandidate(id, candidate)
+    }
+
+    /**
+     * Apply a proposal under the owner-granted autonomous run capability.
+     * This is intentionally separate from interactive dual approval.
+     */
+    @Synchronized
+    fun applyAutonomous(id: String, taskId: String, grant: AutonomousExecutionGrant): MutationApprovalResult {
+        clearExpired()
+        val proposal = pending[id] ?: return MutationApprovalResult.Rejected("Change proposal does not exist")
+        val timestamp = now()
+        if (!grant.isValid(taskId, workspace.projectRoot(), timestamp)) {
+            return MutationApprovalResult.Rejected("Autonomous execution grant is invalid or expired")
+        }
+        if (timestamp > proposal.expiresAt) {
+            return MutationApprovalResult.Rejected("Change proposal approval window expired")
+        }
+
+        val approvals = listOf(
+            ApprovalRecord(
+                actionId = "$id:autonomous:1",
+                approvedAt = timestamp,
+                ownerLabel = "autonomous-run",
+                confirmationNumber = 1
+            ),
+            ApprovalRecord(
+                actionId = "$id:autonomous:2",
+                approvedAt = timestamp,
+                ownerLabel = "autonomous-run",
+                confirmationNumber = 2
+            )
+        )
+        val candidate = proposal.copy(approvals = approvals)
+        val action = AgentAction(
+            description = proposal.request,
+            category = AgentActionCategory.CODE_CHANGE,
+            ownerVerified = true,
+            approvalCount = candidate.approvalCount,
+            sandboxPassed = proposal.verification.passed,
+            clearPermission = true
+        )
+        val violations = AgentConstitution.check(action, timestamp, proposal.createdAt)
+        if (violations.isNotEmpty()) {
+            return MutationApprovalResult.Rejected(violations.joinToString("; ") { "${it.rule}: ${it.message}" })
+        }
+        pending[id] = candidate
+        persist()
+        return applyCandidate(id, candidate)
+    }
+
+    private fun applyCandidate(id: String, proposal: PendingChangeProposal): MutationApprovalResult {
         return try {
             val applied = workspace.applyApproved(proposal.changeSet)
             val intake = TaskIntakeParser(workspace.projectRoot()).parse(proposal.request)
@@ -215,15 +267,13 @@ class MutationCoordinator(
                     }
                     return MutationApprovalResult.Rejected("$details; changes were rolled back")
                 }
-                return MutationApprovalResult.Rejected(
-                    "$details; rollback was incomplete: $rollback"
-                )
+                return MutationApprovalResult.Rejected("$details; rollback was incomplete: $rollback")
             }
             pending.remove(id)
             persist()
             OpenJobStore.markApplied(workspace.projectRoot())
-            recordEvolution(candidate, applied)
-            MutationApprovalResult.Applied(candidate, applied)
+            recordEvolution(proposal, applied)
+            MutationApprovalResult.Applied(proposal, applied)
         } catch (error: Exception) {
             MutationApprovalResult.Rejected("Approved change could not be applied: ${error.message.orEmpty()}")
         }
