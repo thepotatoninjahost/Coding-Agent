@@ -39,15 +39,7 @@ object UserMemoryExtractor {
         "i like ",
         "i don't like ",
         "i do not like ",
-        "i hate ",
-        "i want you to ",
-        "i don't want you to ",
-        "i do not want you to ",
-        "please always ",
-        "always ",
-        "never ",
-        "do not ever ",
-        "don't ever "
+        "i hate "
     )
 
     private val transientScope = Regex(
