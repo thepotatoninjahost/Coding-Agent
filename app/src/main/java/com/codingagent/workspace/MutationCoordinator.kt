@@ -441,7 +441,16 @@ class MutationCoordinator(
         val root = workspace.projectRoot()
         val job = OpenJobStore.load(root) ?: return
         val proposalId = job.proposalId ?: job.appliedProposalId ?: return
-        val proposal = pending[proposalId] ?: return
+        val proposal = pending[proposalId]
+        if (proposal == null) {
+            runCatching {
+                OpenJobStore.markRecoveryRequired(
+                    root,
+                    "Durable job state references proposal $proposalId, but that proposal is missing from the pending store"
+                )
+            }
+            return
+        }
 
         when (job.status) {
             "applying" -> when (diskState(proposal.changeSet)) {
