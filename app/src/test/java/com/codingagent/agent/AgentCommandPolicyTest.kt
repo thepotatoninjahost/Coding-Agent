@@ -10,7 +10,9 @@ class AgentCommandPolicyTest {
     @Test
     fun allowsProjectInspectionCommands() {
         assertNotNull(AgentCommandPolicy.rejectionReason("git status --short"))
-        assertNull(AgentCommandPolicy.rejectionReason("find app -type f"))
+        assertNotNull(AgentCommandPolicy.rejectionReason("find app -type f"))
+        assertNotNull(AgentCommandPolicy.rejectionReason("find . -type f"))
+        assertNotNull(AgentCommandPolicy.rejectionReason("find nested -type f"))
         assertNull(AgentCommandPolicy.rejectionReason("rg UserMemory app/src"))
         assertNull(AgentCommandPolicy.rejectionReason("cat app/src/main/AndroidManifest.xml"))
     }
