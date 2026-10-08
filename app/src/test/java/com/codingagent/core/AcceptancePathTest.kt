@@ -193,6 +193,24 @@ class AcceptancePathTest {
     }
 
     @Test
+    fun approvalRejectsCorruptDurableJobStateAndMarksRecoveryRequired() {
+        val root = Files.createTempDirectory("accept-corrupt-job-approval").toFile()
+        root.resolve("Main.kt").writeText("fun main() = 1\n")
+        val coordinator = MutationCoordinator(ProjectWorkspace(root))
+        val proposal = (coordinator.propose(
+            "proposal loses readable durable authorization",
+            listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 2\n"))
+        ) as MutationProposeResult.Proposed).proposal
+
+        OpenJobStore.file(root).writeText("not valid json")
+        val result = coordinator.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id))
+
+        assertTrue(result is MutationApprovalResult.Rejected)
+        assertEquals("recovery-required", OpenJobStore.load(root)?.status)
+        assertEquals("fun main() = 1\n", root.resolve("Main.kt").readText())
+    }
+
+    @Test
     fun secondProposalIsRejectedWhileFirstProposalAwaitsApproval() {
         val root = Files.createTempDirectory("accept-stale-proposal").toFile()
         root.resolve("Main.kt").writeText("fun main() = 1\n")
