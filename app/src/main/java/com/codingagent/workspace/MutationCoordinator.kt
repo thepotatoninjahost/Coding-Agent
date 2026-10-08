@@ -750,7 +750,14 @@ class MutationCoordinator(
         require(path.isNotBlank() && !path.startsWith('/') && !path.contains("..") && !path.contains('\\')) {
             "Unsafe project path"
         }
-        return workspace.projectRoot().resolve(path)
+        val root = workspace.projectRoot().canonicalFile
+        val candidate = root.resolve(path).canonicalFile
+        require(candidate.toPath().startsWith(root.toPath())) { "Unsafe project path" }
+        val relative = root.toPath().relativize(candidate.toPath()).toString().replace('\\', '/')
+        require(!relative.substringBefore('/').equals(".coding-agent", ignoreCase = true)) {
+            "Coding Agent internal metadata is not a recoverable project path"
+        }
+        return candidate
     }
 
     private fun persist(): Boolean =
