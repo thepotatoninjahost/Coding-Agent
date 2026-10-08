@@ -57,6 +57,36 @@ class AgentCommandPolicyTest {
     }
 
     @Test
+    fun blocksSymlinkedParentEvenWhenFinalTargetDoesNotExist() {
+        val root = Files.createTempDirectory("command-policy-root").toFile()
+        val outside = Files.createTempDirectory("command-policy-outside").toFile()
+        val link = root.toPath().resolve("outside")
+        try {
+            Files.createSymbolicLink(link, outside.toPath())
+        } catch (_: Exception) {
+            assumeTrue("Symbolic links are required for this regression test", false)
+        }
+
+        assertNotNull(
+            AgentCommandPolicy.rejectionReason("cat outside/missing.txt", root)
+        )
+        assertNotNull(
+            AgentCommandPolicy.rejectionReason("rg -n needle outside/missing.txt", root)
+        )
+    }
+
+    @Test
+    fun blocksCommandsThatCanExecuteExternalSearchPreprocessors() {
+        val root = Files.createTempDirectory("command-policy-pre").toFile()
+        assertNotNull(
+            AgentCommandPolicy.rejectionReason("rg --pre sh needle .", root)
+        )
+        assertNotNull(
+            AgentCommandPolicy.rejectionReason("grep -R needle outside", root)
+        )
+    }
+
+    @Test
     fun blocksMutatingGitBranchOperations() {
         assertNotNull(AgentCommandPolicy.rejectionReason("git branch feature"))
         assertNotNull(AgentCommandPolicy.rejectionReason("git branch -D feature"))
