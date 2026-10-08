@@ -24,7 +24,7 @@ data class OpenJob(
         append("- status: ").append(status).append('\n')
         append("- goal: ").append(goal.take(1_200)).append('\n')
         if (!proposalId.isNullOrBlank()) append("- proposal: ").append(proposalId).append('\n')
-        if (!recoveryReason.isNullOrBlank()) append("- recovery reason: ").append(recoveryReason.take(600)).append('\\n')
+        if (!recoveryReason.isNullOrBlank()) append("- recovery reason: ").append(recoveryReason.take(600)).append('\n')
         if (paths.isNotEmpty()) {
             append("- staged paths:\n")
             paths.forEach { append("  - ").append(it).append('\n') }
