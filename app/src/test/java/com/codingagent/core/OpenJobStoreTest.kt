@@ -68,6 +68,14 @@ class OpenJobStoreTest {
         OpenJobStore.markApplied(root, "proposal-missing")
     }
 
+    @Test(expected = IllegalStateException::class)
+    fun unreadableDurableStateIsNotTreatedAsMissing() {
+        val root = Files.createTempDirectory("open-job-corrupt").toFile()
+        root.resolve(".coding-agent").mkdirs()
+        root.resolve(".coding-agent/open-job.json").writeText("not valid json")
+        OpenJobStore.startNew(root, "different goal")
+    }
+
     @Test
     fun saveReplacesJobAtomicallyAndLeavesNoTemporaryFiles() {
         val root = Files.createTempDirectory("open-job-atomic").toFile()

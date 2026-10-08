@@ -55,7 +55,7 @@ object OpenJobStore {
         bind(root)
         val f = file(root)
         val text = AtomicFileWriter.readTextIfExists(f) ?: return null
-        return runCatching {
+        return try {
             val o = JSONObject(text)
             OpenJob(
                 id = o.getString("id"),
@@ -69,7 +69,12 @@ object OpenJobStore {
                 appliedProposalId = o.optString("appliedProposalId").takeIf { it.isNotBlank() && it != "null" },
                 recoveryReason = o.optString("recoveryReason").takeIf { it.isNotBlank() && it != "null" }
             )
-        }.getOrNull()
+        } catch (error: Exception) {
+            throw IllegalStateException(
+                "Durable open-job state is unreadable; refusing to treat it as absent",
+                error
+            )
+        }
     }
 
     @Synchronized
@@ -181,7 +186,8 @@ object OpenJobStore {
     @Synchronized
     fun markRecoveryRequired(root: File, reason: String) {
         bind(root)
-        val current = load(root) ?: return
+        val current = load(root)
+            ?: error("Cannot record recovery-required state: durable open-job state is missing")
         save(
             root,
             current.copy(
