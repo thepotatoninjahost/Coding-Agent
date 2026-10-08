@@ -14,7 +14,8 @@ data class OpenJob(
     val status: String,
     val proposalId: String?,
     val paths: List<String>,
-    val updatedAt: Long
+    val updatedAt: Long,
+    val appliedProposalId: String? = null
 ) {
     fun promptBlock(): String = buildString {
         append("OPEN JOB (do not claim there is no prior task):\n")
@@ -62,7 +63,8 @@ object OpenJobStore {
                 paths = o.optJSONArray("paths")?.let { arr ->
                     (0 until arr.length()).map { arr.getString(it) }
                 } ?: emptyList(),
-                updatedAt = o.optLong("updatedAt", 0L)
+                updatedAt = o.optLong("updatedAt", 0L),
+                appliedProposalId = o.optString("appliedProposalId").takeIf { it.isNotBlank() && it != "null" }
             )
         }.getOrNull()
     }
@@ -78,6 +80,7 @@ object OpenJobStore {
             .put("status", job.status)
             .put("proposalId", job.proposalId ?: JSONObject.NULL)
             .put("updatedAt", job.updatedAt)
+            .put("appliedProposalId", job.appliedProposalId ?: JSONObject.NULL)
         val paths = JSONArray()
         job.paths.forEach { paths.put(it) }
         o.put("paths", paths)
@@ -135,10 +138,49 @@ object OpenJobStore {
     }
 
     @Synchronized
-    fun markApplied(root: File) {
+    fun markApplying(root: File, proposalId: String, paths: List<String>, goal: String?) {
+        bind(root)
+        val current = load(root)
+        save(
+            root,
+            OpenJob(
+                id = current?.id ?: UUID.randomUUID().toString(),
+                goal = goal?.takeIf { it.isNotBlank() } ?: current?.goal ?: "",
+                status = "applying",
+                proposalId = proposalId,
+                paths = paths.ifEmpty { current?.paths ?: emptyList() },
+                updatedAt = System.currentTimeMillis()
+            )
+        )
+    }
+
+    @Synchronized
+    fun markApplied(root: File, proposalId: String? = null) {
         bind(root)
         val current = load(root) ?: return
-        save(root, current.copy(status = "applied", proposalId = null, updatedAt = System.currentTimeMillis()))
+        save(
+            root,
+            current.copy(
+                status = "applied",
+                proposalId = null,
+                updatedAt = System.currentTimeMillis(),
+                appliedProposalId = proposalId ?: current.appliedProposalId
+            )
+        )
+    }
+
+    @Synchronized
+    fun markRecoveryRequired(root: File, reason: String) {
+        bind(root)
+        val current = load(root) ?: return
+        save(
+            root,
+            current.copy(
+                status = "recovery-required",
+                goal = if (reason.isBlank()) current.goal else current.goal + "\nRecovery: " + reason.take(600),
+                updatedAt = System.currentTimeMillis()
+            )
+        )
     }
 
     @Synchronized
@@ -150,7 +192,8 @@ object OpenJobStore {
             current.copy(
                 status = "open",
                 proposalId = null,
-                updatedAt = System.currentTimeMillis()
+                updatedAt = System.currentTimeMillis(),
+                appliedProposalId = null
             )
         )
     }
