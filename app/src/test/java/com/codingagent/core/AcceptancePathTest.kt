@@ -124,6 +124,28 @@ class AcceptancePathTest {
     }
 
     @Test
+    fun unexpectedPostApplyVerificationFailureRollsBackAndClearsApplyingState() {
+        val root = Files.createTempDirectory("accept-post-apply-failure").toFile()
+        root.resolve("Main.kt").writeText("fun main() = 1\\n")
+        Files.write(root.resolve("Broken.kt").toPath(), byteArrayOf(0xC3.toByte(), 0x28))
+
+        val workspace = ProjectWorkspace(root)
+        val coordinator = MutationCoordinator(workspace)
+        val proposal = (coordinator.propose(
+            "trigger post-apply verification failure",
+            listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\\n", "fun main() = 2\\n"))
+        ) as MutationProposeResult.Proposed).proposal
+
+        assertTrue(coordinator.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id)) is MutationApprovalResult.AwaitingSecond)
+        val result = coordinator.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id))
+
+        assertTrue(result is MutationApprovalResult.Rejected)
+        assertEquals("fun main() = 1\\n", root.resolve("Main.kt").readText())
+        assertEquals("open", OpenJobStore.load(root)?.status)
+        assertTrue(coordinator.pending().isEmpty())
+    }
+
+    @Test
     fun interruptedApplyingStateResetsWhenMutationNeverReachedDisk() {
         val root = Files.createTempDirectory("accept-apply-not-started").toFile()
         root.resolve("Main.kt").writeText("fun main() = 1\n")
