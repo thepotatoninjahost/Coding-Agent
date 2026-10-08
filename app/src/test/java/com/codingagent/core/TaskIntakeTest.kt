@@ -86,7 +86,7 @@ class TaskIntakeTest {
             androidSdkAvailable = { false }
         ).parse("run the tests")
 
-        assertEquals(listOf(listOf("npm", "test")), intake.verificationCommands.single())
+        assertEquals(listOf("npm", "test"), intake.verificationCommands.single())
         assertEquals(null, intake.verificationNote)
     }
 
