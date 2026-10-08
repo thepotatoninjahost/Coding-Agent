@@ -80,7 +80,7 @@ class ChatWorkspace(
                 return persist(result = pending)
             }
         }
-        if (agent != null && looksLikeNewGoal(trimmed)) {
+        if (looksLikeNewGoal(trimmed)) {
             val boundRoot = OpenJobStore.boundRoot()
             val existingJob = boundRoot?.let { OpenJobStore.load(it) }
             if (existingJob?.status == "recovery-required") {
@@ -102,7 +102,9 @@ class ChatWorkspace(
                     )
                 ))
             }
-            boundRoot?.let { OpenJobStore.startNew(it, trimmed) }
+            if (agent != null) {
+                boundRoot?.let { OpenJobStore.startNew(it, trimmed) }
+            }
         }
         val lastAgent = store.recentChatMessages(20).firstOrNull { it.role == ChatRole.AGENT }?.content
         val openJob = OpenJobStore.loadBound()
