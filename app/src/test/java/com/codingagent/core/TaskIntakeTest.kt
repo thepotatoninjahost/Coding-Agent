@@ -45,6 +45,17 @@ class TaskIntakeTest {
         root.resolve("gradlew").writeText("#!/bin/sh\n")
         val intake = TaskIntakeParser(root).parse("run the tests")
         assertEquals(TaskIntent.TEST, intake.intent)
-        assertEquals(listOf("sh", "-c", "./gradlew test --no-daemon"), intake.verificationCommands.single())
+        assertEquals(listOf("sh", "./gradlew", "test", "--no-daemon"), intake.verificationCommands.single())
+    }
+
+    @Test fun ordinaryCodeChangeDoesNotAutoExecuteProjectBuildScripts() {
+        val root = Files.createTempDirectory("task-intake-no-auto-build").toFile()
+        root.resolve("gradlew").writeText("#!/bin/sh\\n")
+        root.resolve("app").mkdirs()
+        root.resolve("app/build.gradle.kts").writeText("plugins {}\\n")
+
+        val intake = TaskIntakeParser(root).parse("fix the login bug")
+
+        assertTrue(intake.verificationCommands.isEmpty())
     }
 }
