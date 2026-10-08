@@ -117,13 +117,13 @@ class AgentCommandPolicyTest {
     fun blocksGitCommandsWhenRepositoryConfigEnablesExecutableHelpers() {
         val root = Files.createTempDirectory("command-policy-git-config").toFile()
         root.resolve(".git").mkdirs()
-        root.resolve(".git/config").writeText("[core]\\n fsmonitor = ./untrusted-helper.sh\\n")
+        root.resolve(".git/config").writeText("[core]\n fsmonitor = ./untrusted-helper.sh\n")
 
         assertNotNull(AgentCommandPolicy.rejectionReason("git status", root))
         assertNotNull(AgentCommandPolicy.rejectionReason("git diff", root))
 
         root.resolve(".git/config").writeText(
-            "[core]\\n repositoryformatversion = 0\\n filemode = true\\n bare = false\\n logallrefupdates = true\\n"
+            "[core]\n repositoryformatversion = 0\n filemode = true\n bare = false\n logallrefupdates = true\n"
         )
         assertNull(AgentCommandPolicy.rejectionReason("git status", root))
     }
