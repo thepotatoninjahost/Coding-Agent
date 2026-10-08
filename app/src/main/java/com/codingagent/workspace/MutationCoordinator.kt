@@ -203,7 +203,8 @@ class MutationCoordinator(
                 return MutationApprovalResult.Rejected("Could not durably enter the apply phase; no mutation was attempted")
             }
 
-            applied = workspace.applyApproved(proposal.changeSet)
+            val appliedChangeSet = workspace.applyApproved(proposal.changeSet)
+            applied = appliedChangeSet
             val intake = TaskIntakeParser(workspace.projectRoot()).parse(proposal.request)
             val postApply = if (intake.verificationCommands.isEmpty()) {
                 workspace.verify()
@@ -224,7 +225,7 @@ class MutationCoordinator(
                         append(postApply.issues.joinToString { "${it.path}:${it.line}: ${it.message}" })
                     }
                 }
-                val rollback = workspace.rollback(applied)
+                val rollback = workspace.rollback(appliedChangeSet)
                 if (rollback == RollbackResult.Restored) {
                     pending.remove(id)
                     if (!persist()) {
@@ -289,8 +290,8 @@ class MutationCoordinator(
                     )
                 }
             }
-            recordEvolution(candidate, applied)
-            MutationApprovalResult.Applied(candidate, applied)
+            recordEvolution(candidate, appliedChangeSet)
+            MutationApprovalResult.Applied(candidate, appliedChangeSet)
         } catch (error: Exception) {
             val completedChangeSet = applied
             if (completedChangeSet != null) {
