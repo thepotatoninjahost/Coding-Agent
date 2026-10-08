@@ -76,6 +76,24 @@ class ProjectFileServiceBoundaryTest {
     }
 
     @Test
+    fun indexerExcludesCaseVariantPrivateMetadataDirectories() {
+        val root = Files.createTempDirectory("project-index-case-variant-metadata").toFile()
+        root.resolve("src").mkdirs()
+        root.resolve("src/Main.kt").writeText("fun main() = Unit\\n")
+        root.resolve(".GIT").mkdirs()
+        root.resolve(".GIT/Private.kt").writeText("const val CASE_VARIANT_PRIVATE_MARKER = \"private\"\\n")
+        root.resolve("nested/.Git").mkdirs()
+        root.resolve("nested/.Git/Secret.kt").writeText("const val NESTED_PRIVATE_MARKER = \"private\"\\n")
+
+        val workspace = ProjectWorkspace(root)
+        val paths = workspace.summary().files.map { it.path }
+        assertTrue(paths.any { it == "src/Main.kt" })
+        assertFalse(paths.any { it.split('/').any { part -> part.equals(".git", ignoreCase = true) } })
+        assertTrue(workspace.search("CASE_VARIANT_PRIVATE_MARKER").isEmpty())
+        assertTrue(workspace.search("NESTED_PRIVATE_MARKER").isEmpty())
+    }
+
+    @Test
     fun indexingAndSearchNeverFollowSymlinksOutsideTheProject() {
         val root = Files.createTempDirectory("project-index-symlink").toFile()
         val outside = Files.createTempDirectory("project-index-outside").toFile()
