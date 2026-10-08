@@ -5,6 +5,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.nio.file.Files
 import com.codingagent.workspace.AgentPlan
+import com.codingagent.model.ModelResponse
 import com.codingagent.workspace.AgentStep
 import com.codingagent.workspace.ProjectWorkspace
 import com.codingagent.workspace.MutationCoordinator
