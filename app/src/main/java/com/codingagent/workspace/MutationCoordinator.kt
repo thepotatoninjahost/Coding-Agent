@@ -303,7 +303,7 @@ class MutationCoordinator(
         } catch (error: Exception) {
             val recovery = recoverAfterApplyFailure(proposal.changeSet, error)
             MutationApprovalResult.Rejected(recovery)
-        }}
+        }
     }
 
     @Synchronized
