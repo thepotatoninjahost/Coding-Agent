@@ -65,6 +65,25 @@ class AcceptancePathTest {
     }
 
     @Test
+    fun proposalIsRejectedWhenPendingJobStateCannotPersist() {
+        val root = Files.createTempDirectory("accept-proposal-job-failure").toFile()
+        root.resolve("Main.kt").writeText("fun main() = 1\n")
+        val codingDir = root.resolve(".coding-agent")
+        codingDir.mkdirs()
+        codingDir.resolve("open-job.json").mkdirs()
+
+        val coordinator = MutationCoordinator(ProjectWorkspace(root))
+        val result = coordinator.propose(
+            "fail closed when pending job state cannot persist",
+            listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 2\n"))
+        )
+
+        assertTrue(result is MutationProposeResult.Rejected)
+        assertTrue(coordinator.pending().isEmpty())
+        assertEquals("fun main() = 1\n", root.resolve("Main.kt").readText())
+    }
+
+    @Test
     fun openJobMetadataFailurePreventsMutationBeforeApply() {
         val root = Files.createTempDirectory("accept-open-job-failure").toFile()
         root.resolve("Main.kt").writeText("fun main() = 1\n")
