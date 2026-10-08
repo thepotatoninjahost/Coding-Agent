@@ -77,9 +77,12 @@ class AgentTools(private val workspace: ProjectWorkspace) {
 
     private fun resolveExistingFile(path: String): File {
         val root = workspace.projectRoot().canonicalFile
+        require(!isReservedProjectMetadataPath(root, path, root.resolve(path))) {
+            "Private agent and Git metadata are not accessible as project source"
+        }
         val direct = root.resolve(path).canonicalFile
         require(direct.toPath().startsWith(root.toPath())) { "Unsafe project path" }
-        require(!isReservedProjectMetadataPath(root, direct)) {
+        require(!isReservedProjectMetadataPath(root, path, direct)) {
             "Private agent and Git metadata are not accessible as project source"
         }
         if (direct.isFile) return direct
@@ -88,17 +91,24 @@ class AgentTools(private val workspace: ProjectWorkspace) {
         val match = findCaseInsensitive(root, normalized)
             ?: throw IllegalArgumentException("File does not exist: $path")
         require(match.canonicalFile.toPath().startsWith(root.toPath())) { "Unsafe project path" }
-        require(!isReservedProjectMetadataPath(root, match)) {
+        require(!isReservedProjectMetadataPath(root, normalized, match)) {
             "Private agent and Git metadata are not accessible as project source"
         }
         return match
     }
 
-    private fun isReservedProjectMetadataPath(root: File, candidate: File): Boolean {
-        val relative = root.toPath().relativize(candidate.canonicalFile.toPath())
-            .toString().replace('\\', '/')
-        val first = relative.substringBefore('/')
-        return first.equals(".coding-agent", ignoreCase = true) || first.equals(".git", ignoreCase = true)
+    private fun isReservedProjectMetadataPath(root: File, requestedPath: String, candidate: File): Boolean {
+        val requestedParts = requestedPath.replace('\\', '/').split('/').filter { it.isNotEmpty() }
+        if (requestedParts.any { it.equals(".git", ignoreCase = true) } ||
+            requestedParts.firstOrNull()?.equals(".coding-agent", ignoreCase = true) == true
+        ) return true
+
+        val relative = runCatching {
+            root.toPath().relativize(candidate.canonicalFile.toPath()).toString().replace('\\', '/')
+        }.getOrElse { return true }
+        val canonicalParts = relative.split('/').filter { it.isNotEmpty() }
+        return canonicalParts.any { it.equals(".git", ignoreCase = true) } ||
+            canonicalParts.firstOrNull()?.equals(".coding-agent", ignoreCase = true) == true
     }
 
     private fun findCaseInsensitive(root: File, relative: String): File? {
