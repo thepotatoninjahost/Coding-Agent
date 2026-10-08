@@ -20,6 +20,7 @@ import com.codingagent.workspace.MutationCoordinator
 import com.codingagent.workspace.MutationProposeResult
 import com.codingagent.workspace.ProjectWorkspace
 import com.codingagent.workspace.PendingProposalStore
+import com.codingagent.workspace.OpenJobStore
 
 /**
  * Path A acceptance: offline explicit create/replace → dual approve → disk changed.
@@ -64,7 +65,7 @@ class AcceptancePathTest {
     }
 
     @Test
-    fun openJobMetadataFailureCannotTurnAppliedMutationIntoRejection() {
+    fun openJobMetadataFailurePreventsMutationBeforeApply() {
         val root = Files.createTempDirectory("accept-open-job-failure").toFile()
         root.resolve("Main.kt").writeText("fun main() = 1\n")
         val codingDir = root.resolve(".coding-agent")
@@ -73,18 +74,88 @@ class AcceptancePathTest {
 
         val coordinator = MutationCoordinator(ProjectWorkspace(root))
         val proposed = coordinator.propose(
-            "apply despite recovery metadata failure",
+            "fail closed when recovery metadata cannot persist",
             listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 2\n"))
-        )
-        assertTrue(proposed is MutationProposeResult.Proposed)
-        val proposal = (proposed as MutationProposeResult.Proposed).proposal
+        ) as MutationProposeResult.Proposed
 
-        assertTrue(coordinator.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id)) is MutationApprovalResult.AwaitingSecond)
-        val result = coordinator.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id))
+        assertTrue(coordinator.approve(proposed.proposal.id, OwnerApprovalToken.authenticated(proposed.proposal.id)) is MutationApprovalResult.AwaitingSecond)
+        val result = coordinator.approve(proposed.proposal.id, OwnerApprovalToken.authenticated(proposed.proposal.id))
 
-        assertTrue(result is MutationApprovalResult.Applied)
+        assertTrue(result is MutationApprovalResult.Rejected)
+        assertEquals("fun main() = 1\n", root.resolve("Main.kt").readText())
+        assertEquals(1, coordinator.pending().single().approvalCount)
+    }
+
+    @Test
+    fun interruptedApplyingStateRecoversAfterCoordinatorRestart() {
+        val root = Files.createTempDirectory("accept-apply-restart").toFile()
+        root.resolve("Main.kt").writeText("fun main() = 1\n")
+        val workspace = ProjectWorkspace(root)
+        val first = MutationCoordinator(workspace)
+        val proposal = (first.propose(
+            "recover applied edit",
+            listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 2\n"))
+        ) as MutationProposeResult.Proposed).proposal
+
+        assertTrue(first.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id)) is MutationApprovalResult.AwaitingSecond)
+        OpenJobStore.markApplying(root, proposal.id, listOf("Main.kt"), proposal.request)
+        workspace.applyApproved(proposal.changeSet)
+
+        val restarted = MutationCoordinator(ProjectWorkspace(root))
+        assertTrue(restarted.pending().isEmpty())
+        assertEquals("applied", OpenJobStore.load(root)?.status)
         assertEquals("fun main() = 2\n", root.resolve("Main.kt").readText())
-        assertTrue(coordinator.pending().isEmpty())
+    }
+
+    @Test
+    fun interruptedApplyingStateResetsWhenMutationNeverReachedDisk() {
+        val root = Files.createTempDirectory("accept-apply-not-started").toFile()
+        root.resolve("Main.kt").writeText("fun main() = 1\n")
+        val workspace = ProjectWorkspace(root)
+        val first = MutationCoordinator(workspace)
+        val proposal = (first.propose(
+            "recover unapplied edit",
+            listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 2\n"))
+        ) as MutationProposeResult.Proposed).proposal
+
+        assertTrue(first.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id)) is MutationApprovalResult.AwaitingSecond)
+        OpenJobStore.markApplying(root, proposal.id, listOf("Main.kt"), proposal.request)
+
+        val restarted = MutationCoordinator(ProjectWorkspace(root))
+        assertEquals("open", OpenJobStore.load(root)?.status)
+        assertEquals(1, restarted.pending().single().approvalCount)
+        assertTrue(
+            restarted.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id)) is MutationApprovalResult.Applied
+        )
+        assertEquals("fun main() = 2\n", root.resolve("Main.kt").readText())
+    }
+
+    @Test
+    fun partiallyAppliedTransactionFailsClosedForRecovery() {
+        val root = Files.createTempDirectory("accept-apply-partial").toFile()
+        root.resolve("src").mkdirs()
+        root.resolve("src/A.kt").writeText("fun a() = 1\n")
+        root.resolve("src/B.kt").writeText("fun b() = 1\n")
+        val workspace = ProjectWorkspace(root)
+        val first = MutationCoordinator(workspace)
+        val proposal = (first.propose(
+            "recover partial edit",
+            listOf(
+                TaskOperation(OperationKind.REPLACE, "src/A.kt", "fun a() = 1\n", "fun a() = 2\n"),
+                TaskOperation(OperationKind.REPLACE, "src/B.kt", "fun b() = 1\n", "fun b() = 2\n")
+            )
+        ) as MutationProposeResult.Proposed).proposal
+
+        assertTrue(first.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id)) is MutationApprovalResult.AwaitingSecond)
+        OpenJobStore.markApplying(root, proposal.id, proposal.changeSet.changes.map { it.path }, proposal.request)
+        workspace.replace("src/A.kt", "fun a() = 1\n", "fun a() = 2\n", "simulated partial apply")
+
+        val restarted = MutationCoordinator(ProjectWorkspace(root))
+        assertEquals("recovery-required", OpenJobStore.load(root)?.status)
+        val blocked = restarted.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id))
+        assertTrue(blocked is MutationApprovalResult.Rejected)
+        assertEquals("fun a() = 2\n", root.resolve("src/A.kt").readText())
+        assertEquals("fun b() = 1\n", root.resolve("src/B.kt").readText())
     }
 
     @Test
