@@ -7,6 +7,8 @@ import com.codingagent.agent.AgentAction
 import com.codingagent.agent.AgentConstitution
 import com.codingagent.workspace.VerificationReport
 
+private val SAFE_ID = Regex("[A-Za-z0-9_-]+")
+
 /**
  * ONE JOB: Persist and version live-module source (install, parse, roll back, list history).
  * Extracted out of LiveModules.kt, which mixed storage, execution, and default-module bootstrap
@@ -39,6 +41,10 @@ class LiveModuleStore(private val root: File) {
     init { moduleRoot.mkdirs() }
 
     fun install(source: String, kind: String, version: Int = 1, action: AgentAction, evaluation: VerificationReport): ModuleInstallResult {
+        val safeKind = kind.trim()
+        if (!safeKind.matches(SAFE_ID)) {
+            return ModuleInstallResult.Rejected("Module kind contains unsafe path characters")
+        }
         if (!evaluation.passed) {
             return ModuleInstallResult.Rejected(
                 "Module evaluation failed: ${evaluation.issues.joinToString { "${it.path}:${it.line}: ${it.message}" }}"
@@ -47,9 +53,9 @@ class LiveModuleStore(private val root: File) {
         val violations = AgentConstitution.check(action.copy(sandboxPassed = evaluation.passed))
         if (violations.isNotEmpty()) return ModuleInstallResult.Rejected(violations.joinToString("; ") { "${it.rule}: ${it.message}" })
         val parsed = runCatching { parse(source) }.getOrElse { return ModuleInstallResult.Rejected("Invalid module: ${it.message}") }
-        if (parsed.kind != kind) return ModuleInstallResult.Rejected("Module kind does not match requested kind")
+        if (parsed.kind != safeKind) return ModuleInstallResult.Rejected("Module kind does not match requested kind")
         if (parsed.version != version) return ModuleInstallResult.Rejected("Module version does not match requested version")
-        val id = "${kind}-${System.currentTimeMillis()}-${UUID.randomUUID().toString().take(8)}"
+        val id = "${safeKind}-${System.currentTimeMillis()}-${UUID.randomUUID().toString().take(8)}"
         val destination = moduleRoot.resolve(id).apply { mkdirs() }.resolve("module.json")
         destination.writeText(source)
         val module = LiveModule(id, kind, version, destination.absolutePath, checksum(source), System.currentTimeMillis())
@@ -72,6 +78,7 @@ class LiveModuleStore(private val root: File) {
      * false when the id is not found on disk (no write occurs in that case).
      */
     fun rollback(id: String): Boolean {
+        if (!id.matches(SAFE_ID)) return false
         val moduleDir = moduleRoot.resolve(id)
         if (!moduleDir.isDirectory) return false
         val moduleFile = moduleDir.resolve("module.json")
@@ -82,7 +89,7 @@ class LiveModuleStore(private val root: File) {
 
     fun active(): LiveModule? {
         val id = activeFile.takeIf { it.isFile }?.readText()?.trim().orEmpty()
-        if (id.isBlank()) return null
+        if (!id.matches(SAFE_ID)) return null
         val source = moduleRoot.resolve(id).resolve("module.json")
         if (!source.isFile) return null
         val parsed = runCatching { parse(source.readText()) }.getOrNull() ?: return null
