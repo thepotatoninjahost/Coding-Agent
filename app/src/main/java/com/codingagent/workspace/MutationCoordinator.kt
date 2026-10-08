@@ -24,7 +24,11 @@ sealed class MutationProposeResult {
 
 sealed class MutationApprovalResult {
     data class AwaitingSecond(val proposal: PendingChangeProposal, val approval: ApprovalRecord) : MutationApprovalResult()
-    data class Applied(val proposal: PendingChangeProposal, val changeSet: ChangeSet) : MutationApprovalResult()
+    data class Applied(
+        val proposal: PendingChangeProposal,
+        val changeSet: ChangeSet,
+        val verificationNote: String? = null
+    ) : MutationApprovalResult()
     data class RepairRequired(val proposal: PendingChangeProposal, val failure: String) : MutationApprovalResult()
     data class Rejected(val reason: String) : MutationApprovalResult()
 }
@@ -251,6 +255,7 @@ class MutationCoordinator(
             return MutationApprovalResult.AwaitingSecond(candidate, approval)
         }
         var applied: ChangeSet? = null
+        var verificationNote: String? = null
         return try {
             try {
                 OpenJobStore.markApplying(workspace.projectRoot(), proposal.id, proposal.changeSet.changes.map { it.path }.distinct(), proposal.request)
@@ -261,10 +266,14 @@ class MutationCoordinator(
             val appliedChangeSet = workspace.applyApproved(proposal.changeSet)
             applied = appliedChangeSet
             val intake = TaskIntakeParser(workspace.projectRoot()).parse(proposal.request)
+            verificationNote = intake.verificationNote
             val postApply = if (intake.verificationCommands.isEmpty()) {
                 workspace.verify()
             } else {
                 workspace.runChecks(intake.verificationCommands, 180)
+            }
+            if (postApply.passed && intake.verificationCommands.isNotEmpty()) {
+                verificationNote = "Requested build/test checks passed."
             }
             if (!postApply.passed) {
                 val details = buildString {
@@ -389,7 +398,7 @@ class MutationCoordinator(
                 }
             }
             recordEvolution(candidate, appliedChangeSet)
-            MutationApprovalResult.Applied(candidate, appliedChangeSet)
+            MutationApprovalResult.Applied(candidate, appliedChangeSet, verificationNote)
         } catch (error: Exception) {
             val completedChangeSet = applied
             if (completedChangeSet != null) {
@@ -448,7 +457,7 @@ class MutationCoordinator(
                     if (markedApplied) {
                         pending.remove(id)
                         if (persist()) {
-                            return MutationApprovalResult.Applied(candidate, proposal.changeSet)
+                            return MutationApprovalResult.Applied(candidate, proposal.changeSet, verificationNote)
                         }
                         pending[id] = proposal
                     }
