@@ -155,8 +155,7 @@ class TaskIntakeParser(
             .containsMatchIn(normalized)
         val directVerificationVerb = Regex("""\b(test|verify|build|compile|lint|check)\b\s+(the|this|my|all|project|app|application|module|code|changes|it)\b""")
             .containsMatchIn(normalized)
-        return (runVerb && checkTarget) || directVerificationVerb ||
-            Regex("""\b(build|compile|lint)\b""").containsMatchIn(normalized)
+        return (runVerb && checkTarget) || directVerificationVerb
     }
 }
 
