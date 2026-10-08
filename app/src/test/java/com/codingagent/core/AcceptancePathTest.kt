@@ -219,6 +219,42 @@ class AcceptancePathTest {
     }
 
     @Test
+    fun rejectRestoresPendingProposalWhenOpenJobCleanupFails() {
+        val root = Files.createTempDirectory("accept-reject-job-cleanup-failure").toFile()
+        root.resolve("Main.kt").writeText("fun main() = 1\n")
+        val coordinator = MutationCoordinator(ProjectWorkspace(root))
+        val proposal = (coordinator.propose(
+            "reject cleanup failure",
+            listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 2\n"))
+        ) as MutationProposeResult.Proposed).proposal
+
+        OpenJobStore.file(root).writeText("not valid json")
+        assertFalse(coordinator.reject(proposal.id))
+        assertEquals(1, coordinator.pending().size)
+        assertEquals("fun main() = 1\n", root.resolve("Main.kt").readText())
+    }
+
+    @Test
+    fun expiredProposalIsRestoredWhenOpenJobCleanupFails() {
+        val root = Files.createTempDirectory("accept-expiry-job-cleanup-failure").toFile()
+        root.resolve("Main.kt").writeText("fun main() = 1\n")
+        var now = 1_000L
+        val coordinator = MutationCoordinator(
+            ProjectWorkspace(root),
+            now = { now }
+        )
+        val proposal = (coordinator.propose(
+            "expiry cleanup failure",
+            listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 2\n"))
+        ) as MutationProposeResult.Proposed).proposal
+
+        OpenJobStore.file(root).writeText("not valid json")
+        now = proposal.expiresAt + 1L
+        assertEquals(1, coordinator.pending().size)
+        assertEquals("fun main() = 1\n", root.resolve("Main.kt").readText())
+    }
+
+    @Test
     fun rejectLeavesDiskUnchanged() {
         val root = Files.createTempDirectory("accept-reject").toFile()
         root.resolve("Main.kt").writeText("fun main() = 1\n")
