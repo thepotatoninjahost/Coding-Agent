@@ -21,7 +21,7 @@ class ProjectIndexer {
     private val extensions = setOf("kt", "java", "kts", "py", "js", "ts", "tsx", "jsx", "json", "xml", "gradle", "md", "yaml", "yml", "toml", "sh")
 
     fun index(root: File): List<ProjectFile> = root.walkTopDown()
-        .onEnter { it.name !in ignored && isSafeProjectPath(root, it) }
+        .onEnter { it.name.lowercase() !in ignored && isSafeProjectPath(root, it) }
         .filter {
             it.isFile && !java.nio.file.Files.isSymbolicLink(it.toPath()) &&
                 isSafeProjectPath(root, it) &&
