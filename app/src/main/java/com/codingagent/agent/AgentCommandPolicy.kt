@@ -10,7 +10,7 @@ package com.codingagent.agent
  */
 object AgentCommandPolicy {
     private val shellMetacharacters = Regex("""[;&|><`\$'"\n\r]""")
-    private val shellGlobCharacters = Regex("""[*?\[\]]""")
+    private val shellGlobCharacters = Regex("""[*?{}()!+@\[\]]""")
     private val forbiddenPathTokens = Regex("""(^|/|\\)\.\.(?:/|\\|$)""")
 
     fun rejectionReason(raw: String): String? = rejectionReason(raw, null)
