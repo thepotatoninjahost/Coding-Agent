@@ -100,6 +100,26 @@ class ModelGatewayTest {
     }
 
     @Test
+    fun `stream parsing stops emitting deltas after cancellation`() {
+        lateinit var gateway: RemoteHttpGateway
+        var deltas = 0
+        gateway = RemoteHttpGateway("http://127.0.0.1:8080/v1", "", "local", connectionFactory = { _ ->
+            fakeConnection("""data: {"choices":[{"delta":{"content":"first"}}]}
+data: {"choices":[{"delta":{"content":"second"}}]}
+data: [DONE]
+""".trimIndent())
+        })
+
+        val result = gateway.stream(ModelRequest("system", "inspect", emptyList())) {
+            deltas++
+            if (deltas == 1) gateway.cancel()
+        }
+
+        assertEquals(ModelResponse.Failure("Cancelled"), result)
+        assertEquals("cancellation must stop further streamed deltas", 1, deltas)
+    }
+
+    @Test
     fun `streamed tool call arguments are accumulated instead of treated as text`() {
         val gateway = RemoteHttpGateway("http://127.0.0.1:8080/v1", "", "local", connectionFactory = { _ ->
             fakeConnection("""data: {"choices":[{"delta":{"tool_calls":[{"id":"call_1","index":0,"function":{"name":"read_file","arguments":"{\"path\":\"src/"}}]}}]}
