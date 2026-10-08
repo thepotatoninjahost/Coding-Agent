@@ -16,17 +16,10 @@ class AgentCommandPolicyTest {
     }
 
     @Test
-    fun allowsStandardVerificationGradleCommands() {
-        assertNull(
-            AgentCommandPolicy.rejectionReason(
-                "./gradlew :app:testDebugUnitTest --no-daemon --console=plain"
-            )
-        )
-        assertNull(
-            AgentCommandPolicy.rejectionReason(
-                "./gradlew :app:lintDebug :app:assembleDebug --no-daemon --console=plain"
-            )
-        )
+    fun blocksProjectControlledBuildScriptsFromAutonomousCommands() {
+        assertNotNull(AgentCommandPolicy.rejectionReason("./gradlew :app:testDebugUnitTest --no-daemon"))
+        assertNotNull(AgentCommandPolicy.rejectionReason("gradle test"))
+        assertNotNull(AgentCommandPolicy.rejectionReason("gradlew.bat test"))
     }
 
     @Test
@@ -57,7 +50,7 @@ class AgentCommandPolicyTest {
     }
 
     @Test
-    fun blocksPathEscapeAndDangerousGradleOptions() {
+    fun blocksProjectControlledBuildScriptVariantsAndPathEscape() {
         assertNotNull(AgentCommandPolicy.rejectionReason("cat ../secrets.txt"))
         assertNotNull(AgentCommandPolicy.rejectionReason("cat /data/data/example/file"))
         assertNotNull(AgentCommandPolicy.rejectionReason("./gradlew test -I evil.init.gradle"))
