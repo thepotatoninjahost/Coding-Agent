@@ -62,6 +62,7 @@ class MutationCoordinator(
         OpenJobStore.bind(workspace.projectRoot())
         PendingProposalStore.load(workspace.projectRoot()).forEach { pending[it.id] = it }
         clearExpired()
+        reconcilePendingJobConsistency()
         reconcileDurableApplyState()
     }
 
@@ -434,6 +435,33 @@ class MutationCoordinator(
                 )
                 evolution.promoteSource(staged, kind, proposal.verification, action, latestApproval)
             }
+        }
+    }
+
+    private fun reconcilePendingJobConsistency() {
+        val root = workspace.projectRoot()
+        val job = OpenJobStore.load(root)
+        if (pending.isEmpty()) return
+
+        if (job == null) {
+            pending.clear()
+            persist()
+            return
+        }
+
+        if (job.status == "recovery-required") return
+
+        val expectedProposalId = job.proposalId ?: job.appliedProposalId
+        if (expectedProposalId == null) {
+            pending.clear()
+            persist()
+            return
+        }
+
+        val orphaned = pending.keys.filter { it != expectedProposalId }
+        if (orphaned.isNotEmpty()) {
+            orphaned.forEach(pending::remove)
+            persist()
         }
     }
 
