@@ -193,6 +193,22 @@ class AcceptancePathTest {
     }
 
     @Test
+    fun startupMarksRecoveryRequiredWhenWaitingJobHasNoPendingProposal() {
+        val root = Files.createTempDirectory("accept-missing-pending-proposal").toFile()
+        root.resolve("Main.kt").writeText("fun main() = Unit\n")
+        OpenJobStore.markWaiting(root, "missing-proposal-id", listOf("Main.kt"), "recover missing proposal")
+
+        val coordinator = MutationCoordinator(ProjectWorkspace(root))
+
+        assertEquals("recovery-required", OpenJobStore.load(root)?.status)
+        assertTrue(OpenJobStore.load(root)?.recoveryReason.orEmpty().contains("pending proposal is missing"))
+        assertTrue(coordinator.approve(
+            "missing-proposal-id",
+            OwnerApprovalToken.authenticated("missing-proposal-id")
+        ) is MutationApprovalResult.Rejected)
+    }
+
+    @Test
     fun approvalRejectsCorruptDurableJobStateAndMarksRecoveryRequired() {
         val root = Files.createTempDirectory("accept-corrupt-job-approval").toFile()
         root.resolve("Main.kt").writeText("fun main() = 1\n")
