@@ -69,7 +69,9 @@ class TaskIntakeTest {
         root.resolve("app/build.gradle.kts").writeText("plugins {}\\n")
 
         val intake = TaskIntakeParser(root).parse("fix the login bug")
+        val ambiguousTestMention = TaskIntakeParser(root).parse("the test file has a bug")
 
         assertTrue(intake.verificationCommands.isEmpty())
+        assertTrue(ambiguousTestMention.verificationCommands.isEmpty())
     }
 }
