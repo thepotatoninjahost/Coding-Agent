@@ -622,4 +622,61 @@ class AcceptancePathTest {
             names
         )
     }
+
+    @Test
+    fun postApplyFailureIsRolledBackAndJobReopened() {
+        val root = Files.createTempDirectory("accept-post-apply-failure").toFile()
+        root.resolve("Main.kt").writeText("fun main() = 1\n")
+        val workspace = ProjectWorkspace(root)
+        val coordinator = MutationCoordinator(workspace)
+        val proposal = (coordinator.propose(
+            "recover post-apply failure",
+            listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 2\n"))
+        ) as MutationProposeResult.Proposed).proposal
+
+        assertTrue(coordinator.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id)) is MutationApprovalResult.AwaitingSecond)
+        OpenJobStore.markApplying(root, proposal.id, listOf("Main.kt"), proposal.request)
+        workspace.applyApproved(proposal.changeSet)
+
+        val message = coordinator.recoverAfterApplyFailure(
+            proposal.changeSet,
+            IllegalStateException("simulated post-apply failure")
+        )
+
+        assertTrue(message.contains("rolled back"))
+        assertEquals("open", OpenJobStore.load(root)?.status)
+        assertEquals("fun main() = 1\n", root.resolve("Main.kt").readText())
+    }
+
+    @Test
+    fun mixedPostApplyFailureLocksJobForRecovery() {
+        val root = Files.createTempDirectory("accept-mixed-post-apply-failure").toFile()
+        root.resolve("src").mkdirs()
+        root.resolve("src/A.kt").writeText("fun a() = 1\n")
+        root.resolve("src/B.kt").writeText("fun b() = 1\n")
+        val workspace = ProjectWorkspace(root)
+        val coordinator = MutationCoordinator(workspace)
+        val proposal = (coordinator.propose(
+            "recover mixed post-apply failure",
+            listOf(
+                TaskOperation(OperationKind.REPLACE, "src/A.kt", "fun a() = 1\n", "fun a() = 2\n"),
+                TaskOperation(OperationKind.REPLACE, "src/B.kt", "fun b() = 1\n", "fun b() = 2\n")
+            )
+        ) as MutationProposeResult.Proposed).proposal
+
+        assertTrue(coordinator.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id)) is MutationApprovalResult.AwaitingSecond)
+        OpenJobStore.markApplying(root, proposal.id, proposal.changeSet.changes.map { it.path }, proposal.request)
+        workspace.replace("src/A.kt", "fun a() = 1\n", "fun a() = 2\n", "simulate partial apply")
+
+        val message = coordinator.recoverAfterApplyFailure(
+            proposal.changeSet,
+            IllegalStateException("simulated verification crash")
+        )
+
+        assertTrue(message.contains("recovery is required"))
+        assertEquals("recovery-required", OpenJobStore.load(root)?.status)
+        assertEquals("fun a() = 2\n", root.resolve("src/A.kt").readText())
+        assertEquals("fun b() = 1\n", root.resolve("src/B.kt").readText())
+    }
+
 }

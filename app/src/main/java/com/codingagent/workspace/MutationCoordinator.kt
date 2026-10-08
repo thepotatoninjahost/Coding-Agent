@@ -272,7 +272,13 @@ class MutationCoordinator(
                     runCatching { OpenJobStore.markReady(workspace.projectRoot()) }
                     return MutationApprovalResult.Rejected("Change was rolled back because completed-job persistence failed")
                 }
-                return MutationApprovalResult.Rejected("CRITICAL: completed-job persistence failed and rollback was incomplete: $rollback")
+                OpenJobStore.markRecoveryRequired(
+                    workspace.projectRoot(),
+                    "Completed-job persistence failed after files were changed and rollback was incomplete: " + rollback
+                )
+                return MutationApprovalResult.Rejected(
+                    "CRITICAL: completed-job persistence failed and rollback was incomplete; recovery is required: " + rollback
+                )
             }
 
             pending.remove(id)
@@ -283,15 +289,20 @@ class MutationCoordinator(
                     runCatching { OpenJobStore.markReady(workspace.projectRoot()) }
                     MutationApprovalResult.Rejected("Change was rolled back because approved-state persistence failed")
                 } else {
+                    OpenJobStore.markRecoveryRequired(
+                        workspace.projectRoot(),
+                        "Approved-state persistence failed after files were changed and rollback was incomplete: " + rollback
+                    )
                     MutationApprovalResult.Rejected(
-                        "CRITICAL: change was applied but could not be durably persisted or rolled back: $rollback"
+                        "CRITICAL: change was applied but could not be durably persisted or rolled back; recovery is required: " + rollback
                     )
                 }
             }
             recordEvolution(candidate, applied)
             MutationApprovalResult.Applied(candidate, applied)
         } catch (error: Exception) {
-            MutationApprovalResult.Rejected("Approved change could not be applied: ${error.message.orEmpty()}")
+            val recovery = recoverAfterApplyFailure(proposal.changeSet, error)
+            MutationApprovalResult.Rejected(recovery)
         }
     }
 
@@ -440,6 +451,39 @@ class MutationCoordinator(
                 DiskState.BEFORE, DiskState.MIXED -> runCatching {
                     OpenJobStore.markRecoveryRequired(root, "The job is marked applied but its recorded proposal does not match the on-disk checksums")
                 }
+            }
+        }
+    }
+
+    internal fun recoverAfterApplyFailure(changeSet: ChangeSet, error: Exception): String {
+        val root = workspace.projectRoot()
+        val state = diskState(changeSet)
+        val message = error.message.orEmpty().ifBlank { error.javaClass.simpleName }
+        return when (state) {
+            DiskState.BEFORE -> {
+                runCatching { OpenJobStore.markReady(root) }
+                "Approved change failed before any new file state remained: " + message
+            }
+            DiskState.AFTER -> {
+                val rollback = runCatching { workspace.rollback(changeSet) }
+                    .getOrElse { RollbackResult.Rejected(it.message.orEmpty()) }
+                if (rollback == RollbackResult.Restored) {
+                    runCatching { OpenJobStore.markReady(root) }
+                    "Approved change failed and was rolled back: " + message
+                } else {
+                    OpenJobStore.markRecoveryRequired(
+                        root,
+                        "The change was applied but automatic rollback was incomplete: " + rollback
+                    )
+                    "CRITICAL: approved change failed and automatic rollback was incomplete; recovery is required: " + rollback
+                }
+            }
+            DiskState.MIXED -> {
+                OpenJobStore.markRecoveryRequired(
+                    root,
+                    "The change failed with a mixed on-disk state; automatic recovery is required"
+                )
+                "CRITICAL: approved change failed with a mixed on-disk state; recovery is required: " + message
             }
         }
     }

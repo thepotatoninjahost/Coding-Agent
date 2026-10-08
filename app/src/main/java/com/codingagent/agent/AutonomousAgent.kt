@@ -182,9 +182,8 @@ class AutonomousAgent(
         tools.setRequestContext(normalized)
         val intake = TaskIntakeParser(root).parse(normalized)
         val plan = AgentPlanner(workspace).plan(intake)
-        // Wired in: was previously dead code. Every call below is defensively wrapped
-        // (runCatching) — PlanningLoop can at worst no-op, never crash a live run, since
-        // this file can't be compiled/tested in this environment before shipping.
+        // PlanningLoop is part of the live execution path. Its bookkeeping is defensive:
+        // a planning-recording failure must not crash an otherwise valid agent run.
         val planningLoop = PlanningLoop(plan)
         val toolSelectionLoop = ToolSelectionLoop(ToolSelector().select(intake))
         // Intake and the initial repository view are real execution prerequisites, not
