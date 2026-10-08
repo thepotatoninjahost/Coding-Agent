@@ -67,21 +67,20 @@ class TaskIntakeParser(
     }
 
     private fun parseOperation(request: String): TaskOperation {
-        Regex("(?is)^\s*replace\s+(.+?)\s+with\s+(.+?)\s+in\s+([A-Za-z0-9_./-]+)\s*$").matchEntire(request)?.let {
+        Regex("(?is)^\\s*replace\\s+(.+?)\\s+with\\s+(.+?)\\s+in\\s+([A-Za-z0-9_./-]+)\\s*$").matchEntire(request)?.let {
             return TaskOperation(OperationKind.REPLACE, it.groupValues[3], it.groupValues[1].trim(), it.groupValues[2].trim())
         }
-        Regex("(?is)^\s*append\s+(.+?)\s+to\s+([A-Za-z0-9_./-]+)\s*$").matchEntire(request)?.let {
+        Regex("(?is)^\\s*append\\s+(.+?)\\s+to\\s+([A-Za-z0-9_./-]+)\\s*$").matchEntire(request)?.let {
             return TaskOperation(OperationKind.APPEND, it.groupValues[2], text = it.groupValues[1].trimEnd())
         }
-        Regex("(?is)^\s*remove\s+(.+?)\s+from\s+([A-Za-z0-9_./-]+)\s*$").matchEntire(request)?.let {
+        Regex("(?is)^\\s*remove\\s+(.+?)\\s+from\\s+([A-Za-z0-9_./-]+)\\s*$").matchEntire(request)?.let {
             return TaskOperation(OperationKind.REMOVE, it.groupValues[2], oldText = it.groupValues[1].trim())
         }
-        Regex("(?is)^\s*create\s+(?:file\s+)?([A-Za-z0-9_./-]+)\s+with\s+(.+)\s*$").matchEntire(request)?.let {
+        Regex("(?is)^\\s*create\\s+(?:file\\s+)?([A-Za-z0-9_./-]+)\\s+with\\s+(.+)\\s*$").matchEntire(request)?.let {
             return TaskOperation(OperationKind.CREATE_FILE, it.groupValues[1], text = it.groupValues[2])
         }
         return TaskOperation()
     }
-
     private data class VerificationPlan(
         val commands: List<List<String>>,
         val note: String? = null
