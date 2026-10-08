@@ -35,6 +35,32 @@ class OpenJobStoreTest {
     }
 
 
+    @Test
+    fun recoveryRequiredStateCanBeRecreatedWhenPriorMarkerIsMissing() {
+        val root = Files.createTempDirectory("open-job-recovery-missing").toFile()
+
+        OpenJobStore.markRecoveryRequired(root, "rollback incomplete")
+
+        val loaded = OpenJobStore.load(root)
+        assertEquals("recovery-required", loaded?.status)
+        assertEquals("rollback incomplete", loaded?.recoveryReason)
+    }
+
+    @Test
+    fun recoveryRequiredStateReplacesCorruptMarker() {
+        val root = Files.createTempDirectory("open-job-recovery-corrupt").toFile()
+        OpenJobStore.file(root).apply {
+            parentFile?.mkdirs()
+            writeText("not valid json")
+        }
+
+        OpenJobStore.markRecoveryRequired(root, "rollback incomplete")
+
+        val loaded = OpenJobStore.load(root)
+        assertEquals("recovery-required", loaded?.status)
+        assertEquals("rollback incomplete", loaded?.recoveryReason)
+    }
+
     @Test(expected = IllegalStateException::class)
     fun startNewFailsClosedWhenJobIsRecoveryRequired() {
         val root = Files.createTempDirectory("open-job-recovery-start").toFile()
