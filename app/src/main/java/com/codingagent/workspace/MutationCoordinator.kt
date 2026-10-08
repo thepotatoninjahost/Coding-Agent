@@ -219,6 +219,7 @@ class MutationCoordinator(
                     pending.remove(id)
                     if (!persist()) {
                         pending[id] = proposal
+                        runCatching { OpenJobStore.markReady(workspace.projectRoot()) }
                         return MutationApprovalResult.Rejected(
                             "$details; rollback restored files, but pending-state persistence failed"
                         )
