@@ -626,7 +626,7 @@ class AcceptancePathTest {
     @Test
     fun postApplyFailureIsRolledBackAndJobReopened() {
         val root = Files.createTempDirectory("accept-post-apply-failure").toFile()
-        root.resolve("Main.kt").writeText("fun main() = 1\\n")
+        root.resolve("Main.kt").writeText("fun main() = 1\n")
         val workspace = ProjectWorkspace(root)
         val coordinator = MutationCoordinator(workspace)
         val proposal = (coordinator.propose(
