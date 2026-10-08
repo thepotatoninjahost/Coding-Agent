@@ -47,7 +47,7 @@ class RemoteHttpGateway(
             connection.outputStream.use { it.write(body.toString().toByteArray(StandardCharsets.UTF_8)) }
             if (isCancelled(generation)) return ModelResponse.Failure("Cancelled")
             if (connection.responseCode !in 200..299) return failure(connection)
-            parseStreamedBody(connection.inputStream, onDelta)
+            parseStreamedBody(connection.inputStream, onDelta, generation)
         } catch (error: IOException) {
             ModelResponse.Failure("Model request failed: ${error.message.orEmpty().ifBlank { error.javaClass.simpleName }}")
         } catch (error: Exception) {
@@ -65,7 +65,11 @@ class RemoteHttpGateway(
      * responseFromChatMessage() path that non-streaming responses already go through.
      * This avoids a second, divergent parsing implementation for the streamed case.
      */
-    private fun parseStreamedBody(input: java.io.InputStream, onDelta: (String) -> Unit): ModelResponse {
+    private fun parseStreamedBody(
+        input: java.io.InputStream,
+        onDelta: (String) -> Unit,
+        generation: Long
+    ): ModelResponse {
         val mergedContent = StringBuilder()
         var toolCallId: String? = null
         var toolCallName: String? = null
@@ -74,6 +78,7 @@ class RemoteHttpGateway(
 
         input.bufferedReader(StandardCharsets.UTF_8).useLines { lines ->
             for (rawLine in lines) {
+                if (isCancelled(generation)) return@useLines ModelResponse.Failure("Cancelled")
                 val line = rawLine.trim()
                 if (!line.startsWith("data:")) continue
                 val payload = line.removePrefix("data:").trim()
