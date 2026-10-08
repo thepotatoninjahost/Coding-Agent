@@ -2,6 +2,7 @@ package com.codingagent.intake
 
 import java.io.File
 import java.util.Properties
+import org.json.JSONObject
 
 /**
  * ONE JOB: Free text → typed intake (intent, targets, operations).
@@ -124,12 +125,28 @@ class TaskIntakeParser(
                     )
                 }
             }
-            root.resolve("package.json").isFile ->
-                if (executableAvailable("npm")) {
-                    VerificationPlan(listOf(listOf("npm", "test", "--if-present")))
-                } else {
+            root.resolve("package.json").isFile -> {
+                if (!executableAvailable("npm")) {
                     VerificationPlan(emptyList(), "Requested Node.js tests were not run because npm is unavailable.")
+                } else {
+                    val packageJson = runCatching {
+                        JSONObject(root.resolve("package.json").readText(Charsets.UTF_8))
+                    }.getOrNull()
+                    val scripts = packageJson?.optJSONObject("scripts")
+                    val testScript = scripts?.optString("test")?.trim().orEmpty()
+                    when {
+                        packageJson == null -> VerificationPlan(
+                            emptyList(),
+                            "Requested Node.js tests were not run because package.json could not be parsed."
+                        )
+                        testScript.isEmpty() || scripts?.isNull("test") != false -> VerificationPlan(
+                            emptyList(),
+                            "Requested Node.js tests were not run because package.json does not define a test script."
+                        )
+                        else -> VerificationPlan(listOf(listOf("npm", "test")))
+                    }
                 }
+            }
             root.resolve("pyproject.toml").isFile || root.resolve("pytest.ini").isFile -> {
                 when {
                     executableAvailable("python") -> VerificationPlan(listOf(listOf("python", "-m", "pytest")))
