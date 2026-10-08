@@ -35,7 +35,7 @@ class OpenJobStoreTest {
     }
 
 
-    @Test
+    @Test(expected = IllegalStateException::class)
     fun markAppliedFailsClosedWhenJobMarkerIsMissing() {
         val root = Files.createTempDirectory("open-job-missing").toFile()
         OpenJobStore.markApplied(root, "proposal-missing")
