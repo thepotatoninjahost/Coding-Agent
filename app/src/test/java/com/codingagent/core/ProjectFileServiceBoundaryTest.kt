@@ -2,8 +2,12 @@ package com.codingagent.core
 
 import com.codingagent.workspace.ProjectFileService
 import com.codingagent.workspace.ProjectWorkspace
+import com.codingagent.workspace.OpenJobStore
+import com.codingagent.intake.OperationKind
+import com.codingagent.intake.TaskOperation
 import org.junit.Assume.assumeTrue
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
@@ -25,6 +29,24 @@ class ProjectFileServiceBoundaryTest {
         assertRejected { service.read(".coding-agent/private-state.json") }
         assertRejected { service.read("nested/../.coding-agent/private-state.json") }
         assertRejected { service.read(".CODING-AGENT/private-state.json") }
+    }
+
+    @Test
+    fun workspaceMutationsCannotTargetInternalAgentMetadata() {
+        val root = Files.createTempDirectory("project-mutation-boundary").toFile()
+        root.resolve("Main.kt").writeText("fun main() = Unit\n")
+        OpenJobStore.openOrKeep(root, "active project task")
+        val jobFile = OpenJobStore.file(root)
+        val before = jobFile.readText()
+        val workspace = ProjectWorkspace(root)
+
+        assertRejected {
+            workspace.preview(
+                listOf(TaskOperation(OperationKind.CREATE_FILE, ".coding-agent/open-job.json", text = "{\"status\":\"open\"}")),
+                "attempt to overwrite private agent state"
+            )
+        }
+        assertEquals(before, jobFile.readText())
     }
 
     @Test
