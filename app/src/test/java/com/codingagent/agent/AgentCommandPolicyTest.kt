@@ -38,7 +38,7 @@ class AgentCommandPolicyTest {
         // Android's /system/bin/sh is mksh; brace and extended-glob expansion can
         // introduce absolute/out-of-root operands after the policy's path checks.
         assertNotNull(AgentCommandPolicy.rejectionReason("cat {README.md,/etc/passwd}"))
-        assertNotNull(AgentCommandPolicy.rejectionReason("cat +(README.md|/etc/passwd)"))
+        assertNotNull(AgentCommandPolicy.rejectionReason("cat @(/etc/passwd)"))
     }
 
     @Test
