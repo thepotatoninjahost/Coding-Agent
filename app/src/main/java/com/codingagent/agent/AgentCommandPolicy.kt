@@ -36,7 +36,8 @@ object AgentCommandPolicy {
             validateFilesystemOperands(executable, tokens, projectRoot)?.let { return it }
         }
         return when (executable) {
-            "gradlew", "gradlew.bat", "gradle" -> validateGradle(tokens)
+            "gradlew", "gradlew.bat", "gradle" ->
+                "Build tools execute project-controlled scripts and are not permitted through the autonomous command channel; use the owner-controlled Terminal after reviewing the project scripts"
             "git" -> validateGit(tokens)
             "find" -> validateFind(tokens)
             "cat", "head", "tail", "wc", "file", "grep", "rg", "ls", "pwd", "printf" -> null
@@ -157,79 +158,5 @@ object AgentCommandPolicy {
         return null
     }
 
-    private fun validateGradle(tokens: List<String>): String? {
-        val dangerousOptions = setOf(
-            "-I", "--init-script",
-            "-p", "--project-dir",
-            "-g", "--gradle-user-home",
-            "-b", "--build-file",
-            "--settings-file",
-            "--include-build",
-            "--project-cache-dir",
-            "--write-locks",
-            "--update-locks",
-            "--write-verification-metadata",
-            "--export-keys",
-            "--refresh-keys",
-            "--dependency-verification",
-            "--scan",
-            "--develocity-url",
-            "--develocity-plugin-version"
-        )
-        if (tokens.any { token ->
-                token in dangerousOptions ||
-                    token.startsWith("-I=") ||
-                    token.startsWith("--init-script=") ||
-                    token.startsWith("-p=") ||
-                    token.startsWith("--project-dir=") ||
-                    token.startsWith("-g=") ||
-                    token.startsWith("--gradle-user-home=") ||
-                    token.startsWith("-b=") ||
-                    token.startsWith("--build-file=") ||
-                    token.startsWith("--settings-file=") ||
-                    token.startsWith("--include-build=") ||
-                    token.startsWith("--project-cache-dir=") ||
-                    token.startsWith("--update-locks=") ||
-                    token.startsWith("--write-verification-metadata=") ||
-                    token.startsWith("--export-keys=") ||
-                    token.startsWith("--dependency-verification=") ||
-                    token.startsWith("-P") ||
-                    token.startsWith("--project-prop") ||
-                    token.startsWith("-D") ||
-                    token.startsWith("--system-prop")
-            }) {
-            return "Global, external-project, initialization-script, system-property, project-property, and build-scan Gradle options are not allowed for model commands"
-        }
 
-        val taskTokens = tokens.drop(1).filterNot { it.startsWith("-") }
-        if (taskTokens.isEmpty()) return null
-
-        val safeTasks = setOf(
-            "build",
-            "assemble",
-            "check",
-            "test",
-            "tasks",
-            "projects",
-            "dependencies",
-            "properties",
-            ":app:build",
-            ":app:assemble",
-            ":app:assembleDebug",
-            ":app:assembleRelease",
-            ":app:check",
-            ":app:test",
-            ":app:testDebugUnitTest",
-            ":app:testReleaseUnitTest",
-            ":app:lint",
-            ":app:lintDebug",
-            ":app:lintRelease",
-            ":app:compileDebugKotlin",
-            ":app:compileReleaseKotlin"
-        )
-        if (taskTokens.any { it !in safeTasks }) {
-            return "Only explicitly allowlisted build, test, lint, compile, verification, and Gradle inspection tasks are allowed"
-        }
-        return null
-    }
 }
