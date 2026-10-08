@@ -80,6 +80,18 @@ object AgentCommandPolicy {
         if (subcommand !in allowed) {
             return "git '$subcommand' is not permitted for model commands"
         }
+        val executionOrEscapeOptions = setOf(
+            "--ext-diff",
+            "--textconv",
+            "--no-index",
+            "--open-files-in-pager"
+        )
+        if (tokens.any { token ->
+                token in executionOrEscapeOptions ||
+                    token.startsWith("--open-files-in-pager=")
+            }) {
+            return "External diff tools, textconv filters, pager commands, and no-index filesystem access are not allowed for model commands"
+        }
         if (tokens.any { it == "-o" || it == "--output" || it.startsWith("--output=") }) {
             return "Writing git output to files is not allowed for model commands"
         }
