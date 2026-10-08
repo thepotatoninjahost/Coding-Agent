@@ -10,6 +10,7 @@ package com.codingagent.agent
  */
 object AgentCommandPolicy {
     private val shellMetacharacters = Regex("""[;&|><`\$'"\n\r]""")
+    private val shellGlobCharacters = Regex("""[*?{}()!+@\[\]]""")
     private val forbiddenPathTokens = Regex("""(^|/|\\)\.\.(?:/|\\|$)""")
 
     fun rejectionReason(raw: String): String? = rejectionReason(raw, null)
@@ -20,6 +21,9 @@ object AgentCommandPolicy {
         if (command.length > 1_000) return "Command is too long"
         if (shellMetacharacters.containsMatchIn(command)) {
             return "Shell chaining, redirection, substitution, quotes, and control characters are not allowed for model commands"
+        }
+        if (shellGlobCharacters.containsMatchIn(command)) {
+            return "Shell glob expansion is not allowed for model commands; specify explicit project-relative paths"
         }
 
         val tokens = command.split(Regex("\\s+")).filter { it.isNotBlank() }
@@ -32,7 +36,8 @@ object AgentCommandPolicy {
             validateFilesystemOperands(executable, tokens, projectRoot)?.let { return it }
         }
         return when (executable) {
-            "gradlew", "gradlew.bat", "gradle" -> validateGradle(tokens)
+            "gradlew", "gradlew.bat", "gradle" ->
+                "Build tools execute project-controlled scripts and are not permitted through the autonomous command channel; use the owner-controlled Terminal after reviewing the project scripts"
             "git" -> validateGit(tokens)
             "find" -> validateFind(tokens)
             "cat", "head", "tail", "wc", "file", "grep", "rg", "ls", "pwd", "printf" -> null
@@ -54,11 +59,21 @@ object AgentCommandPolicy {
             "find" -> tokens.drop(1).filterNot { it.startsWith("-") }.take(1)
             else -> emptyList()
         }
-        if (executable == "rg" && tokens.any { it == "--pre" || it.startsWith("--pre=") }) {
-            return "ripgrep preprocessors are not allowed for model commands"
+        if (executable == "rg" && tokens.any { token ->
+                token == "--pre" || token.startsWith("--pre=") ||
+                    token == "--hidden" || token == "--follow" || token == "-L" ||
+                    token.startsWith("--no-ignore") ||
+                    Regex("""^-u{1,3}$""").matches(token) ||
+                    (token.startsWith("-") && !token.startsWith("--") && token.drop(1).contains('u'))
+            }) {
+            return "Ripgrep preprocessors, hidden agent metadata, and symlink-following or ignore-bypass options are not allowed for model commands"
         }
-        if (executable == "grep" && tokens.any { it == "-R" || it == "--dereference-recursive" }) {
-            return "grep recursive symlink following is not allowed for model commands"
+        if (executable == "grep" && tokens.any { token ->
+                token == "--recursive" || token == "--dereference-recursive" ||
+                    (token.startsWith("-") && !token.startsWith("--") &&
+                        token.drop(1).any { it == 'r' || it == 'R' })
+            }) {
+            return "Recursive grep can expose private agent metadata and is not allowed for model commands; use explicit project-relative file paths"
         }
         val canonicalRoot = runCatching { root.canonicalFile }.getOrElse { return "Project root could not be resolved safely" }
         for (operand in operands) {
@@ -69,6 +84,11 @@ object AgentCommandPolicy {
             }
             if (!canonical.toPath().startsWith(canonicalRoot.toPath())) {
                 return "Model commands may not follow a symlink or filesystem path outside the project"
+            }
+            val relative = canonicalRoot.toPath().relativize(canonical.toPath())
+                .toString().replace('\\', '/')
+            if (relative.substringBefore('/').equals(".coding-agent", ignoreCase = true)) {
+                return "Coding Agent internal metadata is not accessible to model commands"
             }
         }
         return null
@@ -148,67 +168,5 @@ object AgentCommandPolicy {
         return null
     }
 
-    private fun validateGradle(tokens: List<String>): String? {
-        val dangerousOptions = setOf(
-            "-I", "--init-script",
-            "-p", "--project-dir",
-            "-g", "--gradle-user-home",
-            "-b", "--build-file",
-            "--settings-file",
-            "--include-build",
-            "--scan",
-            "--develocity-url",
-            "--develocity-plugin-version"
-        )
-        if (tokens.any { token ->
-                token in dangerousOptions ||
-                    token.startsWith("-I=") ||
-                    token.startsWith("--init-script=") ||
-                    token.startsWith("-p=") ||
-                    token.startsWith("--project-dir=") ||
-                    token.startsWith("-g=") ||
-                    token.startsWith("--gradle-user-home=") ||
-                    token.startsWith("-b=") ||
-                    token.startsWith("--build-file=") ||
-                    token.startsWith("--settings-file=") ||
-                    token.startsWith("--include-build=") ||
-                    token.startsWith("-P") ||
-                    token.startsWith("--project-prop") ||
-                    token.startsWith("-D") ||
-                    token.startsWith("--system-prop")
-            }) {
-            return "Global, external-project, initialization-script, system-property, project-property, and build-scan Gradle options are not allowed for model commands"
-        }
 
-        val taskTokens = tokens.drop(1).filterNot { it.startsWith("-") }
-        if (taskTokens.isEmpty()) return null
-
-        val safeTasks = setOf(
-            "build",
-            "assemble",
-            "check",
-            "test",
-            "tasks",
-            "projects",
-            "dependencies",
-            "properties",
-            ":app:build",
-            ":app:assemble",
-            ":app:assembleDebug",
-            ":app:assembleRelease",
-            ":app:check",
-            ":app:test",
-            ":app:testDebugUnitTest",
-            ":app:testReleaseUnitTest",
-            ":app:lint",
-            ":app:lintDebug",
-            ":app:lintRelease",
-            ":app:compileDebugKotlin",
-            ":app:compileReleaseKotlin"
-        )
-        if (taskTokens.any { it !in safeTasks }) {
-            return "Only explicitly allowlisted build, test, lint, compile, verification, and Gradle inspection tasks are allowed"
-        }
-        return null
-    }
 }

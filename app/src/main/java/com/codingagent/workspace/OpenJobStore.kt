@@ -186,16 +186,28 @@ object OpenJobStore {
     @Synchronized
     fun markRecoveryRequired(root: File, reason: String) {
         bind(root)
-        val current = load(root)
-            ?: error("Cannot record recovery-required state: durable open-job state is missing")
-        save(
-            root,
+        // Recovery is the fail-closed state. If the old marker is missing or corrupt,
+        // replace it with a minimal recovery record instead of leaving the workspace open.
+        val current = runCatching { load(root) }.getOrNull()
+        val recoveryReason = reason.takeIf { it.isNotBlank() }?.take(600)
+        val recovery = if (current != null) {
             current.copy(
                 status = "recovery-required",
-                recoveryReason = reason.takeIf { it.isNotBlank() }?.take(600),
+                recoveryReason = recoveryReason,
                 updatedAt = System.currentTimeMillis()
             )
-        )
+        } else {
+            OpenJob(
+                id = UUID.randomUUID().toString(),
+                goal = "Interrupted mutation requires recovery",
+                status = "recovery-required",
+                proposalId = null,
+                paths = emptyList(),
+                updatedAt = System.currentTimeMillis(),
+                recoveryReason = recoveryReason
+            )
+        }
+        save(root, recovery)
     }
 
     @Synchronized

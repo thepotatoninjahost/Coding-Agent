@@ -561,24 +561,81 @@ internal fun createEmptyProject(privateDir: File, nameHint: String? = null): Fil
     return destination
 }
 
-internal fun importProject(context: Context, privateDir: File, uri: Uri): File {
-    val source = DocumentFile.fromTreeUri(context, uri) ?: error("Folder is unavailable")
-    val destination = privateDir.resolve("projects").resolve("project-${System.currentTimeMillis()}")
-    require(destination.mkdirs()) { "Could not create project storage" }
-    copyDocumentTree(context, source, destination)
-    return destination
+internal const val MAX_PROJECT_IMPORT_FILES = 10_000
+internal const val MAX_PROJECT_IMPORT_BYTES = 250L * 1024L * 1024L
+internal const val MAX_PROJECT_IMPORT_DEPTH = 64
+
+internal data class ProjectImportBudget(
+    var files: Int = 0,
+    var bytes: Long = 0L
+)
+
+internal fun isReservedProjectImportEntry(relativePath: String, name: String): Boolean =
+    relativePath.isEmpty() && name == ".coding-agent"
+
+internal fun validateProjectImportEntryName(name: String) {
+    require(name.isNotBlank() && name != "." && name != ".." &&
+        !name.contains('/') && !name.contains('\\') && name.none { it.isISOControl() }) {
+        "Project entry has an unsafe name"
+    }
 }
 
-internal fun copyDocumentTree(context: Context, source: DocumentFile, destination: File) {
+internal fun importProject(context: Context, privateDir: File, uri: Uri): File {
+    val source = DocumentFile.fromTreeUri(context, uri) ?: error("Folder is unavailable")
+    val projects = privateDir.resolve("projects")
+    require(projects.isDirectory || projects.mkdirs()) { "Could not create project storage" }
+    val destination = projects.resolve("project-${System.currentTimeMillis()}")
+    require(destination.mkdirs()) { "Could not create project storage" }
+    try {
+        copyDocumentTree(context, source, destination)
+        return destination
+    } catch (error: Exception) {
+        destination.deleteRecursively()
+        throw error
+    }
+}
+
+internal fun copyDocumentTree(
+    context: Context,
+    source: DocumentFile,
+    destination: File,
+    depth: Int = 0,
+    relativePath: String = "",
+    budget: ProjectImportBudget = ProjectImportBudget()
+) {
+    require(depth <= MAX_PROJECT_IMPORT_DEPTH) { "Project import exceeded the maximum folder depth" }
+    val canonicalRoot = destination.canonicalFile.toPath()
     for (child in source.listFiles()) {
-        val name = child.name ?: continue
-        val target = destination.resolve(name)
+        val name = child.name ?: error("Project entry has no name")
+        validateProjectImportEntryName(name)
+        val childRelativePath = if (relativePath.isEmpty()) name else "$relativePath/$name"
+        // This namespace belongs to Coding Agent itself. Imported content must never
+        // supply durable jobs, pending approvals, transaction journals, or research state.
+        if (isReservedProjectImportEntry(relativePath, name)) continue
+        val target = destination.resolve(name).canonicalFile
+        require(target.toPath().startsWith(canonicalRoot)) { "Project entry escapes the import destination" }
+        budget.files += 1
+        require(budget.files <= MAX_PROJECT_IMPORT_FILES) { "Project import exceeds $MAX_PROJECT_IMPORT_FILES entries" }
         if (child.isDirectory) {
-            require(target.mkdirs()) { "Could not create ${target.path}" }
-            copyDocumentTree(context, child, target)
+            require(target.isDirectory || target.mkdirs()) { "Could not create ${target.path}" }
+            copyDocumentTree(context, child, target, depth + 1, childRelativePath, budget)
         } else if (child.isFile) {
+            require(target.parentFile?.canonicalFile?.toPath()?.startsWith(canonicalRoot) == true) {
+                "Project file escapes the import destination"
+            }
             context.contentResolver.openInputStream(child.uri)?.use { input ->
-                target.outputStream().use { output -> input.copyTo(output) }
+                target.outputStream().use { output ->
+                    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                    while (true) {
+                        val read = input.read(buffer)
+                        if (read < 0) break
+                        budget.bytes += read
+                        require(budget.bytes <= MAX_PROJECT_IMPORT_BYTES) {
+                            "Project import exceeds the $MAX_PROJECT_IMPORT_BYTES byte limit"
+                        }
+                        output.write(buffer, 0, read)
+                    }
+                }
             } ?: error("Could not read ${child.uri}")
         }
     }

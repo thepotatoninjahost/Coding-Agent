@@ -21,8 +21,12 @@ class ProjectIndexer {
     private val extensions = setOf("kt", "java", "kts", "py", "js", "ts", "tsx", "jsx", "json", "xml", "gradle", "md", "yaml", "yml", "toml", "sh")
 
     fun index(root: File): List<ProjectFile> = root.walkTopDown()
-        .onEnter { it.name !in ignored }
-        .filter { it.isFile && (it.extension.lowercase() in extensions || it.name == "Makefile") }
+        .onEnter { it.name !in ignored && isSafeProjectPath(root, it) }
+        .filter {
+            it.isFile && !java.nio.file.Files.isSymbolicLink(it.toPath()) &&
+                isSafeProjectPath(root, it) &&
+                (it.extension.lowercase() in extensions || it.name == "Makefile")
+        }
         .map { file ->
             val metadata = analyze(file)
             ProjectFile(
@@ -57,8 +61,12 @@ class ProjectIndexer {
         // Indexing reads every source file to calculate imports, symbols, line counts, and hashes,
         // which doubled I/O and memory work for every search request.
         return root.walkTopDown()
-            .onEnter { it.name !in ignored }
-            .filter { it.isFile && (it.extension.lowercase() in extensions || it.name == "Makefile") }
+            .onEnter { it.name !in ignored && isSafeProjectPath(root, it) }
+            .filter {
+                it.isFile && !java.nio.file.Files.isSymbolicLink(it.toPath()) &&
+                    isSafeProjectPath(root, it) &&
+                    (it.extension.lowercase() in extensions || it.name == "Makefile")
+            }
             .flatMap { file ->
                 val path = ProjectPaths.relative(root, file)
                 file.useLines { lines ->
@@ -69,6 +77,12 @@ class ProjectIndexer {
                 }
             }.toList()
     }
+    private fun isSafeProjectPath(root: File, candidate: File): Boolean = runCatching {
+        val canonicalRoot = root.canonicalFile.toPath()
+        val canonicalCandidate = candidate.canonicalFile.toPath()
+        canonicalCandidate.startsWith(canonicalRoot)
+    }.getOrDefault(false)
+
     private data class FileMetadata(
         val imports: List<String>,
         val symbols: List<String>,

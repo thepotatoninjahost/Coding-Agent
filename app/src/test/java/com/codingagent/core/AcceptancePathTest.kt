@@ -122,6 +122,7 @@ class AcceptancePathTest {
             assertTrue("Unexpected result: $result", result is MutationApprovalResult.Rejected)
             assertEquals("fun main() = 1\n", root.resolve("Main.kt").readText())
             assertEquals("open", OpenJobStore.load(root)?.status)
+            assertTrue(coordinator.pending().isEmpty())
         } finally {
             unreadable.setReadable(true, false)
         }
@@ -150,7 +151,8 @@ class AcceptancePathTest {
         val result = coordinator.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id))
 
         assertTrue(result is MutationApprovalResult.Rejected)
-        assertTrue((result as MutationApprovalResult.Rejected).reason.contains("durable recovery state"))
+        assertTrue((result as MutationApprovalResult.Rejected).reason.contains("recovery-required"))
+        assertEquals("recovery-required", OpenJobStore.load(root)?.status)
         assertEquals("fun main() = 1\n", root.resolve("Main.kt").readText())
     }
 
@@ -191,7 +193,68 @@ class AcceptancePathTest {
     }
 
     @Test
-    fun staleProposalCannotBeApprovedWhenDurableJobReferencesAnotherProposal() {
+    fun missingJobMarkerWithAlreadyChangedFilesRequiresRecovery() {
+        val root = Files.createTempDirectory("accept-missing-job-after-write").toFile()
+        root.resolve("Main.kt").writeText("fun main() = 1\n")
+        val workspace = ProjectWorkspace(root)
+        val coordinator = MutationCoordinator(workspace)
+        val proposal = (coordinator.propose(
+            "recover interrupted apply with missing job marker",
+            listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 2\n"))
+        ) as MutationProposeResult.Proposed).proposal
+        assertTrue(coordinator.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id)) is MutationApprovalResult.AwaitingSecond)
+
+        OpenJobStore.markApplying(root, proposal.id, listOf("Main.kt"), proposal.request)
+        workspace.applyApproved(proposal.changeSet)
+        OpenJobStore.clear(root)
+
+        val restarted = MutationCoordinator(ProjectWorkspace(root))
+
+        assertEquals("recovery-required", OpenJobStore.load(root)?.status)
+        assertTrue(OpenJobStore.load(root)?.recoveryReason.orEmpty().contains("no longer matches its pre-apply disk state"))
+        assertEquals("fun main() = 2\n", root.resolve("Main.kt").readText())
+        assertTrue(restarted.approve(
+            proposal.id,
+            OwnerApprovalToken.authenticated(proposal.id)
+        ) is MutationApprovalResult.Rejected)
+    }
+
+    @Test
+    fun startupMarksRecoveryRequiredWhenWaitingJobHasNoPendingProposal() {
+        val root = Files.createTempDirectory("accept-missing-pending-proposal").toFile()
+        root.resolve("Main.kt").writeText("fun main() = Unit\n")
+        OpenJobStore.markWaiting(root, "missing-proposal-id", listOf("Main.kt"), "recover missing proposal")
+
+        val coordinator = MutationCoordinator(ProjectWorkspace(root))
+
+        assertEquals("recovery-required", OpenJobStore.load(root)?.status)
+        assertTrue(OpenJobStore.load(root)?.recoveryReason.orEmpty().contains("pending proposal is missing"))
+        assertTrue(coordinator.approve(
+            "missing-proposal-id",
+            OwnerApprovalToken.authenticated("missing-proposal-id")
+        ) is MutationApprovalResult.Rejected)
+    }
+
+    @Test
+    fun approvalRejectsCorruptDurableJobStateAndMarksRecoveryRequired() {
+        val root = Files.createTempDirectory("accept-corrupt-job-approval").toFile()
+        root.resolve("Main.kt").writeText("fun main() = 1\n")
+        val coordinator = MutationCoordinator(ProjectWorkspace(root))
+        val proposal = (coordinator.propose(
+            "proposal loses readable durable authorization",
+            listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 2\n"))
+        ) as MutationProposeResult.Proposed).proposal
+
+        OpenJobStore.file(root).writeText("not valid json")
+        val result = coordinator.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id))
+
+        assertTrue(result is MutationApprovalResult.Rejected)
+        assertEquals("recovery-required", OpenJobStore.load(root)?.status)
+        assertEquals("fun main() = 1\n", root.resolve("Main.kt").readText())
+    }
+
+    @Test
+    fun secondProposalIsRejectedWhileFirstProposalAwaitsApproval() {
         val root = Files.createTempDirectory("accept-stale-proposal").toFile()
         root.resolve("Main.kt").writeText("fun main() = 1\n")
         val coordinator = MutationCoordinator(ProjectWorkspace(root))
@@ -199,17 +262,38 @@ class AcceptancePathTest {
             "first proposal",
             listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 2\n"))
         ) as MutationProposeResult.Proposed).proposal
-        val second = (coordinator.propose(
+        val second = coordinator.propose(
             "second proposal",
             listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 3\n"))
+        )
+
+        assertTrue(second is MutationProposeResult.Rejected)
+        assertEquals(first.id, OpenJobStore.load(root)?.proposalId)
+        assertTrue(coordinator.approve(first.id, OwnerApprovalToken.authenticated(first.id)) is MutationApprovalResult.AwaitingSecond)
+        assertEquals("fun main() = 1\n", root.resolve("Main.kt").readText())
+    }
+
+    @Test
+    fun approvalIsRejectedWhenDurableJobNoLongerAuthorizesProposal() {
+        val root = Files.createTempDirectory("accept-unauthorized-proposal").toFile()
+        root.resolve("Main.kt").writeText("fun main() = 1\n")
+        val coordinator = MutationCoordinator(ProjectWorkspace(root))
+        val proposal = (coordinator.propose(
+            "proposal loses durable authorization",
+            listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 2\n"))
         ) as MutationProposeResult.Proposed).proposal
 
-        assertTrue(first.id != second.id)
-        val result = coordinator.approve(first.id, OwnerApprovalToken.authenticated(first.id))
+        OpenJobStore.markReady(root)
+        val restaged = coordinator.propose(
+            "attempt to replace a stale proposal",
+            listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 3\n"))
+        )
+        assertTrue(restaged is MutationProposeResult.Rejected)
+        val result = coordinator.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id))
 
         assertTrue(result is MutationApprovalResult.Rejected)
+        assertEquals("open", OpenJobStore.load(root)?.status)
         assertEquals("fun main() = 1\n", root.resolve("Main.kt").readText())
-        assertEquals(second.id, OpenJobStore.load(root)?.proposalId)
     }
 
     @Test
@@ -248,7 +332,8 @@ class AcceptancePathTest {
         OpenJobStore.markApplying(root, proposal.id, listOf("Main.kt"), proposal.request)
 
         val restarted = MutationCoordinator(ProjectWorkspace(root))
-        assertEquals("open", OpenJobStore.load(root)?.status)
+        assertEquals("waiting-approval", OpenJobStore.load(root)?.status)
+        assertEquals(proposal.id, OpenJobStore.load(root)?.proposalId)
         assertEquals(1, restarted.pending().single().approvalCount)
         assertTrue(
             restarted.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id)) is MutationApprovalResult.Applied
