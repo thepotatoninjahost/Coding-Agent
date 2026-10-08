@@ -21,7 +21,7 @@ class ProjectFileServiceBoundaryTest {
         root.resolve(".coding-agent").apply { mkdirs() }
             .resolve("private-state.json").writeText("{\"private\":true}")
         root.resolve(".git").apply { mkdirs() }.resolve("config")
-            .writeText("[remote \"origin\"]\\n url = https://user:secret@example.com/repo.git\\n")
+            .writeText("[remote \"origin\"]\n url = https://user:secret@example.com/repo.git\n")
 
         val service = ProjectFileService(ProjectWorkspace(root))
 
@@ -58,7 +58,7 @@ class ProjectFileServiceBoundaryTest {
         }
         assertEquals(before, jobFile.readText())
         root.resolve(".git").mkdirs()
-        root.resolve(".git/config").writeText("[core]\\n repositoryformatversion = 0\\n")
+        root.resolve(".git/config").writeText("[core]\n repositoryformatversion = 0\n")
         assertRejected {
             workspace.preview(
                 listOf(TaskOperation(OperationKind.CREATE_FILE, ".git/config", text = "malicious = true")),
@@ -66,10 +66,10 @@ class ProjectFileServiceBoundaryTest {
             )
         }
         root.resolve("nested/.git").mkdirs()
-        root.resolve("nested/.git/config").writeText("[core]\\n repositoryformatversion = 0\\n")
+        root.resolve("nested/.git/config").writeText("[core]\n repositoryformatversion = 0\n")
         assertRejected {
             workspace.preview(
-                listOf(TaskOperation(OperationKind.REPLACE, "nested/.git/config", "[core]\\n", "[core]\\n malicious = true\\n")),
+                listOf(TaskOperation(OperationKind.REPLACE, "nested/.git/config", "[core]\n", "[core]\n malicious = true\n")),
                 "attempt to overwrite nested Git metadata"
             )
         }
@@ -79,11 +79,11 @@ class ProjectFileServiceBoundaryTest {
     fun indexerExcludesCaseVariantPrivateMetadataDirectories() {
         val root = Files.createTempDirectory("project-index-case-variant-metadata").toFile()
         root.resolve("src").mkdirs()
-        root.resolve("src/Main.kt").writeText("fun main() = Unit\\n")
+        root.resolve("src/Main.kt").writeText("fun main() = Unit\n")
         root.resolve(".GIT").mkdirs()
-        root.resolve(".GIT/Private.kt").writeText("const val CASE_VARIANT_PRIVATE_MARKER = \"private\"\\n")
+        root.resolve(".GIT/Private.kt").writeText("const val CASE_VARIANT_PRIVATE_MARKER = \"private\"\n")
         root.resolve("nested/.Git").mkdirs()
-        root.resolve("nested/.Git/Secret.kt").writeText("const val NESTED_PRIVATE_MARKER = \"private\"\\n")
+        root.resolve("nested/.Git/Secret.kt").writeText("const val NESTED_PRIVATE_MARKER = \"private\"\n")
 
         val workspace = ProjectWorkspace(root)
         val paths = workspace.summary().files.map { it.path }
