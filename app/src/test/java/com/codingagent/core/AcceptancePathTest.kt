@@ -92,17 +92,14 @@ class AcceptancePathTest {
         codingDir.resolve("open-job.json").mkdirs()
 
         val coordinator = MutationCoordinator(ProjectWorkspace(root))
-        val proposed = coordinator.propose(
+        val result = coordinator.propose(
             "fail closed when recovery metadata cannot persist",
             listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 2\n"))
-        ) as MutationProposeResult.Proposed
+        )
 
-        assertTrue(coordinator.approve(proposed.proposal.id, OwnerApprovalToken.authenticated(proposed.proposal.id)) is MutationApprovalResult.AwaitingSecond)
-        val result = coordinator.approve(proposed.proposal.id, OwnerApprovalToken.authenticated(proposed.proposal.id))
-
-        assertTrue(result is MutationApprovalResult.Rejected)
+        assertTrue(result is MutationProposeResult.Rejected)
+        assertTrue(coordinator.pending().isEmpty())
         assertEquals("fun main() = 1\n", root.resolve("Main.kt").readText())
-        assertEquals(1, coordinator.pending().single().approvalCount)
     }
 
     @Test
