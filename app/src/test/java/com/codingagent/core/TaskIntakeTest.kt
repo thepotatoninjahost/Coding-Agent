@@ -70,8 +70,10 @@ class TaskIntakeTest {
 
         val intake = TaskIntakeParser(root).parse("fix the login bug")
         val ambiguousTestMention = TaskIntakeParser(root).parse("the test file has a bug")
+        val buildFileEdit = TaskIntakeParser(root).parse("edit build.gradle.kts")
 
         assertTrue(intake.verificationCommands.isEmpty())
         assertTrue(ambiguousTestMention.verificationCommands.isEmpty())
+        assertTrue(buildFileEdit.verificationCommands.isEmpty())
     }
 }
