@@ -195,6 +195,7 @@ class MutationCoordinator(
             }
             return MutationApprovalResult.AwaitingSecond(candidate, approval)
         }
+        var appliedChangeSet: ChangeSet? = null
         return try {
             try {
                 OpenJobStore.markApplying(workspace.projectRoot(), proposal.id, proposal.changeSet.changes.map { it.path }.distinct(), proposal.request)
@@ -203,6 +204,7 @@ class MutationCoordinator(
             }
 
             val applied = workspace.applyApproved(proposal.changeSet)
+            appliedChangeSet = applied
             val intake = TaskIntakeParser(workspace.projectRoot()).parse(proposal.request)
             val postApply = if (intake.verificationCommands.isEmpty()) {
                 workspace.verify()
@@ -291,6 +293,26 @@ class MutationCoordinator(
             recordEvolution(candidate, applied)
             MutationApprovalResult.Applied(candidate, applied)
         } catch (error: Exception) {
+            val applied = appliedChangeSet
+            if (applied != null) {
+                val rollback = runCatching { workspace.rollback(applied) }
+                    .getOrElse { RollbackResult.Rejected(it.message.orEmpty()) }
+                if (rollback == RollbackResult.Restored) {
+                    runCatching { OpenJobStore.markReady(workspace.projectRoot()) }
+                    return MutationApprovalResult.Rejected(
+                        "Approved change was rolled back because post-apply processing failed: ${error.message.orEmpty().ifBlank { error.javaClass.simpleName }}"
+                    )
+                }
+                runCatching {
+                    OpenJobStore.markRecoveryRequired(
+                        workspace.projectRoot(),
+                        "An approved mutation reached disk, but post-apply processing failed and rollback was incomplete: ${rollback}"
+                    )
+                }
+                return MutationApprovalResult.Rejected(
+                    "CRITICAL: post-apply processing failed and rollback was incomplete; recovery is required: ${rollback}"
+                )
+            }
             MutationApprovalResult.Rejected("Approved change could not be applied: ${error.message.orEmpty()}")
         }
     }
