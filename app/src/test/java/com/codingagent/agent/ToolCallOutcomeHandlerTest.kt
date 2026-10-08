@@ -8,10 +8,6 @@ import com.codingagent.workspace.AgentPlan
 import com.codingagent.workspace.AgentStep
 import com.codingagent.workspace.ProjectWorkspace
 import com.codingagent.workspace.MutationCoordinator
-import com.codingagent.workspace.ToolInvocation
-import com.codingagent.workspace.ToolKind
-import com.codingagent.workspace.ToolSelectionLoop
-import com.codingagent.workspace.ToolSelectionPlan
 
 class ToolCallOutcomeHandlerTest {
     @Test
