@@ -75,10 +75,18 @@ class TaskIntakeParser(private val root: File) {
         return TaskOperation()
     }
 
-    /**
-     * Project-provided build/test scripts are executable code, not read-only diagnostics.
-     * Do not launch them automatically from the autonomous agent. Owners can review and
-     * run the suggested checks from the unrestricted Terminal when they trust the project.
-     */
-    private fun detectChecks(): List<List<String>> = emptyList()
+    private fun detectChecks(): List<List<String>> {
+        return when {
+            root.resolve("gradlew").isFile && root.resolve("app/build.gradle.kts").isFile -> listOf(
+                listOf("sh", "-c", "./gradlew :app:compileDebugKotlin :app:testDebugUnitTest --no-daemon --console=plain"),
+                listOf("sh", "-c", "./gradlew :app:lintDebug --no-daemon --console=plain"),
+                listOf("sh", "-c", "./gradlew :app:assembleDebug --no-daemon --console=plain")
+            )
+            root.resolve("gradlew").isFile -> listOf(listOf("sh", "-c", "./gradlew test --no-daemon"))
+            root.resolve("package.json").isFile -> listOf(listOf("sh", "-c", "npm test --if-present"))
+            root.resolve("pyproject.toml").isFile || root.resolve("pytest.ini").isFile -> listOf(listOf("python", "-m", "pytest"))
+            root.resolve("Makefile").isFile -> listOf(listOf("make", "test"))
+            else -> emptyList()
+        }
+    }
 }

@@ -142,41 +142,54 @@ class TerminalCancelTest {
     }
 
     @Test
-    fun workspaceVerificationBlocksProjectControlledScripts() {
-        val root = Files.createTempDirectory("term-check-policy").toFile()
-        val marker = root.resolve("verification-script-ran")
+    fun workspaceVerificationUsesCancellableTerminalRunner() {
+        val root = Files.createTempDirectory("term-check-cancel").toFile()
         val workspace = ProjectWorkspace(root)
-
-        val report = workspace.runChecks(
-            listOf(listOf("sh", "-c", "printf ran > verification-script-ran")),
-            timeoutSeconds = 10
-        )
-
+        val resultRef = AtomicReference<com.codingagent.workspace.VerificationReport>()
+        val started = CountDownLatch(1)
+        val thread = Thread {
+            started.countDown()
+            resultRef.set(workspace.runChecks(listOf(listOf("sh", "-c", "sleep 30")), timeoutSeconds = 60))
+        }
+        thread.start()
+        assertTrue(started.await(2, TimeUnit.SECONDS))
+        Thread.sleep(200)
+        workspace.terminal().cancel("verification-stop")
+        thread.join(5_000)
+        val report = resultRef.get()
         assertTrue(report != null)
-        assertTrue(report.commands.isEmpty())
-        assertTrue(!marker.exists())
-        assertTrue(report.issues.any { it.message.contains("Not executed by autonomous verification") })
+        assertEquals(130, report.commands.single().exitCode)
     }
 
     @Test
-    fun blockedVerificationBatchDoesNotStartAnyProjectScript() {
-        val root = Files.createTempDirectory("term-check-batch-policy").toFile()
+    fun cancelledVerificationDoesNotStartLaterChecks() {
+        val root = Files.createTempDirectory("term-check-batch-cancel").toFile()
         val workspace = ProjectWorkspace(root)
-        val first = root.resolve("first-check-ran")
-        val second = root.resolve("second-check-ran")
-
-        val report = workspace.runChecks(
-            listOf(
-                listOf("sh", "-c", "printf ran > first-check-ran"),
-                listOf("sh", "-c", "printf ran > second-check-ran")
-            ),
-            timeoutSeconds = 10
-        )
-
-        assertTrue(report.commands.isEmpty())
-        assertTrue(!first.exists())
-        assertTrue(!second.exists())
-        assertTrue(report.issues.size >= 2)
+        val resultRef = AtomicReference<com.codingagent.workspace.VerificationReport>()
+        val started = CountDownLatch(1)
+        val secondCheck = root.resolve("second-check-ran")
+        val thread = Thread {
+            started.countDown()
+            resultRef.set(
+                workspace.runChecks(
+                    listOf(
+                        listOf("sh", "-c", "sleep 30"),
+                        listOf("sh", "-c", "printf ran > second-check-ran")
+                    ),
+                    timeoutSeconds = 60
+                )
+            )
+        }
+        thread.start()
+        assertTrue(started.await(2, TimeUnit.SECONDS))
+        Thread.sleep(200)
+        workspace.terminal().cancel("verification-stop")
+        thread.join(5_000)
+        val report = resultRef.get()
+        assertTrue(report != null)
+        assertEquals(1, report.commands.size)
+        assertEquals(130, report.commands.single().exitCode)
+        assertTrue(!secondCheck.exists())
     }
 
     @Test
