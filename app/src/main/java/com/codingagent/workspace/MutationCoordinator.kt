@@ -242,8 +242,13 @@ class MutationCoordinator(
                         "Rollback restored files after failed verification, but ready-state persistence failed"
                     )
                     if (readyState != ReadyState.READY) {
+                        val recoveryDetails = when (readyState) {
+                            ReadyState.RECOVERY_REQUIRED -> "the job remains in recovery-required state"
+                            ReadyState.FAILED -> "durable recovery state could not be persisted"
+                            ReadyState.READY -> "the job state is ready"
+                        }
                         return MutationApprovalResult.Rejected(
-                            "$details; rollback restored files, but the job remains in recovery-required state"
+                            "$details; rollback restored files, but $recoveryDetails"
                         )
                     }
                 }
