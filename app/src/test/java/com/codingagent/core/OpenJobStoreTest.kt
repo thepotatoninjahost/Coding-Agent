@@ -5,6 +5,8 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import com.codingagent.workspace.OpenJobStore
+import com.codingagent.workspace.MutationCoordinator
+import com.codingagent.workspace.ProjectWorkspace
 
 class OpenJobStoreTest {
     @Test
@@ -59,6 +61,22 @@ class OpenJobStoreTest {
         val loaded = OpenJobStore.load(root)
         assertEquals("recovery-required", loaded?.status)
         assertEquals("rollback incomplete", loaded?.recoveryReason)
+    }
+
+    @Test
+    fun coordinatorStartsFailClosedAndRepairsCorruptDurableJobState() {
+        val root = Files.createTempDirectory("open-job-corrupt-startup").toFile()
+        root.resolve("Main.kt").writeText("fun main() = Unit\n")
+        OpenJobStore.file(root).apply {
+            parentFile?.mkdirs()
+            writeText("not valid json")
+        }
+
+        val coordinator = MutationCoordinator(ProjectWorkspace(root))
+
+        assertTrue(coordinator.pending().isEmpty())
+        assertEquals("recovery-required", OpenJobStore.load(root)?.status)
+        assertTrue(OpenJobStore.load(root)?.recoveryReason.orEmpty().contains("unreadable"))
     }
 
     @Test(expected = IllegalStateException::class)
