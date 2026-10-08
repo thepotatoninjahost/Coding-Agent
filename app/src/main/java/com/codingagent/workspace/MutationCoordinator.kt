@@ -455,7 +455,7 @@ class MutationCoordinator(
         }
     }
 
-    private fun recoverAfterApplyFailure(changeSet: ChangeSet, error: Exception): String {
+    internal fun recoverAfterApplyFailure(changeSet: ChangeSet, error: Exception): String {
         val root = workspace.projectRoot()
         val state = diskState(changeSet)
         val message = error.message.orEmpty().ifBlank { error.javaClass.simpleName }
