@@ -80,4 +80,5 @@ class TaskIntakeParser(private val root: File) {
      * Do not launch them automatically from the autonomous agent. Owners can review and
      * run the suggested checks from the unrestricted Terminal when they trust the project.
      */
-    private fun detectChecks(): List<List<String>> = emptyList()}
+    private fun detectChecks(): List<List<String>> = emptyList()
+}
