@@ -171,6 +171,25 @@ class AcceptancePathTest {
     }
 
     @Test
+    fun orphanedPendingProposalIsDiscardedAfterJobStateDisappears() {
+        val root = Files.createTempDirectory("accept-orphaned-proposal").toFile()
+        root.resolve("Main.kt").writeText("fun main() = 1\n")
+
+        val first = MutationCoordinator(ProjectWorkspace(root))
+        val proposed = first.propose(
+            "orphaned proposal",
+            listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 2\n"))
+        )
+        assertTrue(proposed is MutationProposeResult.Proposed)
+        assertTrue(root.resolve(".coding-agent/open-job.json").delete())
+
+        val restarted = MutationCoordinator(ProjectWorkspace(root))
+
+        assertTrue(restarted.pending().isEmpty())
+        assertEquals("fun main() = 1\n", root.resolve("Main.kt").readText())
+    }
+
+    @Test
     fun missingPendingProposalForDurableApplyStateRequiresRecovery() {
         val root = Files.createTempDirectory("accept-missing-proposal").toFile()
         root.resolve("Main.kt").writeText("fun main() = 1\n")
