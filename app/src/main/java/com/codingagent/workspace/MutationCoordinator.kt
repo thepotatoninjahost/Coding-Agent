@@ -355,26 +355,32 @@ class MutationCoordinator(
 
     @Synchronized
     fun clear(id: String): Boolean {
-        val gone = pending.remove(id) != null
-        if (gone && !persist()) {
+        val removed = pending.remove(id) ?: return false
+        if (!persist()) {
+            pending[id] = removed
             return false
         }
-        if (gone) {
-            runCatching { OpenJobStore.markReady(workspace.projectRoot()) }
+        if (!runCatching { OpenJobStore.markReady(workspace.projectRoot()) }.isSuccess) {
+            pending[id] = removed
+            persist()
+            return false
         }
-        return gone
+        return true
     }
 
     @Synchronized
     fun reject(id: String): Boolean {
-        val gone = pending.remove(id) != null
-        if (gone && !persist()) {
+        val removed = pending.remove(id) ?: return false
+        if (!persist()) {
+            pending[id] = removed
             return false
         }
-        if (gone) {
-            runCatching { OpenJobStore.markReady(workspace.projectRoot()) }
+        if (!runCatching { OpenJobStore.markReady(workspace.projectRoot()) }.isSuccess) {
+            pending[id] = removed
+            persist()
+            return false
         }
-        return gone
+        return true
     }
 
     @Synchronized
@@ -389,7 +395,10 @@ class MutationCoordinator(
             expired.forEach { (id, proposal) -> pending[id] = proposal }
             return
         }
-        runCatching { OpenJobStore.markReady(workspace.projectRoot()) }
+        if (!runCatching { OpenJobStore.markReady(workspace.projectRoot()) }.isSuccess) {
+            expired.forEach { (id, proposal) -> pending[id] = proposal }
+            persist()
+        }
     }
 
     @Synchronized
