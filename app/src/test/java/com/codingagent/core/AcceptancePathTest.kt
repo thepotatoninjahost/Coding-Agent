@@ -264,7 +264,8 @@ class AcceptancePathTest {
         OpenJobStore.markApplying(root, proposal.id, listOf("Main.kt"), proposal.request)
 
         val restarted = MutationCoordinator(ProjectWorkspace(root))
-        assertEquals("open", OpenJobStore.load(root)?.status)
+        assertEquals("waiting-approval", OpenJobStore.load(root)?.status)
+        assertEquals(proposal.id, OpenJobStore.load(root)?.proposalId)
         assertEquals(1, restarted.pending().single().approvalCount)
         assertTrue(
             restarted.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id)) is MutationApprovalResult.Applied
