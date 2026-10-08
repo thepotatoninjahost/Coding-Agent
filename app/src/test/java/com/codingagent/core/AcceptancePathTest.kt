@@ -175,6 +175,25 @@ class AcceptancePathTest {
     }
 
     @Test
+    fun recoveryRequiredStateBlocksNewMutationProposal() {
+        val root = Files.createTempDirectory("accept-recovery-propose").toFile()
+        root.resolve("Main.kt").writeText("fun main() = 1\n")
+        val coordinator = MutationCoordinator(ProjectWorkspace(root))
+        OpenJobStore.startNew(root, "interrupted mutation")
+        OpenJobStore.markRecoveryRequired(root, "partial apply")
+
+        val result = coordinator.propose(
+            "start another mutation",
+            listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 2\n"))
+        )
+
+        assertTrue(result is MutationProposeResult.Rejected)
+        assertEquals("recovery-required", OpenJobStore.load(root)?.status)
+        assertEquals("interrupted mutation", OpenJobStore.load(root)?.goal)
+        assertEquals("fun main() = 1\n", root.resolve("Main.kt").readText())
+    }
+
+    @Test
     fun rejectLeavesDiskUnchanged() {
         val root = Files.createTempDirectory("accept-reject").toFile()
         root.resolve("Main.kt").writeText("fun main() = 1\n")

@@ -14,6 +14,7 @@ import com.codingagent.agent.ChatMessage
 import com.codingagent.agent.ChatMessageStore
 import com.codingagent.agent.ChatRole
 import com.codingagent.agent.ChatWorkspace
+import com.codingagent.agent.AgentRuntimeResult
 import com.codingagent.agent.UserMemory
 import com.codingagent.agent.UserMemoryStore
 import com.codingagent.agent.PendingWorkResume
@@ -23,6 +24,29 @@ import com.codingagent.workspace.OpenJobStore
 class ChatWorkspaceTest {
     private val emptyKnowledge = object : AgentKnowledge {
         override fun search(query: String, limit: Int): List<KnowledgeHit> = emptyList()
+    }
+
+    @Test
+    fun recoveryRequiredJobCannotBeReplacedByNewGoal() {
+        val root = Files.createTempDirectory("chat-recovery-boundary").toFile()
+        OpenJobStore.startNew(root, "interrupted mutation")
+        OpenJobStore.markRecoveryRequired(root, "partial apply")
+        val messages = mutableListOf<ChatMessage>()
+        val workspace = ChatWorkspace(
+            store = object : ChatMessageStore {
+                override fun recordChatMessage(message: ChatMessage) { messages += message }
+                override fun recentChatMessages(limit: Int): List<ChatMessage> = messages.takeLast(limit)
+            },
+            runtimeProvider = { null }
+        )
+        OpenJobStore.bind(root)
+
+        val turn = workspace.send("build a different feature")
+
+        assertTrue(turn.result is AgentRuntimeResult.Failed)
+        assertEquals("recovery-required", OpenJobStore.load(root)?.status)
+        assertEquals("interrupted mutation", OpenJobStore.load(root)?.goal)
+        assertTrue(turn.response.content.contains("recovery-required"))
     }
 
     @Test

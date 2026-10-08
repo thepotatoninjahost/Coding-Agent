@@ -73,6 +73,9 @@ class MutationCoordinator(
         clearExpired()
         if (request.isBlank()) return MutationProposeResult.Rejected("A mutation request is required")
         if (operations.isEmpty()) return MutationProposeResult.Rejected("At least one mutation operation is required")
+        if (OpenJobStore.load(workspace.projectRoot())?.status == "recovery-required") {
+            return MutationProposeResult.Rejected("This job requires recovery before another mutation can be staged")
+        }
 
         val changeSet = runCatching { workspace.preview(operations, reason) }
             .getOrElse { ex ->

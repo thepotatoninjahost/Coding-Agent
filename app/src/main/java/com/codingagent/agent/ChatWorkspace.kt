@@ -80,8 +80,31 @@ class ChatWorkspace(
                 return persist(result = pending)
             }
         }
-        if (agent != null && looksLikeNewGoal(trimmed)) {
-            OpenJobStore.boundRoot()?.let { OpenJobStore.startNew(it, trimmed) }
+        if (looksLikeNewGoal(trimmed)) {
+            val boundRoot = OpenJobStore.boundRoot()
+            val existingJob = boundRoot?.let { OpenJobStore.load(it) }
+            if (existingJob?.status == "recovery-required") {
+                val response = ChatMessage(
+                    role = ChatRole.AGENT,
+                    content = "The current coding job is in recovery-required state and cannot be replaced. Resolve the interrupted mutation before starting a new coding goal."
+                )
+                store.recordChatMessage(response)
+                return ChatTurn(response, AgentRuntimeResult.Failed(
+                    AgentTask(
+                        id = UUID.randomUUID().toString(),
+                        request = trimmed,
+                        status = "failed",
+                        plan = AgentPlan(trimmed, emptyList(), emptyList()),
+                        changes = emptyList(),
+                        verification = VerificationReport(false, emptyList()),
+                        events = emptyList(),
+                        summary = response.content
+                    )
+                ))
+            }
+            if (agent != null) {
+                boundRoot?.let { OpenJobStore.startNew(it, trimmed) }
+            }
         }
         val lastAgent = store.recentChatMessages(20).firstOrNull { it.role == ChatRole.AGENT }?.content
         val openJob = OpenJobStore.loadBound()
