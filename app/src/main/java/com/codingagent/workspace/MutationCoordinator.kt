@@ -148,24 +148,23 @@ class MutationCoordinator(
         }
         val proposal = pending[id] ?: return MutationApprovalResult.Rejected("Change proposal does not exist")
         val openJob = OpenJobStore.load(workspace.projectRoot())
-        if (openJob == null) {
-            return MutationApprovalResult.Rejected(
+            ?: return MutationApprovalResult.Rejected(
                 "Durable open-job state is missing; this proposal cannot be approved until it is restaged"
             )
-        }
-        if (openJob.status == "waiting-approval" && openJob.proposalId != id) {
-            return MutationApprovalResult.Rejected(
-                "Durable open-job state references a different proposal; restage this change before approval"
-            )
-        }
         when {
-            openJob?.status == "recovery-required" -> return MutationApprovalResult.Rejected("This job requires recovery before another approval can be accepted")
-            openJob?.status == "applying" && openJob.proposalId == id -> return MutationApprovalResult.Rejected("This proposal is already in the apply phase; recover the job before approving again")
-            openJob?.status == "applied" && openJob.appliedProposalId == id -> {
+            openJob.status == "recovery-required" ->
+                return MutationApprovalResult.Rejected("This job requires recovery before another approval can be accepted")
+            openJob.status == "applying" && openJob.proposalId == id ->
+                return MutationApprovalResult.Rejected("This proposal is already in the apply phase; recover the job before approving again")
+            openJob.status == "applied" && openJob.appliedProposalId == id -> {
                 pending.remove(id)
                 persist()
                 return MutationApprovalResult.Rejected("This proposal has already been applied")
             }
+            openJob.status != "waiting-approval" || openJob.proposalId != id ->
+                return MutationApprovalResult.Rejected(
+                    "Durable open-job state does not authorize this proposal; restage the change before approval"
+                )
         }
         val timestamp = now()
         if (timestamp > proposal.expiresAt) {
