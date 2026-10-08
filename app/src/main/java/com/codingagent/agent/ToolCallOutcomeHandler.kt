@@ -154,6 +154,9 @@ class ToolCallOutcomeHandler(
         emit(AutonomousAgentEvent.ToolStarted(response.name, response.arguments, purpose))
         if (isCancelled()) return ToolTurnOutcome.Stop
         val toolResult = executeTool(response.name, response.arguments)
+        // Cancellation can race with a blocking tool. Once the tool returns, do not
+        // record evidence, advance gates, or emit completion/approval for a cancelled run.
+        if (isCancelled()) return ToolTurnOutcome.Stop
 
         val isMutation = response.name == "replace_text" || response.name == "create_file"
         if (isMutation && !toolResult.startsWith("ERROR:")) {
