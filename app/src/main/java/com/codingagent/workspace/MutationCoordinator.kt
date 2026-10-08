@@ -371,17 +371,29 @@ class MutationCoordinator(
                 val rollback = runCatching { workspace.rollback(completedChangeSet) }
                     .getOrElse { RollbackResult.Rejected(it.message.orEmpty()) }
                 if (rollback == RollbackResult.Restored) {
-                    val ready = runCatching { OpenJobStore.markReady(workspace.projectRoot()) }.isSuccess
+                    val previousPending = pending.remove(id)
+                    val pendingCleared = persist()
+                    if (!pendingCleared && previousPending != null) pending[id] = previousPending
+                    val ready = pendingCleared &&
+                        runCatching { OpenJobStore.markReady(workspace.projectRoot()) }.isSuccess
                     if (!ready) {
                         runCatching {
                             OpenJobStore.markRecoveryRequired(
                                 workspace.projectRoot(),
-                                "An approved mutation was rolled back after an unexpected verification failure, but ready-state persistence failed"
+                                if (pendingCleared) {
+                                    "An approved mutation was rolled back after an unexpected failure, but ready-state persistence failed"
+                                } else {
+                                    "An approved mutation was rolled back after an unexpected failure, but pending-state cleanup failed"
+                                }
                             )
                         }
                     }
                     return MutationApprovalResult.Rejected(
-                        "Approved change was rolled back after an unexpected failure: ${error.message.orEmpty()}"
+                        if (ready) {
+                            "Approved change was rolled back after an unexpected failure; pending proposal was cleared: ${error.message.orEmpty()}"
+                        } else {
+                            "CRITICAL: approved change was rolled back after an unexpected failure, but durable cleanup failed; recovery is required: ${error.message.orEmpty()}"
+                        }
                     )
                 }
                 runCatching {
