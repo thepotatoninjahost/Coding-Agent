@@ -213,6 +213,24 @@ class AcceptancePathTest {
     }
 
     @Test
+    fun approvalIsRejectedWhenDurableJobNoLongerAuthorizesProposal() {
+        val root = Files.createTempDirectory("accept-unauthorized-proposal").toFile()
+        root.resolve("Main.kt").writeText("fun main() = 1\n")
+        val coordinator = MutationCoordinator(ProjectWorkspace(root))
+        val proposal = (coordinator.propose(
+            "proposal loses durable authorization",
+            listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 2\n"))
+        ) as MutationProposeResult.Proposed).proposal
+
+        OpenJobStore.markReady(root)
+        val result = coordinator.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id))
+
+        assertTrue(result is MutationApprovalResult.Rejected)
+        assertEquals("open", OpenJobStore.load(root)?.status)
+        assertEquals("fun main() = 1\n", root.resolve("Main.kt").readText())
+    }
+
+    @Test
     fun interruptedApplyingStateRecoversAfterCoordinatorRestart() {
         val root = Files.createTempDirectory("accept-apply-restart").toFile()
         root.resolve("Main.kt").writeText("fun main() = 1\n")
