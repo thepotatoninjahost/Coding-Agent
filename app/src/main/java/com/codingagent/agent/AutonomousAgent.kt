@@ -270,8 +270,8 @@ class AutonomousAgent(
                 }
             }.getOrNull()
             if (isCancelled()) return stopNow(taskId, normalized, plan, events) { emit(it) }
-            if (session != null && session.sources.isNotEmpty()) {
-                val brief = ResearchBriefBuilder.build(session)
+            val brief = session?.takeIf { it.sources.isNotEmpty() }?.let(ResearchBriefBuilder::build)
+            if (brief != null && brief.sourceCount > 0 && brief.evidence.isNotBlank()) {
                 researchEvidence = "\n\nResearch brief:\n${brief.evidence}"
                 emit(AutonomousAgentEvent.Phase("RESEARCH", "Learned ${brief.sourceCount} sources (${brief.wordCount} words)"))
             } else {
@@ -279,6 +279,16 @@ class AutonomousAgent(
                     "\n\nResearch ran but returned no usable sources. Do not invent external docs or APIs. " +
                         "Prefer local project evidence, or call research_web with a tighter technical query."
                 emit(AutonomousAgentEvent.Phase("RESEARCH", "No usable sources — model must not invent external facts"))
+                if (ResearchGate.requiresUsableEvidence(focus, intake)) {
+                    val message =
+                        "Research was required for this request, but no usable external sources were retrieved. " +
+                            "I will not present unsupported current documentation or web research as verified. " +
+                            "Retry with a narrower query or configure a working research provider."
+                    val task = failedTask(taskId, focus, plan, message, emptyList())
+                    recordTask(task)
+                    emit(AutonomousAgentEvent.Failed(task, message))
+                    return events
+                }
             }
         } else {
             emit(AutonomousAgentEvent.Phase("RESEARCH", "Skipped — local project is enough for this request"))
