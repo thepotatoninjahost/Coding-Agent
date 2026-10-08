@@ -112,6 +112,10 @@ object OpenJobStore {
     @Synchronized
     fun startNew(root: File, goal: String): OpenJob {
         bind(root)
+        val existing = load(root)
+        check(existing?.status != "recovery-required") {
+            "Cannot replace a recovery-required job before interrupted mutation recovery is resolved"
+        }
         val normalized = goal.trim()
         require(normalized.isNotEmpty()) { "A job goal is required" }
         val job = OpenJob(
@@ -192,6 +196,9 @@ object OpenJobStore {
     fun markReady(root: File) {
         bind(root)
         val current = load(root) ?: return
+        check(current.status != "recovery-required") {
+            "Cannot clear recovery-required state without explicit recovery resolution"
+        }
         save(
             root,
             current.copy(
