@@ -191,6 +191,28 @@ class AcceptancePathTest {
     }
 
     @Test
+    fun staleProposalCannotBeApprovedWhenDurableJobReferencesAnotherProposal() {
+        val root = Files.createTempDirectory("accept-stale-proposal").toFile()
+        root.resolve("Main.kt").writeText("fun main() = 1\n")
+        val coordinator = MutationCoordinator(ProjectWorkspace(root))
+        val first = (coordinator.propose(
+            "first proposal",
+            listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 2\n"))
+        ) as MutationProposeResult.Proposed).proposal
+        val second = (coordinator.propose(
+            "second proposal",
+            listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 3\n"))
+        ) as MutationProposeResult.Proposed).proposal
+
+        assertTrue(first.id != second.id)
+        val result = coordinator.approve(first.id, OwnerApprovalToken.authenticated(first.id))
+
+        assertTrue(result is MutationApprovalResult.Rejected)
+        assertEquals("fun main() = 1\n", root.resolve("Main.kt").readText())
+        assertEquals(second.id, OpenJobStore.load(root)?.proposalId)
+    }
+
+    @Test
     fun interruptedApplyingStateRecoversAfterCoordinatorRestart() {
         val root = Files.createTempDirectory("accept-apply-restart").toFile()
         root.resolve("Main.kt").writeText("fun main() = 1\n")
