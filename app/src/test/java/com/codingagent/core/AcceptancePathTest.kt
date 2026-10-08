@@ -103,6 +103,31 @@ class AcceptancePathTest {
     }
 
     @Test
+    fun unexpectedPostApplyFailureRollsBackAndClearsApplyingState() {
+        val root = Files.createTempDirectory("accept-post-apply-failure").toFile()
+        root.resolve("Main.kt").writeText("fun main() = 1\n")
+        val unreadable = root.resolve("Unreadable.kt")
+        unreadable.writeText("class Unreadable\n")
+        val workspace = ProjectWorkspace(root)
+        val coordinator = MutationCoordinator(workspace)
+        val proposal = (coordinator.propose(
+            "change Main.kt",
+            listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 2\n"))
+        ) as MutationProposeResult.Proposed).proposal
+
+        assertTrue(coordinator.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id)) is MutationApprovalResult.AwaitingSecond)
+        assertTrue("Test requires filesystem read permissions", unreadable.setReadable(false, false))
+        try {
+            val result = coordinator.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id))
+            assertTrue("Unexpected result: $result", result is MutationApprovalResult.Rejected)
+            assertEquals("fun main() = 1\n", root.resolve("Main.kt").readText())
+            assertEquals("open", OpenJobStore.load(root)?.status)
+        } finally {
+            unreadable.setReadable(true, false)
+        }
+    }
+
+    @Test
     fun interruptedApplyingStateRecoversAfterCoordinatorRestart() {
         val root = Files.createTempDirectory("accept-apply-restart").toFile()
         root.resolve("Main.kt").writeText("fun main() = 1\n")
