@@ -164,7 +164,21 @@ class MutationCoordinator(
             )
         }
         val proposal = pending[id] ?: return MutationApprovalResult.Rejected("Change proposal does not exist")
-        val openJob = OpenJobStore.load(workspace.projectRoot())
+        val root = workspace.projectRoot()
+        val openJob = try {
+            OpenJobStore.load(root)
+        } catch (error: Exception) {
+            pendingReconciliationFailed = true
+            runCatching {
+                OpenJobStore.markRecoveryRequired(
+                    root,
+                    "Durable open-job state became unreadable before approval: ${error.message.orEmpty()}"
+                )
+            }
+            return MutationApprovalResult.Rejected(
+                "Durable open-job state is unreadable; approval was refused and recovery is required"
+            )
+        }
         if (openJob == null) {
             return MutationApprovalResult.Rejected(
                 "Durable open-job state is missing; this proposal cannot be approved until it is restaged"
