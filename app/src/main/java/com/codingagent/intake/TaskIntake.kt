@@ -1,6 +1,7 @@
 package com.codingagent.intake
 
 import java.io.File
+import java.util.Properties
 
 /**
  * ONE JOB: Free text → typed intake (intent, targets, operations).
@@ -37,7 +38,7 @@ class TaskIntakeParser(private val root: File) {
         require(normalized.isNotEmpty()) { "A coding request is required" }
         val operation = parseOperation(normalized)
         val contract = interpreter.interpret(normalized, operation)
-        val verification = detectChecks()
+        val verification = detectChecks(normalized, contract.intent)
         val ready = contract.ready
         val question = if (ready) null else clarification(contract, operation)
         return TaskIntake(
@@ -75,18 +76,83 @@ class TaskIntakeParser(private val root: File) {
         return TaskOperation()
     }
 
-    private fun detectChecks(): List<List<String>> {
+    private fun detectChecks(request: String, intent: TaskIntent): List<List<String>> {
+        if (!explicitlyRequestsVerification(request, intent)) return emptyList()
+
         return when {
-            root.resolve("gradlew").isFile && root.resolve("app/build.gradle.kts").isFile -> listOf(
-                listOf("sh", "-c", "./gradlew :app:compileDebugKotlin :app:testDebugUnitTest --no-daemon --console=plain"),
-                listOf("sh", "-c", "./gradlew :app:lintDebug --no-daemon --console=plain"),
-                listOf("sh", "-c", "./gradlew :app:assembleDebug --no-daemon --console=plain")
-            )
-            root.resolve("gradlew").isFile -> listOf(listOf("sh", "-c", "./gradlew test --no-daemon"))
-            root.resolve("package.json").isFile -> listOf(listOf("sh", "-c", "npm test --if-present"))
-            root.resolve("pyproject.toml").isFile || root.resolve("pytest.ini").isFile -> listOf(listOf("python", "-m", "pytest"))
-            root.resolve("Makefile").isFile -> listOf(listOf("make", "test"))
+            root.resolve("gradlew").isFile && root.resolve("app/build.gradle.kts").isFile -> {
+                if (!root.resolve("gradlew").canRead() ||
+                    !isExecutableAvailable("sh") ||
+                    !isExecutableAvailable("java") ||
+                    !hasAndroidSdk()
+                ) {
+                    emptyList()
+                } else {
+                    listOf(
+                        listOf("sh", "./gradlew", ":app:compileDebugKotlin", ":app:testDebugUnitTest", "--no-daemon", "--console=plain"),
+                        listOf("sh", "./gradlew", ":app:lintDebug", "--no-daemon", "--console=plain"),
+                        listOf("sh", "./gradlew", ":app:assembleDebug", "--no-daemon", "--console=plain")
+                    )
+                }
+            }
+            root.resolve("gradlew").isFile -> {
+                if (root.resolve("gradlew").canRead() && isExecutableAvailable("sh") && isExecutableAvailable("java")) {
+                    listOf(listOf("sh", "./gradlew", "test", "--no-daemon"))
+                } else emptyList()
+            }
+            root.resolve("package.json").isFile ->
+                if (isExecutableAvailable("npm")) listOf(listOf("npm", "test", "--if-present")) else emptyList()
+            root.resolve("pyproject.toml").isFile || root.resolve("pytest.ini").isFile -> {
+                when {
+                    isExecutableAvailable("python") -> listOf(listOf("python", "-m", "pytest"))
+                    isExecutableAvailable("python3") -> listOf(listOf("python3", "-m", "pytest"))
+                    else -> emptyList()
+                }
+            }
+            root.resolve("Makefile").isFile ->
+                if (isExecutableAvailable("make")) listOf(listOf("make", "test")) else emptyList()
             else -> emptyList()
+        }
+    }
+
+    private fun explicitlyRequestsVerification(request: String, intent: TaskIntent): Boolean {
+        if (intent == TaskIntent.TEST) return true
+        val normalized = request.lowercase()
+        val runVerb = Regex("""\\b(run|execute|perform|rerun|re-run)\\b""").containsMatchIn(normalized)
+        val checkTarget = Regex("""\\b(tests?|build|compile|lint|checks?|pytest|gradlew?|npm|make)\\b""")
+            .containsMatchIn(normalized)
+        return (runVerb && checkTarget) ||
+            Regex("""\\b(build|compile|lint)\\b""").containsMatchIn(normalized)
+    }
+
+    private fun isExecutableAvailable(name: String): Boolean {
+        val path = System.getenv("PATH").orEmpty()
+        return path.split(File.pathSeparator).filter { it.isNotBlank() }.any { directory ->
+            val candidate = File(directory, name)
+            candidate.isFile && candidate.canExecute()
+        }
+    }
+
+    private fun hasAndroidSdk(): Boolean {
+        val candidates = linkedSetOf<String>()
+        System.getenv("ANDROID_HOME")?.takeIf { it.isNotBlank() }?.let(candidates::add)
+        System.getenv("ANDROID_SDK_ROOT")?.takeIf { it.isNotBlank() }?.let(candidates::add)
+
+        val localProperties = root.resolve("local.properties")
+        if (localProperties.isFile && localProperties.canRead()) {
+            runCatching {
+                val properties = Properties()
+                localProperties.inputStream().use { properties.load(it) }
+                properties.getProperty("sdk.dir")?.takeIf { it.isNotBlank() }?.let { raw ->
+                    val path = File(raw)
+                    candidates += if (path.isAbsolute) path.path else root.resolve(path).path
+                }
+            }
+        }
+
+        return candidates.any { raw ->
+            val sdk = File(raw)
+            sdk.isDirectory && sdk.resolve("platforms").isDirectory && sdk.resolve("build-tools").isDirectory
         }
     }
 }
