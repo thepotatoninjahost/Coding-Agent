@@ -128,6 +128,33 @@ class AcceptancePathTest {
     }
 
     @Test
+    fun rollbackStateFailureIsReportedAsCriticalInsteadOfSilentlyClearingNothing() {
+        val root = Files.createTempDirectory("accept-rollback-state-failure").toFile()
+        root.resolve("Main.kt").writeText("fun main() = 1\n")
+        root.resolve(".coding-agent").mkdirs()
+        val gradlew = root.resolve("gradlew")
+        gradlew.writeText(
+            "#!/bin/sh\nprintf 'not valid json' > .coding-agent/open-job.json\nexit 1\n"
+        )
+        gradlew.setExecutable(true)
+
+        val coordinator = MutationCoordinator(ProjectWorkspace(root))
+        val proposal = (coordinator.propose(
+            "run ./gradlew test after changing Main.kt",
+            listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 2\n"))
+        ) as MutationProposeResult.Proposed).proposal
+
+        assertTrue(
+            coordinator.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id)) is MutationApprovalResult.AwaitingSecond
+        )
+        val result = coordinator.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id))
+
+        assertTrue(result is MutationApprovalResult.Rejected)
+        assertTrue((result as MutationApprovalResult.Rejected).reason.contains("durable recovery state"))
+        assertEquals("fun main() = 1\n", root.resolve("Main.kt").readText())
+    }
+
+    @Test
     fun interruptedApplyingStateRecoversAfterCoordinatorRestart() {
         val root = Files.createTempDirectory("accept-apply-restart").toFile()
         root.resolve("Main.kt").writeText("fun main() = 1\n")
@@ -215,6 +242,42 @@ class AcceptancePathTest {
         assertTrue(result is MutationProposeResult.Rejected)
         assertEquals("recovery-required", OpenJobStore.load(root)?.status)
         assertEquals("interrupted mutation", OpenJobStore.load(root)?.goal)
+        assertEquals("fun main() = 1\n", root.resolve("Main.kt").readText())
+    }
+
+    @Test
+    fun rejectRestoresPendingProposalWhenOpenJobCleanupFails() {
+        val root = Files.createTempDirectory("accept-reject-job-cleanup-failure").toFile()
+        root.resolve("Main.kt").writeText("fun main() = 1\n")
+        val coordinator = MutationCoordinator(ProjectWorkspace(root))
+        val proposal = (coordinator.propose(
+            "reject cleanup failure",
+            listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 2\n"))
+        ) as MutationProposeResult.Proposed).proposal
+
+        OpenJobStore.file(root).writeText("not valid json")
+        assertFalse(coordinator.reject(proposal.id))
+        assertEquals(1, coordinator.pending().size)
+        assertEquals("fun main() = 1\n", root.resolve("Main.kt").readText())
+    }
+
+    @Test
+    fun expiredProposalIsRestoredWhenOpenJobCleanupFails() {
+        val root = Files.createTempDirectory("accept-expiry-job-cleanup-failure").toFile()
+        root.resolve("Main.kt").writeText("fun main() = 1\n")
+        var now = 1_000L
+        val coordinator = MutationCoordinator(
+            ProjectWorkspace(root),
+            now = { now }
+        )
+        val proposal = (coordinator.propose(
+            "expiry cleanup failure",
+            listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 2\n"))
+        ) as MutationProposeResult.Proposed).proposal
+
+        OpenJobStore.file(root).writeText("not valid json")
+        now = proposal.expiresAt + 1L
+        assertEquals(1, coordinator.pending().size)
         assertEquals("fun main() = 1\n", root.resolve("Main.kt").readText())
     }
 
