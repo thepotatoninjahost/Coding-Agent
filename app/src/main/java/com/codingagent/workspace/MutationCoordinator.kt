@@ -63,7 +63,7 @@ class MutationCoordinator(
         PendingProposalStore.load(workspace.projectRoot()).forEach { pending[it.id] = it }
         clearExpired()
         reconcilePendingJobConsistency()
-        reconcileDurableApplyState()
+        if (!pendingReconciliationFailed) reconcileDurableApplyState()
     }
 
     @Synchronized
@@ -587,7 +587,18 @@ class MutationCoordinator(
 
     private fun reconcilePendingJobConsistency() {
         val root = workspace.projectRoot()
-        val job = OpenJobStore.load(root)
+        val job = try {
+            OpenJobStore.load(root)
+        } catch (error: Exception) {
+            pendingReconciliationFailed = true
+            runCatching {
+                OpenJobStore.markRecoveryRequired(
+                    root,
+                    "Durable open-job state was unreadable during startup reconciliation: ${error.message.orEmpty()}"
+                )
+            }
+            return
+        }
         if (pending.isEmpty()) return
 
         if (job == null) {
@@ -640,7 +651,18 @@ class MutationCoordinator(
 
     private fun reconcileDurableApplyState() {
         val root = workspace.projectRoot()
-        val job = OpenJobStore.load(root) ?: return
+        val job = try {
+            OpenJobStore.load(root)
+        } catch (error: Exception) {
+            pendingReconciliationFailed = true
+            runCatching {
+                OpenJobStore.markRecoveryRequired(
+                    root,
+                    "Durable open-job state was unreadable during apply-state reconciliation: ${error.message.orEmpty()}"
+                )
+            }
+            return
+        } ?: return
         val proposalId = job.proposalId ?: job.appliedProposalId ?: return
         val proposal = pending[proposalId] ?: return
 
