@@ -205,11 +205,7 @@ class ChatWorkspace(
                         result.task.request
                     )
                 }
-                is AgentRuntimeResult.Completed -> {
-                    if (result.task.status.contains("applied", ignoreCase = true)) {
-                        runCatching { OpenJobStore.markApplied(root) }
-                    }
-                }
+                is AgentRuntimeResult.Completed -> Unit
                 else -> Unit
             }
         }
