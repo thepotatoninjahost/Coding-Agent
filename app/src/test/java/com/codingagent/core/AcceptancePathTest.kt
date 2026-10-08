@@ -155,6 +155,64 @@ class AcceptancePathTest {
     }
 
     @Test
+    fun orphanedPendingProposalIsDiscardedAfterDurableJobStateDisappears() {
+        val root = Files.createTempDirectory("accept-orphaned-proposal").toFile()
+        root.resolve("Main.kt").writeText("fun main() = 1\n")
+
+        val first = MutationCoordinator(ProjectWorkspace(root))
+        val proposed = first.propose(
+            "orphaned proposal",
+            listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 2\n"))
+        )
+        assertTrue(proposed is MutationProposeResult.Proposed)
+        assertTrue(OpenJobStore.file(root).delete())
+
+        val restarted = MutationCoordinator(ProjectWorkspace(root))
+
+        assertTrue(restarted.pending().isEmpty())
+        assertEquals("fun main() = 1\n", root.resolve("Main.kt").readText())
+    }
+
+    @Test
+    fun approvalIsRejectedWhenDurableJobStateDisappearsAfterStaging() {
+        val root = Files.createTempDirectory("accept-missing-job-before-approval").toFile()
+        root.resolve("Main.kt").writeText("fun main() = 1\n")
+        val coordinator = MutationCoordinator(ProjectWorkspace(root))
+        val proposal = (coordinator.propose(
+            "approval without durable job",
+            listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 2\n"))
+        ) as MutationProposeResult.Proposed).proposal
+
+        assertTrue(OpenJobStore.file(root).delete())
+        val result = coordinator.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id))
+
+        assertTrue(result is MutationApprovalResult.Rejected)
+        assertEquals("fun main() = 1\n", root.resolve("Main.kt").readText())
+    }
+
+    @Test
+    fun staleProposalCannotBeApprovedWhenDurableJobReferencesAnotherProposal() {
+        val root = Files.createTempDirectory("accept-stale-proposal").toFile()
+        root.resolve("Main.kt").writeText("fun main() = 1\n")
+        val coordinator = MutationCoordinator(ProjectWorkspace(root))
+        val first = (coordinator.propose(
+            "first proposal",
+            listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 2\n"))
+        ) as MutationProposeResult.Proposed).proposal
+        val second = (coordinator.propose(
+            "second proposal",
+            listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 3\n"))
+        ) as MutationProposeResult.Proposed).proposal
+
+        assertTrue(first.id != second.id)
+        val result = coordinator.approve(first.id, OwnerApprovalToken.authenticated(first.id))
+
+        assertTrue(result is MutationApprovalResult.Rejected)
+        assertEquals("fun main() = 1\n", root.resolve("Main.kt").readText())
+        assertEquals(second.id, OpenJobStore.load(root)?.proposalId)
+    }
+
+    @Test
     fun interruptedApplyingStateRecoversAfterCoordinatorRestart() {
         val root = Files.createTempDirectory("accept-apply-restart").toFile()
         root.resolve("Main.kt").writeText("fun main() = 1\n")

@@ -50,6 +50,7 @@ class MutationCoordinator(
     private val repairConfig: RepairCycleConfig = RepairCycleConfig()
 ) {
     private val pending = linkedMapOf<String, PendingChangeProposal>()
+    private var pendingReconciliationFailed = false
     private val evolution = SelfEvolution(workspace.projectRoot())
     @Volatile private var repairProvider: ((String, Int) -> ChangeSet?)? = null
 
@@ -61,6 +62,7 @@ class MutationCoordinator(
         OpenJobStore.bind(workspace.projectRoot())
         PendingProposalStore.load(workspace.projectRoot()).forEach { pending[it.id] = it }
         clearExpired()
+        reconcilePendingJobConsistency()
         reconcileDurableApplyState()
     }
 
@@ -139,8 +141,23 @@ class MutationCoordinator(
     @Synchronized
     fun approve(id: String, ownerApproval: OwnerApprovalToken): MutationApprovalResult {
         clearExpired()
+        if (pendingReconciliationFailed) {
+            return MutationApprovalResult.Rejected(
+                "Pending proposal state could not be reconciled durably; restart the agent and restage the change before approval"
+            )
+        }
         val proposal = pending[id] ?: return MutationApprovalResult.Rejected("Change proposal does not exist")
         val openJob = OpenJobStore.load(workspace.projectRoot())
+        if (openJob == null) {
+            return MutationApprovalResult.Rejected(
+                "Durable open-job state is missing; this proposal cannot be approved until it is restaged"
+            )
+        }
+        if (openJob.status == "waiting-approval" && openJob.proposalId != id) {
+            return MutationApprovalResult.Rejected(
+                "Durable open-job state references a different proposal; restage this change before approval"
+            )
+        }
         when {
             openJob?.status == "recovery-required" -> return MutationApprovalResult.Rejected("This job requires recovery before another approval can be accepted")
             openJob?.status == "applying" && openJob.proposalId == id -> return MutationApprovalResult.Rejected("This proposal is already in the apply phase; recover the job before approving again")
@@ -509,6 +526,59 @@ class MutationCoordinator(
                     clearPermission = true
                 )
                 evolution.promoteSource(staged, kind, proposal.verification, action, latestApproval)
+            }
+        }
+    }
+
+    private fun reconcilePendingJobConsistency() {
+        val root = workspace.projectRoot()
+        val job = OpenJobStore.load(root)
+        if (pending.isEmpty()) return
+
+        if (job == null) {
+            discardUnreferencedPendingProposals(null)
+            return
+        }
+
+        if (job.status == "recovery-required") return
+
+        val expectedProposalId = job.proposalId ?: job.appliedProposalId
+        if (expectedProposalId == null) {
+            discardUnreferencedPendingProposals(job)
+            return
+        }
+
+        val orphanedIds = pending.keys.filter { it != expectedProposalId }
+        if (orphanedIds.isNotEmpty()) {
+            val orphaned = orphanedIds.associateWith { pending.getValue(it) }
+            orphanedIds.forEach(pending::remove)
+            if (!persist()) {
+                pending.putAll(orphaned)
+                pendingReconciliationFailed = true
+                runCatching {
+                    OpenJobStore.markRecoveryRequired(
+                        root,
+                        "Pending proposal consistency could not be persisted during startup reconciliation"
+                    )
+                }
+            }
+        }
+    }
+
+    private fun discardUnreferencedPendingProposals(job: OpenJob?) {
+        val root = workspace.projectRoot()
+        val previous = pending.toMap()
+        pending.clear()
+        if (!persist()) {
+            pending.putAll(previous)
+            pendingReconciliationFailed = true
+            if (job != null) {
+                runCatching {
+                    OpenJobStore.markRecoveryRequired(
+                        root,
+                        "Orphaned pending proposals could not be removed durably"
+                    )
+                }
             }
         }
     }
