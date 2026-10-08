@@ -118,4 +118,22 @@ class LiveUpdateTest {
         assertTrue(rejected is ModulePatchResult.Rejected)
         assertEquals("stable", runtime.execute("").output.single())
     }
+
+    @Test
+    fun moduleKindCannotEscapeLiveModuleDirectory() {
+        val root = Files.createTempDirectory("coding-agent-live-path").toFile()
+        val store = LiveModuleStore(root)
+        val action = AgentAction("unsafe-module", AgentActionCategory.CODE_CHANGE, ownerVerified = true, approvalCount = 2)
+        val result = store.install(
+            """{"kind":"../../escape","version":1,"steps":[{"op":"emit","value":"bad"}]}""",
+            "../../escape",
+            1,
+            action,
+            VerificationReport(true, emptyList())
+        )
+        assertTrue(result is ModuleInstallResult.Rejected)
+        assertTrue(root.resolve("escape").exists().not())
+        assertTrue(store.history().isEmpty())
+    }
+
 }
