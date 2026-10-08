@@ -216,6 +216,12 @@ private fun CodingAgentApp(privateDir: File) {
     }
 
     LaunchedEffect(Unit) {
+        // Index the bundled offline reference before the first request can query knowledge.
+        // Keep asset I/O and chunk indexing off the Compose main thread; this is idempotent
+        // and preserves user-imported knowledge already stored in the same index.
+        runCatching {
+            withContext(Dispatchers.IO) { knowledgeBase.ensureBundledExample(context) }
+        }
         // Model settings first so gateway exists as soon as project mounts (avoids first-message race).
         val loadedSettings = withContext(Dispatchers.IO) { store.loadModelSettings() }
         applyModelSettings(loadedSettings)
