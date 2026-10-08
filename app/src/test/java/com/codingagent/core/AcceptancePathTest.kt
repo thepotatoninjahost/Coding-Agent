@@ -193,6 +193,33 @@ class AcceptancePathTest {
     }
 
     @Test
+    fun missingJobMarkerWithAlreadyChangedFilesRequiresRecovery() {
+        val root = Files.createTempDirectory("accept-missing-job-after-write").toFile()
+        root.resolve("Main.kt").writeText("fun main() = 1\n")
+        val workspace = ProjectWorkspace(root)
+        val coordinator = MutationCoordinator(workspace)
+        val proposal = (coordinator.propose(
+            "recover interrupted apply with missing job marker",
+            listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 2\n"))
+        ) as MutationProposeResult.Proposed).proposal
+        assertTrue(coordinator.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id)) is MutationApprovalResult.AwaitingSecond)
+
+        OpenJobStore.markApplying(root, proposal.id, listOf("Main.kt"), proposal.request)
+        workspace.applyApproved(proposal.changeSet)
+        OpenJobStore.clear(root)
+
+        val restarted = MutationCoordinator(ProjectWorkspace(root))
+
+        assertEquals("recovery-required", OpenJobStore.load(root)?.status)
+        assertTrue(OpenJobStore.load(root)?.recoveryReason.orEmpty().contains("no longer matches its pre-apply disk state"))
+        assertEquals("fun main() = 2\n", root.resolve("Main.kt").readText())
+        assertTrue(restarted.approve(
+            proposal.id,
+            OwnerApprovalToken.authenticated(proposal.id)
+        ) is MutationApprovalResult.Rejected)
+    }
+
+    @Test
     fun startupMarksRecoveryRequiredWhenWaitingJobHasNoPendingProposal() {
         val root = Files.createTempDirectory("accept-missing-pending-proposal").toFile()
         root.resolve("Main.kt").writeText("fun main() = Unit\n")
