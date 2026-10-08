@@ -26,6 +26,29 @@ class ChatWorkspaceTest {
     }
 
     @Test
+    fun recoveryRequiredJobCannotBeReplacedByNewGoal() {
+        val root = Files.createTempDirectory("chat-recovery-boundary").toFile()
+        OpenJobStore.startNew(root, "interrupted mutation")
+        OpenJobStore.markRecoveryRequired(root, "partial apply")
+        val messages = mutableListOf<ChatMessage>()
+        val workspace = ChatWorkspace(
+            store = object : ChatMessageStore {
+                override fun recordChatMessage(message: ChatMessage) { messages += message }
+                override fun recentChatMessages(limit: Int): List<ChatMessage> = messages.takeLast(limit)
+            },
+            runtimeProvider = { null }
+        )
+        OpenJobStore.bind(root)
+
+        val turn = workspace.send("build a different feature")
+
+        assertTrue(turn.result is AgentRuntimeResult.Failed)
+        assertEquals("recovery-required", OpenJobStore.load(root)?.status)
+        assertEquals("interrupted mutation", OpenJobStore.load(root)?.goal)
+        assertTrue(turn.response.content.contains("recovery-required"))
+    }
+
+    @Test
     fun persistsUserAndAgentMessages() {
         val root = Files.createTempDirectory("chat-persist").toFile()
         root.resolve("Main.kt").writeText("fun main() = 1\n")
