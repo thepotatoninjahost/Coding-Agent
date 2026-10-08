@@ -34,6 +34,13 @@ class OpenJobStoreTest {
         assertEquals(null, second.proposalId)
     }
 
+
+    @Test
+    fun markAppliedFailsClosedWhenJobMarkerIsMissing() {
+        val root = Files.createTempDirectory("open-job-missing").toFile()
+        OpenJobStore.markApplied(root, "proposal-missing")
+    }
+
     @Test
     fun saveReplacesJobAtomicallyAndLeavesNoTemporaryFiles() {
         val root = Files.createTempDirectory("open-job-atomic").toFile()
