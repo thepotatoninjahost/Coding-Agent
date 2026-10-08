@@ -66,6 +66,14 @@ class AgentCommandPolicyTest {
         assertNotNull(AgentCommandPolicy.rejectionReason("./gradlew :exfiltrate"))
         assertNotNull(AgentCommandPolicy.rejectionReason("./gradlew testExfiltrate"))
         assertNotNull(AgentCommandPolicy.rejectionReason("./gradlew :app:testExfiltrate"))
+        assertNotNull(AgentCommandPolicy.rejectionReason("./gradlew :app:testDebugUnitTest --project-cache-dir=/tmp/external-cache"))
+        assertNotNull(AgentCommandPolicy.rejectionReason("./gradlew :app:testDebugUnitTest --project-cache-dir=../external-cache"))
+        assertNotNull(AgentCommandPolicy.rejectionReason("./gradlew :app:testDebugUnitTest --write-verification-metadata sha256"))
+        assertNotNull(AgentCommandPolicy.rejectionReason("./gradlew :app:testDebugUnitTest --write-locks"))
+        assertNotNull(AgentCommandPolicy.rejectionReason("./gradlew :app:testDebugUnitTest --update-locks=org.example:library"))
+        assertNotNull(AgentCommandPolicy.rejectionReason("./gradlew :app:testDebugUnitTest --export-keys"))
+        assertNotNull(AgentCommandPolicy.rejectionReason("./gradlew :app:testDebugUnitTest --refresh-keys"))
+        assertNotNull(AgentCommandPolicy.rejectionReason("./gradlew :app:testDebugUnitTest --dependency-verification=off"))
     }
 
     @Test
