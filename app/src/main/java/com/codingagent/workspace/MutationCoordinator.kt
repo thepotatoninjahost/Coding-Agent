@@ -75,6 +75,11 @@ class MutationCoordinator(
         clearExpired()
         if (request.isBlank()) return MutationProposeResult.Rejected("A mutation request is required")
         if (operations.isEmpty()) return MutationProposeResult.Rejected("At least one mutation operation is required")
+        if (pending.isNotEmpty()) {
+            return MutationProposeResult.Rejected(
+                "An unresolved pending proposal exists; approve, reject, or recover it before staging another mutation"
+            )
+        }
         val durableJob = try {
             OpenJobStore.load(workspace.projectRoot())
         } catch (error: Exception) {
