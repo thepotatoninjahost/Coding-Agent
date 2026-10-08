@@ -17,6 +17,7 @@ class ProjectFileService(private val workspace: ProjectWorkspace) {
         val directory = resolveDirectory(path)
         val root = workspace.projectRoot()
         return directory.listFiles()
+            ?.filterNot { directory.canonicalFile == root.canonicalFile && it.name.equals(".coding-agent", ignoreCase = true) }
             ?.sortedBy { it.name.lowercase() }
             ?.map { ProjectPaths.relative(root, it) }
             .orEmpty()
@@ -42,6 +43,10 @@ class ProjectFileService(private val workspace: ProjectWorkspace) {
         val root = workspace.projectRoot().canonicalFile
         val directory = root.resolve(path).canonicalFile
         require(directory.toPath().startsWith(root.toPath())) { "Unsafe project path" }
+        val relative = root.toPath().relativize(directory.toPath()).toString().replace('\\', '/')
+        require(!relative.substringBefore('/').equals(".coding-agent", ignoreCase = true)) {
+            "Coding Agent internal metadata is not accessible as project source"
+        }
         require(directory.isDirectory) { "Directory does not exist: $path" }
         return directory
     }
