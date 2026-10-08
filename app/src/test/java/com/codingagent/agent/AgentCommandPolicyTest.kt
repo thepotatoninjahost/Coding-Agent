@@ -118,7 +118,7 @@ class AgentCommandPolicyTest {
     }
 
     @Test
-    fun blocksGitCommandsWhenRepositoryConfigEnablesExecutableHelpers() {
+    fun blocksGitCommandsRegardlessOfRepositoryConfig() {
         val root = Files.createTempDirectory("command-policy-git-config").toFile()
         root.resolve(".git").mkdirs()
         root.resolve(".git/config").writeText("[core]\n fsmonitor = ./untrusted-helper.sh\n")
@@ -167,7 +167,7 @@ class AgentCommandPolicyTest {
     }
 
     @Test
-    fun blocksMutatingGitBranchOperations() {
+    fun blocksAllGitBranchCommands() {
         assertNotNull(AgentCommandPolicy.rejectionReason("git branch feature"))
         assertNotNull(AgentCommandPolicy.rejectionReason("git branch -D feature"))
         assertNotNull(AgentCommandPolicy.rejectionReason("git branch -m old new"))
