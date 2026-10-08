@@ -36,6 +36,33 @@ class OpenJobStoreTest {
 
 
     @Test(expected = IllegalStateException::class)
+    fun startNewFailsClosedWhenJobIsRecoveryRequired() {
+        val root = Files.createTempDirectory("open-job-recovery-start").toFile()
+        OpenJobStore.startNew(root, "interrupted mutation")
+        OpenJobStore.markRecoveryRequired(root, "partial apply")
+        OpenJobStore.startNew(root, "different goal")
+    }
+
+    @Test(expected = IllegalStateException::class)
+    fun markReadyCannotClearRecoveryRequiredState() {
+        val root = Files.createTempDirectory("open-job-recovery-ready").toFile()
+        OpenJobStore.startNew(root, "interrupted mutation")
+        OpenJobStore.markRecoveryRequired(root, "partial apply")
+        OpenJobStore.markReady(root)
+    }
+
+    @Test
+    fun recoveryReasonIsDurableWithoutOverwritingOriginalGoal() {
+        val root = Files.createTempDirectory("open-job-recovery-reason").toFile()
+        OpenJobStore.startNew(root, "interrupted mutation")
+        OpenJobStore.markRecoveryRequired(root, "partial apply")
+        val loaded = OpenJobStore.load(root)!!
+        assertEquals("interrupted mutation", loaded.goal)
+        assertEquals("partial apply", loaded.recoveryReason)
+        assertTrue(loaded.promptBlock().contains("partial apply"))
+    }
+
+    @Test(expected = IllegalStateException::class)
     fun markAppliedFailsClosedWhenJobMarkerIsMissing() {
         val root = Files.createTempDirectory("open-job-missing").toFile()
         OpenJobStore.markApplied(root, "proposal-missing")
