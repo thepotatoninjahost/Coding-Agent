@@ -157,7 +157,8 @@ object OpenJobStore {
     @Synchronized
     fun markApplied(root: File, proposalId: String? = null) {
         bind(root)
-        val current = load(root) ?: return
+        val current = load(root)
+            ?: error("Cannot mark mutation applied: durable open-job state is missing")
         save(
             root,
             current.copy(
