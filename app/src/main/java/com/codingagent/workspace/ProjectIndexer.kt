@@ -61,7 +61,7 @@ class ProjectIndexer {
         // Indexing reads every source file to calculate imports, symbols, line counts, and hashes,
         // which doubled I/O and memory work for every search request.
         return root.walkTopDown()
-            .onEnter { it.name.lowercase() !in ignored && isSafeProjectPath(root, it) }
+            .onEnter { !isIgnoredDirectory(it.name) && isSafeProjectPath(root, it) }
             .filter {
                 it.isFile && !java.nio.file.Files.isSymbolicLink(it.toPath()) &&
                     isSafeProjectPath(root, it) &&
