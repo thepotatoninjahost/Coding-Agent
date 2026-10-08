@@ -31,14 +31,18 @@ object AgentCommandPolicy {
             return "Model commands may use only project-relative paths"
         }
 
-        val executable = tokens.first().removePrefix("./")
+        val rawExecutable = tokens.first()
+        if (rawExecutable.contains('/') || rawExecutable.contains('\\')) {
+            return "Project-local or path-qualified executables are not allowed for model commands"
+        }
+        val executable = rawExecutable
         if (projectRoot != null) {
             validateFilesystemOperands(executable, tokens, projectRoot)?.let { return it }
         }
         return when (executable) {
             "gradlew", "gradlew.bat", "gradle" ->
                 "Build tools execute project-controlled scripts and are not permitted through the autonomous command channel; use the owner-controlled Terminal after reviewing the project scripts"
-            "git" -> validateGit(tokens)
+            "git" -> validateGit(tokens, projectRoot)
             "find" -> validateFind(tokens)
             "cat", "head", "tail", "wc", "file", "grep", "rg", "ls", "pwd", "printf" -> null
             else -> "Model command '$executable' is not permitted; use project inspection tools or a standard verification command"
@@ -87,14 +91,35 @@ object AgentCommandPolicy {
             }
             val relative = canonicalRoot.toPath().relativize(canonical.toPath())
                 .toString().replace('\\', '/')
-            if (relative.substringBefore('/').equals(".coding-agent", ignoreCase = true)) {
-                return "Coding Agent internal metadata is not accessible to model commands"
+            val first = relative.substringBefore('/')
+            if (first.equals(".coding-agent", ignoreCase = true) || first.equals(".git", ignoreCase = true)) {
+                return "Private agent and Git metadata are not accessible to model commands"
             }
         }
         return null
     }
 
-    private fun validateGit(tokens: List<String>): String? {
+    private fun gitConfigUsesExecutableHelpers(root: File): Boolean {
+        val gitDirectory = root.resolve(".git")
+        if (!gitDirectory.exists()) return false
+        if (java.nio.file.Files.isSymbolicLink(gitDirectory.toPath()) || !gitDirectory.isDirectory) return true
+        val config = gitDirectory.resolve("config")
+        if (!config.exists()) return false
+        if (java.nio.file.Files.isSymbolicLink(config.toPath())) return true
+        val canonicalRoot = runCatching { root.canonicalFile.toPath() }.getOrElse { return true }
+        val canonicalConfig = runCatching { config.canonicalFile.toPath() }.getOrElse { return true }
+        if (!canonicalConfig.startsWith(canonicalRoot)) return true
+        val content = runCatching { config.readText() }.getOrElse { return true }
+        val unsafeConfig = Regex(
+            """(?im)^\s*(?:\[\s*(?:include(?:if)?|pager)\b|\[\s*diff\s+"[^"]+"|(?:fsmonitor|external|textconv|clean|smudge|process|pager|path|sshcommand|hookspath|worktree|worktreeconfig)\s*=)"""
+        )
+        return unsafeConfig.containsMatchIn(content)
+    }
+
+    private fun validateGit(tokens: List<String>, projectRoot: File?): String? {
+        if (projectRoot != null && gitConfigUsesExecutableHelpers(projectRoot)) {
+            return "Git commands are disabled because .git/config enables external helpers or includes; review the repository configuration in the owner-controlled Terminal"
+        }
         val subcommand = tokens.getOrNull(1)?.removePrefix("-") ?: return "git requires a read-only subcommand"
         val allowed = setOf("status", "diff", "log", "branch", "rev-parse", "ls-files", "show", "grep")
         if (subcommand !in allowed) {
