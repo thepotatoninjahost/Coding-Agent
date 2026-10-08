@@ -42,7 +42,7 @@ object AgentCommandPolicy {
         return when (executable) {
             "gradlew", "gradlew.bat", "gradle" ->
                 "Build tools execute project-controlled scripts and are not permitted through the autonomous command channel; use the owner-controlled Terminal after reviewing the project scripts"
-            "git" -> validateGit(tokens, projectRoot)
+            "git" -> "Git commands are disabled in the autonomous command channel because Git can execute configured helpers from repository, global, or system configuration"
             "find" -> validateFind(tokens)
             "cat", "head", "tail", "wc", "file", "grep", "rg", "ls", "pwd", "printf" -> null
             else -> "Model command '$executable' is not permitted; use project inspection tools or a standard verification command"
@@ -107,99 +107,7 @@ object AgentCommandPolicy {
         return null
     }
 
-    private fun gitConfigUsesExecutableHelpers(root: java.io.File): Boolean {
-        val gitDirectory = root.resolve(".git")
-        if (!gitDirectory.exists()) return false
-        if (java.nio.file.Files.isSymbolicLink(gitDirectory.toPath()) || !gitDirectory.isDirectory) return true
-        val config = gitDirectory.resolve("config")
-        if (!config.exists()) return false
-        if (java.nio.file.Files.isSymbolicLink(config.toPath())) return true
-        val canonicalRoot = runCatching { root.canonicalFile.toPath() }.getOrElse { return true }
-        val canonicalConfig = runCatching { config.canonicalFile.toPath() }.getOrElse { return true }
-        if (!canonicalConfig.startsWith(canonicalRoot)) return true
-        val content = runCatching { config.readText() }.getOrElse { return true }
-        val unsafeConfig = Regex(
-            """(?im)^\s*(?:\[\s*(?:include(?:if)?|pager)\b|\[\s*diff\s+"[^"]+"|(?:fsmonitor|external|textconv|clean|smudge|process|pager|path|sshcommand|hookspath|worktree|worktreeconfig)\s*=)"""
-        )
-        return unsafeConfig.containsMatchIn(content)
-    }
 
-    private fun validateGit(tokens: List<String>, projectRoot: java.io.File?): String? {
-        if (projectRoot != null && gitConfigUsesExecutableHelpers(projectRoot)) {
-            return "Git commands are disabled because .git/config enables external helpers or includes; review the repository configuration in the owner-controlled Terminal"
-        }
-        val subcommand = tokens.getOrNull(1)?.removePrefix("-") ?: return "git requires a read-only subcommand"
-        val allowed = setOf("status", "diff", "log", "branch", "rev-parse", "ls-files", "show", "grep")
-        if (subcommand !in allowed) {
-            return "git '$subcommand' is not permitted for model commands"
-        }
-        val executionOrEscapeOptions = setOf(
-            "--ext-diff",
-            "--textconv",
-            "--no-index",
-            "--open-files-in-pager"
-        )
-        if (tokens.any { token ->
-                token in executionOrEscapeOptions ||
-                    token.startsWith("--open-files-in-pager=")
-            }) {
-            return "External diff tools, textconv filters, pager commands, and no-index filesystem access are not allowed for model commands"
-        }
-        if (tokens.any { it == "-o" || it == "--output" || it.startsWith("--output=") }) {
-            return "Writing git output to files is not allowed for model commands"
-        }
-        if (subcommand == "branch") {
-            return validateGitBranch(tokens)
-        }
-        return null
-    }
-
-    private fun validateGitBranch(tokens: List<String>): String? {
-        val args = tokens.drop(2)
-        if (args.isEmpty()) return null
-
-        val forbidden = setOf(
-            "-d", "--delete", "-D",
-            "-m", "--move", "-M",
-            "-c", "--copy", "-C",
-            "-f", "--force",
-            "-u", "--set-upstream-to", "--unset-upstream",
-            "--track", "--no-track",
-            "--edit-description", "--create-reflog",
-            "--delete-merged"
-        )
-        if (args.any { token ->
-                token in forbidden ||
-                    token.startsWith("--set-upstream-to=") ||
-                    token.startsWith("--delete-merged=")
-            }) {
-            return "git branch mutations are not permitted for model commands"
-        }
-
-        val readModes = setOf(
-            "-l", "--list", "--show-current",
-            "-r", "--remotes", "-a", "--all",
-            "--merged", "--no-merged", "--contains", "--no-contains",
-            "--points-at", "--format",
-            "--sort", "--column", "--no-column",
-            "-v", "-vv", "--verbose",
-            "--abbrev", "--no-abbrev",
-            "--color", "--no-color", "--omit-empty",
-            "--ignore-case", "--forked"
-        )
-        val hasReadMode = args.any { token ->
-            token in readModes ||
-                token.startsWith("--format=") ||
-                token.startsWith("--sort=") ||
-                token.startsWith("--column=") ||
-                token.startsWith("--abbrev=") ||
-                token.startsWith("--color=")
-        }
-        if (!hasReadMode) {
-            return "git branch creation and other mutating forms are not permitted for model commands"
-        }
-        return null
-    }
 
 
 }
