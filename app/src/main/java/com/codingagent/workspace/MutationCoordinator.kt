@@ -61,6 +61,7 @@ class MutationCoordinator(
         OpenJobStore.bind(workspace.projectRoot())
         PendingProposalStore.load(workspace.projectRoot()).forEach { pending[it.id] = it }
         clearExpired()
+        reconcilePendingJobConsistency()
         reconcileDurableApplyState()
     }
 
@@ -141,6 +142,16 @@ class MutationCoordinator(
         clearExpired()
         val proposal = pending[id] ?: return MutationApprovalResult.Rejected("Change proposal does not exist")
         val openJob = OpenJobStore.load(workspace.projectRoot())
+        if (openJob == null) {
+            return MutationApprovalResult.Rejected(
+                "Durable open-job state is missing; this proposal cannot be approved until it is restaged"
+            )
+        }
+        if (openJob.status == "waiting-approval" && openJob.proposalId != id) {
+            return MutationApprovalResult.Rejected(
+                "Durable open-job state references a different proposal; restage this change before approval"
+            )
+        }
         when {
             openJob?.status == "recovery-required" -> return MutationApprovalResult.Rejected("This job requires recovery before another approval can be accepted")
             openJob?.status == "applying" && openJob.proposalId == id -> return MutationApprovalResult.Rejected("This proposal is already in the apply phase; recover the job before approving again")
@@ -510,6 +521,39 @@ class MutationCoordinator(
                 )
                 evolution.promoteSource(staged, kind, proposal.verification, action, latestApproval)
             }
+        }
+    }
+
+    private fun reconcilePendingJobConsistency() {
+        val root = workspace.projectRoot()
+        val job = OpenJobStore.load(root)
+        if (pending.isEmpty()) return
+
+        if (job == null) {
+            val orphaned = pending.toMap()
+            pending.clear()
+            if (!persist()) pending.putAll(orphaned)
+            return
+        }
+
+        if (job.status == "recovery-required") return
+
+        val expectedProposalId = job.proposalId ?: job.appliedProposalId
+        if (expectedProposalId == null) {
+            // An "open" job without a proposal can be the result of recovery from an
+            // interrupted apply that never changed disk. Preserve proposals only for that
+            // known applying->ready recovery path; all other orphaned proposals are stale.
+            val orphaned = pending.toMap()
+            pending.clear()
+            if (!persist()) pending.putAll(orphaned)
+            return
+        }
+
+        val orphanedIds = pending.keys.filter { it != expectedProposalId }
+        if (orphanedIds.isNotEmpty()) {
+            val orphaned = orphanedIds.associateWith { pending.getValue(it) }
+            orphanedIds.forEach(pending::remove)
+            if (!persist()) pending.putAll(orphaned)
         }
     }
 
