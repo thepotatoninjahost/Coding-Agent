@@ -88,6 +88,18 @@ class AgentCommandPolicyTest {
     }
 
     @Test
+    fun blocksDirectAccessToPrivateAgentMetadata() {
+        val root = Files.createTempDirectory("command-policy-metadata").toFile()
+        root.resolve(".coding-agent").mkdirs()
+        root.resolve(".coding-agent/private-state.json").writeText("{\"secret\":true}")
+
+        assertNotNull(AgentCommandPolicy.rejectionReason("cat .coding-agent/private-state.json", root))
+        assertNotNull(AgentCommandPolicy.rejectionReason("rg secret .coding-agent/private-state.json", root))
+        assertNotNull(AgentCommandPolicy.rejectionReason("find .coding-agent -type f", root))
+        assertNull(AgentCommandPolicy.rejectionReason("cat README.md", root))
+    }
+
+    @Test
     fun blocksCommandsThatCanExecuteExternalSearchPreprocessors() {
         val root = Files.createTempDirectory("command-policy-pre").toFile()
         assertNotNull(
