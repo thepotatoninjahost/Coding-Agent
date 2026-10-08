@@ -2,6 +2,7 @@ package com.codingagent.core
 
 import com.codingagent.workspace.ProjectFileService
 import com.codingagent.workspace.ProjectWorkspace
+import org.junit.Assume.assumeTrue
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
@@ -24,6 +25,24 @@ class ProjectFileServiceBoundaryTest {
         assertRejected { service.read(".coding-agent/private-state.json") }
         assertRejected { service.read("nested/../.coding-agent/private-state.json") }
         assertRejected { service.read(".CODING-AGENT/private-state.json") }
+    }
+
+    @Test
+    fun indexingAndSearchNeverFollowSymlinksOutsideTheProject() {
+        val root = Files.createTempDirectory("project-index-symlink").toFile()
+        val outside = Files.createTempDirectory("project-index-outside").toFile()
+        root.resolve("Main.kt").writeText("fun main() = Unit\n")
+        outside.resolve("Outside.kt").writeText("PRIVATE_OUTSIDE_MARKER\n")
+        try {
+            Files.createSymbolicLink(root.toPath().resolve("Outside.kt"), outside.toPath().resolve("Outside.kt"))
+            Files.createSymbolicLink(root.toPath().resolve("escape"), outside.toPath())
+        } catch (_: Exception) {
+            assumeTrue("Symbolic links are required for this regression test", false)
+        }
+
+        val workspace = ProjectWorkspace(root)
+        assertFalse(workspace.summary().files.any { it.path == "Outside.kt" || it.path.startsWith("escape/") })
+        assertTrue(workspace.search("PRIVATE_OUTSIDE_MARKER").isEmpty())
     }
 
     private fun assertRejected(action: () -> Unit) {
