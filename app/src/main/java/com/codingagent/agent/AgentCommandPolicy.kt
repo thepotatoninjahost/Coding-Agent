@@ -50,15 +50,20 @@ object AgentCommandPolicy {
     private fun validateFilesystemOperands(executable: String, tokens: List<String>, root: java.io.File): String? {
         val operands = when (executable) {
             "cat", "head", "tail", "wc", "file", "ls" -> tokens.drop(1).filterNot { it.startsWith("-") }
-            "grep", "rg" -> tokens.drop(2).filterNot { it.startsWith("-") }
+            "grep", "rg" -> tokens.drop(1).filterNot { it.startsWith("-") }
             "find" -> tokens.drop(1).filterNot { it.startsWith("-") }.take(1)
             else -> emptyList()
+        }
+        if (executable == "rg" && tokens.any { it == "--pre" || it.startsWith("--pre=") }) {
+            return "ripgrep preprocessors are not allowed for model commands"
+        }
+        if (executable == "grep" && tokens.any { it == "-R" || it == "--dereference-recursive" }) {
+            return "grep recursive symlink following is not allowed for model commands"
         }
         val canonicalRoot = runCatching { root.canonicalFile }.getOrElse { return "Project root could not be resolved safely" }
         for (operand in operands) {
             if (operand.isBlank()) continue
             val candidate = root.resolve(operand)
-            if (!candidate.exists()) continue
             val canonical = runCatching { candidate.canonicalFile }.getOrElse {
                 return "Model commands may not access filesystem paths that cannot be resolved safely"
             }
