@@ -101,6 +101,21 @@ class AgentCommandPolicyTest {
     }
 
     @Test
+    fun blocksRecursiveSearchesThatCouldReadPrivateMetadataOrFollowSymlinks() {
+        val root = Files.createTempDirectory("command-policy-recursive-search").toFile()
+        root.resolve(".coding-agent").mkdirs()
+        root.resolve(".coding-agent/private-state.json").writeText("{\"secret\":true}")
+
+        assertNotNull(AgentCommandPolicy.rejectionReason("grep -R secret .", root))
+        assertNotNull(AgentCommandPolicy.rejectionReason("grep -r secret .", root))
+        assertNotNull(AgentCommandPolicy.rejectionReason("grep -nR secret .", root))
+        assertNotNull(AgentCommandPolicy.rejectionReason("rg --hidden secret .", root))
+        assertNotNull(AgentCommandPolicy.rejectionReason("rg --no-ignore secret .", root))
+        assertNotNull(AgentCommandPolicy.rejectionReason("rg --follow secret .", root))
+        assertNotNull(AgentCommandPolicy.rejectionReason("rg -uu secret .", root))
+    }
+
+    @Test
     fun blocksCommandsThatCanExecuteExternalSearchPreprocessors() {
         val root = Files.createTempDirectory("command-policy-pre").toFile()
         assertNotNull(
