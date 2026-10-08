@@ -122,6 +122,7 @@ class AcceptancePathTest {
             assertTrue("Unexpected result: $result", result is MutationApprovalResult.Rejected)
             assertEquals("fun main() = 1\n", root.resolve("Main.kt").readText())
             assertEquals("open", OpenJobStore.load(root)?.status)
+            assertTrue(coordinator.pending().isEmpty())
         } finally {
             unreadable.setReadable(true, false)
         }
@@ -150,7 +151,8 @@ class AcceptancePathTest {
         val result = coordinator.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id))
 
         assertTrue(result is MutationApprovalResult.Rejected)
-        assertTrue((result as MutationApprovalResult.Rejected).reason.contains("durable recovery state"))
+        assertTrue((result as MutationApprovalResult.Rejected).reason.contains("recovery-required"))
+        assertEquals("recovery-required", OpenJobStore.load(root)?.status)
         assertEquals("fun main() = 1\n", root.resolve("Main.kt").readText())
     }
 
