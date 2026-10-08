@@ -32,6 +32,11 @@ class ProjectFileServiceBoundaryTest {
         assertRejected { service.list(".git") }
         assertRejected { service.read(".coding-agent/private-state.json") }
         assertRejected { service.read(".git/config") }
+        root.resolve("nested/.git").mkdirs()
+        root.resolve("nested/.git/config").writeText("secret config")
+        assertRejected { service.read("nested/.git/config") }
+        assertRejected { service.list("nested/.git") }
+        assertFalse(service.list("nested").any { it.equals(".git", ignoreCase = true) })
         assertRejected { service.read("nested/../.coding-agent/private-state.json") }
         assertRejected { service.read(".CODING-AGENT/private-state.json") }
     }
@@ -58,6 +63,14 @@ class ProjectFileServiceBoundaryTest {
             workspace.preview(
                 listOf(TaskOperation(OperationKind.CREATE_FILE, ".git/config", text = "malicious = true")),
                 "attempt to overwrite Git metadata"
+            )
+        }
+        root.resolve("nested/.git").mkdirs()
+        root.resolve("nested/.git/config").writeText("[core]\\n repositoryformatversion = 0\\n")
+        assertRejected {
+            workspace.preview(
+                listOf(TaskOperation(OperationKind.REPLACE, "nested/.git/config", "[core]\\n", "[core]\\n malicious = true\\n")),
+                "attempt to overwrite nested Git metadata"
             )
         }
     }
