@@ -171,6 +171,19 @@ class AcceptancePathTest {
     }
 
     @Test
+    fun missingPendingProposalForDurableApplyStateRequiresRecovery() {
+        val root = Files.createTempDirectory("accept-missing-proposal").toFile()
+        root.resolve("Main.kt").writeText("fun main() = 1\n")
+
+        OpenJobStore.markApplying(root, "missing-proposal", listOf("Main.kt"), "interrupted mutation")
+
+        MutationCoordinator(ProjectWorkspace(root))
+
+        assertEquals("recovery-required", OpenJobStore.load(root)?.status)
+        assertTrue(OpenJobStore.load(root)?.recoveryReason?.contains("missing-proposal") == true)
+    }
+
+    @Test
     fun partiallyAppliedTransactionFailsClosedForRecovery() {
         val root = Files.createTempDirectory("accept-apply-partial").toFile()
         root.resolve("src").mkdirs()
