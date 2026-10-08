@@ -75,8 +75,20 @@ class MutationCoordinator(
         clearExpired()
         if (request.isBlank()) return MutationProposeResult.Rejected("A mutation request is required")
         if (operations.isEmpty()) return MutationProposeResult.Rejected("At least one mutation operation is required")
-        if (OpenJobStore.load(workspace.projectRoot())?.status == "recovery-required") {
+        val durableJob = try {
+            OpenJobStore.load(workspace.projectRoot())
+        } catch (error: Exception) {
+            return MutationProposeResult.Rejected(
+                "Durable job state is unreadable; refusing to stage a mutation: ${error.message.orEmpty()}"
+            )
+        }
+        if (durableJob?.status == "recovery-required") {
             return MutationProposeResult.Rejected("This job requires recovery before another mutation can be staged")
+        }
+        if (durableJob?.status == "waiting-approval" || durableJob?.status == "applying") {
+            return MutationProposeResult.Rejected(
+                "An existing mutation is still pending or applying; resolve it before staging another proposal"
+            )
         }
 
         val changeSet = runCatching { workspace.preview(operations, reason) }
@@ -153,19 +165,20 @@ class MutationCoordinator(
                 "Durable open-job state is missing; this proposal cannot be approved until it is restaged"
             )
         }
-        if (openJob.status == "waiting-approval" && openJob.proposalId != id) {
-            return MutationApprovalResult.Rejected(
-                "Durable open-job state references a different proposal; restage this change before approval"
-            )
-        }
         when {
-            openJob?.status == "recovery-required" -> return MutationApprovalResult.Rejected("This job requires recovery before another approval can be accepted")
-            openJob?.status == "applying" && openJob.proposalId == id -> return MutationApprovalResult.Rejected("This proposal is already in the apply phase; recover the job before approving again")
-            openJob?.status == "applied" && openJob.appliedProposalId == id -> {
+            openJob.status == "recovery-required" ->
+                return MutationApprovalResult.Rejected("This job requires recovery before another approval can be accepted")
+            openJob.status == "applying" && openJob.proposalId == id ->
+                return MutationApprovalResult.Rejected("This proposal is already in the apply phase; recover the job before approving again")
+            openJob.status == "applied" && openJob.appliedProposalId == id -> {
                 pending.remove(id)
                 persist()
                 return MutationApprovalResult.Rejected("This proposal has already been applied")
             }
+            openJob.status != "waiting-approval" || openJob.proposalId != id ->
+                return MutationApprovalResult.Rejected(
+                    "Durable open-job state does not authorize this proposal; restage the change before approval"
+                )
         }
         val timestamp = now()
         if (timestamp > proposal.expiresAt) {
@@ -294,8 +307,14 @@ class MutationCoordinator(
                     }
                     return MutationApprovalResult.Rejected("$details; changes were rolled back")
                 }
+                runCatching {
+                    OpenJobStore.markRecoveryRequired(
+                        workspace.projectRoot(),
+                        "Post-apply verification failed and rollback was incomplete: $rollback"
+                    )
+                }
                 return MutationApprovalResult.Rejected(
-                    "$details; rollback was incomplete: $rollback"
+                    "CRITICAL: $details; rollback was incomplete and the job was marked recovery-required: $rollback"
                 )
             }
             try {
@@ -311,7 +330,13 @@ class MutationCoordinator(
                         else "CRITICAL: change was rolled back, but the job remains in recovery-required state"
                     )
                 }
-                return MutationApprovalResult.Rejected("CRITICAL: completed-job persistence failed and rollback was incomplete: $rollback")
+                runCatching {
+                    OpenJobStore.markRecoveryRequired(
+                        workspace.projectRoot(),
+                        "Completed-job persistence failed and rollback was incomplete: $rollback"
+                    )
+                }
+                return MutationApprovalResult.Rejected("CRITICAL: completed-job persistence failed and rollback was incomplete; recovery is required: $rollback")
             }
 
             pending.remove(id)
@@ -327,8 +352,14 @@ class MutationCoordinator(
                         else "CRITICAL: change was rolled back, but the job remains in recovery-required state"
                     )
                 } else {
+                    runCatching {
+                        OpenJobStore.markRecoveryRequired(
+                            workspace.projectRoot(),
+                            "Approved-state persistence failed and rollback was incomplete: $rollback"
+                        )
+                    }
                     MutationApprovalResult.Rejected(
-                        "CRITICAL: change was applied but could not be durably persisted or rolled back: $rollback"
+                        "CRITICAL: change was applied but could not be durably persisted or rolled back; recovery is required: $rollback"
                     )
                 }
             }
@@ -365,7 +396,14 @@ class MutationCoordinator(
             }
 
             when (diskState(proposal.changeSet)) {
-                DiskState.BEFORE -> runCatching { OpenJobStore.markReady(workspace.projectRoot()) }
+                DiskState.BEFORE -> runCatching {
+                    OpenJobStore.markWaiting(
+                        workspace.projectRoot(),
+                        proposal.id,
+                        proposal.changeSet.changes.map { it.path }.distinct(),
+                        proposal.request
+                    )
+                }
                 DiskState.AFTER -> {
                     val markedApplied = runCatching {
                         OpenJobStore.markApplied(workspace.projectRoot(), proposal.id)
@@ -591,7 +629,14 @@ class MutationCoordinator(
 
         when (job.status) {
             "applying" -> when (diskState(proposal.changeSet)) {
-                DiskState.BEFORE -> runCatching { OpenJobStore.markReady(root) }
+                DiskState.BEFORE -> runCatching {
+                    OpenJobStore.markWaiting(
+                        root,
+                        proposal.id,
+                        proposal.changeSet.changes.map { it.path }.distinct(),
+                        proposal.request
+                    )
+                }
                 DiskState.AFTER -> {
                     runCatching { OpenJobStore.markApplied(root, proposal.id) }
                         .onSuccess {
