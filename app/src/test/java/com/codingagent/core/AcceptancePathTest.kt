@@ -128,6 +128,33 @@ class AcceptancePathTest {
     }
 
     @Test
+    fun rollbackStateFailureIsReportedAsCriticalInsteadOfSilentlyClearingNothing() {
+        val root = Files.createTempDirectory("accept-rollback-state-failure").toFile()
+        root.resolve("Main.kt").writeText("fun main() = 1\n")
+        root.resolve(".coding-agent").mkdirs()
+        val gradlew = root.resolve("gradlew")
+        gradlew.writeText(
+            "#!/bin/sh\nprintf 'not valid json' > .coding-agent/open-job.json\nexit 1\n"
+        )
+        gradlew.setExecutable(true)
+
+        val coordinator = MutationCoordinator(ProjectWorkspace(root))
+        val proposal = (coordinator.propose(
+            "run ./gradlew test after changing Main.kt",
+            listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 2\n"))
+        ) as MutationProposeResult.Proposed).proposal
+
+        assertTrue(
+            coordinator.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id)) is MutationApprovalResult.AwaitingSecond
+        )
+        val result = coordinator.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id))
+
+        assertTrue(result is MutationApprovalResult.Rejected)
+        assertTrue((result as MutationApprovalResult.Rejected).reason.contains("durable recovery state"))
+        assertEquals("fun main() = 1\n", root.resolve("Main.kt").readText())
+    }
+
+    @Test
     fun interruptedApplyingStateRecoversAfterCoordinatorRestart() {
         val root = Files.createTempDirectory("accept-apply-restart").toFile()
         root.resolve("Main.kt").writeText("fun main() = 1\n")
