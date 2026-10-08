@@ -613,53 +613,74 @@ class MutationCoordinator(
             }
             return
         }
-        if (pending.isEmpty()) return
 
-        if (job == null) {
-            discardUnreferencedPendingProposals(null)
-            return
-        }
-
-        if (job.status == "recovery-required") return
-
-        val expectedProposalId = job.proposalId ?: job.appliedProposalId
-        if (expectedProposalId == null) {
-            discardUnreferencedPendingProposals(job)
-            return
-        }
-
-        val orphanedIds = pending.keys.filter { it != expectedProposalId }
-        if (orphanedIds.isNotEmpty()) {
-            val orphaned = orphanedIds.associateWith { pending.getValue(it) }
-            orphanedIds.forEach(pending::remove)
-            if (!persist()) {
-                pending.putAll(orphaned)
+        when (job?.status) {
+            null -> discardPendingProposalsExcept(
+                expectedProposalId = null,
+                failureReason = "Orphaned pending proposals could not be removed durably"
+            )
+            "recovery-required" -> return
+            "waiting-approval", "applying" -> {
+                val expectedId = job.proposalId
+                if (expectedId.isNullOrBlank() || expectedId !in pending) {
+                    pendingReconciliationFailed = true
+                    runCatching {
+                        OpenJobStore.markRecoveryRequired(
+                            root,
+                            "Durable job is ${job.status} but its authorized pending proposal is missing"
+                        )
+                    }
+                    return
+                }
+                discardPendingProposalsExcept(
+                    expectedProposalId = expectedId,
+                    failureReason = "Pending proposal consistency could not be persisted during startup reconciliation"
+                )
+            }
+            "applied" -> {
+                val expectedId = job.appliedProposalId ?: job.proposalId
+                if (expectedId.isNullOrBlank()) {
+                    pendingReconciliationFailed = true
+                    runCatching {
+                        OpenJobStore.markRecoveryRequired(
+                            root,
+                            "Durable job is marked applied but has no applied proposal identifier"
+                        )
+                    }
+                    return
+                }
+                discardPendingProposalsExcept(
+                    expectedProposalId = expectedId,
+                    failureReason = "Pending proposal consistency could not be persisted during startup reconciliation"
+                )
+            }
+            "open" -> discardPendingProposalsExcept(
+                expectedProposalId = null,
+                failureReason = "Stale pending proposals could not be removed from durable storage"
+            )
+            else -> {
                 pendingReconciliationFailed = true
                 runCatching {
                     OpenJobStore.markRecoveryRequired(
                         root,
-                        "Pending proposal consistency could not be persisted during startup reconciliation"
+                        "Durable open-job state has an unsupported status: ${job.status}"
                     )
                 }
             }
         }
     }
 
-    private fun discardUnreferencedPendingProposals(job: OpenJob?) {
+    private fun discardPendingProposalsExcept(expectedProposalId: String?, failureReason: String) {
+        val orphanedIds = pending.keys.filter { it != expectedProposalId }
+        if (orphanedIds.isEmpty()) return
+
         val root = workspace.projectRoot()
-        val previous = pending.toMap()
-        pending.clear()
+        val orphaned = orphanedIds.associateWith { pending.getValue(it) }
+        orphanedIds.forEach(pending::remove)
         if (!persist()) {
-            pending.putAll(previous)
+            pending.putAll(orphaned)
             pendingReconciliationFailed = true
-            if (job != null) {
-                runCatching {
-                    OpenJobStore.markRecoveryRequired(
-                        root,
-                        "Orphaned pending proposals could not be removed durably"
-                    )
-                }
-            }
+            runCatching { OpenJobStore.markRecoveryRequired(root, failureReason) }
         }
     }
 
