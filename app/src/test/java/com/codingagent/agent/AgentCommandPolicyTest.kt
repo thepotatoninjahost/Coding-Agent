@@ -87,6 +87,14 @@ class AgentCommandPolicyTest {
     }
 
     @Test
+    fun blocksGitOptionsThatCanExecuteExternalToolsOrReadOutsideTheRepository() {
+        assertNotNull(AgentCommandPolicy.rejectionReason("git diff --ext-diff"))
+        assertNotNull(AgentCommandPolicy.rejectionReason("git show --textconv HEAD"))
+        assertNotNull(AgentCommandPolicy.rejectionReason("git grep --open-files-in-pager=sh needle"))
+        assertNotNull(AgentCommandPolicy.rejectionReason("git diff --no-index /etc/passwd app/src/main/AndroidManifest.xml"))
+    }
+
+    @Test
     fun blocksMutatingGitBranchOperations() {
         assertNotNull(AgentCommandPolicy.rejectionReason("git branch feature"))
         assertNotNull(AgentCommandPolicy.rejectionReason("git branch -D feature"))
