@@ -59,11 +59,21 @@ object AgentCommandPolicy {
             "find" -> tokens.drop(1).filterNot { it.startsWith("-") }.take(1)
             else -> emptyList()
         }
-        if (executable == "rg" && tokens.any { it == "--pre" || it.startsWith("--pre=") }) {
-            return "ripgrep preprocessors are not allowed for model commands"
+        if (executable == "rg" && tokens.any { token ->
+                token == "--pre" || token.startsWith("--pre=") ||
+                    token == "--hidden" || token == "--follow" || token == "-L" ||
+                    token.startsWith("--no-ignore") ||
+                    Regex("""^-u{1,3}$""").matches(token) ||
+                    (token.startsWith("-") && !token.startsWith("--") && token.drop(1).contains('u'))
+            }) {
+            return "Ripgrep preprocessors, hidden agent metadata, and symlink-following or ignore-bypass options are not allowed for model commands"
         }
-        if (executable == "grep" && tokens.any { it == "-R" || it == "--dereference-recursive" }) {
-            return "grep recursive symlink following is not allowed for model commands"
+        if (executable == "grep" && tokens.any { token ->
+                token == "--recursive" || token == "--dereference-recursive" ||
+                    (token.startsWith("-") && !token.startsWith("--") &&
+                        token.drop(1).any { it == 'r' || it == 'R' })
+            }) {
+            return "Recursive grep can expose private agent metadata and is not allowed for model commands; use explicit project-relative file paths"
         }
         val canonicalRoot = runCatching { root.canonicalFile }.getOrElse { return "Project root could not be resolved safely" }
         for (operand in operands) {
