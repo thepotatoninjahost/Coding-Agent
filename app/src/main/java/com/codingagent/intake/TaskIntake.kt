@@ -43,7 +43,7 @@ class TaskIntakeParser(
         require(normalized.isNotEmpty()) { "A coding request is required" }
         val operation = parseOperation(normalized)
         val contract = interpreter.interpret(normalized, operation)
-        val verification = detectChecks(normalized, contract.intent)
+        val verification = detectChecks(normalized)
         val ready = contract.ready
         val question = if (ready) null else clarification(contract, operation)
         return TaskIntake(
@@ -87,8 +87,8 @@ class TaskIntakeParser(
         val note: String? = null
     )
 
-    private fun detectChecks(request: String, intent: TaskIntent): VerificationPlan {
-        if (!explicitlyRequestsVerification(request, intent)) return VerificationPlan(emptyList())
+    private fun detectChecks(request: String): VerificationPlan {
+        if (!explicitlyRequestsVerification(request)) return VerificationPlan(emptyList())
 
         return when {
             root.resolve("gradlew").isFile && root.resolve("app/build.gradle.kts").isFile -> {
@@ -148,13 +148,14 @@ class TaskIntakeParser(
         }
     }
 
-    private fun explicitlyRequestsVerification(request: String, intent: TaskIntent): Boolean {
-        if (intent == TaskIntent.TEST) return true
+    private fun explicitlyRequestsVerification(request: String): Boolean {
         val normalized = request.lowercase()
         val runVerb = Regex("""\\b(run|execute|perform|rerun|re-run)\\b""").containsMatchIn(normalized)
         val checkTarget = Regex("""\\b(tests?|build|compile|lint|checks?|pytest|gradlew?|npm|make)\\b""")
             .containsMatchIn(normalized)
-        return (runVerb && checkTarget) ||
+        val directVerificationVerb = Regex("""\\b(test|verify|build|compile|lint|check)\\b\\s+(the|this|my|all|project|app|application|module|code|changes|it)\\b""")
+            .containsMatchIn(normalized)
+        return (runVerb && checkTarget) || directVerificationVerb ||
             Regex("""\\b(build|compile|lint)\\b""").containsMatchIn(normalized)
     }
 }
