@@ -50,7 +50,7 @@ class TaskIntakeTest {
 
     @Test fun requestedVerificationIsReportedAsNotRunWhenToolchainIsUnavailable() {
         val root = Files.createTempDirectory("task-intake-missing-toolchain").toFile()
-        root.resolve("gradlew").writeText("#!/bin/sh\\n")
+        root.resolve("gradlew").writeText("#!/bin/sh\n")
 
         val intake = TaskIntakeParser(
             root,
@@ -92,9 +92,9 @@ class TaskIntakeTest {
 
     @Test fun ordinaryCodeChangeDoesNotAutoExecuteProjectBuildScripts() {
         val root = Files.createTempDirectory("task-intake-no-auto-build").toFile()
-        root.resolve("gradlew").writeText("#!/bin/sh\\n")
+        root.resolve("gradlew").writeText("#!/bin/sh\n")
         root.resolve("app").mkdirs()
-        root.resolve("app/build.gradle.kts").writeText("plugins {}\\n")
+        root.resolve("app/build.gradle.kts").writeText("plugins {}\n")
 
         val intake = TaskIntakeParser(root).parse("fix the login bug")
         val ambiguousTestMention = TaskIntakeParser(root).parse("the test file has a bug")
