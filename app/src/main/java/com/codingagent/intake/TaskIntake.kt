@@ -118,11 +118,11 @@ class TaskIntakeParser(private val root: File) {
     private fun explicitlyRequestsVerification(request: String, intent: TaskIntent): Boolean {
         if (intent == TaskIntent.TEST) return true
         val normalized = request.lowercase()
-        val runVerb = Regex("""\\b(run|execute|perform|rerun|re-run)\\b""").containsMatchIn(normalized)
-        val checkTarget = Regex("""\\b(tests?|build|compile|lint|checks?|pytest|gradlew?|npm|make)\\b""")
+        val runVerb = Regex("""\b(run|execute|perform|rerun|re-run)\b""").containsMatchIn(normalized)
+        val checkTarget = Regex("""\b(tests?|build|compile|lint|checks?|pytest|gradlew?|npm|make)\b""")
             .containsMatchIn(normalized)
         return (runVerb && checkTarget) ||
-            Regex("""\\b(build|compile|lint)\\b""").containsMatchIn(normalized)
+            Regex("""\b(build|compile|lint)\b""").containsMatchIn(normalized)
     }
 
     private fun isExecutableAvailable(name: String): Boolean {
