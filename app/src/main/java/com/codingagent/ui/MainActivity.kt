@@ -344,7 +344,7 @@ private fun CodingAgentApp(privateDir: File) {
         pendingProposal = null
         pendingProposalId = null
         status = AgentStatus.READY
-        val verificationSuffix = result.verificationNote?.let { "\\nVerification: $it" }.orEmpty()
+        val verificationSuffix = result.verificationNote?.let { "\nVerification: $it" }.orEmpty()
         detail = "APPLIED ${paths.size} file(s): ${paths.joinToString().take(100)}" +
             (result.verificationNote?.let { " · $it" } ?: "")
         store.recordChatMessage(
