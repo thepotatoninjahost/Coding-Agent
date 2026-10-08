@@ -31,7 +31,11 @@ data class TaskIntake(
     val verificationNote: String? = null
 )
 
-class TaskIntakeParser(private val root: File) {
+class TaskIntakeParser(
+    private val root: File,
+    private val executableAvailable: (String) -> Boolean = ::isExecutableAvailable,
+    private val androidSdkAvailable: (File) -> Boolean = ::hasAndroidSdk
+) {
     private val interpreter = GoalInterpreter(root)
 
     fun parse(request: String): TaskIntake {
