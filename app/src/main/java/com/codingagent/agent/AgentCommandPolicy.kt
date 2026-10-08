@@ -82,6 +82,12 @@ object AgentCommandPolicy {
         val canonicalRoot = runCatching { root.canonicalFile }.getOrElse { return "Project root could not be resolved safely" }
         for (operand in operands) {
             if (operand.isBlank()) continue
+            val requestedParts = operand.replace('\\', '/').split('/')
+            if (requestedParts.any { it.equals(".git", ignoreCase = true) } ||
+                requestedParts.firstOrNull()?.equals(".coding-agent", ignoreCase = true) == true
+            ) {
+                return "Private agent and Git metadata are not accessible to model commands"
+            }
             val candidate = root.resolve(operand)
             val canonical = runCatching { candidate.canonicalFile }.getOrElse {
                 return "Model commands may not access filesystem paths that cannot be resolved safely"
@@ -91,8 +97,10 @@ object AgentCommandPolicy {
             }
             val relative = canonicalRoot.toPath().relativize(canonical.toPath())
                 .toString().replace('\\', '/')
-            val first = relative.substringBefore('/')
-            if (first.equals(".coding-agent", ignoreCase = true) || first.equals(".git", ignoreCase = true)) {
+            val parts = relative.split('/').filter { it.isNotEmpty() }
+            if (parts.any { it.equals(".git", ignoreCase = true) } ||
+                parts.firstOrNull()?.equals(".coding-agent", ignoreCase = true) == true
+            ) {
                 return "Private agent and Git metadata are not accessible to model commands"
             }
         }
