@@ -15,6 +15,18 @@ import com.codingagent.workspace.VerificationReport
  * AutonomousAgent.run(). Extracted verbatim — same fields, same meaning, now readable
  * both by the turn-start decision logic (LoopControl.decide) and by ToolCallOutcomeHandler.
  */
+/**
+ * Classifies the outcome encoded by a tool result. Transport success alone is
+ * insufficient: execution gates must only advance after the underlying operation passed.
+ */
+internal fun toolExecutionSucceeded(toolName: String, toolResult: String): Boolean = when (toolName) {
+    "run_command" -> !toolResult.startsWith("ERROR:") &&
+        Regex("(?m)^exit=0\\s+timeout=false").containsMatchIn(toolResult)
+    "verify" -> !toolResult.startsWith("ERROR:") &&
+        Regex("(?m)^passed=true(?:\\s|$)").containsMatchIn(toolResult)
+    else -> !toolResult.startsWith("ERROR:")
+}
+
 class ToolTurnState {
     var lastEvidence: String = ""
     var consecutiveFailures = 0
@@ -263,7 +275,7 @@ class ToolCallOutcomeHandler(
         transcript += com.codingagent.model.ModelMessage("assistant", response.thought.ifBlank { "Calling ${response.name}" }, toolCallId, response.name, response.arguments)
         transcript += com.codingagent.model.ModelMessage("tool", "${response.name}: $toolResult", toolCallId)
 
-        val success = !toolResult.startsWith("ERROR:")
+        val success = toolExecutionSucceeded(response.name, toolResult)
 
         if (success) {
             toolSelectionLoop.recordSuccess(response.name, toolKind, toolResult.take(300))
