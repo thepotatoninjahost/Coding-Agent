@@ -110,12 +110,18 @@ class MutationCoordinator(
             pending.remove(proposal.id)
             return MutationProposeResult.Rejected("Could not durably persist the change proposal; no mutation was staged")
         }
-        runCatching {
+        try {
             OpenJobStore.markWaiting(
                 workspace.projectRoot(),
                 proposal.id,
                 proposal.changeSet.changes.map { it.path }.distinct(),
                 request
+            )
+        } catch (_: Exception) {
+            pending.remove(proposal.id)
+            persist()
+            return MutationProposeResult.Rejected(
+                "Could not durably record the pending job state; no mutation was staged"
             )
         }
         return MutationProposeResult.Proposed(proposal)
@@ -367,13 +373,17 @@ class MutationCoordinator(
             pending.remove(proposal.id)
             return null
         }
-        runCatching {
+        try {
             OpenJobStore.markWaiting(
                 workspace.projectRoot(),
                 proposal.id,
                 changeSet.changes.map { it.path }.distinct(),
                 proposal.request
             )
+        } catch (_: Exception) {
+            pending.remove(proposal.id)
+            persist()
+            return null
         }
         return proposal
     }
