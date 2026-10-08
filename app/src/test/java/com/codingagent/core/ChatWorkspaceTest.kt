@@ -14,6 +14,7 @@ import com.codingagent.agent.ChatMessage
 import com.codingagent.agent.ChatMessageStore
 import com.codingagent.agent.ChatRole
 import com.codingagent.agent.ChatWorkspace
+import com.codingagent.agent.AgentRuntimeResult
 import com.codingagent.agent.UserMemory
 import com.codingagent.agent.UserMemoryStore
 import com.codingagent.agent.PendingWorkResume
