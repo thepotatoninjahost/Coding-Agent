@@ -50,6 +50,7 @@ class MutationCoordinator(
     private val repairConfig: RepairCycleConfig = RepairCycleConfig()
 ) {
     private val pending = linkedMapOf<String, PendingChangeProposal>()
+    private var pendingReconciliationFailed = false
     private val evolution = SelfEvolution(workspace.projectRoot())
     @Volatile private var repairProvider: ((String, Int) -> ChangeSet?)? = null
 
@@ -140,6 +141,11 @@ class MutationCoordinator(
     @Synchronized
     fun approve(id: String, ownerApproval: OwnerApprovalToken): MutationApprovalResult {
         clearExpired()
+        if (pendingReconciliationFailed) {
+            return MutationApprovalResult.Rejected(
+                "Pending proposal state could not be reconciled durably; restart the agent and restage the change before approval"
+            )
+        }
         val proposal = pending[id] ?: return MutationApprovalResult.Rejected("Change proposal does not exist")
         val openJob = OpenJobStore.load(workspace.projectRoot())
         if (openJob == null) {
@@ -530,9 +536,7 @@ class MutationCoordinator(
         if (pending.isEmpty()) return
 
         if (job == null) {
-            val orphaned = pending.toMap()
-            pending.clear()
-            if (!persist()) pending.putAll(orphaned)
+            discardUnreferencedPendingProposals(null)
             return
         }
 
@@ -540,12 +544,7 @@ class MutationCoordinator(
 
         val expectedProposalId = job.proposalId ?: job.appliedProposalId
         if (expectedProposalId == null) {
-            // An "open" job without a proposal can be the result of recovery from an
-            // interrupted apply that never changed disk. Preserve proposals only for that
-            // known applying->ready recovery path; all other orphaned proposals are stale.
-            val orphaned = pending.toMap()
-            pending.clear()
-            if (!persist()) pending.putAll(orphaned)
+            discardUnreferencedPendingProposals(job)
             return
         }
 
@@ -553,7 +552,34 @@ class MutationCoordinator(
         if (orphanedIds.isNotEmpty()) {
             val orphaned = orphanedIds.associateWith { pending.getValue(it) }
             orphanedIds.forEach(pending::remove)
-            if (!persist()) pending.putAll(orphaned)
+            if (!persist()) {
+                pending.putAll(orphaned)
+                pendingReconciliationFailed = true
+                runCatching {
+                    OpenJobStore.markRecoveryRequired(
+                        root,
+                        "Pending proposal consistency could not be persisted during startup reconciliation"
+                    )
+                }
+            }
+        }
+    }
+
+    private fun discardUnreferencedPendingProposals(job: OpenJob?) {
+        val root = workspace.projectRoot()
+        val previous = pending.toMap()
+        pending.clear()
+        if (!persist()) {
+            pending.putAll(previous)
+            pendingReconciliationFailed = true
+            if (job != null) {
+                runCatching {
+                    OpenJobStore.markRecoveryRequired(
+                        root,
+                        "Orphaned pending proposals could not be removed durably"
+                    )
+                }
+            }
         }
     }
 
