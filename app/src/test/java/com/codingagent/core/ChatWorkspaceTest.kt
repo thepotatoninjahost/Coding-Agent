@@ -124,7 +124,7 @@ class ChatWorkspaceTest {
     }
 
     @Test
-    fun chatApprovalRefusesWhenMultipleProposalsArePending() {
+    fun secondMutationCannotReplaceOrCompeteWithAnExistingPendingProposal() {
         val root = Files.createTempDirectory("chat-ambiguous-approval").toFile()
         root.resolve("Main.kt").writeText("fun main() = 1\n")
         val agent = AutonomousAgent(root, emptyKnowledge, gateway = null)
@@ -132,35 +132,32 @@ class ChatWorkspaceTest {
         val first = agent.run("replace fun main() = 1 with fun main() = 2 in Main.kt")
         val second = agent.run("replace fun main() = 1 with fun main() = 3 in Main.kt")
         assertTrue(first.any { it is com.codingagent.agent.AutonomousAgentEvent.ApprovalRequired })
-        assertTrue(second.any { it is com.codingagent.agent.AutonomousAgentEvent.ApprovalRequired })
-        assertEquals(2, agent.pendingProposals().size)
+        assertTrue(second.any { it is com.codingagent.agent.AutonomousAgentEvent.Failed })
+        assertEquals(1, agent.pendingProposals().size)
 
         val result = com.codingagent.agent.ChatApproval.tryApprove(agent, "approve")
-        assertTrue(result is com.codingagent.agent.AgentRuntimeResult.Failed)
-        assertEquals(2, agent.pendingProposals().size)
+        assertTrue(result is com.codingagent.agent.AgentRuntimeResult.NeedsApproval)
+        assertEquals(1, agent.pendingProposals().size)
         assertEquals("fun main() = 1\n", root.resolve("Main.kt").readText())
     }
 
     @Test
-    fun resumeRefusesWhenMultipleProposalsArePending() {
+    fun resumeKeepsTheSingleDurableProposalPending() {
         val root = Files.createTempDirectory("chat-ambiguous-resume").toFile()
         root.resolve("Main.kt").writeText("fun main() = 1\n")
         val agent = AutonomousAgent(root, emptyKnowledge, gateway = null)
 
         agent.run("replace fun main() = 1 with fun main() = 2 in Main.kt")
-        agent.run("replace fun main() = 1 with fun main() = 3 in Main.kt")
+        val second = agent.run("replace fun main() = 1 with fun main() = 3 in Main.kt")
+        assertTrue(second.any { it is com.codingagent.agent.AutonomousAgentEvent.Failed })
         val pending = agent.pendingProposals()
-        assertEquals(2, pending.size)
+        assertEquals(1, pending.size)
 
         val result = PendingWorkResume.tryResume(agent, "continue", null)
 
-        assertTrue(result is com.codingagent.agent.AgentRuntimeResult.Failed)
-        val failed = result as com.codingagent.agent.AgentRuntimeResult.Failed
-        assertEquals("resume-ambiguous", failed.task.status)
-        assertFalse(failed.task.verification.passed)
-        assertTrue(failed.task.summary.contains(pending[0].id))
-        assertTrue(failed.task.summary.contains(pending[1].id))
-        assertEquals(2, agent.pendingProposals().size)
+        assertTrue(result is com.codingagent.agent.AgentRuntimeResult.NeedsApproval)
+        assertEquals(pending.single().id, (result as com.codingagent.agent.AgentRuntimeResult.NeedsApproval).proposalId)
+        assertEquals(1, agent.pendingProposals().size)
         assertEquals("fun main() = 1\n", root.resolve("Main.kt").readText())
     }
 
