@@ -15,7 +15,8 @@ data class OpenJob(
     val proposalId: String?,
     val paths: List<String>,
     val updatedAt: Long,
-    val appliedProposalId: String? = null
+    val appliedProposalId: String? = null,
+    val recoveryReason: String? = null
 ) {
     fun promptBlock(): String = buildString {
         append("OPEN JOB (do not claim there is no prior task):\n")
@@ -23,6 +24,7 @@ data class OpenJob(
         append("- status: ").append(status).append('\n')
         append("- goal: ").append(goal.take(1_200)).append('\n')
         if (!proposalId.isNullOrBlank()) append("- proposal: ").append(proposalId).append('\n')
+        if (!recoveryReason.isNullOrBlank()) append("- recovery reason: ").append(recoveryReason.take(600)).append('\\n')
         if (paths.isNotEmpty()) {
             append("- staged paths:\n")
             paths.forEach { append("  - ").append(it).append('\n') }
@@ -64,7 +66,8 @@ object OpenJobStore {
                     (0 until arr.length()).map { arr.getString(it) }
                 } ?: emptyList(),
                 updatedAt = o.optLong("updatedAt", 0L),
-                appliedProposalId = o.optString("appliedProposalId").takeIf { it.isNotBlank() && it != "null" }
+                appliedProposalId = o.optString("appliedProposalId").takeIf { it.isNotBlank() && it != "null" },
+                recoveryReason = o.optString("recoveryReason").takeIf { it.isNotBlank() && it != "null" }
             )
         }.getOrNull()
     }
@@ -81,6 +84,7 @@ object OpenJobStore {
             .put("proposalId", job.proposalId ?: JSONObject.NULL)
             .put("updatedAt", job.updatedAt)
             .put("appliedProposalId", job.appliedProposalId ?: JSONObject.NULL)
+            .put("recoveryReason", job.recoveryReason ?: JSONObject.NULL)
         val paths = JSONArray()
         job.paths.forEach { paths.put(it) }
         o.put("paths", paths)
@@ -178,7 +182,7 @@ object OpenJobStore {
             root,
             current.copy(
                 status = "recovery-required",
-                goal = if (reason.isBlank()) current.goal else current.goal + "\nRecovery: " + reason.take(600),
+                recoveryReason = reason.takeIf { it.isNotBlank() }?.take(600),
                 updatedAt = System.currentTimeMillis()
             )
         )
@@ -194,7 +198,8 @@ object OpenJobStore {
                 status = "open",
                 proposalId = null,
                 updatedAt = System.currentTimeMillis(),
-                appliedProposalId = null
+                appliedProposalId = null,
+                recoveryReason = null
             )
         )
     }
