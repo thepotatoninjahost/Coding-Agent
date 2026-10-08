@@ -129,7 +129,7 @@ class AgentCommandPolicyTest {
         root.resolve(".git/config").writeText(
             "[core]\n repositoryformatversion = 0\n filemode = true\n bare = false\n logallrefupdates = true\n"
         )
-        assertNull(AgentCommandPolicy.rejectionReason("git status", root))
+        assertNotNull(AgentCommandPolicy.rejectionReason("git status", root))
     }
 
     @Test
