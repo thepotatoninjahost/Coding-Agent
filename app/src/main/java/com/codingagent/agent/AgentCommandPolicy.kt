@@ -74,6 +74,11 @@ object AgentCommandPolicy {
             if (!canonical.toPath().startsWith(canonicalRoot.toPath())) {
                 return "Model commands may not follow a symlink or filesystem path outside the project"
             }
+            val relative = canonicalRoot.toPath().relativize(canonical.toPath())
+                .toString().replace('\\', '/')
+            if (relative.substringBefore('/').equals(".coding-agent", ignoreCase = true)) {
+                return "Coding Agent internal metadata is not accessible to model commands"
+            }
         }
         return null
     }
