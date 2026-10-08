@@ -165,6 +165,13 @@ object AgentCommandPolicy {
             "-b", "--build-file",
             "--settings-file",
             "--include-build",
+            "--project-cache-dir",
+            "--write-locks",
+            "--update-locks",
+            "--write-verification-metadata",
+            "--export-keys",
+            "--refresh-keys",
+            "--dependency-verification",
             "--scan",
             "--develocity-url",
             "--develocity-plugin-version"
@@ -181,6 +188,11 @@ object AgentCommandPolicy {
                     token.startsWith("--build-file=") ||
                     token.startsWith("--settings-file=") ||
                     token.startsWith("--include-build=") ||
+                    token.startsWith("--project-cache-dir=") ||
+                    token.startsWith("--update-locks=") ||
+                    token.startsWith("--write-verification-metadata=") ||
+                    token.startsWith("--export-keys=") ||
+                    token.startsWith("--dependency-verification=") ||
                     token.startsWith("-P") ||
                     token.startsWith("--project-prop") ||
                     token.startsWith("-D") ||
