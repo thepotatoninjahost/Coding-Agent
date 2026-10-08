@@ -72,6 +72,9 @@ class MutationCoordinator(
         operations: List<TaskOperation>,
         reason: String = request
     ): MutationProposeResult {
+        if (pendingReconciliationFailed) {
+            return MutationProposeResult.Rejected("Durable mutation state could not be reconciled; recovery is required")
+        }
         clearExpired()
         if (request.isBlank()) return MutationProposeResult.Rejected("A mutation request is required")
         if (operations.isEmpty()) return MutationProposeResult.Rejected("At least one mutation operation is required")
@@ -157,6 +160,9 @@ class MutationCoordinator(
 
     @Synchronized
     fun approve(id: String, ownerApproval: OwnerApprovalToken): MutationApprovalResult {
+        if (pendingReconciliationFailed) {
+            return MutationApprovalResult.Rejected("Durable mutation state could not be reconciled; recovery is required")
+        }
         clearExpired()
         if (pendingReconciliationFailed) {
             return MutationApprovalResult.Rejected(
@@ -530,6 +536,7 @@ class MutationCoordinator(
         repairAttempt: Int,
         changeSet: ChangeSet
     ): PendingChangeProposal? {
+        if (pendingReconciliationFailed) return null
         val verification = runCatching { workspace.verifyProposal(changeSet) }.getOrNull() ?: return null
         if (!verification.passed || changeSet.changes.isEmpty()) return null
         val timestamp = now()
@@ -794,8 +801,9 @@ class MutationCoordinator(
         val candidate = root.resolve(path).canonicalFile
         require(candidate.toPath().startsWith(root.toPath())) { "Unsafe project path" }
         val relative = root.toPath().relativize(candidate.toPath()).toString().replace('\\', '/')
-        require(!relative.substringBefore('/').equals(".coding-agent", ignoreCase = true)) {
-            "Coding Agent internal metadata is not a recoverable project path"
+        val first = relative.substringBefore('/')
+        require(!first.equals(".coding-agent", ignoreCase = true) && !first.equals(".git", ignoreCase = true)) {
+            "Private agent and Git metadata are not recoverable project paths"
         }
         return candidate
     }
