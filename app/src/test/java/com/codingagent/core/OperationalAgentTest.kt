@@ -15,6 +15,9 @@ import com.codingagent.workspace.KnowledgeHit
 import com.codingagent.model.ModelGateway
 import com.codingagent.model.ModelRequest
 import com.codingagent.model.ModelResponse
+import com.codingagent.research.DeepResearchProvider
+import com.codingagent.research.ResearchMode
+import com.codingagent.workspace.ResearchSession
 import com.codingagent.workspace.ChangeOperation
 import com.codingagent.workspace.MutationApprovalResult
 import com.codingagent.workspace.OwnerApprovalToken
@@ -126,6 +129,41 @@ class OperationalAgentTest {
         assertTrue(events.last() is AutonomousAgentEvent.ApprovalRequired)
         assertEquals("fun main() = 1\n", root.resolve("src/Main.kt").readText())
         assertEquals(1, spine.pendingProposals().size)
+    }
+
+    @Test
+    fun explicitResearchFailsWithoutCallingModelWhenNoUsableSourcesExist() {
+        val root = Files.createTempDirectory("agent-research-fail-closed").toFile()
+        var modelCalls = 0
+        val gateway = object : ModelGateway {
+            override fun complete(request: ModelRequest): ModelResponse {
+                modelCalls++
+                return ModelResponse.Text("Unsupported answer that must never be returned")
+            }
+        }
+        val emptyResearch = object : DeepResearchProvider {
+            override fun deepResearch(
+                query: String,
+                targetSources: Int,
+                mode: ResearchMode,
+                onProgress: (com.codingagent.workspace.DeepResearchProgress) -> Unit
+            ): ResearchSession = ResearchSession(
+                id = "empty-session",
+                query = query,
+                createdAt = System.currentTimeMillis(),
+                requestedSources = targetSources,
+                sources = emptyList(),
+                learnedChunks = 0,
+                errors = listOf("No results")
+            )
+        }
+        val spine = AutonomousAgent(root, emptyKnowledge, gateway, research = emptyResearch)
+
+        val events = spine.run("Research the web for the latest Kotlin coroutine cancellation API documentation")
+
+        assertTrue(events.last() is AutonomousAgentEvent.Failed)
+        assertTrue((events.last() as AutonomousAgentEvent.Failed).message.contains("no usable external sources"))
+        assertEquals(0, modelCalls)
     }
 
     @Test
