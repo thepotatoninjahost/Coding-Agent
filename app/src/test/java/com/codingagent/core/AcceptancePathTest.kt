@@ -191,7 +191,7 @@ class AcceptancePathTest {
     }
 
     @Test
-    fun staleProposalCannotBeApprovedWhenDurableJobReferencesAnotherProposal() {
+    fun secondProposalIsRejectedWhileFirstProposalAwaitsApproval() {
         val root = Files.createTempDirectory("accept-stale-proposal").toFile()
         root.resolve("Main.kt").writeText("fun main() = 1\n")
         val coordinator = MutationCoordinator(ProjectWorkspace(root))
@@ -199,17 +199,33 @@ class AcceptancePathTest {
             "first proposal",
             listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 2\n"))
         ) as MutationProposeResult.Proposed).proposal
-        val second = (coordinator.propose(
+        val second = coordinator.propose(
             "second proposal",
             listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 3\n"))
+        )
+
+        assertTrue(second is MutationProposeResult.Rejected)
+        assertEquals(first.id, OpenJobStore.load(root)?.proposalId)
+        assertTrue(coordinator.approve(first.id, OwnerApprovalToken.authenticated(first.id)) is MutationApprovalResult.AwaitingSecond)
+        assertEquals("fun main() = 1\n", root.resolve("Main.kt").readText())
+    }
+
+    @Test
+    fun approvalIsRejectedWhenDurableJobNoLongerAuthorizesProposal() {
+        val root = Files.createTempDirectory("accept-unauthorized-proposal").toFile()
+        root.resolve("Main.kt").writeText("fun main() = 1\n")
+        val coordinator = MutationCoordinator(ProjectWorkspace(root))
+        val proposal = (coordinator.propose(
+            "proposal loses durable authorization",
+            listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 2\n"))
         ) as MutationProposeResult.Proposed).proposal
 
-        assertTrue(first.id != second.id)
-        val result = coordinator.approve(first.id, OwnerApprovalToken.authenticated(first.id))
+        OpenJobStore.markReady(root)
+        val result = coordinator.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id))
 
         assertTrue(result is MutationApprovalResult.Rejected)
+        assertEquals("open", OpenJobStore.load(root)?.status)
         assertEquals("fun main() = 1\n", root.resolve("Main.kt").readText())
-        assertEquals(second.id, OpenJobStore.load(root)?.proposalId)
     }
 
     @Test
