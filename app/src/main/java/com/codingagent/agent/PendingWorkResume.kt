@@ -54,6 +54,29 @@ object PendingWorkResume {
             return AgentRuntimeResult.Failed(task)
         }
         val pendingProposal = pending.singleOrNull()
+        if (pendingProposal == null) {
+            val openJob = com.codingagent.workspace.OpenJobStore.load(agent.workspace.projectRoot())
+            if (openJob?.status == "waiting-approval" && !openJob.proposalId.isNullOrBlank()) {
+                return AgentRuntimeResult.Failed(
+                    AgentTask(
+                        id = UUID.randomUUID().toString(),
+                        request = text,
+                        status = "resume-integrity-failure",
+                        plan = AgentPlan(text, emptyList(), emptyList()),
+                        changes = emptyList(),
+                        verification = VerificationReport(false, listOf(
+                            com.codingagent.workspace.VerificationIssue(
+                                "pending-proposals",
+                                0,
+                                "The persisted open job expects proposal ${openJob.proposalId}, but that proposal could not be loaded. Review or restore the pending proposal before continuing."
+                            )
+                        )),
+                        events = listOf("open job ${openJob.id} references missing pending proposal ${openJob.proposalId}"),
+                        summary = "The previous coding job is still marked waiting for approval, but its pending proposal is unavailable or failed integrity validation. The agent will not treat this as a new empty job."
+                    )
+                )
+            }
+        }
         if (pendingProposal != null) {
             val body = ChangeDiff.ownerReviewText(pendingProposal)
             val task = AgentTask(
