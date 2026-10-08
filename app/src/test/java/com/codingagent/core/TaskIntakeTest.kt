@@ -48,6 +48,20 @@ class TaskIntakeTest {
         assertEquals(listOf("sh", "./gradlew", "test", "--no-daemon"), intake.verificationCommands.single())
     }
 
+    @Test fun requestedVerificationIsReportedAsNotRunWhenToolchainIsUnavailable() {
+        val root = Files.createTempDirectory("task-intake-missing-toolchain").toFile()
+        root.resolve("gradlew").writeText("#!/bin/sh\\n")
+
+        val intake = TaskIntakeParser(
+            root,
+            executableAvailable = { false },
+            androidSdkAvailable = { false }
+        ).parse("run the tests")
+
+        assertTrue(intake.verificationCommands.isEmpty())
+        assertTrue(intake.verificationNote.orEmpty().contains("were not run"))
+    }
+
     @Test fun ordinaryCodeChangeDoesNotAutoExecuteProjectBuildScripts() {
         val root = Files.createTempDirectory("task-intake-no-auto-build").toFile()
         root.resolve("gradlew").writeText("#!/bin/sh\\n")
