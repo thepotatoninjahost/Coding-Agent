@@ -344,12 +344,15 @@ private fun CodingAgentApp(privateDir: File) {
         pendingProposal = null
         pendingProposalId = null
         status = AgentStatus.READY
-        detail = "APPLIED ${paths.size} file(s): ${paths.joinToString().take(100)}"
+        val verificationSuffix = result.verificationNote?.let { "\\nVerification: $it" }.orEmpty()
+        detail = "APPLIED ${paths.size} file(s): ${paths.joinToString().take(100)}" +
+            (result.verificationNote?.let { " · $it" } ?: "")
         store.recordChatMessage(
             ChatMessage(
                 role = ChatRole.SYSTEM,
                 content = "APPLIED to disk after dual approval.\nFiles:\n" +
                     paths.joinToString("\n") { "- $it" } +
+                    verificationSuffix +
                     "\nRequest: ${result.proposal.request.take(200)}"
             )
         )
