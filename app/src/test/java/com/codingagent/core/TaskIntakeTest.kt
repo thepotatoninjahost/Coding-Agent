@@ -40,11 +40,12 @@ class TaskIntakeTest {
         assertTrue(intake.contract.ambiguity.isEmpty())
     }
 
-    @Test fun detectsGradleVerification() {
+    @Test fun doesNotAutoExecuteProjectControlledVerificationScripts() {
         val root = Files.createTempDirectory("task-intake").toFile()
         root.resolve("gradlew").writeText("#!/bin/sh\n")
+        root.resolve("package.json").writeText("{\"scripts\":{\"test\":\"node test.js\"}}")
         val intake = TaskIntakeParser(root).parse("run the tests")
         assertEquals(TaskIntent.TEST, intake.intent)
-        assertEquals(listOf("sh", "-c", "./gradlew test --no-daemon"), intake.verificationCommands.single())
+        assertTrue(intake.verificationCommands.isEmpty())
     }
 }
