@@ -68,6 +68,24 @@ class AgentCommandPolicyTest {
     }
 
     @Test
+    fun blocksShellGlobThatCouldExpandThroughExternalSymlink() {
+        val root = Files.createTempDirectory("command-policy-root").toFile()
+        val outside = Files.createTempDirectory("command-policy-outside").toFile()
+        val link = root.resolve("external")
+        try {
+            Files.createSymbolicLink(link.toPath(), outside.toPath())
+            assumeTrue(Files.isSymbolicLink(link.toPath()))
+            assertNotNull(
+                AgentCommandPolicy.rejectionReason("cat external/*", root)
+            )
+        } catch (_: UnsupportedOperationException) {
+            return
+        } catch (_: java.nio.file.FileSystemException) {
+            return
+        }
+    }
+
+    @Test
     fun blocksFindAndSedWrites() {
         assertNotNull(AgentCommandPolicy.rejectionReason("find app -exec rm {} ;"))
         assertNotNull(AgentCommandPolicy.rejectionReason("sed -i s/old/new/ file.txt"))
