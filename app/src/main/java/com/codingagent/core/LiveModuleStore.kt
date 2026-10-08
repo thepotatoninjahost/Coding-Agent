@@ -7,6 +7,8 @@ import com.codingagent.agent.AgentAction
 import com.codingagent.agent.AgentConstitution
 import com.codingagent.workspace.VerificationReport
 
+private val SAFE_ID = Regex("[A-Za-z0-9_-]+")
+
 /**
  * ONE JOB: Persist and version live-module source (install, parse, roll back, list history).
  * Extracted out of LiveModules.kt, which mixed storage, execution, and default-module bootstrap
