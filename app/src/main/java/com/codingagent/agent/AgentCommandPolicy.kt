@@ -1,5 +1,7 @@
 package com.codingagent.agent
 
+import java.io.File
+
 /**
  * ONE JOB: Limit model-invoked shell commands to read-only inspection and ordinary
  * project verification. The interactive owner terminal remains unrestricted.
