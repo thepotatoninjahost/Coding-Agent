@@ -6,6 +6,7 @@ import java.time.Instant
 import java.util.UUID
 import com.codingagent.intake.OperationKind
 import com.codingagent.intake.TaskOperation
+import com.codingagent.agent.AgentCommandPolicy
 
 private const val TODO_MARKER = "TO" + "DO"
 private const val FIXME_MARKER = "FIX" + "ME"
@@ -329,6 +330,28 @@ class ProjectWorkspace(private val root: File) {
     }
 
     fun runChecks(commands: List<List<String>>, timeoutSeconds: Long = 90): VerificationReport {
+        // Verification commands may be supplied by an imported project (Gradle wrapper,
+        // npm scripts, Makefile, pytest plugins). Never execute them through the agent
+        // without an explicit owner-controlled terminal action.
+        val blocked = commands.mapNotNull { command ->
+            val rendered = command.joinToString(" ")
+            AgentCommandPolicy.rejectionReason(rendered, root)?.let { reason ->
+                VerificationIssue(
+                    "<command>",
+                    0,
+                    "Not executed by autonomous verification: $reason. Review the project scripts and run them from the owner-controlled Terminal if trusted."
+                )
+            }
+        }
+        if (blocked.isNotEmpty()) {
+            val staticReport = verify()
+            return VerificationReport(
+                passed = false,
+                issues = staticReport.issues + blocked,
+                commands = emptyList()
+            )
+        }
+
         // Use the workspace-owned terminal runner so owner cancellation reaches
         // verification commands instead of leaving an independent process behind.
         // A cancellation is terminal for this verification batch: do not start the
@@ -339,7 +362,9 @@ class ProjectWorkspace(private val root: File) {
             commandResults += result
             if (result.exitCode == 130 && result.stderr.contains("cancelled", ignoreCase = true)) break
         }
-        val issues = commandResults.filter { it.timedOut || it.exitCode != 0 }.map { VerificationIssue("<command>", 0, "${it.command}: exit=${it.exitCode} ${it.stderr.take(400)}") }
+        val issues = commandResults.filter { it.timedOut || it.exitCode != 0 }.map {
+            VerificationIssue("<command>", 0, "${it.command}: exit=${it.exitCode} ${it.stderr.take(400)}")
+        }
         val staticReport = verify()
         return VerificationReport(staticReport.passed && issues.isEmpty(), staticReport.issues + issues, commandResults)
     }
