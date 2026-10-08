@@ -210,6 +210,7 @@ internal fun ApprovalCard(approvalCount: Int, reason: String, onApprove: () -> U
             Text("CODE CHANGE REVIEW", color = FluoroOrange, fontWeight = FontWeight.Bold)
             Text(reason, color = NeonGreen, fontSize = 13.sp)
             Text("Two explicit approvals are required before a code transaction can proceed.", color = SoftGreen, fontSize = 12.sp)
+            Text("Confirming may run build/test scripts supplied by this project after applying the change. Those scripts can execute code. Review them first if you do not fully trust this project.", color = FluoroOrange, fontSize = 11.sp)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("${approvalCount}/2", color = SoftGreen, modifier = Modifier.weight(1f))
                 Button(
@@ -345,6 +346,7 @@ internal fun ReviewSurface(pending: Boolean, approvals: Int, reason: String, onA
                     Text("Pending transactional proposal", color = FluoroOrange, fontWeight = FontWeight.Bold)
                     Text(reason, color = NeonGreen)
                     Text("Review changed files before confirming. Transactional writes remain checksum-guarded.", color = SoftGreen, fontSize = 12.sp)
+                    Text("Confirming may run build/test scripts supplied by this project after applying the change. Those scripts can execute code. Review them first if you do not fully trust this project.", color = FluoroOrange, fontSize = 11.sp)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(onClick = onReject, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4A2030))) { Text("Reject", color = NeonGreen) }
                         Button(onClick = onApprove, colors = ButtonDefaults.buttonColors(containerColor = FluoroOrange, contentColor = DarkPurple)) { Text("Confirm ${approvals + 1}/2") }
