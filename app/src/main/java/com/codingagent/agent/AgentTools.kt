@@ -79,13 +79,25 @@ class AgentTools(private val workspace: ProjectWorkspace) {
         val root = workspace.projectRoot().canonicalFile
         val direct = root.resolve(path).canonicalFile
         require(direct.toPath().startsWith(root.toPath())) { "Unsafe project path" }
+        require(!isReservedAgentMetadataPath(root, direct)) {
+            "Coding Agent internal metadata is not accessible as project source"
+        }
         if (direct.isFile) return direct
 
         val normalized = path.trim().trimStart('/').replace('\\', '/')
         val match = findCaseInsensitive(root, normalized)
             ?: throw IllegalArgumentException("File does not exist: $path")
         require(match.canonicalFile.toPath().startsWith(root.toPath())) { "Unsafe project path" }
+        require(!isReservedAgentMetadataPath(root, match)) {
+            "Coding Agent internal metadata is not accessible as project source"
+        }
         return match
+    }
+
+    private fun isReservedAgentMetadataPath(root: File, candidate: File): Boolean {
+        val relative = root.toPath().relativize(candidate.canonicalFile.toPath())
+            .toString().replace('\\', '/')
+        return relative.substringBefore('/').equals(".coding-agent", ignoreCase = true)
     }
 
     private fun findCaseInsensitive(root: File, relative: String): File? {
