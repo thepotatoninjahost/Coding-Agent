@@ -99,7 +99,7 @@ object AgentCommandPolicy {
         return null
     }
 
-    private fun gitConfigUsesExecutableHelpers(root: File): Boolean {
+    private fun gitConfigUsesExecutableHelpers(root: java.io.File): Boolean {
         val gitDirectory = root.resolve(".git")
         if (!gitDirectory.exists()) return false
         if (java.nio.file.Files.isSymbolicLink(gitDirectory.toPath()) || !gitDirectory.isDirectory) return true
@@ -116,7 +116,7 @@ object AgentCommandPolicy {
         return unsafeConfig.containsMatchIn(content)
     }
 
-    private fun validateGit(tokens: List<String>, projectRoot: File?): String? {
+    private fun validateGit(tokens: List<String>, projectRoot: java.io.File?): String? {
         if (projectRoot != null && gitConfigUsesExecutableHelpers(projectRoot)) {
             return "Git commands are disabled because .git/config enables external helpers or includes; review the repository configuration in the owner-controlled Terminal"
         }
