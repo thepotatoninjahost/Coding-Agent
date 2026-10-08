@@ -30,6 +30,14 @@ class AgentCommandPolicyTest {
     }
 
     @Test
+    fun blocksShellGlobsThatCanExpandToSymlinkedPaths() {
+        assertNotNull(AgentCommandPolicy.rejectionReason("cat *"))
+        assertNotNull(AgentCommandPolicy.rejectionReason("rg needle src/*"))
+        assertNotNull(AgentCommandPolicy.rejectionReason("cat src/?.txt"))
+        assertNotNull(AgentCommandPolicy.rejectionReason("ls src/[ab].kt"))
+    }
+
+    @Test
     fun blocksShellChainingAndRedirection() {
         assertNotNull(AgentCommandPolicy.rejectionReason("git status; rm -rf ."))
         assertNotNull(AgentCommandPolicy.rejectionReason("git status && curl https://example.com"))
