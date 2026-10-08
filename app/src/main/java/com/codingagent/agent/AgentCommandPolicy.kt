@@ -43,24 +43,16 @@ object AgentCommandPolicy {
             "gradlew", "gradlew.bat", "gradle" ->
                 "Build tools execute project-controlled scripts and are not permitted through the autonomous command channel; use the owner-controlled Terminal after reviewing the project scripts"
             "git" -> "Git commands are disabled in the autonomous command channel because Git can execute configured helpers from repository, global, or system configuration"
-            "find" -> validateFind(tokens)
+            "find" -> "Find is disabled in the autonomous command channel because recursive traversal can expose private metadata; use the project indexer or file-list tools"
             "cat", "head", "tail", "wc", "file", "grep", "rg", "ls", "pwd", "printf" -> null
             else -> "Model command '$executable' is not permitted; use project inspection tools or a standard verification command"
         }
-    }
-
-    private fun validateFind(tokens: List<String>): String? {
-        val forbidden = setOf("-exec", "-execdir", "-delete", "-ok", "-okdir", "-L", "--follow", "--dereference")
-        return if (tokens.any { it.lowercase() in forbidden }) {
-            "find execution actions are not allowed for model commands"
-        } else null
     }
 
     private fun validateFilesystemOperands(executable: String, tokens: List<String>, root: java.io.File): String? {
         val operands = when (executable) {
             "cat", "head", "tail", "wc", "file", "ls" -> tokens.drop(1).filterNot { it.startsWith("-") }
             "grep", "rg" -> tokens.drop(1).filterNot { it.startsWith("-") }
-            "find" -> tokens.drop(1).filterNot { it.startsWith("-") }.take(1)
             else -> emptyList()
         }
         if (executable == "rg" && tokens.any { token ->
