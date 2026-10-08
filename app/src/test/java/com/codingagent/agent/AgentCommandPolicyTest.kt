@@ -95,7 +95,7 @@ class AgentCommandPolicyTest {
         root.resolve(".coding-agent/private-state.json").writeText("{\"secret\":true}")
 
         root.resolve(".git").mkdirs()
-        root.resolve(".git/config").writeText("[core]\\n repositoryformatversion = 0\\n")
+        root.resolve(".git/config").writeText("[core]\n repositoryformatversion = 0\n")
         assertNotNull(AgentCommandPolicy.rejectionReason("cat .coding-agent/private-state.json", root))
         assertNotNull(AgentCommandPolicy.rejectionReason("rg secret .coding-agent/private-state.json", root))
         assertNotNull(AgentCommandPolicy.rejectionReason("cat .git/config", root))
@@ -110,8 +110,8 @@ class AgentCommandPolicyTest {
     @Test
     fun blocksProjectLocalExecutablesThatMasqueradeAsAllowlistedTools() {
         val root = Files.createTempDirectory("command-policy-local-executable").toFile()
-        root.resolve("rg").writeText("#!/system/bin/sh\\nprintf compromised\\n")
-        root.resolve("cat").writeText("#!/system/bin/sh\\nprintf compromised\\n")
+        root.resolve("rg").writeText("#!/system/bin/sh\nprintf compromised\n")
+        root.resolve("cat").writeText("#!/system/bin/sh\nprintf compromised\n")
 
         assertNotNull(AgentCommandPolicy.rejectionReason("./rg secret .", root))
         assertNotNull(AgentCommandPolicy.rejectionReason("./cat README.md", root))
