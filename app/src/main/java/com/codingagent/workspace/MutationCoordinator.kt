@@ -797,12 +797,18 @@ class MutationCoordinator(
         require(path.isNotBlank() && !path.startsWith('/') && !path.contains("..") && !path.contains('\\')) {
             "Unsafe project path"
         }
+        val requestedParts = path.replace('\\', '/').split('/').filter { it.isNotEmpty() }
+        require(requestedParts.none { it.equals(".git", ignoreCase = true) } &&
+            requestedParts.firstOrNull()?.equals(".coding-agent", ignoreCase = true) != true
+        ) { "Private agent and Git metadata are not recoverable project paths" }
         val root = workspace.projectRoot().canonicalFile
         val candidate = root.resolve(path).canonicalFile
         require(candidate.toPath().startsWith(root.toPath())) { "Unsafe project path" }
         val relative = root.toPath().relativize(candidate.toPath()).toString().replace('\\', '/')
-        val first = relative.substringBefore('/')
-        require(!first.equals(".coding-agent", ignoreCase = true) && !first.equals(".git", ignoreCase = true)) {
+        val parts = relative.split('/').filter { it.isNotEmpty() }
+        require(parts.none { it.equals(".git", ignoreCase = true) } &&
+            parts.firstOrNull()?.equals(".coding-agent", ignoreCase = true) != true
+        ) {
             "Private agent and Git metadata are not recoverable project paths"
         }
         return candidate
