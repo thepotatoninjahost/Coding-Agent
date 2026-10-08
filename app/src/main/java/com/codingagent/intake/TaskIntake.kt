@@ -67,16 +67,16 @@ class TaskIntakeParser(
     }
 
     private fun parseOperation(request: String): TaskOperation {
-        Regex("(?is)^\\s*replace\\s+(.+?)\\s+with\\s+(.+?)\\s+in\\s+([A-Za-z0-9_./-]+)\\s*$").matchEntire(request)?.let {
+        Regex("(?is)^\s*replace\s+(.+?)\s+with\s+(.+?)\s+in\s+([A-Za-z0-9_./-]+)\s*$").matchEntire(request)?.let {
             return TaskOperation(OperationKind.REPLACE, it.groupValues[3], it.groupValues[1].trim(), it.groupValues[2].trim())
         }
-        Regex("(?is)^\\s*append\\s+(.+?)\\s+to\\s+([A-Za-z0-9_./-]+)\\s*$").matchEntire(request)?.let {
+        Regex("(?is)^\s*append\s+(.+?)\s+to\s+([A-Za-z0-9_./-]+)\s*$").matchEntire(request)?.let {
             return TaskOperation(OperationKind.APPEND, it.groupValues[2], text = it.groupValues[1].trimEnd())
         }
-        Regex("(?is)^\\s*remove\\s+(.+?)\\s+from\\s+([A-Za-z0-9_./-]+)\\s*$").matchEntire(request)?.let {
+        Regex("(?is)^\s*remove\s+(.+?)\s+from\s+([A-Za-z0-9_./-]+)\s*$").matchEntire(request)?.let {
             return TaskOperation(OperationKind.REMOVE, it.groupValues[2], oldText = it.groupValues[1].trim())
         }
-        Regex("(?is)^\\s*create\\s+(?:file\\s+)?([A-Za-z0-9_./-]+)\\s+with\\s+(.+)\\s*$").matchEntire(request)?.let {
+        Regex("(?is)^\s*create\s+(?:file\s+)?([A-Za-z0-9_./-]+)\s+with\s+(.+)\s*$").matchEntire(request)?.let {
             return TaskOperation(OperationKind.CREATE_FILE, it.groupValues[1], text = it.groupValues[2])
         }
         return TaskOperation()
@@ -150,13 +150,13 @@ class TaskIntakeParser(
 
     private fun explicitlyRequestsVerification(request: String): Boolean {
         val normalized = request.lowercase()
-        val runVerb = Regex("""\\b(run|execute|perform|rerun|re-run)\\b""").containsMatchIn(normalized)
-        val checkTarget = Regex("""\\b(tests?|build|compile|lint|checks?|pytest|gradlew?|npm|make)\\b""")
+        val runVerb = Regex("""\b(run|execute|perform|rerun|re-run)\b""").containsMatchIn(normalized)
+        val checkTarget = Regex("""\b(tests?|build|compile|lint|checks?|pytest|gradlew?|npm|make)\b""")
             .containsMatchIn(normalized)
-        val directVerificationVerb = Regex("""\\b(test|verify|build|compile|lint|check)\\b\\s+(the|this|my|all|project|app|application|module|code|changes|it)\\b""")
+        val directVerificationVerb = Regex("""\b(test|verify|build|compile|lint|check)\b\s+(the|this|my|all|project|app|application|module|code|changes|it)\b""")
             .containsMatchIn(normalized)
         return (runVerb && checkTarget) || directVerificationVerb ||
-            Regex("""\\b(build|compile|lint)\\b""").containsMatchIn(normalized)
+            Regex("""\b(build|compile|lint)\b""").containsMatchIn(normalized)
     }
 }
 
