@@ -195,6 +195,7 @@ class MutationCoordinator(
             }
             return MutationApprovalResult.AwaitingSecond(candidate, approval)
         }
+        var applied: ChangeSet? = null
         return try {
             try {
                 OpenJobStore.markApplying(workspace.projectRoot(), proposal.id, proposal.changeSet.changes.map { it.path }.distinct(), proposal.request)
@@ -202,7 +203,7 @@ class MutationCoordinator(
                 return MutationApprovalResult.Rejected("Could not durably enter the apply phase; no mutation was attempted")
             }
 
-            val applied = workspace.applyApproved(proposal.changeSet)
+            applied = workspace.applyApproved(proposal.changeSet)
             val intake = TaskIntakeParser(workspace.projectRoot()).parse(proposal.request)
             val postApply = if (intake.verificationCommands.isEmpty()) {
                 workspace.verify()
@@ -291,7 +292,57 @@ class MutationCoordinator(
             recordEvolution(candidate, applied)
             MutationApprovalResult.Applied(candidate, applied)
         } catch (error: Exception) {
-            MutationApprovalResult.Rejected("Approved change could not be applied: ${error.message.orEmpty()}")
+            val completedChangeSet = applied
+            if (completedChangeSet != null) {
+                val rollback = runCatching { workspace.rollback(completedChangeSet) }
+                    .getOrElse { RollbackResult.Rejected(it.message.orEmpty()) }
+                if (rollback == RollbackResult.Restored) {
+                    val ready = runCatching { OpenJobStore.markReady(workspace.projectRoot()) }.isSuccess
+                    if (!ready) {
+                        runCatching {
+                            OpenJobStore.markRecoveryRequired(
+                                workspace.projectRoot(),
+                                "An approved mutation was rolled back after an unexpected verification failure, but ready-state persistence failed"
+                            )
+                        }
+                    }
+                    return MutationApprovalResult.Rejected(
+                        "Approved change was rolled back after an unexpected failure: ${error.message.orEmpty()}"
+                    )
+                }
+                runCatching {
+                    OpenJobStore.markRecoveryRequired(
+                        workspace.projectRoot(),
+                        "An approved mutation could not be rolled back after an unexpected failure"
+                    )
+                }
+                return MutationApprovalResult.Rejected(
+                    "CRITICAL: approved change could not be safely rolled back: $rollback"
+                )
+            }
+
+            when (diskState(proposal.changeSet)) {
+                DiskState.BEFORE -> runCatching { OpenJobStore.markReady(workspace.projectRoot()) }
+                DiskState.AFTER -> {
+                    val markedApplied = runCatching {
+                        OpenJobStore.markApplied(workspace.projectRoot(), proposal.id)
+                    }.isSuccess
+                    if (markedApplied) {
+                        pending.remove(id)
+                        if (persist()) {
+                            return MutationApprovalResult.Applied(candidate, proposal.changeSet)
+                        }
+                        pending[id] = proposal
+                    }
+                }
+                DiskState.MIXED -> runCatching {
+                    OpenJobStore.markRecoveryRequired(
+                        workspace.projectRoot(),
+                        "An approved mutation failed during application and left a mixed on-disk state"
+                    )
+                }
+            }
+            MutationApprovalResult.Rejected("Approved change could not be safely completed: ${error.message.orEmpty()}")
         }
     }
 
