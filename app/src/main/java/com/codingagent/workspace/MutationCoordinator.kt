@@ -615,10 +615,29 @@ class MutationCoordinator(
         }
 
         when (job?.status) {
-            null -> discardPendingProposalsExcept(
-                expectedProposalId = null,
-                failureReason = "Orphaned pending proposals could not be removed durably"
-            )
+            null -> {
+                // A missing job marker is safe to clean up only when every pending proposal's
+                // files are still in the exact pre-apply state. AFTER/MIXED means an interrupted
+                // apply cannot be ruled out, so retain the evidence and require recovery.
+                val diskMayHaveChanged = pending.values.any { proposal ->
+                    runCatching { diskState(proposal.changeSet) != DiskState.BEFORE }
+                        .getOrDefault(true)
+                }
+                if (diskMayHaveChanged) {
+                    pendingReconciliationFailed = true
+                    runCatching {
+                        OpenJobStore.markRecoveryRequired(
+                            root,
+                            "Durable job state is missing and a pending proposal no longer matches its pre-apply disk state"
+                        )
+                    }
+                } else {
+                    discardPendingProposalsExcept(
+                        expectedProposalId = null,
+                        failureReason = "Orphaned pending proposals could not be removed durably"
+                    )
+                }
+            }
             "recovery-required" -> return
             "waiting-approval", "applying" -> {
                 val expectedId = job.proposalId
