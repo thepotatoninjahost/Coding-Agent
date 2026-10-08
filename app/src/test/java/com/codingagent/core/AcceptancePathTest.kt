@@ -124,6 +124,30 @@ class AcceptancePathTest {
     }
 
     @Test
+    fun unexpectedPostApplyVerificationFailureRollsBackAndClearsApplyingState() {
+        val root = Files.createTempDirectory("accept-post-apply-failure").toFile()
+        root.resolve("Main.kt").writeText("fun main() = 1\n")
+
+        val workspace = ProjectWorkspace(root)
+        val coordinator = MutationCoordinator(
+            workspace,
+            postApplyVerifier = { throw IllegalStateException("simulated post-apply failure") }
+        )
+        val proposal = (coordinator.propose(
+            "trigger post-apply verification failure",
+            listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 2\n"))
+        ) as MutationProposeResult.Proposed).proposal
+
+        assertTrue(coordinator.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id)) is MutationApprovalResult.AwaitingSecond)
+        val result = coordinator.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id))
+
+        assertTrue(result is MutationApprovalResult.Rejected)
+        assertEquals("fun main() = 1\n", root.resolve("Main.kt").readText())
+        assertEquals("open", OpenJobStore.load(root)?.status)
+        assertTrue(coordinator.pending().isEmpty())
+    }
+
+    @Test
     fun interruptedApplyingStateResetsWhenMutationNeverReachedDisk() {
         val root = Files.createTempDirectory("accept-apply-not-started").toFile()
         root.resolve("Main.kt").writeText("fun main() = 1\n")
@@ -144,6 +168,38 @@ class AcceptancePathTest {
             restarted.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id)) is MutationApprovalResult.Applied
         )
         assertEquals("fun main() = 2\n", root.resolve("Main.kt").readText())
+    }
+
+    @Test
+    fun orphanedPendingProposalIsDiscardedAfterJobStateDisappears() {
+        val root = Files.createTempDirectory("accept-orphaned-proposal").toFile()
+        root.resolve("Main.kt").writeText("fun main() = 1\n")
+
+        val first = MutationCoordinator(ProjectWorkspace(root))
+        val proposed = first.propose(
+            "orphaned proposal",
+            listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 2\n"))
+        )
+        assertTrue(proposed is MutationProposeResult.Proposed)
+        assertTrue(root.resolve(".coding-agent/open-job.json").delete())
+
+        val restarted = MutationCoordinator(ProjectWorkspace(root))
+
+        assertTrue(restarted.pending().isEmpty())
+        assertEquals("fun main() = 1\n", root.resolve("Main.kt").readText())
+    }
+
+    @Test
+    fun missingPendingProposalForDurableApplyStateRequiresRecovery() {
+        val root = Files.createTempDirectory("accept-missing-proposal").toFile()
+        root.resolve("Main.kt").writeText("fun main() = 1\n")
+
+        OpenJobStore.markApplying(root, "missing-proposal", listOf("Main.kt"), "interrupted mutation")
+
+        MutationCoordinator(ProjectWorkspace(root))
+
+        assertEquals("recovery-required", OpenJobStore.load(root)?.status)
+        assertTrue(OpenJobStore.load(root)?.recoveryReason?.contains("missing-proposal") == true)
     }
 
     @Test

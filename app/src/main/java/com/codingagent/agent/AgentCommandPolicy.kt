@@ -9,7 +9,7 @@ package com.codingagent.agent
  * or global Gradle configuration changes.
  */
 object AgentCommandPolicy {
-    private val shellMetacharacters = Regex("""[;&|><`\$'"\n\r]""")
+    private val shellMetacharacters = Regex("""[;&|><`\$'"\n\r*?\[\]]""")
     private val forbiddenPathTokens = Regex("""(^|/|\\)\.\.(?:/|\\|$)""")
 
     fun rejectionReason(raw: String): String? = rejectionReason(raw, null)

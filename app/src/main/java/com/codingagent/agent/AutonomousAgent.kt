@@ -182,19 +182,24 @@ class AutonomousAgent(
         tools.setRequestContext(normalized)
         val intake = TaskIntakeParser(root).parse(normalized)
         val plan = AgentPlanner(workspace).plan(intake)
-        // Wired in: was previously dead code. Every call below is defensively wrapped
-        // (runCatching) — PlanningLoop can at worst no-op, never crash a live run, since
-        // this file can't be compiled/tested in this environment before shipping.
         val planningLoop = PlanningLoop(plan)
         val toolSelectionLoop = ToolSelectionLoop(ToolSelector().select(intake))
         // Intake and the initial repository view are real execution prerequisites, not
-        // observational plan entries. Complete them only after the same workspace instance
-        // used by mutations has produced its repository summary.
-        runCatching { workspace.summary() }.onSuccess {
-            planningLoop.completePhase("intake", "request parsed")
-            planningLoop.completePhase("understand", "repository summary established")
-            toolSelectionLoop.completeKind(ToolKind.INDEX_REPOSITORY, "repository summary established")
+        // observational plan entries. If the repository cannot be summarized, stop instead
+        // of allowing later gates to proceed without the evidence they require.
+        val repositorySummary = runCatching { workspace.summary() }
+        if (repositorySummary.isFailure) {
+            val error = repositorySummary.exceptionOrNull()
+            val message = "Repository inspection failed before execution could begin: " +
+                (error?.message?.takeIf { it.isNotBlank() } ?: error?.javaClass?.simpleName ?: "unknown error")
+            val task = failedTask(taskId, normalized, plan, message, emptyList())
+            emit(AutonomousAgentEvent.Failed(task, message))
+            recordTask(task)
+            return events
         }
+        planningLoop.completePhase("intake", "request parsed")
+        planningLoop.completePhase("understand", "repository summary established")
+        toolSelectionLoop.completeKind(ToolKind.INDEX_REPOSITORY, "repository summary established")
         emit(AutonomousAgentEvent.Phase("PLAN", plan.steps.joinToString(" → ") { it.phase }))
 
         // Direct lanes: do not force the full tool loop for social / status / explicit read.
