@@ -570,6 +570,16 @@ internal data class ProjectImportBudget(
     var bytes: Long = 0L
 )
 
+internal fun isReservedProjectImportEntry(relativePath: String, name: String): Boolean =
+    relativePath.isEmpty() && name == ".coding-agent"
+
+internal fun validateProjectImportEntryName(name: String) {
+    require(name.isNotBlank() && name != "." && name != ".." &&
+        !name.contains('/') && !name.contains('\\') && name.none { it.isISOControl() }) {
+        "Project entry has an unsafe name"
+    }
+}
+
 internal fun importProject(context: Context, privateDir: File, uri: Uri): File {
     val source = DocumentFile.fromTreeUri(context, uri) ?: error("Folder is unavailable")
     val projects = privateDir.resolve("projects")
@@ -597,14 +607,11 @@ internal fun copyDocumentTree(
     val canonicalRoot = destination.canonicalFile.toPath()
     for (child in source.listFiles()) {
         val name = child.name ?: error("Project entry has no name")
-        require(name.isNotBlank() && name != "." && name != ".." &&
-            !name.contains('/') && !name.contains('\\') && name.none { it.isISOControl() }) {
-            "Project entry has an unsafe name"
-        }
+        validateProjectImportEntryName(name)
         val childRelativePath = if (relativePath.isEmpty()) name else "$relativePath/$name"
         // This namespace belongs to Coding Agent itself. Imported content must never
         // supply durable jobs, pending approvals, transaction journals, or research state.
-        if (relativePath.isEmpty() && name == ".coding-agent") continue
+        if (isReservedProjectImportEntry(relativePath, name)) continue
         val target = destination.resolve(name).canonicalFile
         require(target.toPath().startsWith(canonicalRoot)) { "Project entry escapes the import destination" }
         budget.files += 1
