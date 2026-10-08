@@ -47,7 +47,8 @@ class MutationCoordinator(
     internal val workspace: ProjectWorkspace,
     private val ledger: ApprovalLedger = ApprovalLedger(),
     private val now: () -> Long = { System.currentTimeMillis() },
-    private val repairConfig: RepairCycleConfig = RepairCycleConfig()
+    private val repairConfig: RepairCycleConfig = RepairCycleConfig(),
+    private val postApplyVerifier: ((PendingChangeProposal) -> VerificationReport)? = null
 ) {
     private val pending = linkedMapOf<String, PendingChangeProposal>()
     private val evolution = SelfEvolution(workspace.projectRoot())
@@ -205,11 +206,13 @@ class MutationCoordinator(
 
             val applied = workspace.applyApproved(proposal.changeSet)
             appliedChangeSet = applied
-            val intake = TaskIntakeParser(workspace.projectRoot()).parse(proposal.request)
-            val postApply = if (intake.verificationCommands.isEmpty()) {
-                workspace.verify()
-            } else {
-                workspace.runChecks(intake.verificationCommands, 180)
+            val postApply = postApplyVerifier?.invoke(proposal) ?: run {
+                val intake = TaskIntakeParser(workspace.projectRoot()).parse(proposal.request)
+                if (intake.verificationCommands.isEmpty()) {
+                    workspace.verify()
+                } else {
+                    workspace.runChecks(intake.verificationCommands, 180)
+                }
             }
             if (!postApply.passed) {
                 val details = buildString {
