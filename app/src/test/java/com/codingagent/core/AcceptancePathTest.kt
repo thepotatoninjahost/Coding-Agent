@@ -223,6 +223,11 @@ class AcceptancePathTest {
         ) as MutationProposeResult.Proposed).proposal
 
         OpenJobStore.markReady(root)
+        val restaged = coordinator.propose(
+            "attempt to replace a stale proposal",
+            listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 3\n"))
+        )
+        assertTrue(restaged is MutationProposeResult.Rejected)
         val result = coordinator.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id))
 
         assertTrue(result is MutationApprovalResult.Rejected)
