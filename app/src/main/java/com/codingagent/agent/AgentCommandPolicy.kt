@@ -44,9 +44,23 @@ object AgentCommandPolicy {
                 "Build tools execute project-controlled scripts and are not permitted through the autonomous command channel; use the owner-controlled Terminal after reviewing the project scripts"
             "git" -> "Git commands are disabled in the autonomous command channel because Git can execute configured helpers from repository, global, or system configuration"
             "find" -> "Find is disabled in the autonomous command channel because recursive traversal can expose private metadata; use the project indexer or file-list tools"
-            "cat", "head", "tail", "wc", "file", "grep", "rg", "ls", "pwd", "printf" -> null
+            "ls" -> validateLs(tokens)
+            "cat", "head", "tail", "wc", "file", "grep", "rg", "pwd", "printf" -> null
             else -> "Model command '$executable' is not permitted; use project inspection tools or a standard verification command"
         }
+    }
+
+    private fun validateLs(tokens: List<String>): String? {
+        val exposesPrivateMetadata = tokens.drop(1).any { token ->
+            token == "--all" || token == "--almost-all" || token == "--recursive" ||
+                token == "--dereference" || token == "--dereference-command-line" ||
+                token == "--dereference-command-line-symlink-to-dir" ||
+                (token.startsWith("-") && !token.startsWith("--") &&
+                    token.drop(1).any { it == 'a' || it == 'A' || it == 'R' || it == 'L' || it == 'H' })
+        }
+        return if (exposesPrivateMetadata) {
+            "ls options that reveal hidden metadata, recurse into directories, or dereference symlinks are not allowed; use the project file-list tools"
+        } else null
     }
 
     private fun validateFilesystemOperands(executable: String, tokens: List<String>, root: java.io.File): String? {
