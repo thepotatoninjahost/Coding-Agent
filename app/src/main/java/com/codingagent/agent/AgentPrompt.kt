@@ -20,16 +20,16 @@ object AgentPrompt {
                 append(" Languages: ")
                 append(summary.languages.entries.sortedByDescending { it.value }.joinToString { "${it.key}=${it.value}" })
             }
-            append('\n')
+            append('\\n')
             if (paths.isEmpty()) {
-                append("(no indexed source files)\n")
+                append("(no indexed source files)\\n")
             } else {
                 paths.take(maxPaths).forEach { path ->
                     append(path)
-                    append('\n')
+                    append('\\n')
                 }
                 if (paths.size > maxPaths) {
-                    append("… and ${paths.size - maxPaths} more (use list_files / search_project)\n")
+                    append("… and ${paths.size - maxPaths} more (use list_files / search_project)\\n")
                 }
             }
         }
@@ -63,7 +63,6 @@ object AgentPrompt {
             }
         }
         appendLine()
-        appendLine("Owner operating charter: Truth Mode. Separate verified facts, inferences, and unknowns. Do not invent evidence or results.")
         appendLine("Operating rules for this turn:")
         appendLine("1. Gather real evidence with tools. Never invent file contents or paths.")
         appendLine("2. If the user names a file, call read_file on it before analysis or final answer.")
@@ -76,7 +75,7 @@ object AgentPrompt {
         appendLine("9. Prefer research_web over guessing external APIs. Prefer project files over inventing local paths.")
         appendLine("10. Owner constraints are binding. Never create, modify, or delete something prohibited by them; if a constraint conflicts with the requested work, stop and ask.")
         appendLine("11. Preserve the active job goal across follow-up clarifications; a short follow-up supplies missing details, it does not replace the task.")
-        appendLine("12. Lead with the conclusion. Separate verified facts, inferences, and unknowns. Do not introduce unrelated corporate, political, or ideological opinions. Every project claim must be supported by the evidence below.")
+        appendLine("12. Lead with the conclusion. Do not dump chain-of-thought or <think> blocks. Every project claim must appear in the evidence below.")
         if (AgentRequestKind.isWholeProjectReview(request)) {
             appendLine("13. This is a whole-project review. After real evidence, write concrete improvements.")
         }
@@ -96,12 +95,12 @@ object AgentPrompt {
     fun listingSummary(listing: String, report: VerificationReport, namesOnly: Boolean = true): String {
         return buildString {
             if (namesOnly) {
-                append("Indexed source files (extension whitelist — not a full disk listing):\n")
+                append("Indexed source files (extension whitelist — not a full disk listing):\\n")
             } else {
-                append("Directory listing:\n")
+                append("Directory listing:\\n")
             }
             append(listing.trim().ifBlank { "(none)" })
-            append("\n\nVerification: ")
+            append("\\n\\nVerification: ")
             if (report.passed) {
                 append("passed (static unfinished-work marker scan)")
             } else {
@@ -109,7 +108,7 @@ object AgentPrompt {
                 append(report.issues.size)
                 append(" issue(s)")
                 report.issues.take(20).forEach { issue ->
-                    append("\n- ")
+                    append("\\n- ")
                     append(issue.path)
                     append(":")
                     append(issue.line)
@@ -127,19 +126,19 @@ object AgentPrompt {
         maxChars: Int
     ): String {
         val draft = buildString {
-            append("Review from gathered evidence (model did not write a final after tools were closed).\n\n")
-            append("Request: ").append(request.trim()).append("\n\n")
+            append("Review from gathered evidence (model did not write a final after tools were closed).\\n\\n")
+            append("Request: ").append(request.trim()).append("\\n\\n")
             append(evidence.take(maxChars))
-            append("\n\nVerification: ")
+            append("\\n\\nVerification: ")
             if (report.passed) {
                 append("passed (static unfinished-work marker scan)")
             } else {
                 append("FAILED (").append(report.issues.size).append(" issue(s))")
                 report.issues.take(20).forEach { issue ->
-                    append("\n- ").append(issue.path).append(":").append(issue.line).append(" — ").append(issue.message)
+                    append("\\n- ").append(issue.path).append(":").append(issue.line).append(" — ").append(issue.message)
                 }
             }
-            append("\n\nIf this is thinner than you wanted, retry once. The next run starts with this evidence already in context.")
+            append("\\n\\nIf this is thinner than you wanted, retry once. The next run starts with this evidence already in context.")
         }
         return LogicReasoning.inspect(draft, evidence).displayText
     }
