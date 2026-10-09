@@ -61,7 +61,7 @@ object AgentOfflineStager {
                         " Name the file to create (example: src/Agent.kt) or the exact replace."
                     val task = AgentTask(
                         taskId, request, "needs-input", plan, emptyList(),
-                        VerificationReport(true, emptyList()),
+                        VerificationReport(false, emptyList()),
                         listOf("${Instant.now()}: offline staging needs input"),
                         question
                     )
