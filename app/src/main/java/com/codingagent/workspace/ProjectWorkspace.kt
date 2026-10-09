@@ -206,7 +206,7 @@ class ProjectWorkspace(private val root: File) {
         require(path.isNotBlank() && !path.startsWith('/') && !path.contains("..") && !path.contains('\\')) { "Unsafe project path" }
         val requestedParts = path.replace('\\', '/').split('/').filter { it.isNotEmpty() }
         require(requestedParts.none { it.equals(".git", ignoreCase = true) } &&
-            requestedParts.firstOrNull()?.equals(".coding-agent", ignoreCase = true) != true
+            requestedParts.none { it.equals(".coding-agent", ignoreCase = true) }
         ) { "Private agent and Git metadata are not mutable project paths" }
         val canonicalRoot = root.canonicalFile.toPath()
         val file = root.resolve(path)
@@ -215,7 +215,7 @@ class ProjectWorkspace(private val root: File) {
         val relative = canonicalRoot.relativize(canonicalFile.toPath()).toString().replace('\\', '/')
         val parts = relative.split('/').filter { it.isNotEmpty() }
         require(parts.none { it.equals(".git", ignoreCase = true) } &&
-            parts.firstOrNull()?.equals(".coding-agent", ignoreCase = true) != true
+            parts.none { it.equals(".coding-agent", ignoreCase = true) }
         ) {
             "Private agent and Git metadata are not mutable project paths"
         }
