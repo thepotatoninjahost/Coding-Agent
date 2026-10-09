@@ -195,9 +195,9 @@ To run it manually:
 5. Choose `main` and run it.
 6. Open the completed run and download `coding-agent-debug-apk` under **Artifacts**.
 
-## Supported device contract
+## Android compatibility contract
 
-This build targets the Samsung Galaxy S25 class of devices: Android API 35 or newer, `arm64-v8a`, and 64-bit ARM. The APK intentionally does not claim x86_64 or 32-bit ARM support.
+The Gradle configuration sets `minSdk = 34` and `targetSdk = 35`. The intended validation device is a Samsung Galaxy S25-class phone running Android API 35 or newer, but physical-device compatibility has not been verified in this repository workflow. The Gradle build does not declare ABI filters, so this source configuration does not enforce an `arm64-v8a`-only APK.
 
 ## Reproducible source packaging
 
