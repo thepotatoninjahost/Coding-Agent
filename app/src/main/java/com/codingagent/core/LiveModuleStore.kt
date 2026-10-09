@@ -34,9 +34,9 @@ data class ModuleStep(val operation: String, val value: String = "", val argumen
 data class ParsedModule(val kind: String, val version: Int, val steps: List<ModuleStep>)
 
 class LiveModuleStore(private val root: File) {
-    private val moduleRoot = root.resolve(".coding-agent/live-modules")
-    private val activeFile = moduleRoot.resolve("active-module")
-    private val historyFile = moduleRoot.resolve("history.tsv")
+    private val moduleRoot = com.codingagent.workspace.ProjectMetadataBoundary.normalizePath(root.resolve(".coding-agent/live-modules"))
+    private val activeFile = com.codingagent.workspace.ProjectMetadataBoundary.normalizePath(root.resolve(".coding-agent/live-modules/active-module"))
+    private val historyFile = com.codingagent.workspace.ProjectMetadataBoundary.normalizePath(root.resolve(".coding-agent/live-modules/history.tsv"))
 
     init { moduleRoot.mkdirs() }
 
