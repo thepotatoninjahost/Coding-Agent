@@ -51,7 +51,8 @@ class MutationCoordinator(
     internal val workspace: ProjectWorkspace,
     private val ledger: ApprovalLedger = ApprovalLedger(),
     private val now: () -> Long = { System.currentTimeMillis() },
-    private val repairConfig: RepairCycleConfig = RepairCycleConfig()
+    private val repairConfig: RepairCycleConfig = RepairCycleConfig(),
+    private val postApplyVerifier: (ProjectWorkspace, String) -> VerificationReport = { target, _ -> target.verify() }
 ) {
     private val pending = linkedMapOf<String, PendingChangeProposal>()
     private var pendingReconciliationFailed = false
@@ -283,14 +284,9 @@ class MutationCoordinator(
             applied = appliedChangeSet
             val intake = TaskIntakeParser(workspace.projectRoot()).parse(proposal.request)
             verificationNote = intake.verificationNote
-            val postApply = if (intake.verificationCommands.isEmpty()) {
-                workspace.verify()
-            } else {
-                workspace.runChecks(intake.verificationCommands, 180)
-            }
-            if (postApply.passed && intake.verificationCommands.isNotEmpty()) {
-                verificationNote = "Requested build/test checks passed."
-            }
+            // Default verification is static and never executes scripts supplied by the project.
+            // Tests inject a deterministic verifier to exercise rollback and repair failure paths.
+            val postApply = postApplyVerifier(workspace, proposal.request)
             if (!postApply.passed) {
                 val details = buildString {
                     append("Approved change failed post-apply checks")
