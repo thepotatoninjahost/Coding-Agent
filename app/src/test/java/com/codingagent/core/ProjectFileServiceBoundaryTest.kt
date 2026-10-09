@@ -37,6 +37,11 @@ class ProjectFileServiceBoundaryTest {
         assertRejected { service.read("nested/.git/config") }
         assertRejected { service.list("nested/.git") }
         assertFalse(service.list("nested").any { it.equals(".git", ignoreCase = true) })
+        root.resolve("nested/.coding-agent").mkdirs()
+        root.resolve("nested/.coding-agent/private-state.json").writeText("{\\"private\\":true}")
+        assertRejected { service.read("nested/.coding-agent/private-state.json") }
+        assertRejected { service.list("nested/.coding-agent") }
+        assertFalse(service.list("nested").any { it.equals(".coding-agent", ignoreCase = true) })
         assertRejected { service.read("nested/../.coding-agent/private-state.json") }
         assertRejected { service.read(".CODING-AGENT/private-state.json") }
     }
