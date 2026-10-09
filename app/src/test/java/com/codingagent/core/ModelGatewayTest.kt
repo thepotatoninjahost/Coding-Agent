@@ -121,6 +121,35 @@ data: [DONE]
     }
 
     @Test
+    fun `model retry helper uses streaming and forwards text deltas`() {
+        var streamed = 0
+        var completed = 0
+        val gateway = object : com.codingagent.model.ModelGateway {
+            override fun complete(request: ModelRequest): ModelResponse {
+                completed++
+                return ModelResponse.Text("complete path")
+            }
+            override fun stream(request: ModelRequest, onDelta: (String) -> Unit): ModelResponse {
+                streamed++
+                onDelta("partial")
+                return ModelResponse.Text("stream path")
+            }
+        }
+        val deltas = mutableListOf<String>()
+        val result = com.codingagent.agent.ModelCallWithRetry.call(
+            gateway = gateway,
+            request = { ModelRequest("system", "user", emptyList()) },
+            isCancelled = { false },
+            onPhase = {},
+            onDelta = { deltas += it }
+        )
+        assertEquals(ModelResponse.Text("stream path"), result)
+        assertEquals(1, streamed)
+        assertEquals(0, completed)
+        assertEquals(listOf("partial"), deltas)
+    }
+
+    @Test
     fun `streamed tool call arguments are accumulated instead of treated as text`() {
         val gateway = RemoteHttpGateway("http://127.0.0.1:8080/v1", "", "local", connectionFactory = { _ ->
             fakeConnection("""data: {"choices":[{"delta":{"tool_calls":[{"id":"call_1","index":0,"function":{"name":"read_file","arguments":"{\"path\":\"src/"}}]}}]}
