@@ -27,14 +27,12 @@ class CodeSynthesisTest {
         assertTrue(proposal.knowledgeUsed.isNotEmpty())
     }
 
-    @Test fun createGoalGeneratesLanguageSpecificFile() {
+    @Test fun substantiveCreateDoesNotReturnGenericPlaceholderCode() {
         val root = Files.createTempDirectory("synthesis").toFile()
         val intake = TaskIntakeParser(root).parse("create a Kotlin helper in src/Helper.kt")
         val result = CodeSynthesisEngine(root, knowledge).synthesize(intake)
-        assertTrue(result is SynthesisResult.Ready)
-        val text = (result as SynthesisResult.Ready).proposal.operations.single().text.orEmpty()
-        assertTrue(text.contains("class Helper"))
-        assertTrue(text.contains("fun run"))
+        assertTrue(result is SynthesisResult.NeedsInput)
+        assertTrue((result as SynthesisResult.NeedsInput).question.contains("configured coding model"))
     }
 
     @Test fun vagueChangeDoesNotInventAFile() {
