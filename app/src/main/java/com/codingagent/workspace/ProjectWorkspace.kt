@@ -21,14 +21,17 @@ sealed class RollbackResult {
  */
 class ProjectWorkspace(private val root: File) {
     private val indexer = ProjectIndexer()
-    private val metadataDir = root.resolve(".coding-agent")
-    private val transactionDir = metadataDir.resolve("transactions")
-    private val lessonsFile = metadataDir.resolve("lessons.tsv")
+    private val transactionDir = root.resolve(".coding-agent/transactions")
     private val terminalSession = TerminalSession(root)
 
     init {
         require(root.isDirectory) { "Project root is not a directory" }
-        transactionDir.mkdirs()
+        ProjectMetadataBoundary.resolve(root, ".coding-agent")
+        ProjectMetadataBoundary.resolve(root, ".coding-agent/transactions")
+        if (!transactionDir.mkdirs() && !transactionDir.isDirectory) {
+            throw IllegalStateException("Could not create private transaction directory")
+        }
+        ProjectMetadataBoundary.resolve(root, ".coding-agent/transactions")
     }
 
     fun projectRoot(): File = root
@@ -204,13 +207,20 @@ class ProjectWorkspace(private val root: File) {
 
     private fun requireSafePath(path: String): File {
         require(path.isNotBlank() && !path.startsWith('/') && !path.contains("..") && !path.contains('\\')) { "Unsafe project path" }
+        val requestedParts = path.replace('\\', '/').split('/').filter { it.isNotEmpty() }
+        require(requestedParts.none { it.equals(".git", ignoreCase = true) } &&
+            requestedParts.none { it.equals(".coding-agent", ignoreCase = true) }
+        ) { "Private agent and Git metadata are not mutable project paths" }
         val canonicalRoot = root.canonicalFile.toPath()
         val file = root.resolve(path)
         val canonicalFile = file.canonicalFile
         require(canonicalFile.toPath().startsWith(canonicalRoot)) { "Unsafe project path" }
         val relative = canonicalRoot.relativize(canonicalFile.toPath()).toString().replace('\\', '/')
-        require(!relative.substringBefore('/').equals(".coding-agent", ignoreCase = true)) {
-            "Coding Agent internal metadata is not a mutable project path"
+        val parts = relative.split('/').filter { it.isNotEmpty() }
+        require(parts.none { it.equals(".git", ignoreCase = true) } &&
+            parts.none { it.equals(".coding-agent", ignoreCase = true) }
+        ) {
+            "Private agent and Git metadata are not mutable project paths"
         }
         return file
     }
@@ -226,7 +236,7 @@ class ProjectWorkspace(private val root: File) {
     private data class StagedChange(val path: String, val operation: ChangeOperation, val before: String?, val after: String, val reason: String)
 
     private fun persist(changeSet: ChangeSet) {
-        val file = transactionDir.resolve("${changeSet.createdAt}_${changeSet.id}.tsv")
+        val file = ProjectMetadataBoundary.resolve(root, ".coding-agent/transactions/${changeSet.createdAt}_${changeSet.id}.tsv")
         val lines = listOf("${changeSet.id}\t${changeSet.createdAt}\t${sanitize(changeSet.reason)}") +
             changeSet.changes.map {
                 listOf(it.path, it.operation, it.beforeChecksum, it.afterChecksum, sanitize(it.reason)).joinToString("\t")
@@ -345,13 +355,17 @@ class ProjectWorkspace(private val root: File) {
     }
 
     fun recordLesson(request: String, status: String, evidence: String) {
-        lessonsFile.parentFile?.mkdirs()
-        lessonsFile.appendText("${Instant.now()}\t${status}\t${sanitize(request)}\t${sanitize(evidence)}\n")
+        val file = ProjectMetadataBoundary.resolve(root, ".coding-agent/lessons.tsv")
+        file.parentFile?.mkdirs()
+        file.appendText("${Instant.now()}\t${status}\t${sanitize(request)}\t${sanitize(evidence)}\n")
     }
 
-    fun lessons(): List<Lesson> = if (!lessonsFile.isFile) emptyList() else lessonsFile.readLines().mapNotNull { line ->
+    fun lessons(): List<Lesson> {
+        val file = ProjectMetadataBoundary.resolve(root, ".coding-agent/lessons.tsv")
+        return if (!file.isFile) emptyList() else file.readLines().mapNotNull { line ->
         val parts = line.split('\t', limit = 4)
         if (parts.size == 4) Lesson(parts[1], parts[2], parts[3], Instant.parse(parts[0]).toEpochMilli()) else null
+        }
     }
 
     private fun sanitize(value: String): String = value.replace('\t', ' ').replace('\n', ' ').trim()

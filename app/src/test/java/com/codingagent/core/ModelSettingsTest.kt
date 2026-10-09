@@ -82,6 +82,31 @@ class ModelSettingsTest {
     }
 
     @Test
+    fun fallbackModelsAreOrderedDeduplicatedAndPersisted() {
+        val settings = ModelSettings(
+            modelName = "primary",
+            rotationModels = "fallback-a; fallback-b\nfallback-a"
+        )
+        val restored = ModelSettings.fromJson(ModelSettings.toJson(settings))
+
+        assertEquals("fallback-a; fallback-b\nfallback-a", restored.rotationModels)
+        assertEquals(listOf("primary", "fallback-a", "fallback-b"), restored.allModelIds())
+    }
+
+    @Test
+    fun ownerSystemPromptIsAdditiveAndSurvivesSettingsRoundTrip() {
+        val custom = "Prefer small functions and explain test coverage."
+        val settings = ModelSettings(systemPrompt = custom)
+        val restored = ModelSettings.fromJson(ModelSettings.toJson(settings))
+
+        assertEquals(custom, restored.systemPrompt)
+        assertTrue(restored.effectiveSystemPrompt().contains(com.codingagent.model.AgentModelProtocol.DEFAULT_SYSTEM))
+        assertTrue(restored.effectiveSystemPrompt().contains("\n\n## Owner-configured additional instructions\n"))
+        assertTrue(restored.effectiveSystemPrompt().contains(custom))
+        assertFalse(restored.effectiveSystemPrompt().contains("\\n## Owner-configured additional instructions"))
+    }
+
+    @Test
     fun corruptJsonFallsBackToEmptyRemoteDefaults() {
         val defaults = ModelSettings.fromJson("{not-json")
         assertEquals(ModelBackend.REMOTE, defaults.backend)

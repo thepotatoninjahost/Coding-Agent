@@ -36,6 +36,19 @@ class OperationalAgentTest {
         AutonomousAgent(root, emptyKnowledge, gateway)
 
     @Test
+    fun failedTaskNeverClaimsVerificationPassed() {
+        val task = com.codingagent.agent.AgentTaskBuilders.failed(
+            id = "failed-verification",
+            request = "run tests",
+            plan = com.codingagent.workspace.AgentPlan("run tests", emptyList(), emptyList()),
+            message = "Verification could not run",
+            changes = emptyList()
+        )
+        assertEquals("failed", task.status)
+        assertTrue("A failed task must not claim verification passed", !task.verification.passed)
+    }
+
+    @Test
     fun editorRoundTripUsesProjectRelativePathsAndTransactions() {
         val root = Files.createTempDirectory("agent-editor").toFile()
         root.resolve("src").mkdirs()

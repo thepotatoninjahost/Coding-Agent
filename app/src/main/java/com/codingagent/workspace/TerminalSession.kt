@@ -54,6 +54,33 @@ class TerminalSession(
         ).also { entries += it }
     }
 
+    /**
+     * Execute an argument vector directly, without joining arguments into shell source.
+     * Use this for callers that already have tokenized arguments.
+     */
+    fun executeArgs(
+        command: List<String>,
+        onStdout: ((String) -> Unit)? = null,
+        onStderr: ((String) -> Unit)? = null,
+        timeoutSeconds: Long = this.timeoutSeconds
+    ): TerminalEntry {
+        require(command.isNotEmpty()) { "A terminal command is required" }
+        val started = System.currentTimeMillis()
+        val result = runner.run(command, timeoutSeconds, onStdout, onStderr)
+        val durationMs = System.currentTimeMillis() - started
+        val cancelled = result.exitCode == 130 && result.stderr.contains("cancelled")
+        return TerminalEntry(
+            command = command.joinToString(" "),
+            stdout = result.stdout,
+            stderr = result.stderr,
+            exitCode = result.exitCode,
+            timedOut = result.timedOut,
+            durationMs = durationMs,
+            cancelled = cancelled,
+            shell = "(direct process)"
+        ).also { entries += it }
+    }
+
     fun cancel(reason: String = "cancelled by owner") {
         runner.cancel(reason)
     }

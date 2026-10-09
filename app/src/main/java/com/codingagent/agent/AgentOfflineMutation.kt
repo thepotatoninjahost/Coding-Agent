@@ -43,28 +43,25 @@ object AgentOfflineStager {
             intake.intent == TaskIntent.REFACTOR
         if (!wantsEdit) return null
 
-        // Old rule: if any model was configured, skip offline staging and hope the model
-        // writes files. On free/rate-limited models that became README-only "completed".
-        // Empty (or README-only) workspaces now stage locally first so a 429 cannot eat the job.
-        val onlyBoilerplate = workspace.summary().files.all { file ->
-            val n = file.path.lowercase()
-            n.endsWith("readme.md") || n.contains(".coding-agent/")
-        }
-        if (!hasExplicit && gateway != null && !onlyBoilerplate) return null
+        // Model-backed substantive requests must go through the model loop. A local
+        // generic scaffold is not fulfillment and must not pre-empt real synthesis.
+        if (!hasExplicit && gateway != null) return null
 
         val staged: Pair<List<TaskOperation>, String> = if (hasExplicit) {
             listOf(intake.operation) to "Offline explicit ${intake.operation.kind.name.lowercase()} from request"
         } else {
-            when (val synthesis = CodeSynthesisEngine(workspace.projectRoot(), knowledge).synthesize(intake)) {
+            when (val synthesis = CodeSynthesisEngine(knowledge).synthesize(intake)) {
                 is SynthesisResult.Ready ->
                     synthesis.proposal.operations to "Offline synthesis: ${synthesis.proposal.rationale}"
                 is SynthesisResult.NeedsInput -> {
-                    if (gateway != null && !onlyBoilerplate) return null
+                    // A configured model gets the opportunity to satisfy the request even
+                    // when the workspace is empty or contains only a README.
+                    if (gateway != null) return null
                     val question = synthesis.question +
                         " Name the file to create (example: src/Agent.kt) or the exact replace."
                     val task = AgentTask(
                         taskId, request, "needs-input", plan, emptyList(),
-                        VerificationReport(true, emptyList()),
+                        VerificationReport(false, emptyList()),
                         listOf("${Instant.now()}: offline staging needs input"),
                         question
                     )
@@ -78,7 +75,7 @@ object AgentOfflineStager {
                 val proposal = proposeResult.proposal
                 val task = AgentTask(
                     taskId, request, "needs-approval", plan, proposal.changeSet.changes,
-                    VerificationReport(true, emptyList()),
+                    proposal.verification,
                     listOf("${Instant.now()}: offline proposal ${proposal.id} staged; awaiting two owner approvals"),
                     ChangeDiff.ownerReviewText(proposal)
                 )

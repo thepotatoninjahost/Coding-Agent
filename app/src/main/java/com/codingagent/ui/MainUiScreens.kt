@@ -210,6 +210,7 @@ internal fun ApprovalCard(approvalCount: Int, reason: String, onApprove: () -> U
             Text("CODE CHANGE REVIEW", color = FluoroOrange, fontWeight = FontWeight.Bold)
             Text(reason, color = NeonGreen, fontSize = 13.sp)
             Text("Two explicit approvals are required before a code transaction can proceed.", color = SoftGreen, fontSize = 12.sp)
+            Text("Confirming may run build/test scripts supplied by this project after applying the change. Those scripts can execute code. Review them first if you do not fully trust this project.", color = FluoroOrange, fontSize = 11.sp)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("${approvalCount}/2", color = SoftGreen, modifier = Modifier.weight(1f))
                 Button(
@@ -345,6 +346,7 @@ internal fun ReviewSurface(pending: Boolean, approvals: Int, reason: String, onA
                     Text("Pending transactional proposal", color = FluoroOrange, fontWeight = FontWeight.Bold)
                     Text(reason, color = NeonGreen)
                     Text("Review changed files before confirming. Transactional writes remain checksum-guarded.", color = SoftGreen, fontSize = 12.sp)
+                    Text("Build/test scripts run only when your request explicitly asks for them and the required tools are available. These scripts can execute code; review them before requesting verification if you do not fully trust this project.", color = FluoroOrange, fontSize = 11.sp)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(onClick = onReject, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4A2030))) { Text("Reject", color = NeonGreen) }
                         Button(onClick = onApprove, colors = ButtonDefaults.buttonColors(containerColor = FluoroOrange, contentColor = DarkPurple)) { Text("Confirm ${approvals + 1}/2") }
@@ -570,8 +572,17 @@ internal data class ProjectImportBudget(
     var bytes: Long = 0L
 )
 
-internal fun isReservedProjectImportEntry(relativePath: String, name: String): Boolean =
-    relativePath.isEmpty() && name == ".coding-agent"
+private val GENERATED_PROJECT_IMPORT_DIRECTORIES = setOf(
+    "build", "dist", "out", "target", "node_modules", ".gradle", ".idea", ".kotlin"
+)
+
+internal fun isReservedProjectImportEntry(name: String, isDirectory: Boolean = true): Boolean {
+    // Never import Coding Agent's private state or repository metadata, including nested
+    // occurrences. Generated dependency/build trees are excluded at every depth to keep
+    // imports bounded and avoid indexing artifacts as source.
+    if (name == ".coding-agent" || name == ".git") return true
+    return isDirectory && name.lowercase() in GENERATED_PROJECT_IMPORT_DIRECTORIES
+}
 
 internal fun validateProjectImportEntryName(name: String) {
     require(name.isNotBlank() && name != "." && name != ".." &&
@@ -611,7 +622,7 @@ internal fun copyDocumentTree(
         val childRelativePath = if (relativePath.isEmpty()) name else "$relativePath/$name"
         // This namespace belongs to Coding Agent itself. Imported content must never
         // supply durable jobs, pending approvals, transaction journals, or research state.
-        if (isReservedProjectImportEntry(relativePath, name)) continue
+        if (isReservedProjectImportEntry(name, child.isDirectory)) continue
         val target = destination.resolve(name).canonicalFile
         require(target.toPath().startsWith(canonicalRoot)) { "Project entry escapes the import destination" }
         budget.files += 1

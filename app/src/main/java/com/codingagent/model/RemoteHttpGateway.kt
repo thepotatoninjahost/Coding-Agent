@@ -254,6 +254,9 @@ class RemoteHttpGateway(
             .put("temperature", 0.1)
             .put("stream", false)
         if (request.tools.isNotEmpty()) {
+            // The agent executes one tool per turn. Prevent OpenAI-compatible models
+            // from returning parallel calls that this single-call protocol would drop.
+            body.put("parallel_tool_calls", false)
             body.put("tool_choice", "auto")
             body.put("tools", JSONArray().apply {
                 request.tools.forEach { tool ->

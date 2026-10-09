@@ -24,7 +24,11 @@ sealed class MutationProposeResult {
 
 sealed class MutationApprovalResult {
     data class AwaitingSecond(val proposal: PendingChangeProposal, val approval: ApprovalRecord) : MutationApprovalResult()
-    data class Applied(val proposal: PendingChangeProposal, val changeSet: ChangeSet) : MutationApprovalResult()
+    data class Applied(
+        val proposal: PendingChangeProposal,
+        val changeSet: ChangeSet,
+        val verificationNote: String? = null
+    ) : MutationApprovalResult()
     data class RepairRequired(val proposal: PendingChangeProposal, val failure: String) : MutationApprovalResult()
     data class Rejected(val reason: String) : MutationApprovalResult()
 }
@@ -47,7 +51,8 @@ class MutationCoordinator(
     internal val workspace: ProjectWorkspace,
     private val ledger: ApprovalLedger = ApprovalLedger(),
     private val now: () -> Long = { System.currentTimeMillis() },
-    private val repairConfig: RepairCycleConfig = RepairCycleConfig()
+    private val repairConfig: RepairCycleConfig = RepairCycleConfig(),
+    private val postApplyVerifier: (ProjectWorkspace, String) -> VerificationReport = { target, _ -> target.verify() }
 ) {
     private val pending = linkedMapOf<String, PendingChangeProposal>()
     private var pendingReconciliationFailed = false
@@ -59,9 +64,25 @@ class MutationCoordinator(
     }
 
     init {
-        OpenJobStore.bind(workspace.projectRoot())
-        PendingProposalStore.load(workspace.projectRoot()).forEach { pending[it.id] = it }
-        clearExpired()
+        val root = workspace.projectRoot()
+        OpenJobStore.bind(root)
+        val proposalsLoaded = try {
+            PendingProposalStore.load(root).forEach { pending[it.id] = it }
+            true
+        } catch (error: Exception) {
+            // A private-state read failure must not crash project mounting or be
+            // mistaken for an empty proposal store. Preserve fail-closed behavior
+            // and record recovery-required whenever durable metadata permits it.
+            pendingReconciliationFailed = true
+            runCatching {
+                OpenJobStore.markRecoveryRequired(
+                    root,
+                    "Pending proposal state was unreadable during startup: ${error.message.orEmpty()}"
+                )
+            }
+            false
+        }
+        if (proposalsLoaded) clearExpired()
         reconcilePendingJobConsistency()
         if (!pendingReconciliationFailed) reconcileDurableApplyState()
     }
@@ -72,6 +93,9 @@ class MutationCoordinator(
         operations: List<TaskOperation>,
         reason: String = request
     ): MutationProposeResult {
+        if (pendingReconciliationFailed) {
+            return MutationProposeResult.Rejected("Durable mutation state could not be reconciled; recovery is required")
+        }
         clearExpired()
         if (request.isBlank()) return MutationProposeResult.Rejected("A mutation request is required")
         if (operations.isEmpty()) return MutationProposeResult.Rejected("At least one mutation operation is required")
@@ -157,6 +181,9 @@ class MutationCoordinator(
 
     @Synchronized
     fun approve(id: String, ownerApproval: OwnerApprovalToken): MutationApprovalResult {
+        if (pendingReconciliationFailed) {
+            return MutationApprovalResult.Rejected("Durable mutation state could not be reconciled; recovery is required")
+        }
         clearExpired()
         if (pendingReconciliationFailed) {
             return MutationApprovalResult.Rejected(
@@ -245,6 +272,7 @@ class MutationCoordinator(
             return MutationApprovalResult.AwaitingSecond(candidate, approval)
         }
         var applied: ChangeSet? = null
+        var verificationNote: String? = null
         return try {
             try {
                 OpenJobStore.markApplying(workspace.projectRoot(), proposal.id, proposal.changeSet.changes.map { it.path }.distinct(), proposal.request)
@@ -255,11 +283,10 @@ class MutationCoordinator(
             val appliedChangeSet = workspace.applyApproved(proposal.changeSet)
             applied = appliedChangeSet
             val intake = TaskIntakeParser(workspace.projectRoot()).parse(proposal.request)
-            val postApply = if (intake.verificationCommands.isEmpty()) {
-                workspace.verify()
-            } else {
-                workspace.runChecks(intake.verificationCommands, 180)
-            }
+            verificationNote = intake.verificationNote
+            // Default verification is static and never executes scripts supplied by the project.
+            // Tests inject a deterministic verifier to exercise rollback and repair failure paths.
+            val postApply = postApplyVerifier(workspace, proposal.request)
             if (!postApply.passed) {
                 val details = buildString {
                     append("Approved change failed post-apply checks")
@@ -383,7 +410,7 @@ class MutationCoordinator(
                 }
             }
             recordEvolution(candidate, appliedChangeSet)
-            MutationApprovalResult.Applied(candidate, appliedChangeSet)
+            MutationApprovalResult.Applied(candidate, appliedChangeSet, verificationNote)
         } catch (error: Exception) {
             val completedChangeSet = applied
             if (completedChangeSet != null) {
@@ -442,7 +469,7 @@ class MutationCoordinator(
                     if (markedApplied) {
                         pending.remove(id)
                         if (persist()) {
-                            return MutationApprovalResult.Applied(candidate, proposal.changeSet)
+                            return MutationApprovalResult.Applied(candidate, proposal.changeSet, verificationNote)
                         }
                         pending[id] = proposal
                     }
@@ -530,6 +557,7 @@ class MutationCoordinator(
         repairAttempt: Int,
         changeSet: ChangeSet
     ): PendingChangeProposal? {
+        if (pendingReconciliationFailed) return null
         val verification = runCatching { workspace.verifyProposal(changeSet) }.getOrNull() ?: return null
         if (!verification.passed || changeSet.changes.isEmpty()) return null
         val timestamp = now()
@@ -708,13 +736,10 @@ class MutationCoordinator(
         val job = try {
             OpenJobStore.load(root)
         } catch (error: Exception) {
-            pendingReconciliationFailed = true
-            runCatching {
-                OpenJobStore.markRecoveryRequired(
-                    root,
-                    "Durable open-job state was unreadable during apply-state reconciliation: ${error.message.orEmpty()}"
-                )
-            }
+            requireRecoveryDuringReconciliation(
+                root,
+                "Durable open-job state was unreadable during apply-state reconciliation: ${error.message.orEmpty()}"
+            )
             return
         } ?: return
         val proposalId = job.proposalId ?: job.appliedProposalId ?: return
@@ -722,35 +747,68 @@ class MutationCoordinator(
 
         when (job.status) {
             "applying" -> when (diskState(proposal.changeSet)) {
-                DiskState.BEFORE -> runCatching {
-                    OpenJobStore.markWaiting(
-                        root,
-                        proposal.id,
-                        proposal.changeSet.changes.map { it.path }.distinct(),
-                        proposal.request
-                    )
+                DiskState.BEFORE -> {
+                    runCatching {
+                        OpenJobStore.markWaiting(
+                            root,
+                            proposal.id,
+                            proposal.changeSet.changes.map { it.path }.distinct(),
+                            proposal.request
+                        )
+                    }.onFailure {
+                        requireRecoveryDuringReconciliation(
+                            root,
+                            "Interrupted mutation files were unchanged, but restoring waiting-approval state failed: ${it.message.orEmpty()}"
+                        )
+                    }
                 }
                 DiskState.AFTER -> {
-                    runCatching { OpenJobStore.markApplied(root, proposal.id) }
-                        .onSuccess {
-                            pending.remove(proposal.id)
-                            if (!persist()) pending[proposal.id] = proposal
+                    val markedApplied = runCatching { OpenJobStore.markApplied(root, proposal.id) }
+                    if (markedApplied.isFailure) {
+                        requireRecoveryDuringReconciliation(
+                            root,
+                            "Interrupted mutation files match the applied checksums, but recording applied state failed: ${markedApplied.exceptionOrNull()?.message.orEmpty()}"
+                        )
+                    } else {
+                        pending.remove(proposal.id)
+                        if (!persist()) {
+                            pending[proposal.id] = proposal
+                            requireRecoveryDuringReconciliation(
+                                root,
+                                "Interrupted mutation was recorded as applied, but clearing its pending proposal failed"
+                            )
                         }
+                    }
                 }
-                DiskState.MIXED -> runCatching {
-                    OpenJobStore.markRecoveryRequired(root, "A mutation transaction was interrupted with a partially applied file set")
-                }
+                DiskState.MIXED -> requireRecoveryDuringReconciliation(
+                    root,
+                    "A mutation transaction was interrupted with a partially applied file set"
+                )
             }
             "applied" -> when (diskState(proposal.changeSet)) {
                 DiskState.AFTER -> {
                     pending.remove(proposal.id)
-                    if (!persist()) pending[proposal.id] = proposal
+                    if (!persist()) {
+                        pending[proposal.id] = proposal
+                        requireRecoveryDuringReconciliation(
+                            root,
+                            "The applied mutation is intact, but clearing its pending proposal failed"
+                        )
+                    }
                 }
-                DiskState.BEFORE, DiskState.MIXED -> runCatching {
-                    OpenJobStore.markRecoveryRequired(root, "The job is marked applied but its recorded proposal does not match the on-disk checksums")
-                }
+                DiskState.BEFORE, DiskState.MIXED -> requireRecoveryDuringReconciliation(
+                    root,
+                    "The job is marked applied but its recorded proposal does not match the on-disk checksums"
+                )
             }
         }
+    }
+
+    private fun requireRecoveryDuringReconciliation(root: File, reason: String) {
+        // Set the in-memory gate first. Even if the filesystem also refuses to persist the
+        // recovery marker, this coordinator instance must never accept another mutation.
+        pendingReconciliationFailed = true
+        runCatching { OpenJobStore.markRecoveryRequired(root, reason.take(600)) }
     }
 
     private enum class DiskState { BEFORE, AFTER, MIXED }
@@ -790,12 +848,19 @@ class MutationCoordinator(
         require(path.isNotBlank() && !path.startsWith('/') && !path.contains("..") && !path.contains('\\')) {
             "Unsafe project path"
         }
+        val requestedParts = path.replace('\\', '/').split('/').filter { it.isNotEmpty() }
+        require(requestedParts.none { it.equals(".git", ignoreCase = true) } &&
+            requestedParts.none { it.equals(".coding-agent", ignoreCase = true) }
+        ) { "Private agent and Git metadata are not recoverable project paths" }
         val root = workspace.projectRoot().canonicalFile
         val candidate = root.resolve(path).canonicalFile
         require(candidate.toPath().startsWith(root.toPath())) { "Unsafe project path" }
         val relative = root.toPath().relativize(candidate.toPath()).toString().replace('\\', '/')
-        require(!relative.substringBefore('/').equals(".coding-agent", ignoreCase = true)) {
-            "Coding Agent internal metadata is not a recoverable project path"
+        val parts = relative.split('/').filter { it.isNotEmpty() }
+        require(parts.none { it.equals(".git", ignoreCase = true) } &&
+            parts.none { it.equals(".coding-agent", ignoreCase = true) }
+        ) {
+            "Private agent and Git metadata are not recoverable project paths"
         }
         return candidate
     }

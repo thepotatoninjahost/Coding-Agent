@@ -40,11 +40,41 @@ class TaskIntakeTest {
         assertTrue(intake.contract.ambiguity.isEmpty())
     }
 
-    @Test fun detectsGradleVerification() {
-        val root = Files.createTempDirectory("task-intake").toFile()
+    @Test fun gradleVerificationIsNotExecutedAutomatically() {
+        val root = Files.createTempDirectory("task-intake-gradle-no-auto").toFile()
         root.resolve("gradlew").writeText("#!/bin/sh\n")
+        root.resolve("app").mkdirs()
+        root.resolve("app/build.gradle.kts").writeText("plugins {}\n")
+
         val intake = TaskIntakeParser(root).parse("run the tests")
+
         assertEquals(TaskIntent.TEST, intake.intent)
-        assertEquals(listOf("sh", "-c", "./gradlew test --no-daemon"), intake.verificationCommands.single())
+        assertTrue(intake.verificationCommands.isEmpty())
+        assertTrue(intake.verificationNote.orEmpty().contains("not run automatically"))
+    }
+
+    @Test fun npmTestScriptIsNotExecutedAutomatically() {
+        val root = Files.createTempDirectory("task-intake-npm-no-auto").toFile()
+        root.resolve("package.json").writeText("""{"name":"with-tests","scripts":{"test":"node test.js"}}""")
+
+        val intake = TaskIntakeParser(root).parse("run the tests")
+
+        assertTrue(intake.verificationCommands.isEmpty())
+        assertTrue(intake.verificationNote.orEmpty().contains("not run automatically"))
+    }
+
+    @Test fun ordinaryCodeChangeDoesNotAutoExecuteProjectBuildScripts() {
+        val root = Files.createTempDirectory("task-intake-no-auto-build").toFile()
+        root.resolve("gradlew").writeText("#!/bin/sh\n")
+        root.resolve("app").mkdirs()
+        root.resolve("app/build.gradle.kts").writeText("plugins {}\n")
+
+        val intake = TaskIntakeParser(root).parse("fix the login bug")
+        val ambiguousTestMention = TaskIntakeParser(root).parse("the test file has a bug")
+        val buildFileEdit = TaskIntakeParser(root).parse("edit build.gradle.kts")
+
+        assertTrue(intake.verificationCommands.isEmpty())
+        assertTrue(ambiguousTestMention.verificationCommands.isEmpty())
+        assertTrue(buildFileEdit.verificationCommands.isEmpty())
     }
 }

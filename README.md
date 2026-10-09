@@ -30,9 +30,10 @@ The current APK supports:
 - Transactional file changes with checksum-backed rollback
 - Persisted chat history and task journal
 
-Remaining product polish (not blockers for basic use):
+Remaining work and validation limits:
 - Multi-file diff staging UI refinements
 - Broader document ingestion beyond the example asset
+- The repository contains live-module storage/runtime and local-model package components with JVM tests, but the current APK does not expose a complete user-facing module installation/execution workflow or a local-model inference runtime. These are not supported product capabilities yet.
 - Extended physical-device verification of long streaming sessions
 
 Terminal behavior and limits are documented in **Terminal limitations**.
@@ -66,7 +67,7 @@ Production source is split by job under `app/src/main/java/com/codingagent/`:
 Execution path:
 
 1. `TaskIntakeParser` interprets a request into a typed goal contract and operation.
-2. `AutonomousAgent` owns the loop: gather evidence, plan, one tool per turn (queue extras), observe, verify, hand over.
+2. `AutonomousAgent` owns the loop: gather evidence, plan, issue one tool call per turn, observe, verify, and hand over. Parallel tool calls are disabled; extra calls are not queued by the current gateway.
 3. `AgentPlanner` produces and revises the plan from evidence.
 4. `ProjectIndexer` inventories project files, languages, imports, symbols, and checksums.
 5. `AgentKnowledge` supplies local evidence. `WebResearchProvider` / deep-research providers supply internet evidence when the request requires it. Empty research fails closed.
@@ -87,18 +88,16 @@ Unit tests currently live under `app/src/test/java/com/codingagent/core/` even t
 - Search the imported coding reference offline.
 - Keep knowledge retrieval behind the `AgentKnowledge` interface so additional providers can be added modularly.
 - Parse explicit create, replace, append, and remove operations.
-- Generate language-specific starter files for supported create requests.
+- Create files from explicit owner-provided content or meaningful model-generated implementations; generic starter placeholders do not count as completing substantive requests.
 - Apply workspace mutations through typed `ChangeSet` transactions.
 - Record each `ChangeRecord` with its operation, before/after content, reason, and checksums.
 - Write file changes atomically and persist transaction metadata under `.coding-agent/transactions/`.
 - Roll back one or more committed transactions only when current content still matches the recorded after-checksum.
 - Reject rollback when another change has modified the file, preventing silent data loss.
-- Run explicit verification commands with bounded timeouts.
+- Run static source-integrity verification. Imported project build/test scripts are not executed automatically because wrappers, build files, package scripts, and test suites can execute arbitrary code; requested checks are reported as not run until the owner reviews and runs them in the owner-controlled Terminal.
 - Persist task, document, and lesson records locally.
 - Persist task, document, lesson, and Chat workspace messages locally in app-private JSONL records.
 - Include prior Chat workspace messages in subsequent agent requests so follow-up work has conversation context.
-- Store versioned live modules and local model files outside the APK.
-- Reload changed modules and model bytes without rebuilding the Android host.
 
 ## Knowledge and learning boundary
 
@@ -113,7 +112,7 @@ The intended ingestion workflow is:
 5. Lessons and verification evidence are stored locally for later tasks.
 6. Internet research will be added as another provider behind the same knowledge boundary.
 
-The current implementation has the local knowledge example and the provider interfaces. General multi-file ingestion and internet-backed retrieval remain implementation work.
+The current implementation has the local knowledge example and provider interfaces. Web research is available through the research provider and UI, but general multi-file document ingestion remains implementation work.
 
 ## Transaction and rollback behavior
 
@@ -140,7 +139,7 @@ The Terminal tab and the agent `run_command` tool use the same underlying runner
 - Timeout: 180 seconds (Stop sends `destroy` / `destroyForcibly`)
 - Output: stdout and stderr, each capture capped at 256 KiB
 
-The **Terminal tab is the owner-controlled terminal** and remains unrestricted. The **agent `run_command` tool is restricted** to project inspection and standard verification commands. Model commands cannot delete or modify files, chain shell commands, redirect output, access parent/absolute paths, use network tools, or change global Gradle configuration.
+The **Terminal tab is the owner-controlled terminal** and remains unrestricted. The **agent `run_command` tool is restricted** to project inspection commands. Model commands cannot execute project build/test tools, delete or modify files, chain shell commands, redirect output, access parent/absolute paths, use network tools, or change global Gradle configuration. Imported build/test scripts are not run automatically; review them before explicitly running them in the owner-controlled Terminal.
 
 This is the stock Android `sh` (toybox/toolbox on current devices). It is not bash, not a login shell, and not Termux. Typical available commands are basic Unix utilities already on the device (`ls`, `pwd`, `cat`, `echo`, limited `grep`). There is usually **no** JDK, **no** Gradle, **no** `git`, and **no** package manager. A command such as `./gradlew testDebugUnitTest` will fail on a normal phone unless those binaries are already on `PATH`.
 
@@ -196,9 +195,9 @@ To run it manually:
 5. Choose `main` and run it.
 6. Open the completed run and download `coding-agent-debug-apk` under **Artifacts**.
 
-## Supported device contract
+## Android compatibility contract
 
-This build targets the Samsung Galaxy S25 class of devices: Android API 35 or newer, `arm64-v8a`, and 64-bit ARM. The APK intentionally does not claim x86_64 or 32-bit ARM support.
+The Gradle configuration sets `minSdk = 34` and `targetSdk = 35`. The intended validation device is a Samsung Galaxy S25-class phone running Android API 35 or newer, but physical-device compatibility has not been verified in this repository workflow. The Gradle build does not declare ABI filters, so this source configuration does not enforce an `arm64-v8a`-only APK.
 
 ## Reproducible source packaging
 

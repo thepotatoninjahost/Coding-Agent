@@ -49,8 +49,7 @@ class AgentTools(private val workspace: ProjectWorkspace) {
         onStderr: ((String) -> Unit)? = null
     ): TerminalEntry {
         require(command.isNotEmpty()) { "Command cannot be empty" }
-        val joined = command.joinToString(" ")
-        return terminalSession.execute(joined, onStdout, onStderr)
+        return terminalSession.executeArgs(command, onStdout, onStderr, timeoutSeconds)
     }
 
     fun runTerminal(
@@ -77,10 +76,13 @@ class AgentTools(private val workspace: ProjectWorkspace) {
 
     private fun resolveExistingFile(path: String): File {
         val root = workspace.projectRoot().canonicalFile
+        require(!isReservedProjectMetadataPath(root, path, root.resolve(path))) {
+            "Private agent and Git metadata are not accessible as project source"
+        }
         val direct = root.resolve(path).canonicalFile
         require(direct.toPath().startsWith(root.toPath())) { "Unsafe project path" }
-        require(!isReservedAgentMetadataPath(root, direct)) {
-            "Coding Agent internal metadata is not accessible as project source"
+        require(!isReservedProjectMetadataPath(root, path, direct)) {
+            "Private agent and Git metadata are not accessible as project source"
         }
         if (direct.isFile) return direct
 
@@ -88,16 +90,24 @@ class AgentTools(private val workspace: ProjectWorkspace) {
         val match = findCaseInsensitive(root, normalized)
             ?: throw IllegalArgumentException("File does not exist: $path")
         require(match.canonicalFile.toPath().startsWith(root.toPath())) { "Unsafe project path" }
-        require(!isReservedAgentMetadataPath(root, match)) {
-            "Coding Agent internal metadata is not accessible as project source"
+        require(!isReservedProjectMetadataPath(root, normalized, match)) {
+            "Private agent and Git metadata are not accessible as project source"
         }
         return match
     }
 
-    private fun isReservedAgentMetadataPath(root: File, candidate: File): Boolean {
-        val relative = root.toPath().relativize(candidate.canonicalFile.toPath())
-            .toString().replace('\\', '/')
-        return relative.substringBefore('/').equals(".coding-agent", ignoreCase = true)
+    private fun isReservedProjectMetadataPath(root: File, requestedPath: String, candidate: File): Boolean {
+        val requestedParts = requestedPath.replace('\\', '/').split('/').filter { it.isNotEmpty() }
+        if (requestedParts.any { it.equals(".git", ignoreCase = true) } ||
+            requestedParts.any { it.equals(".coding-agent", ignoreCase = true) }
+        ) return true
+
+        val relative = runCatching {
+            root.toPath().relativize(candidate.canonicalFile.toPath()).toString().replace('\\', '/')
+        }.getOrElse { return true }
+        val canonicalParts = relative.split('/').filter { it.isNotEmpty() }
+        return canonicalParts.any { it.equals(".git", ignoreCase = true) } ||
+            canonicalParts.any { it.equals(".coding-agent", ignoreCase = true) }
     }
 
     private fun findCaseInsensitive(root: File, relative: String): File? {

@@ -71,6 +71,7 @@ class ModelGatewayTest {
         val result = gateway.complete(ModelRequest("system", "inspect", listOf(ModelToolDefinition("read_file", "read", "{\"type\":\"object\"}"))))
 
         assertTrue(requestBody.contains("\"tools\""))
+        assertTrue(requestBody.contains("\"parallel_tool_calls\":false"))
         assertTrue(requestBody.contains("\"name\":\"read_file\""))
         assertEquals(ModelResponse.ToolCall("read_file", "{\"path\":\"src/Main.kt\"}", "", "call_1"), result)
     }
@@ -117,6 +118,35 @@ data: [DONE]
 
         assertEquals(ModelResponse.Failure("Cancelled"), result)
         assertEquals("cancellation must stop further streamed deltas", 1, deltas)
+    }
+
+    @Test
+    fun `model retry helper uses streaming and forwards text deltas`() {
+        var streamed = 0
+        var completed = 0
+        val gateway = object : com.codingagent.model.ModelGateway {
+            override fun complete(request: ModelRequest): ModelResponse {
+                completed++
+                return ModelResponse.Text("complete path")
+            }
+            override fun stream(request: ModelRequest, onDelta: (String) -> Unit): ModelResponse {
+                streamed++
+                onDelta("partial")
+                return ModelResponse.Text("stream path")
+            }
+        }
+        val deltas = mutableListOf<String>()
+        val result = com.codingagent.agent.ModelCallWithRetry.call(
+            gateway = gateway,
+            request = { ModelRequest("system", "user", emptyList()) },
+            isCancelled = { false },
+            onPhase = {},
+            onDelta = { deltas += it }
+        )
+        assertEquals(ModelResponse.Text("stream path"), result)
+        assertEquals(1, streamed)
+        assertEquals(0, completed)
+        assertEquals(listOf("partial"), deltas)
     }
 
     @Test

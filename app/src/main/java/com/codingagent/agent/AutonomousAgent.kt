@@ -45,7 +45,8 @@ class AutonomousAgent(
     gateway: ModelGateway? = null,
     private val config: AutonomousAgentConfig = AutonomousAgentConfig(),
     private val research: DeepResearchProvider = DurableDeepResearchProvider(root.resolve(".coding-agent/research")),
-    private val mutations: MutationCoordinator = MutationCoordinator(ProjectWorkspace(root))
+    private val mutations: MutationCoordinator = MutationCoordinator(ProjectWorkspace(root)),
+    systemPrompt: String = AgentModelProtocol.DEFAULT_SYSTEM
 ) : CodingAgentExecutor {
     /**
      * The active model gateway. Mutable so the UI can swap the gateway (e.g. after the user
@@ -53,6 +54,8 @@ class AutonomousAgent(
      */
     @Volatile
     private var gateway: ModelGateway? = gateway
+    @Volatile
+    private var activeSystemPrompt: String = systemPrompt
     // FIX: derive workspace from the shared MutationCoordinator instance so both always
     // reference the same ProjectWorkspace. The previous `ProjectWorkspace(root)` here
     // created a second, divergent instance that could silently drift from mutations.workspace.
@@ -116,6 +119,11 @@ class AutonomousAgent(
      */
     fun updateGateway(newGateway: ModelGateway?) {
         gateway = newGateway
+    }
+
+    /** Update additive owner instructions without discarding the current agent's durable workflow state. */
+    fun updateSystemPrompt(newSystemPrompt: String) {
+        activeSystemPrompt = newSystemPrompt.ifBlank { AgentModelProtocol.DEFAULT_SYSTEM }
     }
 
     private fun recordTask(task: AgentTask) {
@@ -229,7 +237,7 @@ class AutonomousAgent(
             val question = intake.clarificationQuestion ?: "Clarify the requested operation"
             val task = AgentTask(
                 taskId, focus, "needs-input", plan, emptyList(),
-                VerificationReport(true, emptyList()),
+                VerificationReport(false, emptyList()),
                 listOf("${java.time.Instant.now()}: needs input from user"),
                 question
             )
@@ -248,7 +256,7 @@ class AutonomousAgent(
                     "Open Model settings (base URL, model name, API key) for autonomous coding and research."
             val task = AgentTask(
                 taskId, focus, "needs-input", plan, emptyList(),
-                VerificationReport(true, emptyList()),
+                VerificationReport(false, emptyList()),
                 listOf("${Instant.now()}: model gateway missing — local lanes only"),
                 msg
             )
@@ -352,7 +360,7 @@ class AutonomousAgent(
                 gateway = activeGateway,
                 request = {
                     ModelRequest(
-                        AgentModelProtocol.SYSTEM,
+                        activeSystemPrompt,
                         buildPrompt(normalized, intake, state.lastEvidence),
                         toolsThisTurn,
                         transcript.toList(),
@@ -360,7 +368,8 @@ class AutonomousAgent(
                     )
                 },
                 isCancelled = { isCancelled() },
-                onPhase = { emit(AutonomousAgentEvent.Phase("MODEL", it)) }
+                onPhase = { emit(AutonomousAgentEvent.Phase("MODEL", it)) },
+                onDelta = { emit(AutonomousAgentEvent.ModelDelta(it)) }
             ) ?: return stopNow(taskId, normalized, plan, events) { emit(it) }
             if (isCancelled()) return stopNow(taskId, normalized, plan, events) { emit(it) }
             // Some providers (NVIDIA NIM and others) never populate structured tool_calls and

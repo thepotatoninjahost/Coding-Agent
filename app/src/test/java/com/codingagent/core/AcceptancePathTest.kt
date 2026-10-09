@@ -5,6 +5,7 @@ import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Assume.assumeTrue
 import org.junit.Test
 import com.codingagent.intake.OperationKind
 import com.codingagent.intake.TaskOperation
@@ -19,6 +20,8 @@ import com.codingagent.workspace.OwnerApprovalToken
 import com.codingagent.workspace.MutationCoordinator
 import com.codingagent.workspace.MutationProposeResult
 import com.codingagent.workspace.ProjectWorkspace
+import com.codingagent.workspace.VerificationIssue
+import com.codingagent.workspace.VerificationReport
 import com.codingagent.workspace.PendingProposalStore
 import com.codingagent.workspace.OpenJobStore
 
@@ -133,13 +136,17 @@ class AcceptancePathTest {
         val root = Files.createTempDirectory("accept-rollback-state-failure").toFile()
         root.resolve("Main.kt").writeText("fun main() = 1\n")
         root.resolve(".coding-agent").mkdirs()
-        val gradlew = root.resolve("gradlew")
-        gradlew.writeText(
-            "#!/bin/sh\nprintf 'not valid json' > .coding-agent/open-job.json\nexit 1\n"
+        val coordinator = MutationCoordinator(
+            ProjectWorkspace(root),
+            postApplyVerifier = { _, _ ->
+                // Simulate a damaged durable job record without executing project-controlled code.
+                root.resolve(".coding-agent/open-job.json").writeText("not valid json")
+                VerificationReport(
+                    passed = false,
+                    issues = listOf(VerificationIssue("Main.kt", 1, "Injected verification failure for recovery test"))
+                )
+            }
         )
-        gradlew.setExecutable(true)
-
-        val coordinator = MutationCoordinator(ProjectWorkspace(root))
         val proposal = (coordinator.propose(
             "run ./gradlew test after changing Main.kt",
             listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 2\n"))
@@ -233,6 +240,38 @@ class AcceptancePathTest {
             "missing-proposal-id",
             OwnerApprovalToken.authenticated("missing-proposal-id")
         ) is MutationApprovalResult.Rejected)
+    }
+
+    @Test
+    fun unreadablePendingProposalStorageFailsClosedWithoutCrashingStartup() {
+        val root = Files.createTempDirectory("accept-unreadable-pending").toFile()
+        root.resolve("Main.kt").writeText("fun main() = 1\\n")
+        val coordinator = MutationCoordinator(ProjectWorkspace(root))
+        coordinator.propose(
+            "protect unreadable approval state",
+            listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\\n", "fun main() = 2\\n"))
+        )
+        val pendingFile = PendingProposalStore.file(root)
+        assertTrue(pendingFile.delete())
+        val outside = Files.createTempFile("pending-proposal-outside", ".json")
+        outside.toFile().writeText("untrusted proposal data")
+        try {
+            Files.createSymbolicLink(pendingFile.toPath(), outside)
+        } catch (_: Exception) {
+            assumeTrue("Symbolic links are required for this regression test", false)
+            return
+        }
+
+        val restarted = runCatching { MutationCoordinator(ProjectWorkspace(root)) }
+
+        assertTrue("Unreadable private state must not crash project startup", restarted.isSuccess)
+        assertEquals("recovery-required", OpenJobStore.load(root)?.status)
+        assertTrue(OpenJobStore.load(root)?.recoveryReason.orEmpty().contains("Pending proposal state was unreadable"))
+        val blocked = restarted.getOrThrow().propose(
+            "must remain blocked",
+            listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\\n", "fun main() = 3\\n"))
+        )
+        assertTrue(blocked is MutationProposeResult.Rejected)
     }
 
     @Test
@@ -647,11 +686,17 @@ class AcceptancePathTest {
     @Test
     fun failedApprovedChangeStagesRepairAfterRollback() {
         val root = Files.createTempDirectory("accept-repair").toFile()
-        root.resolve("gradlew").writeText("#!/bin/sh\nexit 1\n")
-        root.resolve("gradlew").setExecutable(true)
         root.resolve("Main.kt").writeText("fun main() = 1\n")
         val workspace = ProjectWorkspace(root)
-        val coordinator = MutationCoordinator(workspace)
+        val coordinator = MutationCoordinator(
+            workspace,
+            postApplyVerifier = { _, _ ->
+                VerificationReport(
+                    passed = false,
+                    issues = listOf(VerificationIssue("Main.kt", 1, "Injected verification failure for repair test"))
+                )
+            }
+        )
         coordinator.setRepairProvider { _, _ ->
             workspace.preview(
                 listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 2\n")),
@@ -677,11 +722,17 @@ class AcceptancePathTest {
     @Test
     fun failedRepairStagesNextAttemptAndPreservesRootRequest() {
         val root = Files.createTempDirectory("accept-repair-retry").toFile()
-        root.resolve("gradlew").writeText("#!/bin/sh\nexit 1\n")
-        root.resolve("gradlew").setExecutable(true)
         root.resolve("Main.kt").writeText("fun main() = 1\n")
         val workspace = ProjectWorkspace(root)
-        val coordinator = MutationCoordinator(workspace)
+        val coordinator = MutationCoordinator(
+            workspace,
+            postApplyVerifier = { _, _ ->
+                VerificationReport(
+                    passed = false,
+                    issues = listOf(VerificationIssue("Main.kt", 1, "Injected verification failure for repair test"))
+                )
+            }
+        )
         coordinator.setRepairProvider { _, attempt ->
             workspace.preview(
                 listOf(
@@ -722,11 +773,15 @@ class AcceptancePathTest {
     @Test
     fun repairApprovalSurvivesCoordinatorRestart() {
         val root = Files.createTempDirectory("accept-repair-restart").toFile()
-        root.resolve("gradlew").writeText("#!/bin/sh\nexit 1\n")
-        root.resolve("gradlew").setExecutable(true)
         root.resolve("Main.kt").writeText("fun main() = 1\n")
         val workspace = ProjectWorkspace(root)
-        val first = MutationCoordinator(workspace)
+        val failingVerifier: (ProjectWorkspace, String) -> VerificationReport = { _, _ ->
+            VerificationReport(
+                passed = false,
+                issues = listOf(VerificationIssue("Main.kt", 1, "Injected verification failure for restart test"))
+            )
+        }
+        val first = MutationCoordinator(workspace, postApplyVerifier = failingVerifier)
         first.setRepairProvider { _, attempt ->
             workspace.preview(
                 listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = ${attempt + 1}\n")),
@@ -743,7 +798,7 @@ class AcceptancePathTest {
             as MutationApprovalResult.RepairRequired).proposal
         assertEquals(1, repair.repairAttempt)
 
-        val restarted = MutationCoordinator(ProjectWorkspace(root))
+        val restarted = MutationCoordinator(ProjectWorkspace(root), postApplyVerifier = failingVerifier)
         restarted.setRepairProvider { _, attempt ->
             ProjectWorkspace(root).preview(
                 listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = ${attempt + 1}\n")),
@@ -765,11 +820,17 @@ class AcceptancePathTest {
     @Test
     fun repairAttemptsAreBoundedAndStopAfterConfiguredMaximum() {
         val root = Files.createTempDirectory("accept-repair-bound").toFile()
-        root.resolve("gradlew").writeText("#!/bin/sh\nexit 1\n")
-        root.resolve("gradlew").setExecutable(true)
         root.resolve("Main.kt").writeText("fun main() = 1\n")
         val workspace = ProjectWorkspace(root)
-        val coordinator = MutationCoordinator(workspace)
+        val coordinator = MutationCoordinator(
+            workspace,
+            postApplyVerifier = { _, _ ->
+                VerificationReport(
+                    passed = false,
+                    issues = listOf(VerificationIssue("Main.kt", 1, "Injected verification failure for repair test"))
+                )
+            }
+        )
         coordinator.setRepairProvider { _, attempt ->
             workspace.preview(
                 listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = ${attempt + 1}\n")),
@@ -852,5 +913,31 @@ class AcceptancePathTest {
             ),
             names
         )
+    }
+
+    @Test
+    fun unauthenticatedLegacyProposalCannotBeResignedAndMatchingJobRequiresRecovery() {
+        val root = Files.createTempDirectory("accept-legacy-pending").toFile()
+        root.resolve("Main.kt").writeText("fun main() = 1\\n")
+        val coordinator = MutationCoordinator(ProjectWorkspace(root))
+        val proposed = coordinator.propose(
+            "reject unauthenticated legacy state",
+            listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\\n", "fun main() = 2\\n"))
+        ) as MutationProposeResult.Proposed
+
+        val pendingFile = PendingProposalStore.file(root)
+        val authenticatedEnvelope = JSONObject(pendingFile.readText())
+        val legacyPayload = authenticatedEnvelope.getString("payload")
+        // Simulate an old/imported raw JSON proposal that has no authenticated envelope.
+        pendingFile.writeText(legacyPayload)
+
+        assertTrue(PendingProposalStore.load(root).isEmpty())
+        assertEquals("Legacy input must not be silently re-signed", legacyPayload, pendingFile.readText())
+
+        val restarted = MutationCoordinator(ProjectWorkspace(root))
+        assertTrue(restarted.pending().isEmpty())
+        val durableJob = OpenJobStore.load(root)
+        assertEquals("recovery-required", durableJob?.status)
+        assertTrue(durableJob?.recoveryReason.orEmpty().contains("pending proposal", ignoreCase = true))
     }
 }

@@ -21,7 +21,7 @@ class ProjectIndexer {
     private val extensions = setOf("kt", "java", "kts", "py", "js", "ts", "tsx", "jsx", "json", "xml", "gradle", "md", "yaml", "yml", "toml", "sh")
 
     fun index(root: File): List<ProjectFile> = root.walkTopDown()
-        .onEnter { it.name !in ignored && isSafeProjectPath(root, it) }
+        .onEnter { !isIgnoredDirectory(it.name) && isSafeProjectPath(root, it) }
         .filter {
             it.isFile && !java.nio.file.Files.isSymbolicLink(it.toPath()) &&
                 isSafeProjectPath(root, it) &&
@@ -61,7 +61,7 @@ class ProjectIndexer {
         // Indexing reads every source file to calculate imports, symbols, line counts, and hashes,
         // which doubled I/O and memory work for every search request.
         return root.walkTopDown()
-            .onEnter { it.name !in ignored && isSafeProjectPath(root, it) }
+            .onEnter { !isIgnoredDirectory(it.name) && isSafeProjectPath(root, it) }
             .filter {
                 it.isFile && !java.nio.file.Files.isSymbolicLink(it.toPath()) &&
                     isSafeProjectPath(root, it) &&
@@ -77,6 +77,11 @@ class ProjectIndexer {
                 }
             }.toList()
     }
+    private fun isIgnoredDirectory(name: String): Boolean =
+        name in ignored ||
+            name.equals(".git", ignoreCase = true) ||
+            name.equals(".coding-agent", ignoreCase = true)
+
     private fun isSafeProjectPath(root: File, candidate: File): Boolean = runCatching {
         val canonicalRoot = root.canonicalFile.toPath()
         val canonicalCandidate = candidate.canonicalFile.toPath()
