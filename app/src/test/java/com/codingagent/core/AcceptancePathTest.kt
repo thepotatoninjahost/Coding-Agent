@@ -20,6 +20,8 @@ import com.codingagent.workspace.OwnerApprovalToken
 import com.codingagent.workspace.MutationCoordinator
 import com.codingagent.workspace.MutationProposeResult
 import com.codingagent.workspace.ProjectWorkspace
+import com.codingagent.workspace.VerificationIssue
+import com.codingagent.workspace.VerificationReport
 import com.codingagent.workspace.PendingProposalStore
 import com.codingagent.workspace.OpenJobStore
 
@@ -134,13 +136,17 @@ class AcceptancePathTest {
         val root = Files.createTempDirectory("accept-rollback-state-failure").toFile()
         root.resolve("Main.kt").writeText("fun main() = 1\n")
         root.resolve(".coding-agent").mkdirs()
-        val gradlew = root.resolve("gradlew")
-        gradlew.writeText(
-            "#!/bin/sh\nprintf 'not valid json' > .coding-agent/open-job.json\nexit 1\n"
+        val coordinator = MutationCoordinator(
+            ProjectWorkspace(root),
+            postApplyVerifier = { _, _ ->
+                // Simulate a damaged durable job record without executing project-controlled code.
+                root.resolve(".coding-agent/open-job.json").writeText("not valid json")
+                VerificationReport(
+                    passed = false,
+                    issues = listOf(VerificationIssue("Main.kt", 1, "Injected verification failure for recovery test"))
+                )
+            }
         )
-        gradlew.setExecutable(true)
-
-        val coordinator = MutationCoordinator(ProjectWorkspace(root))
         val proposal = (coordinator.propose(
             "run ./gradlew test after changing Main.kt",
             listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 2\n"))
@@ -170,7 +176,7 @@ class AcceptancePathTest {
         assertTrue(proposed is MutationProposeResult.Proposed)
         assertTrue(OpenJobStore.file(root).delete())
 
-        val restarted = MutationCoordinator(ProjectWorkspace(root))
+        val restarted = MutationCoordinator(ProjectWorkspace(root), postApplyVerifier = failingVerifier)
 
         assertTrue(restarted.pending().isEmpty())
         assertEquals("fun main() = 1\n", root.resolve("Main.kt").readText())
@@ -680,11 +686,17 @@ class AcceptancePathTest {
     @Test
     fun failedApprovedChangeStagesRepairAfterRollback() {
         val root = Files.createTempDirectory("accept-repair").toFile()
-        root.resolve("gradlew").writeText("#!/bin/sh\nexit 1\n")
-        root.resolve("gradlew").setExecutable(true)
         root.resolve("Main.kt").writeText("fun main() = 1\n")
         val workspace = ProjectWorkspace(root)
-        val coordinator = MutationCoordinator(workspace)
+        val coordinator = MutationCoordinator(
+            workspace,
+            postApplyVerifier = { _, _ ->
+                VerificationReport(
+                    passed = false,
+                    issues = listOf(VerificationIssue("Main.kt", 1, "Injected verification failure for repair test"))
+                )
+            }
+        )
         coordinator.setRepairProvider { _, _ ->
             workspace.preview(
                 listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 2\n")),
@@ -710,11 +722,17 @@ class AcceptancePathTest {
     @Test
     fun failedRepairStagesNextAttemptAndPreservesRootRequest() {
         val root = Files.createTempDirectory("accept-repair-retry").toFile()
-        root.resolve("gradlew").writeText("#!/bin/sh\nexit 1\n")
-        root.resolve("gradlew").setExecutable(true)
         root.resolve("Main.kt").writeText("fun main() = 1\n")
         val workspace = ProjectWorkspace(root)
-        val coordinator = MutationCoordinator(workspace)
+        val coordinator = MutationCoordinator(
+            workspace,
+            postApplyVerifier = { _, _ ->
+                VerificationReport(
+                    passed = false,
+                    issues = listOf(VerificationIssue("Main.kt", 1, "Injected verification failure for repair test"))
+                )
+            }
+        )
         coordinator.setRepairProvider { _, attempt ->
             workspace.preview(
                 listOf(
@@ -755,11 +773,15 @@ class AcceptancePathTest {
     @Test
     fun repairApprovalSurvivesCoordinatorRestart() {
         val root = Files.createTempDirectory("accept-repair-restart").toFile()
-        root.resolve("gradlew").writeText("#!/bin/sh\nexit 1\n")
-        root.resolve("gradlew").setExecutable(true)
         root.resolve("Main.kt").writeText("fun main() = 1\n")
         val workspace = ProjectWorkspace(root)
-        val first = MutationCoordinator(workspace)
+        val failingVerifier: (ProjectWorkspace, String) -> VerificationReport = { _, _ ->
+            VerificationReport(
+                passed = false,
+                issues = listOf(VerificationIssue("Main.kt", 1, "Injected verification failure for restart test"))
+            )
+        }
+        val first = MutationCoordinator(workspace, postApplyVerifier = failingVerifier)
         first.setRepairProvider { _, attempt ->
             workspace.preview(
                 listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = ${attempt + 1}\n")),
@@ -798,11 +820,17 @@ class AcceptancePathTest {
     @Test
     fun repairAttemptsAreBoundedAndStopAfterConfiguredMaximum() {
         val root = Files.createTempDirectory("accept-repair-bound").toFile()
-        root.resolve("gradlew").writeText("#!/bin/sh\nexit 1\n")
-        root.resolve("gradlew").setExecutable(true)
         root.resolve("Main.kt").writeText("fun main() = 1\n")
         val workspace = ProjectWorkspace(root)
-        val coordinator = MutationCoordinator(workspace)
+        val coordinator = MutationCoordinator(
+            workspace,
+            postApplyVerifier = { _, _ ->
+                VerificationReport(
+                    passed = false,
+                    issues = listOf(VerificationIssue("Main.kt", 1, "Injected verification failure for repair test"))
+                )
+            }
+        )
         coordinator.setRepairProvider { _, attempt ->
             workspace.preview(
                 listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = ${attempt + 1}\n")),
