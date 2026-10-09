@@ -30,9 +30,10 @@ The current APK supports:
 - Transactional file changes with checksum-backed rollback
 - Persisted chat history and task journal
 
-Remaining product polish (not blockers for basic use):
+Remaining work and validation limits:
 - Multi-file diff staging UI refinements
 - Broader document ingestion beyond the example asset
+- The repository contains live-module storage/runtime and local-model package components with JVM tests, but the current APK does not expose a complete user-facing module installation/execution workflow or a local-model inference runtime. These are not supported product capabilities yet.
 - Extended physical-device verification of long streaming sessions
 
 Terminal behavior and limits are documented in **Terminal limitations**.
@@ -66,7 +67,7 @@ Production source is split by job under `app/src/main/java/com/codingagent/`:
 Execution path:
 
 1. `TaskIntakeParser` interprets a request into a typed goal contract and operation.
-2. `AutonomousAgent` owns the loop: gather evidence, plan, one tool per turn (queue extras), observe, verify, hand over.
+2. `AutonomousAgent` owns the loop: gather evidence, plan, issue one tool call per turn, observe, verify, and hand over. Parallel tool calls are disabled; extra calls are not queued by the current gateway.
 3. `AgentPlanner` produces and revises the plan from evidence.
 4. `ProjectIndexer` inventories project files, languages, imports, symbols, and checksums.
 5. `AgentKnowledge` supplies local evidence. `WebResearchProvider` / deep-research providers supply internet evidence when the request requires it. Empty research fails closed.
@@ -97,8 +98,6 @@ Unit tests currently live under `app/src/test/java/com/codingagent/core/` even t
 - Persist task, document, and lesson records locally.
 - Persist task, document, lesson, and Chat workspace messages locally in app-private JSONL records.
 - Include prior Chat workspace messages in subsequent agent requests so follow-up work has conversation context.
-- Store versioned live modules and local model files outside the APK.
-- Reload changed modules and model bytes without rebuilding the Android host.
 
 ## Knowledge and learning boundary
 
@@ -113,7 +112,7 @@ The intended ingestion workflow is:
 5. Lessons and verification evidence are stored locally for later tasks.
 6. Internet research will be added as another provider behind the same knowledge boundary.
 
-The current implementation has the local knowledge example and the provider interfaces. General multi-file ingestion and internet-backed retrieval remain implementation work.
+The current implementation has the local knowledge example and provider interfaces. Web research is available through the research provider and UI, but general multi-file document ingestion remains implementation work.
 
 ## Transaction and rollback behavior
 
