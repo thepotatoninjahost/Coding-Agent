@@ -14,7 +14,7 @@ It is not a chatbot that answers coding questions in one shot. It works like a c
 
 It does not quit early out of convenience. It only stops early when a specific missing input from the user is required that tools cannot supply.
 
-The runtime keeps a degraded offline knowledge path. Non-trivial coding requests that require external knowledge fail closed unless a web research provider is configured and returns evidence. The model-driven autonomous path uses an chat-completions-compatible gateway with tool calling and streamed server-sent-event deltas. Configure the gateway via the in-app Model settings screen (base URL, model id, API key).
+The runtime keeps a degraded offline knowledge path. Non-trivial coding requests that require external knowledge fail closed unless a web research provider is configured and returns evidence. The model-driven autonomous path uses a chat-completions-compatible gateway with tool calling and streamed server-sent-event deltas. Configure the gateway via the in-app Model settings screen (base URL, model id, API key).
 
 ## Current product status
 
