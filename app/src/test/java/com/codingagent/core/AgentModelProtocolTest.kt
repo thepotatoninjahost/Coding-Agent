@@ -1,7 +1,6 @@
 package com.codingagent.core
 
 import com.codingagent.model.AgentModelProtocol
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -14,24 +13,12 @@ class AgentModelProtocolTest {
         assertTrue(prompt.contains("Avoid jargon"))
         assertTrue(prompt.contains("Be direct and concise"))
         assertTrue(prompt.contains("Do not narrate internal planning"))
-    }
-
-    @Test
-    fun defaultSystemPromptUsesOwnerDirectedAutonomousWorkWithoutArbitraryToolLimit() {
-        val prompt = AgentModelProtocol.DEFAULT_SYSTEM
-
-        assertTrue(prompt.contains("Follow the user's stated goals and acceptance criteria"))
-        assertTrue(prompt.contains("there is no arbitrary limit on useful tool calls"))
-        assertTrue(prompt.contains("Do not stop while material dependencies"))
-        assertTrue(prompt.contains("If the user asked to improve, change, edit, or implement something, a written review is not the work"))
-        assertTrue(prompt.contains("The model cannot approve its own proposal"))
-        assertTrue(prompt.contains("When you use research_web or search_knowledge, cite what you found"))
-    }
-
-    @Test
-    fun defaultSystemPromptDoesNotRequireArbitraryStopAfterFewToolResults() {
-        val prompt = AgentModelProtocol.DEFAULT_SYSTEM
-
-        assertFalse(prompt.contains("After two or three useful tool results, stop gathering"))
+        assertTrue(prompt.contains("Do not invoke git, find, gradle"))
+        assertTrue(prompt.contains("There is no fixed tool-call count"))
+        assertTrue(prompt.contains("Inspect relevant callers, dependencies, tests, and failure paths"))
+        assertTrue(prompt.contains("Do not stop at a plan, a diagnosis, or a superficial edit"))
+        assertTrue(prompt.contains("Prefer official documentation and tested reference implementations"))
+        assertTrue(prompt.contains("Verification honesty: distinguish static source checks from actual builds and tests"))
+        assertTrue(prompt.contains("never claim it passed or imply the app is correct based only on static checks"))
     }
 }
