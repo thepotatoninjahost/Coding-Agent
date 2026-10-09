@@ -188,6 +188,7 @@ private fun CodingAgentApp(privateDir: File) {
     var showModelSettings by remember { mutableStateOf(false) }
     var draftApiKey by remember { mutableStateOf(modelSettings.apiKey) }
     var draftModelName by remember { mutableStateOf(modelSettings.modelName) }
+    var draftRotationModels by remember { mutableStateOf(modelSettings.rotationModels) }
     var draftBaseUrl by remember { mutableStateOf(modelSettings.baseUrl) }
     var draftExtraHeaders by remember { mutableStateOf(modelSettings.extraHeaders) }
     var draftSystemPrompt by remember { mutableStateOf(modelSettings.systemPrompt) }
@@ -202,6 +203,7 @@ private fun CodingAgentApp(privateDir: File) {
         modelSettings = normalized
         draftApiKey = normalized.apiKey
         draftModelName = normalized.modelName
+        draftRotationModels = normalized.rotationModels
         draftBaseUrl = normalized.baseUrl
         draftExtraHeaders = normalized.extraHeaders
         draftSystemPrompt = normalized.systemPrompt
@@ -668,6 +670,7 @@ private fun CodingAgentApp(privateDir: File) {
                     onModelImport = {
                         draftApiKey = modelSettings.apiKey
                         draftModelName = modelSettings.modelName
+                        draftRotationModels = modelSettings.rotationModels
                         draftBaseUrl = modelSettings.baseUrl
                         draftExtraHeaders = modelSettings.extraHeaders
                         draftSystemPrompt = modelSettings.systemPrompt
@@ -809,6 +812,22 @@ private fun CodingAgentApp(privateDir: File) {
                         )
                         Spacer(Modifier.height(8.dp))
                         OutlinedTextField(
+                            value = draftRotationModels,
+                            onValueChange = { draftRotationModels = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            label = { Text("Fallback model IDs (optional)", color = SoftGreen) },
+                            placeholder = { Text("model-a, model-b", color = SoftGreen.copy(alpha = 0.5f)) },
+                            minLines = 1,
+                            maxLines = 3,
+                            colors = fieldColors()
+                        )
+                        Text(
+                            "Tried in order when the selected model reports rate limits or capacity errors.",
+                            color = SoftGreen,
+                            fontSize = 10.sp
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        OutlinedTextField(
                             value = draftApiKey,
                             onValueChange = { draftApiKey = it },
                             modifier = Modifier.fillMaxWidth(),
@@ -859,6 +878,7 @@ private fun CodingAgentApp(privateDir: File) {
                                         baseUrl = draftBaseUrl,
                                         apiKey = draftApiKey,
                                         modelName = draftModelName,
+                                        rotationModels = draftRotationModels,
                                         systemPrompt = draftSystemPrompt,
                                         extraHeaders = draftExtraHeaders,
                                         onboarded = true
@@ -881,6 +901,7 @@ private fun CodingAgentApp(privateDir: File) {
                                         baseUrl = draftBaseUrl,
                                         apiKey = draftApiKey,
                                         modelName = draftModelName,
+                                        rotationModels = draftRotationModels,
                                         systemPrompt = draftSystemPrompt,
                                         extraHeaders = draftExtraHeaders,
                                         onboarded = true
