@@ -33,7 +33,7 @@ class JsonModelResponseParser {
 
     /**
      * Some providers (NVIDIA NIM and others) emit tools as XML in the text body
-     * instead of the standard tool_calls field. Treat that as a real tool call, not a final answer.
+     * instead of OpenAI tool_calls. Treat that as a real tool call, not a final answer.
      */
     private fun parseXmlToolCall(raw: String): ModelResponse.ToolCall? {
         val text = raw.trim()
