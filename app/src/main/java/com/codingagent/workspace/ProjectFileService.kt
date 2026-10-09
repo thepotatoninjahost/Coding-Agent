@@ -19,8 +19,7 @@ class ProjectFileService(private val workspace: ProjectWorkspace) {
         return directory.listFiles()
             ?.filterNot {
                 it.name.equals(".git", ignoreCase = true) ||
-                    (directory.canonicalFile == root.canonicalFile &&
-                        it.name.equals(".coding-agent", ignoreCase = true))
+                    it.name.equals(".coding-agent", ignoreCase = true)
             }
             ?.sortedBy { it.name.lowercase() }
             ?.map { ProjectPaths.relative(root, it) }
@@ -47,14 +46,14 @@ class ProjectFileService(private val workspace: ProjectWorkspace) {
         val root = workspace.projectRoot().canonicalFile
         val requestedParts = path.replace('\\', '/').split('/').filter { it.isNotEmpty() }
         require(requestedParts.none { it.equals(".git", ignoreCase = true) } &&
-            requestedParts.firstOrNull()?.equals(".coding-agent", ignoreCase = true) != true
+            requestedParts.none { it.equals(".coding-agent", ignoreCase = true) }
         ) { "Private agent and Git metadata are not accessible as project source" }
         val directory = root.resolve(path).canonicalFile
         require(directory.toPath().startsWith(root.toPath())) { "Unsafe project path" }
         val relative = root.toPath().relativize(directory.toPath()).toString().replace('\\', '/')
         val parts = relative.split('/').filter { it.isNotEmpty() }
         require(parts.none { it.equals(".git", ignoreCase = true) } &&
-            parts.firstOrNull()?.equals(".coding-agent", ignoreCase = true) != true
+            parts.none { it.equals(".coding-agent", ignoreCase = true) }
         ) {
             "Private agent and Git metadata are not accessible as project source"
         }
