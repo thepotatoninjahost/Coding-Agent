@@ -8,11 +8,17 @@ import org.junit.Test
 
 class ProjectImportPolicyTest {
     @Test
-    fun reservesOnlyTheProjectRootAgentMetadataDirectory() {
+    fun reservesPrivateMetadataRepositoryStateAndGeneratedDirectoryTrees() {
         assertTrue(isReservedProjectImportEntry("", ".coding-agent"))
-        assertFalse(isReservedProjectImportEntry("src", ".coding-agent"))
-        assertFalse(isReservedProjectImportEntry("", "src"))
-        assertFalse(isReservedProjectImportEntry("", ".git"))
+        assertTrue(isReservedProjectImportEntry("src", ".coding-agent"))
+        assertTrue(isReservedProjectImportEntry("", ".git", isDirectory = true))
+        assertTrue(isReservedProjectImportEntry("src", ".git", isDirectory = false))
+        assertTrue(isReservedProjectImportEntry("", "build", isDirectory = true))
+        assertTrue(isReservedProjectImportEntry("app", "node_modules", isDirectory = true))
+        assertTrue(isReservedProjectImportEntry("", ".gradle", isDirectory = true))
+        assertFalse(isReservedProjectImportEntry("", "build", isDirectory = false))
+        assertFalse(isReservedProjectImportEntry("", "src", isDirectory = true))
+        assertFalse(isReservedProjectImportEntry("src", "Main.kt", isDirectory = false))
     }
 
     @Test
