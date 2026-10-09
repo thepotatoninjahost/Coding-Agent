@@ -44,9 +44,9 @@ data class LiveModel(
  * Not tied to any local inference vendor. Remote HTTP models do not use this store.
  */
 class LiveModelStore(private val root: File) {
-    private val modelRoot = root.resolve(".coding-agent/models")
-    private val activeFile = modelRoot.resolve("active-model")
-    private val historyFile = modelRoot.resolve("history.tsv")
+    private val modelRoot = com.codingagent.workspace.ProjectMetadataBoundary.normalizePath(root.resolve(".coding-agent/models"))
+    private val activeFile = com.codingagent.workspace.ProjectMetadataBoundary.normalizePath(root.resolve(".coding-agent/models/active-model"))
+    private val historyFile = com.codingagent.workspace.ProjectMetadataBoundary.normalizePath(root.resolve(".coding-agent/models/history.tsv"))
 
     init { modelRoot.mkdirs() }
 
