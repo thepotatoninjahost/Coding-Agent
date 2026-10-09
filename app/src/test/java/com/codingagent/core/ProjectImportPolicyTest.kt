@@ -9,16 +9,16 @@ import org.junit.Test
 class ProjectImportPolicyTest {
     @Test
     fun reservesPrivateMetadataRepositoryStateAndGeneratedDirectoryTrees() {
-        assertTrue(isReservedProjectImportEntry("", ".coding-agent"))
-        assertTrue(isReservedProjectImportEntry("src", ".coding-agent"))
-        assertTrue(isReservedProjectImportEntry("", ".git", isDirectory = true))
-        assertTrue(isReservedProjectImportEntry("src", ".git", isDirectory = false))
-        assertTrue(isReservedProjectImportEntry("", "build", isDirectory = true))
-        assertTrue(isReservedProjectImportEntry("app", "node_modules", isDirectory = true))
-        assertTrue(isReservedProjectImportEntry("", ".gradle", isDirectory = true))
-        assertFalse(isReservedProjectImportEntry("", "build", isDirectory = false))
-        assertFalse(isReservedProjectImportEntry("", "src", isDirectory = true))
-        assertFalse(isReservedProjectImportEntry("src", "Main.kt", isDirectory = false))
+        assertTrue(isReservedProjectImportEntry(".coding-agent"))
+        assertTrue(isReservedProjectImportEntry(".coding-agent"))
+        assertTrue(isReservedProjectImportEntry(".git", isDirectory = true))
+        assertTrue(isReservedProjectImportEntry(".git", isDirectory = false))
+        assertTrue(isReservedProjectImportEntry("build", isDirectory = true))
+        assertTrue(isReservedProjectImportEntry("node_modules", isDirectory = true))
+        assertTrue(isReservedProjectImportEntry(".gradle", isDirectory = true))
+        assertFalse(isReservedProjectImportEntry("build", isDirectory = false))
+        assertFalse(isReservedProjectImportEntry("src", isDirectory = true))
+        assertFalse(isReservedProjectImportEntry("Main.kt", isDirectory = false))
     }
 
     @Test
