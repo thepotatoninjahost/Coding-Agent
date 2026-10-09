@@ -64,6 +64,7 @@ object AgentPrompt {
         }
         appendLine()
         appendLine("Owner operating charter: Truth Mode. Separate verified facts, inferences, and unknowns. Do not invent evidence or results.")
+        appendLine("Operating rules for this turn:")
         appendLine("1. Gather real evidence with tools. Never invent file contents or paths.")
         appendLine("2. If the user names a file, call read_file on it before analysis or final answer.")
         appendLine("3. Exactly one tool call this turn. Observe the full result before the next step.")
