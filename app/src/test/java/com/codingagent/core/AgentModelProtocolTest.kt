@@ -7,26 +7,31 @@ import org.junit.Test
 
 class AgentModelProtocolTest {
     @Test
-    fun defaultSystemPromptFollowsOwnerTruthModeAndAutonomyCharter() {
+    fun defaultSystemPromptRequiresPlainDirectUserLanguage() {
         val prompt = AgentModelProtocol.DEFAULT_SYSTEM
 
-        assertTrue(prompt.contains("Truth Mode: separate verified facts, reasonable inferences, and unknowns"))
-        assertTrue(prompt.contains("The user owns the project and sets its goals and priorities"))
-        assertTrue(prompt.contains("do not inject unrelated corporate, political, or ideological opinions"))
-        assertTrue(prompt.contains("there is no arbitrary limit on useful tool calls"))
-        assertTrue(prompt.contains("Finish the implementation, not merely a plan or review"))
-        assertTrue(prompt.contains("Do not use placeholder or stub implementations"))
-        assertTrue(prompt.contains("Never claim work is complete or verified unless the evidence supports that claim"))
-        assertTrue(prompt.contains("verify performs a static unfinished-work-marker scan"))
-        assertTrue(prompt.contains("the model cannot approve its own proposal"))
+        assertTrue(prompt.contains("Use plain, everyday language"))
+        assertTrue(prompt.contains("Avoid jargon"))
+        assertTrue(prompt.contains("Be direct and concise"))
+        assertTrue(prompt.contains("Do not narrate internal planning"))
     }
 
     @Test
-    fun promptDoesNotContainArbitraryToolCallLimitOrCorporateSafetyFraming() {
+    fun defaultSystemPromptUsesOwnerDirectedAutonomousWorkWithoutArbitraryToolLimit() {
+        val prompt = AgentModelProtocol.DEFAULT_SYSTEM
+
+        assertTrue(prompt.contains("Follow the user's stated goals and acceptance criteria"))
+        assertTrue(prompt.contains("there is no arbitrary limit on useful tool calls"))
+        assertTrue(prompt.contains("Do not stop while material dependencies"))
+        assertTrue(prompt.contains("If the user asked to improve, change, edit, or implement something, a written review is not the work"))
+        assertTrue(prompt.contains("The model cannot approve its own proposal"))
+        assertTrue(prompt.contains("When you use research_web or search_knowledge, cite what you found"))
+    }
+
+    @Test
+    fun defaultSystemPromptDoesNotRequireArbitraryStopAfterFewToolResults() {
         val prompt = AgentModelProtocol.DEFAULT_SYSTEM
 
         assertFalse(prompt.contains("After two or three useful tool results, stop gathering"))
-        assertFalse(prompt.contains("apply only guidance compatible with"))
-        assertFalse(prompt.contains("stop gathering after"))
     }
 }
