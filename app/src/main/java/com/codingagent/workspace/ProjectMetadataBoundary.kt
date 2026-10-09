@@ -9,7 +9,7 @@ import java.nio.file.Files
  */
 internal object ProjectMetadataBoundary {
     fun resolve(root: File, relativePath: String): File {
-        require(relativePath.isNotBlank() && !relativePath.startsWith('/') && !relativePath.contains('\\\\')) {
+        require(relativePath.isNotBlank() && !relativePath.startsWith('/') && !relativePath.contains('\\')) {
             "Unsafe private metadata path"
         }
         val parts = relativePath.split('/')
