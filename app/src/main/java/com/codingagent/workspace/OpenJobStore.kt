@@ -118,8 +118,15 @@ object OpenJobStore {
     fun startNew(root: File, goal: String): OpenJob {
         bind(root)
         val existing = load(root)
-        check(existing?.status != "recovery-required") {
-            "Cannot replace a recovery-required job before interrupted mutation recovery is resolved"
+        check(existing?.status !in setOf("recovery-required", "waiting-approval", "applying")) {
+            when (existing?.status) {
+                "waiting-approval" ->
+                    "Cannot replace a job with a pending owner-approved proposal; approve or reject that proposal first"
+                "applying" ->
+                    "Cannot replace a job while a mutation is applying; recover the interrupted mutation first"
+                else ->
+                    "Cannot replace a recovery-required job before interrupted mutation recovery is resolved"
+            }
         }
         val normalized = goal.trim()
         require(normalized.isNotEmpty()) { "A job goal is required" }
