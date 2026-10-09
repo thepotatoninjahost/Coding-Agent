@@ -119,6 +119,28 @@ class LiveUpdateTest {
         assertEquals("stable", runtime.execute("").output.single())
     }
 
+
+    @Test
+    fun activeModelPointerRejectsTraversalAndSymlinkedModelDirectories() {
+        val root = Files.createTempDirectory("coding-agent-model-pointer").toFile()
+        val store = LiveModelStore(root)
+        val modelRoot = root.resolve(".coding-agent/models")
+        val activeFile = modelRoot.resolve("active-model")
+
+        activeFile.writeText("../../outside")
+        assertEquals(null, store.active())
+
+        val outside = Files.createTempDirectory("coding-agent-model-outside").toFile()
+        outside.resolve("payload.bin").writeBytes(byteArrayOf(7, 8, 9))
+        try {
+            Files.createSymbolicLink(modelRoot.resolve("linked-model").toPath(), outside.toPath())
+        } catch (_: Exception) {
+            org.junit.Assume.assumeTrue("Symbolic links are required for this regression test", false)
+        }
+        activeFile.writeText("linked-model")
+        assertEquals(null, store.active())
+    }
+
     @Test
     fun moduleKindCannotEscapeLiveModuleDirectory() {
         val root = Files.createTempDirectory("coding-agent-live-path").toFile()
