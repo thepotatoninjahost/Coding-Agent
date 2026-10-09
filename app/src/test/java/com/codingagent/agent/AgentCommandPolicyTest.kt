@@ -15,6 +15,13 @@ class AgentCommandPolicyTest {
         assertNotNull(AgentCommandPolicy.rejectionReason("find nested -type f"))
         assertNull(AgentCommandPolicy.rejectionReason("rg UserMemory app/src"))
         assertNull(AgentCommandPolicy.rejectionReason("cat app/src/main/AndroidManifest.xml"))
+        assertNull(AgentCommandPolicy.rejectionReason("ls app/src"))
+        assertNotNull(AgentCommandPolicy.rejectionReason("ls -a"))
+        assertNotNull(AgentCommandPolicy.rejectionReason("ls -A"))
+        assertNotNull(AgentCommandPolicy.rejectionReason("ls -la"))
+        assertNotNull(AgentCommandPolicy.rejectionReason("ls -Ra"))
+        assertNotNull(AgentCommandPolicy.rejectionReason("ls --all"))
+        assertNotNull(AgentCommandPolicy.rejectionReason("ls --recursive"))
     }
 
     @Test
