@@ -39,6 +39,15 @@ object AgentCommandPolicy {
             return "Project-local or path-qualified executables are not allowed for model commands"
         }
         val executable = rawExecutable
+
+        // Command-level safety restrictions must not depend on the caller providing
+        // a project root. Several callers validate commands before a workspace exists.
+        when (executable) {
+            "wc" -> validateWc(tokens)?.let { return it }
+            "rg" -> validateRgOptions(tokens)?.let { return it }
+            "grep" -> validateGrepOptions(tokens)?.let { return it }
+        }
+
         if (projectRoot != null) {
             validateFilesystemOperands(executable, tokens, projectRoot)?.let { return it }
         }
@@ -73,6 +82,37 @@ object AgentCommandPolicy {
         }
         return if (exposesPrivateMetadata) {
             "ls options that reveal hidden metadata, recurse into directories, or dereference symlinks are not allowed; use the project file-list tools"
+        } else null
+    }
+
+    private fun validateRgOptions(tokens: List<String>): String? {
+        val restrictedLongOptions = listOf(
+            "--pre", "--hidden", "--follow", "--files-from", "--no-ignore", "--config-path"
+        )
+        val restricted = tokens.any { token ->
+            val option = token.takeWhile { it != '=' }
+            (option.startsWith("--") && restrictedLongOptions.any {
+                it.startsWith(option) || option.startsWith(it)
+            }) ||
+                token == "-L" ||
+                Regex("""^-u{1,3}$""").matches(token) ||
+                (token.startsWith("-") && !token.startsWith("--") && token.drop(1).contains('u'))
+        }
+        return if (restricted) {
+            "Ripgrep preprocessors, hidden agent metadata, and symlink-following or ignore-bypass options are not allowed for model commands"
+        } else null
+    }
+
+    private fun validateGrepOptions(tokens: List<String>): String? {
+        val restricted = tokens.any { token ->
+            token == "--recursive" || token == "--dereference-recursive" ||
+                token == "--directories" || token.startsWith("--directories=") ||
+                token == "-d" ||
+                (token.startsWith("-") && !token.startsWith("--") &&
+                    token.drop(1).any { it == 'd' || it == 'r' || it == 'R' })
+        }
+        return if (restricted) {
+            "Recursive grep can expose private agent metadata and is not allowed for model commands; use explicit project-relative file paths"
         } else null
     }
 
