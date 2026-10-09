@@ -195,10 +195,6 @@ class LiveModelStore(private val root: File) {
             .fold(ByteArray(0)) { acc, file -> acc + file.readBytes() }
     }
 
-    companion object {
-        private val SAFE_ID = Regex("""[A-Za-z0-9_-]+""")
-    }
-
     private fun checksum(file: File): String = file.inputStream().use { input ->
         val digest = MessageDigest.getInstance("SHA-256")
         val buffer = ByteArray(1024 * 1024)
@@ -220,5 +216,6 @@ class LiveModelStore(private val root: File) {
 
     companion object {
         private const val MANIFEST_NAME = "model.manifest"
+        private val SAFE_ID = Regex("""[A-Za-z0-9_-]+""")
     }
 }
