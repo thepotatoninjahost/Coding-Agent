@@ -51,16 +51,21 @@ class LiveModelStore(private val root: File) {
     init { modelRoot.mkdirs() }
 
     fun inspectPackage(directory: File): LiveModelPackage {
+        val directoryIsSymlink = java.nio.file.Files.isSymbolicLink(directory.toPath())
         val manifest = directory.resolve(MANIFEST_NAME)
-        val files = directory.listFiles()
-            ?.filter { it.isFile && it.name != MANIFEST_NAME }
-            ?.sortedBy { it.name }
-            .orEmpty()
+        val children = if (directoryIsSymlink) emptyList() else directory.listFiles()?.toList().orEmpty()
+        val symlinks = children.filter { java.nio.file.Files.isSymbolicLink(it.toPath()) }
+        val files = children
+            .filter { it.isFile && it.name != MANIFEST_NAME && !java.nio.file.Files.isSymbolicLink(it.toPath()) }
+            .sortedBy { it.name }
         val missing = buildList {
-            if (!manifest.isFile) add(MANIFEST_NAME)
+            if (directoryIsSymlink || !manifest.isFile || java.nio.file.Files.isSymbolicLink(manifest.toPath())) {
+                add(MANIFEST_NAME)
+            }
             if (files.isEmpty()) add("payload")
         }
-        val invalid = files.filter { it.length() == 0L }.map { "${it.name}: empty" }
+        val invalid = symlinks.map { "${it.name}: symbolic links are not allowed" } +
+            files.filter { it.length() == 0L }.map { "${it.name}: empty" }
         val complete = missing.isEmpty() && invalid.isEmpty()
         return LiveModelPackage(manifest, files, files.sumOf { it.length() }, complete, missing, invalid)
     }
@@ -151,9 +156,9 @@ class LiveModelStore(private val root: File) {
         }.getOrNull() ?: return null
         if (!directory.isDirectory) return null
         val fields = history().firstOrNull { it.id == id } ?: return null
-        val payload = directory.listFiles()
-            ?.filter { it.isFile && it.name != MANIFEST_NAME }
-            .orEmpty()
+        val children = directory.listFiles()?.toList().orEmpty()
+        if (children.any { java.nio.file.Files.isSymbolicLink(it.toPath()) }) return null
+        val payload = children.filter { it.isFile && it.name != MANIFEST_NAME }
         val source = payload.singleOrNull() ?: directory
         return fields.copy(sourcePath = source.absolutePath)
     }
@@ -174,9 +179,21 @@ class LiveModelStore(private val root: File) {
         }
     }
 
-    fun modelBytes(model: LiveModel): ByteArray =
-        File(model.sourcePath).walkTopDown().filter { it.isFile }.sortedBy { it.absolutePath }
+    fun modelBytes(model: LiveModel): ByteArray {
+        val source = File(model.sourcePath)
+        val rootPath = modelRoot.canonicalFile.toPath()
+        val canonicalSource = source.canonicalFile.toPath()
+        require(canonicalSource.startsWith(rootPath)) { "Model source is outside private model storage" }
+        val relative = root.canonicalFile.toPath().relativize(source.absoluteFile.toPath())
+            .toString().replace('\\', '/')
+        val safeSource = com.codingagent.workspace.ProjectMetadataBoundary.resolve(root, relative)
+        val entries = safeSource.walkTopDown().toList()
+        require(entries.none { java.nio.file.Files.isSymbolicLink(it.toPath()) }) {
+            "Model payload may not contain symbolic links"
+        }
+        return entries.filter { it.isFile }.sortedBy { it.absolutePath }
             .fold(ByteArray(0)) { acc, file -> acc + file.readBytes() }
+    }
 
     companion object {
         private val SAFE_ID = Regex("""[A-Za-z0-9_-]+""")
