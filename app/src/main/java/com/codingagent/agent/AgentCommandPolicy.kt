@@ -95,7 +95,7 @@ object AgentCommandPolicy {
         }
         if (executable == "rg" && tokens.any { token ->
                 val option = token.takeWhile { it != '=' }
-                val restrictedLongOptions = listOf("--pre", "--hidden", "--follow", "--files-from", "--no-ignore")
+                val restrictedLongOptions = listOf("--pre", "--hidden", "--follow", "--files-from", "--no-ignore", "--config-path")
                 (option.startsWith("--") && restrictedLongOptions.any {
                     it.startsWith(option) || option.startsWith(it)
                 }) ||
