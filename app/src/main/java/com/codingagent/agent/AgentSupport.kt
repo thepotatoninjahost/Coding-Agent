@@ -47,7 +47,7 @@ class AgentPlanner(private val workspace: ProjectWorkspace) {
 }
 
 class AgentJournal(private val root: File) {
-    private val file = root.resolve(".coding-agent/tasks.tsv")
+    private val file = com.codingagent.workspace.ProjectMetadataBoundary.normalizePath(root.resolve(".coding-agent/tasks.tsv"))
 
     @Synchronized
     fun record(task: AgentTask) {
