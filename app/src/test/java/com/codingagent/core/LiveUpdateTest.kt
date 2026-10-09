@@ -121,6 +121,48 @@ class LiveUpdateTest {
 
 
 
+
+    @Test
+    fun modelPackageInspectionRejectsSymlinkPayloads() {
+        val root = Files.createTempDirectory("coding-agent-package-link").toFile()
+        val packageDir = root.resolve("package").apply { mkdirs() }
+        val outside = root.resolve("outside-weights.bin").apply { writeBytes(byteArrayOf(1, 2, 3)) }
+        packageDir.resolve("model.manifest").writeText("""{"name":"demo","files":["weights.bin"]}""")
+        try {
+            Files.createSymbolicLink(packageDir.resolve("weights.bin").toPath(), outside.toPath())
+        } catch (_: Exception) {
+            org.junit.Assume.assumeTrue("Symbolic links are required for this regression test", false)
+        }
+
+        val inspected = LiveModelStore(root).inspectPackage(packageDir)
+        assertTrue(!inspected.complete)
+        assertTrue(inspected.invalid.any { it.contains("symbolic links") })
+        assertTrue(inspected.files.none { it.name == "weights.bin" })
+    }
+
+    @Test
+    fun modelBytesRejectsPathsOutsidePrivateModelStorage() {
+        val root = Files.createTempDirectory("coding-agent-model-bytes-boundary").toFile()
+        val outside = root.resolve("outside.bin").apply { writeBytes(byteArrayOf(1, 2, 3)) }
+        val store = LiveModelStore(root)
+        val untrusted = com.codingagent.model.LiveModel(
+            id = "external",
+            name = "external",
+            format = "raw",
+            sourcePath = outside.absolutePath,
+            checksum = "",
+            sizeBytes = outside.length(),
+            createdAt = 0L
+        )
+
+        try {
+            store.modelBytes(untrusted)
+            throw AssertionError("Model bytes must not read outside private model storage")
+        } catch (_: IllegalArgumentException) {
+            // Expected: source paths are confined to the private model store.
+        }
+    }
+
     @Test
     fun activeModuleAndRollbackRejectSymlinkedModuleDirectories() {
         val root = Files.createTempDirectory("coding-agent-module-pointer").toFile()
