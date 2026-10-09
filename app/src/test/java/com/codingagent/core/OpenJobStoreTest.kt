@@ -38,6 +38,25 @@ class OpenJobStoreTest {
 
 
     @Test
+    fun startNewCannotDiscardWaitingOrApplyingMutationJobs() {
+        listOf("waiting-approval", "applying").forEach { status ->
+            val root = Files.createTempDirectory("open-job-protected-$status").toFile()
+            OpenJobStore.startNew(root, "original mutation goal")
+            if (status == "waiting-approval") {
+                OpenJobStore.markWaiting(root, "proposal-$status", listOf("Main.kt"), "original mutation goal")
+            } else {
+                OpenJobStore.markApplying(root, "proposal-$status", listOf("Main.kt"), "original mutation goal")
+            }
+            val before = OpenJobStore.load(root)!!
+
+            val replacement = runCatching { OpenJobStore.startNew(root, "unrelated new goal") }
+
+            assertTrue("Replacing $status state must be rejected", replacement.isFailure)
+            assertEquals("The durable job must remain unchanged", before, OpenJobStore.load(root))
+        }
+    }
+
+    @Test
     fun recoveryRequiredStateCanBeRecreatedWhenPriorMarkerIsMissing() {
         val root = Files.createTempDirectory("open-job-recovery-missing").toFile()
 
