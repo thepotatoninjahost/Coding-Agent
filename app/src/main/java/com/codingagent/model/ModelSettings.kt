@@ -103,7 +103,7 @@ data class ModelSettings(
             AgentModelProtocol.DEFAULT_SYSTEM
         } else {
             AgentModelProtocol.DEFAULT_SYSTEM +
-                "\\n\\n## Owner-configured additional instructions\\n" +
+                "\n\n## Owner-configured additional instructions\n" +
                 custom
         }
     }
