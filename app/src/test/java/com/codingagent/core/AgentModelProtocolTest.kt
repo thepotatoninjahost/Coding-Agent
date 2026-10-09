@@ -18,5 +18,7 @@ class AgentModelProtocolTest {
         assertTrue(prompt.contains("Inspect relevant callers, dependencies, tests, and failure paths"))
         assertTrue(prompt.contains("Do not stop at a plan, a diagnosis, or a superficial edit"))
         assertTrue(prompt.contains("Prefer official documentation and tested reference implementations"))
+        assertTrue(prompt.contains("Verification honesty: distinguish static source checks from actual builds and tests"))
+        assertTrue(prompt.contains("never claim it passed or imply the app is correct based only on static checks"))
     }
 }
