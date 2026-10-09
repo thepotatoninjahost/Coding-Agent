@@ -42,9 +42,8 @@ class OpenJobStoreTest {
         listOf("waiting-approval", "applying").forEach { status ->
             val root = Files.createTempDirectory("open-job-protected-$status").toFile()
             OpenJobStore.startNew(root, "original mutation goal")
-            if (status == "waiting-approval") {
-                OpenJobStore.markWaiting(root, "proposal-$status", listOf("Main.kt"), "original mutation goal")
-            } else {
+            OpenJobStore.markWaiting(root, "proposal-$status", listOf("Main.kt"), "original mutation goal")
+            if (status == "applying") {
                 OpenJobStore.markApplying(root, "proposal-$status", listOf("Main.kt"), "original mutation goal")
             }
             val before = OpenJobStore.load(root)!!
@@ -54,6 +53,55 @@ class OpenJobStoreTest {
             assertTrue("Replacing $status state must be rejected", replacement.isFailure)
             assertEquals("The durable job must remain unchanged", before, OpenJobStore.load(root))
         }
+    }
+
+    @Test
+    fun markWaitingCannotReplaceAnotherUnresolvedProposal() {
+        val root = Files.createTempDirectory("open-job-waiting-replacement").toFile()
+        OpenJobStore.startNew(root, "first mutation")
+        OpenJobStore.markWaiting(root, "proposal-original", listOf("Main.kt"), "first mutation")
+        val before = OpenJobStore.load(root)!!
+
+        val replacement = runCatching {
+            OpenJobStore.markWaiting(root, "proposal-stale", listOf("Other.kt"), "unrelated mutation")
+        }
+
+        assertTrue("A second proposal must not replace the durable waiting proposal", replacement.isFailure)
+        assertEquals(before, OpenJobStore.load(root))
+    }
+
+    @Test
+    fun markApplyingRequiresTheMatchingWaitingProposal() {
+        val root = Files.createTempDirectory("open-job-applying-authority").toFile()
+        OpenJobStore.startNew(root, "approved mutation")
+        OpenJobStore.markWaiting(root, "proposal-authorized", listOf("Main.kt"), "approved mutation")
+
+        val staleAttempt = runCatching {
+            OpenJobStore.markApplying(root, "proposal-stale", listOf("Other.kt"), "stale request")
+        }
+        assertTrue("A stale proposal must not enter the apply phase", staleAttempt.isFailure)
+        assertEquals("waiting-approval", OpenJobStore.load(root)?.status)
+        assertEquals("proposal-authorized", OpenJobStore.load(root)?.proposalId)
+
+        OpenJobStore.markApplying(root, "proposal-authorized", listOf("Main.kt"), "approved mutation")
+        assertEquals("applying", OpenJobStore.load(root)?.status)
+    }
+
+    @Test
+    fun markAppliedRequiresTheMatchingApplyingProposal() {
+        val root = Files.createTempDirectory("open-job-applied-authority").toFile()
+        OpenJobStore.startNew(root, "approved mutation")
+        OpenJobStore.markWaiting(root, "proposal-authorized", listOf("Main.kt"), "approved mutation")
+        OpenJobStore.markApplying(root, "proposal-authorized", listOf("Main.kt"), "approved mutation")
+
+        val staleAttempt = runCatching { OpenJobStore.markApplied(root, "proposal-stale") }
+        assertTrue("A different proposal must not mark the current mutation applied", staleAttempt.isFailure)
+        assertEquals("applying", OpenJobStore.load(root)?.status)
+        assertEquals("proposal-authorized", OpenJobStore.load(root)?.proposalId)
+
+        OpenJobStore.markApplied(root, "proposal-authorized")
+        assertEquals("applied", OpenJobStore.load(root)?.status)
+        assertEquals("proposal-authorized", OpenJobStore.load(root)?.appliedProposalId)
     }
 
     @Test
