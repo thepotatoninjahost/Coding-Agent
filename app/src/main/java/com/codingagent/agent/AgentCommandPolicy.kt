@@ -54,10 +54,18 @@ object AgentCommandPolicy {
     }
 
     private fun validateLs(tokens: List<String>): String? {
+        val privateMetadataOptions = listOf(
+            "--all",
+            "--almost-all",
+            "--recursive",
+            "--dereference",
+            "--dereference-command-line",
+            "--dereference-command-line-symlink-to-dir"
+        )
         val exposesPrivateMetadata = tokens.drop(1).any { token ->
-            token == "--all" || token == "--almost-all" || token == "--recursive" ||
-                token == "--dereference" || token == "--dereference-command-line" ||
-                token == "--dereference-command-line-symlink-to-dir" ||
+            val longOption = token.takeWhile { it != '=' }
+            (longOption.startsWith("--") &&
+                privateMetadataOptions.any { it.startsWith(longOption) }) ||
                 (token.startsWith("-") && !token.startsWith("--") &&
                     token.drop(1).any { it == 'a' || it == 'A' || it == 'f' || it == 'R' || it == 'L' || it == 'H' })
         }
