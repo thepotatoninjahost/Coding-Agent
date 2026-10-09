@@ -154,6 +154,9 @@ class AgentCommandPolicyTest {
         root.resolve(".coding-agent/private-state.json").writeText("{\"secret\":true}")
 
         assertNotNull(AgentCommandPolicy.rejectionReason("grep -R secret .", root))
+        assertNotNull(AgentCommandPolicy.rejectionReason("grep -d recurse secret .", root))
+        assertNotNull(AgentCommandPolicy.rejectionReason("grep --directories=recurse secret .", root))
+        assertNotNull(AgentCommandPolicy.rejectionReason("grep \\-d recurse secret ."))
         assertNotNull(AgentCommandPolicy.rejectionReason("grep -r secret .", root))
         assertNotNull(AgentCommandPolicy.rejectionReason("grep -nR secret .", root))
         assertNotNull(AgentCommandPolicy.rejectionReason("rg --hidden secret .", root))
