@@ -229,7 +229,7 @@ class AutonomousAgent(
             val question = intake.clarificationQuestion ?: "Clarify the requested operation"
             val task = AgentTask(
                 taskId, focus, "needs-input", plan, emptyList(),
-                VerificationReport(true, emptyList()),
+                VerificationReport(false, emptyList()),
                 listOf("${java.time.Instant.now()}: needs input from user"),
                 question
             )
@@ -248,7 +248,7 @@ class AutonomousAgent(
                     "Open Model settings (base URL, model name, API key) for autonomous coding and research."
             val task = AgentTask(
                 taskId, focus, "needs-input", plan, emptyList(),
-                VerificationReport(true, emptyList()),
+                VerificationReport(false, emptyList()),
                 listOf("${Instant.now()}: model gateway missing — local lanes only"),
                 msg
             )
