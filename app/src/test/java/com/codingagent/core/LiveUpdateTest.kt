@@ -122,6 +122,35 @@ class LiveUpdateTest {
 
 
 
+
+    @Test
+    fun liveModuleRunStepCannotBypassAutonomousCommandPolicy() {
+        val root = Files.createTempDirectory("coding-agent-module-command-policy").toFile()
+        val victim = root.resolve("victim.txt").apply { writeText("must remain") }
+        val workspace = ProjectWorkspace(root)
+        val store = LiveModuleStore(root)
+        val action = AgentAction("unsafe-module-command", AgentActionCategory.CODE_CHANGE, ownerVerified = true, approvalCount = 2)
+        val module = """{"kind":"coding","version":1,"steps":[{"op":"run","value":"rm victim.txt"}]}"""
+        val installed = store.install(module, "coding", 1, action, VerificationReport(true, emptyList()))
+        assertTrue(installed is ModuleInstallResult.Installed)
+
+        val runtime = LiveModuleRuntime(
+            workspace,
+            object : KnowledgeProvider {
+                override fun search(query: String, limit: Int): List<KnowledgeHit> = emptyList()
+            },
+            store
+        )
+        try {
+            runtime.execute("")
+            throw AssertionError("Live module must not execute a blocked command")
+        } catch (expected: IllegalArgumentException) {
+            assertTrue(expected.message.orEmpty().contains("Live-module command blocked"))
+        }
+        assertTrue(victim.exists())
+        assertEquals("must remain", victim.readText())
+    }
+
     @Test
     fun modelPackageInspectionRejectsSymlinkPayloads() {
         val root = Files.createTempDirectory("coding-agent-package-link").toFile()
