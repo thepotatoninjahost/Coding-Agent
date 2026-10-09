@@ -17,7 +17,7 @@ internal object ProjectMetadataBoundary {
                 val projectRoot = ancestor.parentFile
                     ?: throw IllegalArgumentException("Private metadata path has no project root")
                 val relative = projectRoot.toPath().relativize(absolute.toPath())
-                    .toString().replace('\\\\', '/')
+                    .toString().replace('\\', '/')
                 return resolve(projectRoot, relative)
             }
             ancestor = ancestor.parentFile
