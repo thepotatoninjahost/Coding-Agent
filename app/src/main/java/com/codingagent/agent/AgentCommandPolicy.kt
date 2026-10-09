@@ -48,7 +48,9 @@ object AgentCommandPolicy {
             "git" -> "Git commands are disabled in the autonomous command channel because Git can execute configured helpers from repository, global, or system configuration"
             "find" -> "Find is disabled in the autonomous command channel because recursive traversal can expose private metadata; use the project indexer or file-list tools"
             "ls" -> validateLs(tokens)
-            "cat", "head", "tail", "wc", "file", "grep", "rg", "pwd", "printf" -> null
+            "wc" -> validateWc(tokens)
+            "file" -> "The file command is disabled in the autonomous channel because its file-list and compile options can bypass path boundaries or write files"
+            "cat", "head", "tail", "grep", "rg", "pwd", "printf" -> null
             else -> "Model command '$executable' is not permitted; use project inspection tools or a standard verification command"
         }
     }
@@ -74,6 +76,17 @@ object AgentCommandPolicy {
         } else null
     }
 
+    private fun validateWc(tokens: List<String>): String? {
+        val option = tokens.drop(1)
+            .map { it.takeWhile { character -> character != '=' } }
+            .firstOrNull { token ->
+                token.startsWith("--") && "--files0-from".startsWith(token)
+            }
+        return if (option != null) {
+            "wc file-list options are not allowed in the autonomous command channel; specify explicit project-relative files"
+        } else null
+    }
+
     private fun validateFilesystemOperands(executable: String, tokens: List<String>, root: java.io.File): String? {
         val operands = when (executable) {
             "cat", "head", "tail", "wc", "file", "ls" -> tokens.drop(1).filterNot { it.startsWith("-") }
@@ -83,6 +96,7 @@ object AgentCommandPolicy {
         if (executable == "rg" && tokens.any { token ->
                 token == "--pre" || token.startsWith("--pre=") ||
                     token == "--hidden" || token == "--follow" || token == "-L" ||
+                    token == "--files-from" || token.startsWith("--files-from=") ||
                     token.startsWith("--no-ignore") ||
                     Regex("""^-u{1,3}$""").matches(token) ||
                     (token.startsWith("-") && !token.startsWith("--") && token.drop(1).contains('u'))
