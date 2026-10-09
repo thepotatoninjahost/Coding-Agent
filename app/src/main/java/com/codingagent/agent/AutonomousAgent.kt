@@ -360,7 +360,8 @@ class AutonomousAgent(
                     )
                 },
                 isCancelled = { isCancelled() },
-                onPhase = { emit(AutonomousAgentEvent.Phase("MODEL", it)) }
+                onPhase = { emit(AutonomousAgentEvent.Phase("MODEL", it)) },
+                onDelta = { emit(AutonomousAgentEvent.ModelDelta(it)) }
             ) ?: return stopNow(taskId, normalized, plan, events) { emit(it) }
             if (isCancelled()) return stopNow(taskId, normalized, plan, events) { emit(it) }
             // Some providers (NVIDIA NIM and others) never populate structured tool_calls and
