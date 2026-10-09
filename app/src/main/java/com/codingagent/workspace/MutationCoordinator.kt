@@ -808,7 +808,7 @@ class MutationCoordinator(
         }
         val requestedParts = path.replace('\\', '/').split('/').filter { it.isNotEmpty() }
         require(requestedParts.none { it.equals(".git", ignoreCase = true) } &&
-            requestedParts.firstOrNull()?.equals(".coding-agent", ignoreCase = true) != true
+            requestedParts.none { it.equals(".coding-agent", ignoreCase = true) }
         ) { "Private agent and Git metadata are not recoverable project paths" }
         val root = workspace.projectRoot().canonicalFile
         val candidate = root.resolve(path).canonicalFile
@@ -816,7 +816,7 @@ class MutationCoordinator(
         val relative = root.toPath().relativize(candidate.toPath()).toString().replace('\\', '/')
         val parts = relative.split('/').filter { it.isNotEmpty() }
         require(parts.none { it.equals(".git", ignoreCase = true) } &&
-            parts.firstOrNull()?.equals(".coding-agent", ignoreCase = true) != true
+            parts.none { it.equals(".coding-agent", ignoreCase = true) }
         ) {
             "Private agent and Git metadata are not recoverable project paths"
         }
