@@ -65,7 +65,6 @@ class TerminalSession(
         timeoutSeconds: Long = this.timeoutSeconds
     ): TerminalEntry {
         require(command.isNotEmpty()) { "A terminal command is required" }
-        require(command.none { it.isEmpty() }) { "Command arguments cannot be empty" }
         val started = System.currentTimeMillis()
         val result = runner.run(command, timeoutSeconds, onStdout, onStderr)
         val durationMs = System.currentTimeMillis() - started
