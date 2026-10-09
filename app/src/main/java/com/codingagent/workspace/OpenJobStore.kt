@@ -37,7 +37,7 @@ object OpenJobStore {
     @Volatile
     private var lastRoot: File? = null
 
-    fun file(root: File): File = File(root, ".coding-agent/open-job.json")
+    fun file(root: File): File = ProjectMetadataBoundary.resolve(root, ".coding-agent/open-job.json")
 
     @Synchronized
     fun bind(root: File) {
