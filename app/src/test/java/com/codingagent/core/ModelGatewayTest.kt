@@ -71,6 +71,7 @@ class ModelGatewayTest {
         val result = gateway.complete(ModelRequest("system", "inspect", listOf(ModelToolDefinition("read_file", "read", "{\"type\":\"object\"}"))))
 
         assertTrue(requestBody.contains("\"tools\""))
+        assertTrue(requestBody.contains("\"parallel_tool_calls\":false"))
         assertTrue(requestBody.contains("\"name\":\"read_file\""))
         assertEquals(ModelResponse.ToolCall("read_file", "{\"path\":\"src/Main.kt\"}", "", "call_1"), result)
     }
