@@ -43,10 +43,10 @@ class AutonomousAgent(
     private val knowledge: AgentKnowledge,
     /** Null = local-only mode: greeting, list, status, explicit read, offline explicit edits still work. */
     gateway: ModelGateway? = null,
-    systemPrompt: String = AgentModelProtocol.DEFAULT_SYSTEM,
     private val config: AutonomousAgentConfig = AutonomousAgentConfig(),
     private val research: DeepResearchProvider = DurableDeepResearchProvider(root.resolve(".coding-agent/research")),
-    private val mutations: MutationCoordinator = MutationCoordinator(ProjectWorkspace(root))
+    private val mutations: MutationCoordinator = MutationCoordinator(ProjectWorkspace(root)),
+    systemPrompt: String = AgentModelProtocol.DEFAULT_SYSTEM
 ) : CodingAgentExecutor {
     /**
      * The active model gateway. Mutable so the UI can swap the gateway (e.g. after the user
