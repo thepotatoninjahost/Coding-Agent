@@ -100,7 +100,7 @@ class AgentTools(private val workspace: ProjectWorkspace) {
     private fun isReservedProjectMetadataPath(root: File, requestedPath: String, candidate: File): Boolean {
         val requestedParts = requestedPath.replace('\\', '/').split('/').filter { it.isNotEmpty() }
         if (requestedParts.any { it.equals(".git", ignoreCase = true) } ||
-            requestedParts.firstOrNull()?.equals(".coding-agent", ignoreCase = true) == true
+            requestedParts.any { it.equals(".coding-agent", ignoreCase = true) }
         ) return true
 
         val relative = runCatching {
@@ -108,7 +108,7 @@ class AgentTools(private val workspace: ProjectWorkspace) {
         }.getOrElse { return true }
         val canonicalParts = relative.split('/').filter { it.isNotEmpty() }
         return canonicalParts.any { it.equals(".git", ignoreCase = true) } ||
-            canonicalParts.firstOrNull()?.equals(".coding-agent", ignoreCase = true) == true
+            canonicalParts.any { it.equals(".coding-agent", ignoreCase = true) }
     }
 
     private fun findCaseInsensitive(root: File, relative: String): File? {
