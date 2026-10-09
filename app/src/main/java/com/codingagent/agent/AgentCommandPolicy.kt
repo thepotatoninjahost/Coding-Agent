@@ -76,7 +76,7 @@ object AgentCommandPolicy {
             if (operand.isBlank()) continue
             val requestedParts = operand.replace('\\', '/').split('/')
             if (requestedParts.any { it.equals(".git", ignoreCase = true) } ||
-                requestedParts.firstOrNull()?.equals(".coding-agent", ignoreCase = true) == true
+                requestedParts.any { it.equals(".coding-agent", ignoreCase = true) }
             ) {
                 return "Private agent and Git metadata are not accessible to model commands"
             }
@@ -91,7 +91,7 @@ object AgentCommandPolicy {
                 .toString().replace('\\', '/')
             val parts = relative.split('/').filter { it.isNotEmpty() }
             if (parts.any { it.equals(".git", ignoreCase = true) } ||
-                parts.firstOrNull()?.equals(".coding-agent", ignoreCase = true) == true
+                parts.any { it.equals(".coding-agent", ignoreCase = true) }
             ) {
                 return "Private agent and Git metadata are not accessible to model commands"
             }
