@@ -50,7 +50,7 @@ object AgentOfflineStager {
         val staged: Pair<List<TaskOperation>, String> = if (hasExplicit) {
             listOf(intake.operation) to "Offline explicit ${intake.operation.kind.name.lowercase()} from request"
         } else {
-            when (val synthesis = CodeSynthesisEngine(workspace.projectRoot(), knowledge).synthesize(intake)) {
+            when (val synthesis = CodeSynthesisEngine(knowledge).synthesize(intake)) {
                 is SynthesisResult.Ready ->
                     synthesis.proposal.operations to "Offline synthesis: ${synthesis.proposal.rationale}"
                 is SynthesisResult.NeedsInput -> {
