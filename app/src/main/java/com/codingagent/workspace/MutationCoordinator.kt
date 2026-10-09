@@ -63,9 +63,25 @@ class MutationCoordinator(
     }
 
     init {
-        OpenJobStore.bind(workspace.projectRoot())
-        PendingProposalStore.load(workspace.projectRoot()).forEach { pending[it.id] = it }
-        clearExpired()
+        val root = workspace.projectRoot()
+        OpenJobStore.bind(root)
+        val proposalsLoaded = try {
+            PendingProposalStore.load(root).forEach { pending[it.id] = it }
+            true
+        } catch (error: Exception) {
+            // A private-state read failure must not crash project mounting or be
+            // mistaken for an empty proposal store. Preserve fail-closed behavior
+            // and record recovery-required whenever durable metadata permits it.
+            pendingReconciliationFailed = true
+            runCatching {
+                OpenJobStore.markRecoveryRequired(
+                    root,
+                    "Pending proposal state was unreadable during startup: ${error.message.orEmpty()}"
+                )
+            }
+            false
+        }
+        if (proposalsLoaded) clearExpired()
         reconcilePendingJobConsistency()
         if (!pendingReconciliationFailed) reconcileDurableApplyState()
     }
