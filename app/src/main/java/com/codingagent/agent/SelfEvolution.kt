@@ -23,10 +23,10 @@ data class EvolutionVersion(
  * ONE JOB: Stage and promote versioned source snapshots for local self-improvement.
  */
 class SelfEvolution(private val root: File) {
-    private val evolutionRoot = root.resolve(".coding-agent/evolution")
-    private val versionsRoot = evolutionRoot.resolve("versions")
-    private val activeFile = evolutionRoot.resolve("active-version")
-    private val historyFile = evolutionRoot.resolve("history.tsv")
+    private val evolutionRoot = com.codingagent.workspace.ProjectMetadataBoundary.normalizePath(root.resolve(".coding-agent/evolution"))
+    private val versionsRoot = com.codingagent.workspace.ProjectMetadataBoundary.normalizePath(root.resolve(".coding-agent/evolution/versions"))
+    private val activeFile = com.codingagent.workspace.ProjectMetadataBoundary.normalizePath(root.resolve(".coding-agent/evolution/active-version"))
+    private val historyFile = com.codingagent.workspace.ProjectMetadataBoundary.normalizePath(root.resolve(".coding-agent/evolution/history.tsv"))
 
     init {
         versionsRoot.mkdirs()
