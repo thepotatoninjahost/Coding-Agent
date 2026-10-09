@@ -38,19 +38,9 @@ class CodeSynthesisEngine(
         }
 
         if (intake.intent == TaskIntent.CREATE) {
-            val path = intake.contract.targetPaths.singleOrNull() ?: defaultCreatePath(intake.contract.goal)
-            if (!isSafePath(path)) return SynthesisResult.NeedsInput("Choose a project-relative target file.")
-            if (root.resolve(path).exists()) {
-                return SynthesisResult.NeedsInput("$path already exists. Specify whether to replace it or edit it.")
-            }
-            val content = generateFile(path, intake.contract.goal)
-            return SynthesisResult.Ready(
-                SynthesisProposal(
-                    goal = intake.contract.goal,
-                    operations = listOf(TaskOperation(OperationKind.CREATE_FILE, path = path, text = content)),
-                    rationale = "Staged $path from the create request so the owner can review a real file, not README.md.",
-                    knowledgeUsed = evidence
-                )
+            return SynthesisResult.NeedsInput(
+                "This create request needs a configured coding model to generate meaningful implementation code. " +
+                    "Configure a model, or specify an explicit file operation with the exact content."
             )
         }
 
