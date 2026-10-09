@@ -75,7 +75,7 @@ object AgentOfflineStager {
                 val proposal = proposeResult.proposal
                 val task = AgentTask(
                     taskId, request, "needs-approval", plan, proposal.changeSet.changes,
-                    VerificationReport(true, emptyList()),
+                    proposal.verification,
                     listOf("${Instant.now()}: offline proposal ${proposal.id} staged; awaiting two owner approvals"),
                     ChangeDiff.ownerReviewText(proposal)
                 )
