@@ -93,8 +93,20 @@ data class ModelSettings(
         return out
     }
 
-    fun effectiveSystemPrompt(): String =
-        normalized().systemPrompt.ifBlank { AgentModelProtocol.DEFAULT_SYSTEM }
+    /**
+     * Preserve the agent's mandatory safety and evidence contract. The owner-provided
+     * prompt is additive guidance, never a replacement for the core system instructions.
+     */
+    fun effectiveSystemPrompt(): String {
+        val custom = normalized().systemPrompt
+        return if (custom.isBlank()) {
+            AgentModelProtocol.DEFAULT_SYSTEM
+        } else {
+            AgentModelProtocol.DEFAULT_SYSTEM +
+                "\\n\\n## Owner-configured additional instructions\\n" +
+                custom
+        }
+    }
 
     fun validationErrors(): List<String> {
         val s = normalized()
