@@ -43,6 +43,7 @@ class AutonomousAgent(
     private val knowledge: AgentKnowledge,
     /** Null = local-only mode: greeting, list, status, explicit read, offline explicit edits still work. */
     gateway: ModelGateway? = null,
+    systemPrompt: String = AgentModelProtocol.DEFAULT_SYSTEM,
     private val config: AutonomousAgentConfig = AutonomousAgentConfig(),
     private val research: DeepResearchProvider = DurableDeepResearchProvider(root.resolve(".coding-agent/research")),
     private val mutations: MutationCoordinator = MutationCoordinator(ProjectWorkspace(root))
@@ -53,6 +54,8 @@ class AutonomousAgent(
      */
     @Volatile
     private var gateway: ModelGateway? = gateway
+    @Volatile
+    private var activeSystemPrompt: String = systemPrompt
     // FIX: derive workspace from the shared MutationCoordinator instance so both always
     // reference the same ProjectWorkspace. The previous `ProjectWorkspace(root)` here
     // created a second, divergent instance that could silently drift from mutations.workspace.
@@ -116,6 +119,11 @@ class AutonomousAgent(
      */
     fun updateGateway(newGateway: ModelGateway?) {
         gateway = newGateway
+    }
+
+    /** Update additive owner instructions without discarding the current agent's durable workflow state. */
+    fun updateSystemPrompt(newSystemPrompt: String) {
+        activeSystemPrompt = newSystemPrompt.ifBlank { AgentModelProtocol.DEFAULT_SYSTEM }
     }
 
     private fun recordTask(task: AgentTask) {
@@ -352,7 +360,7 @@ class AutonomousAgent(
                 gateway = activeGateway,
                 request = {
                     ModelRequest(
-                        AgentModelProtocol.SYSTEM,
+                        activeSystemPrompt,
                         buildPrompt(normalized, intake, state.lastEvidence),
                         toolsThisTurn,
                         transcript.toList(),
