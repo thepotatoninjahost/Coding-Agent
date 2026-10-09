@@ -20,6 +20,8 @@ class AgentCommandPolicyTest {
         assertNotNull(AgentCommandPolicy.rejectionReason("wc --files0=paths.nul"))
         assertNotNull(AgentCommandPolicy.rejectionReason("rg --files-from paths.txt"))
         assertNotNull(AgentCommandPolicy.rejectionReason("rg --files-fr paths.txt"))
+        assertNotNull(AgentCommandPolicy.rejectionReason("rg --config-path .ripgreprc secret ."))
+        assertNotNull(AgentCommandPolicy.rejectionReason("rg --config-path=.ripgreprc secret ."))
         assertNotNull(AgentCommandPolicy.rejectionReason("ls app/src"))
         assertNotNull(AgentCommandPolicy.rejectionReason("ls -a"))
         assertNotNull(AgentCommandPolicy.rejectionReason("ls -A"))
