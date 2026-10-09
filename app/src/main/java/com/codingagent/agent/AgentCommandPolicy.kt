@@ -19,6 +19,9 @@ object AgentCommandPolicy {
         val command = raw.trim()
         if (command.isBlank()) return "Command is empty"
         if (command.length > 1_000) return "Command is too long"
+        if (command.contains('\\')) {
+            return "Backslash escaping is not allowed for model commands; use explicit project-relative paths"
+        }
         if (shellMetacharacters.containsMatchIn(command)) {
             return "Shell chaining, redirection, substitution, quotes, and control characters are not allowed for model commands"
         }
