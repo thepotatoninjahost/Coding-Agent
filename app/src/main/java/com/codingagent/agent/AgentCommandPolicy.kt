@@ -94,10 +94,12 @@ object AgentCommandPolicy {
             else -> emptyList()
         }
         if (executable == "rg" && tokens.any { token ->
-                token == "--pre" || token.startsWith("--pre=") ||
-                    token == "--hidden" || token == "--follow" || token == "-L" ||
-                    token == "--files-from" || token.startsWith("--files-from=") ||
-                    token.startsWith("--no-ignore") ||
+                val option = token.takeWhile { it != '=' }
+                val restrictedLongOptions = listOf("--pre", "--hidden", "--follow", "--files-from", "--no-ignore")
+                (option.startsWith("--") && restrictedLongOptions.any {
+                    it.startsWith(option) || option.startsWith(it)
+                }) ||
+                    token == "-L" ||
                     Regex("""^-u{1,3}$""").matches(token) ||
                     (token.startsWith("-") && !token.startsWith("--") && token.drop(1).contains('u'))
             }) {
