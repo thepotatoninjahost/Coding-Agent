@@ -128,10 +128,14 @@ object AgentCommandPolicy {
     }
 
     private fun validateFilesystemOperands(executable: String, tokens: List<String>, root: java.io.File): String? {
-        val operands = when (executable) {
-            "cat", "head", "tail", "wc", "file", "ls" -> tokens.drop(1).filterNot { it.startsWith("-") }
-            "grep", "rg" -> tokens.drop(1).filterNot { it.startsWith("-") }
-            else -> emptyList()
+        // Do not discard every dash-prefixed token: after "--", a name such as
+        // "-linked-secret" is a filename, not an option. Skipping it would bypass
+        // canonical-path and symlink checks for a valid "cat -- -linked-secret" command.
+        val optionTerminator = tokens.indexOf("--")
+        val operands = when {
+            executable !in setOf("cat", "head", "tail", "wc", "file", "ls", "grep", "rg") -> emptyList()
+            optionTerminator >= 0 -> tokens.drop(optionTerminator + 1)
+            else -> tokens.drop(1).filterNot { it.startsWith("-") }
         }
         if (executable == "rg" && tokens.any { token ->
                 val option = token.takeWhile { it != '=' }
