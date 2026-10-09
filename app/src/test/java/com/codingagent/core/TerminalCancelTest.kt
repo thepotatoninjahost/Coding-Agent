@@ -77,6 +77,18 @@ class TerminalCancelTest {
         assertEquals(130, entry.exitCode)
     }
 
+
+    @Test
+    fun agentToolsTerminalHonorsRequestedTimeout() {
+        val root = Files.createTempDirectory("term-tools-timeout").toFile()
+        val tools = AgentTools(ProjectWorkspace(root))
+
+        val entry = tools.terminal(listOf("sleep", "5"), timeoutSeconds = 1)
+
+        assertTrue("Requested timeout should stop the command", entry.timedOut)
+        assertTrue("Requested timeout should not wait for the full sleep", entry.durationMs < 4_000)
+    }
+
     @Test
     fun concurrentCommandsAreRejectedWithoutReplacingActiveProcess() {
         val root = Files.createTempDirectory("term-concurrent").toFile()
