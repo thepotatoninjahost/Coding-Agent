@@ -79,7 +79,9 @@ class LiveModuleStore(private val root: File) {
      */
     fun rollback(id: String): Boolean {
         if (!id.matches(SAFE_ID)) return false
-        val moduleDir = moduleRoot.resolve(id)
+        val moduleDir = runCatching {
+            com.codingagent.workspace.ProjectMetadataBoundary.resolve(root, ".coding-agent/live-modules/$id")
+        }.getOrNull() ?: return false
         if (!moduleDir.isDirectory) return false
         val moduleFile = moduleDir.resolve("module.json")
         if (!moduleFile.isFile) return false
@@ -90,7 +92,9 @@ class LiveModuleStore(private val root: File) {
     fun active(): LiveModule? {
         val id = activeFile.takeIf { it.isFile }?.readText()?.trim().orEmpty()
         if (!id.matches(SAFE_ID)) return null
-        val source = moduleRoot.resolve(id).resolve("module.json")
+        val source = runCatching {
+            com.codingagent.workspace.ProjectMetadataBoundary.resolve(root, ".coding-agent/live-modules/$id/module.json")
+        }.getOrNull() ?: return null
         if (!source.isFile) return null
         val parsed = runCatching { parse(source.readText()) }.getOrNull() ?: return null
         return LiveModule(id, parsed.kind, parsed.version, source.absolutePath, checksum(source.readText()), source.parentFile?.lastModified() ?: 0L)
