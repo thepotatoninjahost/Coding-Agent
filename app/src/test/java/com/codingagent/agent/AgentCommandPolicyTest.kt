@@ -24,6 +24,10 @@ class AgentCommandPolicyTest {
         assertNotNull(AgentCommandPolicy.rejectionReason("ls \\-a"))
         assertNotNull(AgentCommandPolicy.rejectionReason("ls --all"))
         assertNotNull(AgentCommandPolicy.rejectionReason("ls --recursive"))
+        // GNU long options accept unique abbreviations; protect those too.
+        assertNotNull(AgentCommandPolicy.rejectionReason("ls --rec"))
+        assertNotNull(AgentCommandPolicy.rejectionReason("ls --dere"))
+        assertNotNull(AgentCommandPolicy.rejectionReason("ls --almost"))
     }
 
     @Test
