@@ -148,6 +148,26 @@ class ProjectFileServiceBoundaryTest {
         assertFalse(outside.listFiles()?.isNotEmpty() == true)
     }
 
+
+    @Test
+    fun rejectsSymlinkedResearchStorageBeforeCreatingSessions() {
+        val root = Files.createTempDirectory("project-research-link").toFile()
+        val outside = Files.createTempDirectory("project-research-outside").toFile()
+        root.resolve(".coding-agent").mkdirs()
+        try {
+            Files.createSymbolicLink(root.toPath().resolve(".coding-agent/research"), outside.toPath())
+        } catch (_: Exception) {
+            assumeTrue("Symbolic links are required for this regression test", false)
+        }
+
+        assertRejected {
+            com.codingagent.research.DurableDeepResearchProvider(
+                root.resolve(".coding-agent/research")
+            )
+        }
+        assertFalse(outside.resolve("sessions").exists())
+    }
+
     private fun assertRejected(action: () -> Unit) {
         try {
             action()
