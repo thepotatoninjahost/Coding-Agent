@@ -145,8 +145,10 @@ class LiveModelStore(private val root: File) {
 
     fun active(): LiveModel? {
         val id = activeFile.takeIf { it.isFile }?.readText()?.trim().orEmpty()
-        if (id.isBlank()) return null
-        val directory = modelRoot.resolve(id)
+        if (!id.matches(SAFE_ID)) return null
+        val directory = runCatching {
+            com.codingagent.workspace.ProjectMetadataBoundary.resolve(root, ".coding-agent/models/$id")
+        }.getOrNull() ?: return null
         if (!directory.isDirectory) return null
         val fields = history().firstOrNull { it.id == id } ?: return null
         val payload = directory.listFiles()
@@ -175,6 +177,10 @@ class LiveModelStore(private val root: File) {
     fun modelBytes(model: LiveModel): ByteArray =
         File(model.sourcePath).walkTopDown().filter { it.isFile }.sortedBy { it.absolutePath }
             .fold(ByteArray(0)) { acc, file -> acc + file.readBytes() }
+
+    companion object {
+        private val SAFE_ID = Regex("""[A-Za-z0-9_-]+""")
+    }
 
     private fun checksum(file: File): String = file.inputStream().use { input ->
         val digest = MessageDigest.getInstance("SHA-256")
