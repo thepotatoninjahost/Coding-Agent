@@ -39,11 +39,12 @@ object PendingProposalStore {
                 if (!ProposalIntegrity.verify(payload, mac)) return emptyList()
                 parsePayload(payload)
             } else {
-                // One-time migration from the pre-integrity format. Once loaded,
-                // immediately rewrite it in the authenticated envelope.
-                val legacy = parsePayload(text)
-                if (legacy.isNotEmpty()) save(root, legacy)
-                legacy
+                // Never authenticate legacy proposal state. Older formats had no
+                // integrity envelope, so imported or modified JSON could otherwise
+                // be re-signed as trusted approval state during migration. Returning
+                // no proposals makes the coordinator reconcile any matching durable
+                // waiting job into recovery-required instead of applying untrusted data.
+                emptyList()
             }
         }.getOrDefault(emptyList())
     }
