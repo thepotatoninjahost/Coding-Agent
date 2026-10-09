@@ -1,8 +1,6 @@
 package com.codingagent.intake
 
 import java.io.File
-import java.util.Properties
-import org.json.JSONObject
 
 /**
  * ONE JOB: Free text → typed intake (intent, targets, operations).
@@ -32,11 +30,7 @@ data class TaskIntake(
     val verificationNote: String? = null
 )
 
-class TaskIntakeParser(
-    private val root: File,
-    private val executableAvailable: (String) -> Boolean = ::isExecutableAvailable,
-    private val androidSdkAvailable: (File) -> Boolean = ::hasAndroidSdk
-) {
+class TaskIntakeParser(private val root: File) {
     private val interpreter = GoalInterpreter(root)
 
     fun parse(request: String): TaskIntake {
@@ -90,78 +84,13 @@ class TaskIntakeParser(
     private fun detectChecks(request: String): VerificationPlan {
         if (!explicitlyRequestsVerification(request)) return VerificationPlan(emptyList())
 
-        return when {
-            root.resolve("gradlew").isFile && root.resolve("app/build.gradle.kts").isFile -> {
-                if (!root.resolve("gradlew").canRead() ||
-                    !executableAvailable("sh") ||
-                    !executableAvailable("java")
-                ) {
-                    VerificationPlan(
-                        emptyList(),
-                        "Requested build/test checks were not run because the shell or Java runtime is unavailable."
-                    )
-                } else if (!androidSdkAvailable(root)) {
-                    VerificationPlan(
-                        emptyList(),
-                        "Requested Android build/test checks were not run because a usable Android SDK was not found."
-                    )
-                } else {
-                    VerificationPlan(
-                        listOf(
-                            listOf("sh", "./gradlew", ":app:compileDebugKotlin", ":app:testDebugUnitTest", "--no-daemon", "--console=plain"),
-                            listOf("sh", "./gradlew", ":app:lintDebug", "--no-daemon", "--console=plain"),
-                            listOf("sh", "./gradlew", ":app:assembleDebug", "--no-daemon", "--console=plain")
-                        )
-                    )
-                }
-            }
-            root.resolve("gradlew").isFile -> {
-                if (root.resolve("gradlew").canRead() && executableAvailable("sh") && executableAvailable("java")) {
-                    VerificationPlan(listOf(listOf("sh", "./gradlew", "test", "--no-daemon")))
-                } else {
-                    VerificationPlan(
-                        emptyList(),
-                        "Requested Gradle checks were not run because the wrapper, shell, or Java runtime is unavailable."
-                    )
-                }
-            }
-            root.resolve("package.json").isFile -> {
-                if (!executableAvailable("npm")) {
-                    VerificationPlan(emptyList(), "Requested Node.js tests were not run because npm is unavailable.")
-                } else {
-                    val packageJson = runCatching {
-                        JSONObject(root.resolve("package.json").readText(Charsets.UTF_8))
-                    }.getOrNull()
-                    val scripts = packageJson?.optJSONObject("scripts")
-                    val testScript = scripts?.optString("test")?.trim().orEmpty()
-                    when {
-                        packageJson == null -> VerificationPlan(
-                            emptyList(),
-                            "Requested Node.js tests were not run because package.json could not be parsed."
-                        )
-                        testScript.isEmpty() || scripts?.isNull("test") != false -> VerificationPlan(
-                            emptyList(),
-                            "Requested Node.js tests were not run because package.json does not define a test script."
-                        )
-                        else -> VerificationPlan(listOf(listOf("npm", "test")))
-                    }
-                }
-            }
-            root.resolve("pyproject.toml").isFile || root.resolve("pytest.ini").isFile -> {
-                when {
-                    executableAvailable("python") -> VerificationPlan(listOf(listOf("python", "-m", "pytest")))
-                    executableAvailable("python3") -> VerificationPlan(listOf(listOf("python3", "-m", "pytest")))
-                    else -> VerificationPlan(emptyList(), "Requested Python tests were not run because Python is unavailable.")
-                }
-            }
-            root.resolve("Makefile").isFile ->
-                if (executableAvailable("make")) {
-                    VerificationPlan(listOf(listOf("make", "test")))
-                } else {
-                    VerificationPlan(emptyList(), "Requested Make checks were not run because make is unavailable.")
-                }
-            else -> VerificationPlan(emptyList(), "Requested verification was not run because no supported project test runner was detected.")
-        }
+        // Imported build/test configuration is executable project-controlled code.
+        // The autonomous path must not run wrappers, package scripts, pytest, or Makefiles.
+        // The owner can review those files and run checks explicitly in the owner-controlled terminal.
+        return VerificationPlan(
+            commands = emptyList(),
+            note = "Requested project build/test checks were not run automatically because imported wrappers, build files, package scripts, and test suites can execute arbitrary code. Review the project first, then run checks explicitly in the owner-controlled Terminal."
+        )
     }
 
     private fun explicitlyRequestsVerification(request: String): Boolean {
@@ -175,33 +104,3 @@ class TaskIntakeParser(
     }
 }
 
-private fun isExecutableAvailable(name: String): Boolean {
-    val path = System.getenv("PATH").orEmpty()
-    return path.split(File.pathSeparator).filter { it.isNotBlank() }.any { directory ->
-        val candidate = File(directory, name)
-        candidate.isFile && candidate.canExecute()
-    }
-}
-
-private fun hasAndroidSdk(root: File): Boolean {
-    val candidates = linkedSetOf<String>()
-    System.getenv("ANDROID_HOME")?.takeIf { it.isNotBlank() }?.let(candidates::add)
-    System.getenv("ANDROID_SDK_ROOT")?.takeIf { it.isNotBlank() }?.let(candidates::add)
-
-    val localProperties = root.resolve("local.properties")
-    if (localProperties.isFile && localProperties.canRead()) {
-        runCatching {
-            val properties = Properties()
-            localProperties.inputStream().use { properties.load(it) }
-            properties.getProperty("sdk.dir")?.takeIf { it.isNotBlank() }?.let { raw ->
-                val path = File(raw)
-                candidates += if (path.isAbsolute) path.path else root.resolve(path).path
-            }
-        }
-    }
-
-    return candidates.any { raw ->
-        val sdk = File(raw)
-        sdk.isDirectory && sdk.resolve("platforms").isDirectory && sdk.resolve("build-tools").isDirectory
-    }
-}
