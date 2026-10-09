@@ -40,54 +40,27 @@ class TaskIntakeTest {
         assertTrue(intake.contract.ambiguity.isEmpty())
     }
 
-    @Test fun detectsGradleVerification() {
-        val root = Files.createTempDirectory("task-intake").toFile()
+    @Test fun gradleVerificationIsNotExecutedAutomatically() {
+        val root = Files.createTempDirectory("task-intake-gradle-no-auto").toFile()
         root.resolve("gradlew").writeText("#!/bin/sh\n")
+        root.resolve("app").mkdirs()
+        root.resolve("app/build.gradle.kts").writeText("plugins {}\n")
+
         val intake = TaskIntakeParser(root).parse("run the tests")
+
         assertEquals(TaskIntent.TEST, intake.intent)
-        assertEquals(listOf("sh", "./gradlew", "test", "--no-daemon"), intake.verificationCommands.single())
-    }
-
-    @Test fun requestedVerificationIsReportedAsNotRunWhenToolchainIsUnavailable() {
-        val root = Files.createTempDirectory("task-intake-missing-toolchain").toFile()
-        root.resolve("gradlew").writeText("#!/bin/sh\n")
-
-        val intake = TaskIntakeParser(
-            root,
-            executableAvailable = { false },
-            androidSdkAvailable = { false }
-        ).parse("run the tests")
-
         assertTrue(intake.verificationCommands.isEmpty())
-        assertTrue(intake.verificationNote.orEmpty().contains("were not run"))
+        assertTrue(intake.verificationNote.orEmpty().contains("not run automatically"))
     }
 
-    @Test fun npmVerificationIsReportedAsNotRunWhenTestScriptIsMissing() {
-        val root = Files.createTempDirectory("task-intake-npm-no-test").toFile()
-        root.resolve("package.json").writeText("""{"name":"no-tests","scripts":{"build":"node build.js"}}""")
-
-        val intake = TaskIntakeParser(
-            root,
-            executableAvailable = { it == "npm" },
-            androidSdkAvailable = { false }
-        ).parse("run the tests")
-
-        assertTrue(intake.verificationCommands.isEmpty())
-        assertTrue(intake.verificationNote.orEmpty().contains("does not define a test script"))
-    }
-
-    @Test fun npmVerificationRunsOnlyWhenTestScriptIsDefined() {
-        val root = Files.createTempDirectory("task-intake-npm-test").toFile()
+    @Test fun npmTestScriptIsNotExecutedAutomatically() {
+        val root = Files.createTempDirectory("task-intake-npm-no-auto").toFile()
         root.resolve("package.json").writeText("""{"name":"with-tests","scripts":{"test":"node test.js"}}""")
 
-        val intake = TaskIntakeParser(
-            root,
-            executableAvailable = { it == "npm" },
-            androidSdkAvailable = { false }
-        ).parse("run the tests")
+        val intake = TaskIntakeParser(root).parse("run the tests")
 
-        assertEquals(listOf("npm", "test"), intake.verificationCommands.single())
-        assertEquals(null, intake.verificationNote)
+        assertTrue(intake.verificationCommands.isEmpty())
+        assertTrue(intake.verificationNote.orEmpty().contains("not run automatically"))
     }
 
     @Test fun ordinaryCodeChangeDoesNotAutoExecuteProjectBuildScripts() {
