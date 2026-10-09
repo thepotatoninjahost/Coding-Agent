@@ -740,13 +740,10 @@ class MutationCoordinator(
         val job = try {
             OpenJobStore.load(root)
         } catch (error: Exception) {
-            pendingReconciliationFailed = true
-            runCatching {
-                OpenJobStore.markRecoveryRequired(
-                    root,
-                    "Durable open-job state was unreadable during apply-state reconciliation: ${error.message.orEmpty()}"
-                )
-            }
+            requireRecoveryDuringReconciliation(
+                root,
+                "Durable open-job state was unreadable during apply-state reconciliation: ${error.message.orEmpty()}"
+            )
             return
         } ?: return
         val proposalId = job.proposalId ?: job.appliedProposalId ?: return
@@ -754,35 +751,68 @@ class MutationCoordinator(
 
         when (job.status) {
             "applying" -> when (diskState(proposal.changeSet)) {
-                DiskState.BEFORE -> runCatching {
-                    OpenJobStore.markWaiting(
-                        root,
-                        proposal.id,
-                        proposal.changeSet.changes.map { it.path }.distinct(),
-                        proposal.request
-                    )
+                DiskState.BEFORE -> {
+                    runCatching {
+                        OpenJobStore.markWaiting(
+                            root,
+                            proposal.id,
+                            proposal.changeSet.changes.map { it.path }.distinct(),
+                            proposal.request
+                        )
+                    }.onFailure {
+                        requireRecoveryDuringReconciliation(
+                            root,
+                            "Interrupted mutation files were unchanged, but restoring waiting-approval state failed: ${it.message.orEmpty()}"
+                        )
+                    }
                 }
                 DiskState.AFTER -> {
-                    runCatching { OpenJobStore.markApplied(root, proposal.id) }
-                        .onSuccess {
-                            pending.remove(proposal.id)
-                            if (!persist()) pending[proposal.id] = proposal
+                    val markedApplied = runCatching { OpenJobStore.markApplied(root, proposal.id) }
+                    if (markedApplied.isFailure) {
+                        requireRecoveryDuringReconciliation(
+                            root,
+                            "Interrupted mutation files match the applied checksums, but recording applied state failed: ${markedApplied.exceptionOrNull()?.message.orEmpty()}"
+                        )
+                    } else {
+                        pending.remove(proposal.id)
+                        if (!persist()) {
+                            pending[proposal.id] = proposal
+                            requireRecoveryDuringReconciliation(
+                                root,
+                                "Interrupted mutation was recorded as applied, but clearing its pending proposal failed"
+                            )
                         }
+                    }
                 }
-                DiskState.MIXED -> runCatching {
-                    OpenJobStore.markRecoveryRequired(root, "A mutation transaction was interrupted with a partially applied file set")
-                }
+                DiskState.MIXED -> requireRecoveryDuringReconciliation(
+                    root,
+                    "A mutation transaction was interrupted with a partially applied file set"
+                )
             }
             "applied" -> when (diskState(proposal.changeSet)) {
                 DiskState.AFTER -> {
                     pending.remove(proposal.id)
-                    if (!persist()) pending[proposal.id] = proposal
+                    if (!persist()) {
+                        pending[proposal.id] = proposal
+                        requireRecoveryDuringReconciliation(
+                            root,
+                            "The applied mutation is intact, but clearing its pending proposal failed"
+                        )
+                    }
                 }
-                DiskState.BEFORE, DiskState.MIXED -> runCatching {
-                    OpenJobStore.markRecoveryRequired(root, "The job is marked applied but its recorded proposal does not match the on-disk checksums")
-                }
+                DiskState.BEFORE, DiskState.MIXED -> requireRecoveryDuringReconciliation(
+                    root,
+                    "The job is marked applied but its recorded proposal does not match the on-disk checksums"
+                )
             }
         }
+    }
+
+    private fun requireRecoveryDuringReconciliation(root: File, reason: String) {
+        // Set the in-memory gate first. Even if the filesystem also refuses to persist the
+        // recovery marker, this coordinator instance must never accept another mutation.
+        pendingReconciliationFailed = true
+        runCatching { OpenJobStore.markRecoveryRequired(root, reason.take(600)) }
     }
 
     private enum class DiskState { BEFORE, AFTER, MIXED }
