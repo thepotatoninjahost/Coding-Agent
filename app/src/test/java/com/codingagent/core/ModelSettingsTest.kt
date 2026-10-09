@@ -82,6 +82,18 @@ class ModelSettingsTest {
     }
 
     @Test
+    fun fallbackModelsAreOrderedDeduplicatedAndPersisted() {
+        val settings = ModelSettings(
+            modelName = "primary",
+            rotationModels = "fallback-a; fallback-b\\nfallback-a"
+        )
+        val restored = ModelSettings.fromJson(ModelSettings.toJson(settings))
+
+        assertEquals("fallback-a; fallback-b\\nfallback-a", restored.rotationModels)
+        assertEquals(listOf("primary", "fallback-a", "fallback-b"), restored.allModelIds())
+    }
+
+    @Test
     fun ownerSystemPromptIsAdditiveAndSurvivesSettingsRoundTrip() {
         val custom = "Prefer small functions and explain test coverage."
         val settings = ModelSettings(systemPrompt = custom)
