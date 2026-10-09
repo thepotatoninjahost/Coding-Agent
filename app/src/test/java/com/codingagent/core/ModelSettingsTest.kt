@@ -89,8 +89,9 @@ class ModelSettingsTest {
 
         assertEquals(custom, restored.systemPrompt)
         assertTrue(restored.effectiveSystemPrompt().contains(com.codingagent.model.AgentModelProtocol.DEFAULT_SYSTEM))
-        assertTrue(restored.effectiveSystemPrompt().contains("Owner-configured additional instructions"))
+        assertTrue(restored.effectiveSystemPrompt().contains("\n\n## Owner-configured additional instructions\n"))
         assertTrue(restored.effectiveSystemPrompt().contains(custom))
+        assertFalse(restored.effectiveSystemPrompt().contains("\\n## Owner-configured additional instructions"))
     }
 
     @Test
