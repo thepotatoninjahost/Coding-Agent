@@ -147,7 +147,8 @@ object OpenJobStore {
         bind(root)
         val current = load(root)
         check(
-            current?.status !in setOf("recovery-required", "waiting-approval", "applying") ||
+            current == null ||
+                current.status !in setOf("recovery-required", "waiting-approval", "applying") ||
                 (current.status == "applying" && current.proposalId == proposalId)
         ) {
             "Cannot replace unresolved durable mutation state with a different waiting proposal"
