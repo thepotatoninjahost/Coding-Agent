@@ -18,7 +18,7 @@ class AgentModelProtocolTest {
         assertTrue(prompt.contains("Do not use placeholder or stub implementations"))
         assertTrue(prompt.contains("Never claim work is complete or verified unless the evidence supports that claim"))
         assertTrue(prompt.contains("verify performs a static unfinished-work-marker scan"))
-        assertTrue(prompt.contains("The model cannot approve its own proposal"))
+        assertTrue(prompt.contains("the model cannot approve its own proposal"))
     }
 
     @Test
