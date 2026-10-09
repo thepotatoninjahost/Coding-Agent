@@ -54,7 +54,9 @@ object AgentOfflineStager {
                 is SynthesisResult.Ready ->
                     synthesis.proposal.operations to "Offline synthesis: ${synthesis.proposal.rationale}"
                 is SynthesisResult.NeedsInput -> {
-                    if (gateway != null && !onlyBoilerplate) return null
+                    // A configured model gets the opportunity to satisfy the request even
+                    // when the workspace is empty or contains only a README.
+                    if (gateway != null) return null
                     val question = synthesis.question +
                         " Name the file to create (example: src/Agent.kt) or the exact replace."
                     val task = AgentTask(
