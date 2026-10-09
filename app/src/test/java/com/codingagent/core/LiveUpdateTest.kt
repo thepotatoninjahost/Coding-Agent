@@ -208,7 +208,7 @@ class LiveUpdateTest {
         }
 
         moduleRoot.resolve("active-module").writeText("linked-module")
-        assertEquals(null, store.active())
+        assertTrue(store.active() == null)
         assertEquals(false, store.rollback("linked-module"))
     }
 
