@@ -146,6 +146,12 @@ object OpenJobStore {
     fun markWaiting(root: File, proposalId: String, paths: List<String>, goal: String?) {
         bind(root)
         val current = load(root)
+        check(
+            current?.status !in setOf("recovery-required", "waiting-approval", "applying") ||
+                (current.status == "applying" && current.proposalId == proposalId)
+        ) {
+            "Cannot replace unresolved durable mutation state with a different waiting proposal"
+        }
         val job = OpenJob(
             id = current?.id ?: UUID.randomUUID().toString(),
             goal = goal?.takeIf { it.isNotBlank() } ?: current?.goal ?: "",
@@ -161,14 +167,15 @@ object OpenJobStore {
     fun markApplying(root: File, proposalId: String, paths: List<String>, goal: String?) {
         bind(root)
         val current = load(root)
+            ?: error("Cannot begin mutation apply: durable waiting-approval state is missing")
+        check(current.status == "waiting-approval" && current.proposalId == proposalId) {
+            "Cannot apply a proposal that is not the currently authorized waiting proposal"
+        }
         save(
             root,
-            OpenJob(
-                id = current?.id ?: UUID.randomUUID().toString(),
-                goal = goal?.takeIf { it.isNotBlank() } ?: current?.goal ?: "",
+            current.copy(
                 status = "applying",
-                proposalId = proposalId,
-                paths = paths.ifEmpty { current?.paths ?: emptyList() },
+                paths = paths.ifEmpty { current.paths },
                 updatedAt = System.currentTimeMillis()
             )
         )
@@ -179,13 +186,16 @@ object OpenJobStore {
         bind(root)
         val current = load(root)
             ?: error("Cannot mark mutation applied: durable open-job state is missing")
+        check(current.status == "applying" && !proposalId.isNullOrBlank() && current.proposalId == proposalId) {
+            "Cannot mark a mutation applied unless the matching proposal is durably applying"
+        }
         save(
             root,
             current.copy(
                 status = "applied",
                 proposalId = null,
                 updatedAt = System.currentTimeMillis(),
-                appliedProposalId = proposalId ?: current.appliedProposalId
+                appliedProposalId = proposalId
             )
         )
     }
