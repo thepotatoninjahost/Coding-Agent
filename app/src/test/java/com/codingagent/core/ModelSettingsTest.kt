@@ -82,6 +82,18 @@ class ModelSettingsTest {
     }
 
     @Test
+    fun ownerSystemPromptIsAdditiveAndSurvivesSettingsRoundTrip() {
+        val custom = "Prefer small functions and explain test coverage."
+        val settings = ModelSettings(systemPrompt = custom)
+        val restored = ModelSettings.fromJson(ModelSettings.toJson(settings))
+
+        assertEquals(custom, restored.systemPrompt)
+        assertTrue(restored.effectiveSystemPrompt().contains(com.codingagent.model.AgentModelProtocol.DEFAULT_SYSTEM))
+        assertTrue(restored.effectiveSystemPrompt().contains("Owner-configured additional instructions"))
+        assertTrue(restored.effectiveSystemPrompt().contains(custom))
+    }
+
+    @Test
     fun corruptJsonFallsBackToEmptyRemoteDefaults() {
         val defaults = ModelSettings.fromJson("{not-json")
         assertEquals(ModelBackend.REMOTE, defaults.backend)
