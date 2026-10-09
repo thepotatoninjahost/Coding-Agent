@@ -8,7 +8,7 @@ import java.nio.file.Files
 
 class AgentCommandPolicyTest {
     @Test
-    fun allowsProjectInspectionCommands() {
+    fun enforcesSafeProjectInspectionCommands() {
         assertNotNull(AgentCommandPolicy.rejectionReason("git status --short"))
         assertNotNull(AgentCommandPolicy.rejectionReason("find app -type f"))
         assertNotNull(AgentCommandPolicy.rejectionReason("find . -type f"))
