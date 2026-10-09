@@ -85,11 +85,11 @@ class ModelSettingsTest {
     fun fallbackModelsAreOrderedDeduplicatedAndPersisted() {
         val settings = ModelSettings(
             modelName = "primary",
-            rotationModels = "fallback-a; fallback-b\\nfallback-a"
+            rotationModels = "fallback-a; fallback-b\nfallback-a"
         )
         val restored = ModelSettings.fromJson(ModelSettings.toJson(settings))
 
-        assertEquals("fallback-a; fallback-b\\nfallback-a", restored.rotationModels)
+        assertEquals("fallback-a; fallback-b\nfallback-a", restored.rotationModels)
         assertEquals(listOf("primary", "fallback-a", "fallback-b"), restored.allModelIds())
     }
 
