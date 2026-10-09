@@ -8,6 +8,26 @@ import java.nio.file.Files
  * in-root filesystem path, not a symbolic link into another location.
  */
 internal object ProjectMetadataBoundary {
+
+    fun normalizePath(path: File): File {
+        val absolute = path.absoluteFile
+        var ancestor: File? = absolute
+        while (ancestor != null) {
+            if (ancestor.name.equals(".coding-agent", ignoreCase = true)) {
+                val projectRoot = ancestor.parentFile
+                    ?: throw IllegalArgumentException("Private metadata path has no project root")
+                val relative = projectRoot.toPath().relativize(absolute.toPath())
+                    .toString().replace('\\\\', '/')
+                return resolve(projectRoot, relative)
+            }
+            ancestor = ancestor.parentFile
+        }
+        require(!Files.isSymbolicLink(absolute.toPath())) {
+            "Private state directory may not be a symbolic link: $path"
+        }
+        return absolute.canonicalFile
+    }
+
     fun resolve(root: File, relativePath: String): File {
         require(relativePath.isNotBlank() && !relativePath.startsWith('/') && !relativePath.contains('\\')) {
             "Unsafe private metadata path"
