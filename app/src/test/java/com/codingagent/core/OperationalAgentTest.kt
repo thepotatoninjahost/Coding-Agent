@@ -40,7 +40,7 @@ class OperationalAgentTest {
         val task = com.codingagent.agent.AgentTaskBuilders.failed(
             id = "failed-verification",
             request = "run tests",
-            plan = com.codingagent.workspace.AgentPlan(emptyList()),
+            plan = com.codingagent.workspace.AgentPlan("run tests", emptyList(), emptyList()),
             message = "Verification could not run",
             changes = emptyList()
         )
