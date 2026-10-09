@@ -90,6 +90,22 @@ class TerminalCancelTest {
     }
 
     @Test
+    fun agentToolsArgumentListPreservesArgumentBoundariesAndDoesNotInterpretShellMetacharacters() {
+        val root = Files.createTempDirectory("term-args").toFile()
+        val tools = AgentTools(ProjectWorkspace(root))
+        val payload = "literal value; touch injected-file"
+
+        val entry = tools.terminal(
+            listOf("sh", "-c", "printf '%s' \"$1\"", "sh", payload),
+            timeoutSeconds = 5
+        )
+
+        assertEquals(0, entry.exitCode)
+        assertEquals(payload, entry.stdout)
+        assertTrue("Argument text must not be interpreted as shell syntax", !root.resolve("injected-file").exists())
+    }
+
+    @Test
     fun concurrentCommandsAreRejectedWithoutReplacingActiveProcess() {
         val root = Files.createTempDirectory("term-concurrent").toFile()
         val runner = CommandRunner(root)
