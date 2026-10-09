@@ -21,9 +21,7 @@ sealed class RollbackResult {
  */
 class ProjectWorkspace(private val root: File) {
     private val indexer = ProjectIndexer()
-    private val metadataDir = root.resolve(".coding-agent")
-    private val transactionDir = metadataDir.resolve("transactions")
-    private val lessonsFile = metadataDir.resolve("lessons.tsv")
+    private val transactionDir = root.resolve(".coding-agent/transactions")
     private val terminalSession = TerminalSession(root)
 
     init {
@@ -367,6 +365,7 @@ class ProjectWorkspace(private val root: File) {
         return if (!file.isFile) emptyList() else file.readLines().mapNotNull { line ->
         val parts = line.split('\t', limit = 4)
         if (parts.size == 4) Lesson(parts[1], parts[2], parts[3], Instant.parse(parts[0]).toEpochMilli()) else null
+        }
     }
 
     private fun sanitize(value: String): String = value.replace('\t', ' ').replace('\n', ' ').trim()
