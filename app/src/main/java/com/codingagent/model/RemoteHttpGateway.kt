@@ -10,7 +10,7 @@ import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 
 /**
- * ONE JOB: HTTP chat-completions-compatible /chat/completions.
+ * ONE JOB: HTTP OpenAI-compatible /chat/completions.
  */
 class RemoteHttpGateway(
     private val endpoint: String,
@@ -59,7 +59,7 @@ class RemoteHttpGateway(
     }
 
     /**
-     * Reconstructs a single chat-completions-style message from Server-Sent-Events deltas by
+     * Reconstructs a single OpenAI-style chat message from Server-Sent-Events deltas by
      * accumulating text content and tool-call arguments (which arrive split across many
      * chunks, keyed by index) into one merged JSONObject, then reuses the exact same
      * responseFromChatMessage() path that non-streaming responses already go through.
