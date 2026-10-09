@@ -9,7 +9,7 @@ import com.codingagent.agent.ApprovalRecord
  * ONE JOB: Write pending dual-approval proposals to disk so Review survives process death.
  */
 object PendingProposalStore {
-    fun file(root: File): File = File(root, ".coding-agent/pending-proposals.json")
+    fun file(root: File): File = ProjectMetadataBoundary.resolve(root, ".coding-agent/pending-proposals.json")
 
     @Synchronized
     fun save(root: File, proposals: List<PendingChangeProposal>) {
