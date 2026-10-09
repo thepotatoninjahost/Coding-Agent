@@ -576,11 +576,7 @@ private val GENERATED_PROJECT_IMPORT_DIRECTORIES = setOf(
     "build", "dist", "out", "target", "node_modules", ".gradle", ".idea", ".kotlin"
 )
 
-internal fun isReservedProjectImportEntry(
-    relativePath: String,
-    name: String,
-    isDirectory: Boolean = true
-): Boolean {
+internal fun isReservedProjectImportEntry(name: String, isDirectory: Boolean = true): Boolean {
     // Never import Coding Agent's private state or repository metadata, including nested
     // occurrences. Generated dependency/build trees are excluded at every depth to keep
     // imports bounded and avoid indexing artifacts as source.
@@ -626,7 +622,7 @@ internal fun copyDocumentTree(
         val childRelativePath = if (relativePath.isEmpty()) name else "$relativePath/$name"
         // This namespace belongs to Coding Agent itself. Imported content must never
         // supply durable jobs, pending approvals, transaction journals, or research state.
-        if (isReservedProjectImportEntry(relativePath, name, child.isDirectory)) continue
+        if (isReservedProjectImportEntry(name, child.isDirectory)) continue
         val target = destination.resolve(name).canonicalFile
         require(target.toPath().startsWith(canonicalRoot)) { "Project entry escapes the import destination" }
         budget.files += 1
