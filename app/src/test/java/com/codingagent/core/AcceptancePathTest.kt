@@ -853,4 +853,30 @@ class AcceptancePathTest {
             names
         )
     }
+
+    @Test
+    fun unauthenticatedLegacyProposalCannotBeResignedAndMatchingJobRequiresRecovery() {
+        val root = Files.createTempDirectory("accept-legacy-pending").toFile()
+        root.resolve("Main.kt").writeText("fun main() = 1\\n")
+        val coordinator = MutationCoordinator(ProjectWorkspace(root))
+        val proposed = coordinator.propose(
+            "reject unauthenticated legacy state",
+            listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\\n", "fun main() = 2\\n"))
+        ) as MutationProposeResult.Proposed
+
+        val pendingFile = PendingProposalStore.file(root)
+        val authenticatedEnvelope = JSONObject(pendingFile.readText())
+        val legacyPayload = authenticatedEnvelope.getString("payload")
+        // Simulate an old/imported raw JSON proposal that has no authenticated envelope.
+        pendingFile.writeText(legacyPayload)
+
+        assertTrue(PendingProposalStore.load(root).isEmpty())
+        assertEquals("Legacy input must not be silently re-signed", legacyPayload, pendingFile.readText())
+
+        val restarted = MutationCoordinator(ProjectWorkspace(root))
+        assertTrue(restarted.pending().isEmpty())
+        val durableJob = OpenJobStore.load(root)
+        assertEquals("recovery-required", durableJob?.status)
+        assertTrue(durableJob?.recoveryReason.orEmpty().contains("pending proposal", ignoreCase = true))
+    }
 }
