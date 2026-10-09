@@ -116,6 +116,38 @@ class ProjectFileServiceBoundaryTest {
         assertTrue(workspace.search("PRIVATE_OUTSIDE_MARKER").isEmpty())
     }
 
+
+    @Test
+    fun rejectsSymlinkedPrivateMetadataDirectoriesBeforeWritingOutsideProject() {
+        val root = Files.createTempDirectory("project-private-metadata-link").toFile()
+        val outside = Files.createTempDirectory("project-private-metadata-outside").toFile()
+        try {
+            Files.createSymbolicLink(root.toPath().resolve(".coding-agent"), outside.toPath())
+        } catch (_: Exception) {
+            assumeTrue("Symbolic links are required for this regression test", false)
+        }
+
+        assertRejected { ProjectWorkspace(root) }
+        assertRejected { OpenJobStore.openOrKeep(root, "must not write through metadata symlink") }
+        assertFalse(outside.resolve("transactions").exists())
+        assertFalse(outside.resolve("open-job.json").exists())
+    }
+
+    @Test
+    fun rejectsSymlinkedTransactionDirectory() {
+        val root = Files.createTempDirectory("project-transaction-link").toFile()
+        val outside = Files.createTempDirectory("project-transaction-outside").toFile()
+        root.resolve(".coding-agent").mkdirs()
+        try {
+            Files.createSymbolicLink(root.toPath().resolve(".coding-agent/transactions"), outside.toPath())
+        } catch (_: Exception) {
+            assumeTrue("Symbolic links are required for this regression test", false)
+        }
+
+        assertRejected { ProjectWorkspace(root) }
+        assertFalse(outside.listFiles()?.isNotEmpty() == true)
+    }
+
     private fun assertRejected(action: () -> Unit) {
         try {
             action()
