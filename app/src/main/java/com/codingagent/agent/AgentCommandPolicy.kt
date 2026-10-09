@@ -56,7 +56,7 @@ object AgentCommandPolicy {
                 token == "--dereference" || token == "--dereference-command-line" ||
                 token == "--dereference-command-line-symlink-to-dir" ||
                 (token.startsWith("-") && !token.startsWith("--") &&
-                    token.drop(1).any { it == 'a' || it == 'A' || it == 'R' || it == 'L' || it == 'H' })
+                    token.drop(1).any { it == 'a' || it == 'A' || it == 'f' || it == 'R' || it == 'L' || it == 'H' })
         }
         return if (exposesPrivateMetadata) {
             "ls options that reveal hidden metadata, recurse into directories, or dereference symlinks are not allowed; use the project file-list tools"
@@ -80,8 +80,10 @@ object AgentCommandPolicy {
         }
         if (executable == "grep" && tokens.any { token ->
                 token == "--recursive" || token == "--dereference-recursive" ||
+                    token == "--directories" || token.startsWith("--directories=") ||
+                    token == "-d" ||
                     (token.startsWith("-") && !token.startsWith("--") &&
-                        token.drop(1).any { it == 'r' || it == 'R' })
+                        token.drop(1).any { it == 'd' || it == 'r' || it == 'R' })
             }) {
             return "Recursive grep can expose private agent metadata and is not allowed for model commands; use explicit project-relative file paths"
         }
