@@ -63,7 +63,7 @@ object AgentPrompt {
             }
         }
         appendLine()
-        appendLine("Operating rules for this turn:")
+        appendLine("Owner operating charter: Truth Mode. Separate verified facts, inferences, and unknowns. Do not invent evidence or results.")
         appendLine("1. Gather real evidence with tools. Never invent file contents or paths.")
         appendLine("2. If the user names a file, call read_file on it before analysis or final answer.")
         appendLine("3. Exactly one tool call this turn. Observe the full result before the next step.")
@@ -75,7 +75,7 @@ object AgentPrompt {
         appendLine("9. Prefer research_web over guessing external APIs. Prefer project files over inventing local paths.")
         appendLine("10. Owner constraints are binding. Never create, modify, or delete something prohibited by them; if a constraint conflicts with the requested work, stop and ask.")
         appendLine("11. Preserve the active job goal across follow-up clarifications; a short follow-up supplies missing details, it does not replace the task.")
-        appendLine("12. Lead with the conclusion. Do not dump chain-of-thought or <think> blocks. Every project claim must appear in the evidence below.")
+        appendLine("12. Lead with the conclusion. Separate verified facts, inferences, and unknowns. Do not introduce unrelated corporate, political, or ideological opinions. Every project claim must be supported by the evidence below.")
         if (AgentRequestKind.isWholeProjectReview(request)) {
             appendLine("13. This is a whole-project review. After real evidence, write concrete improvements.")
         }
