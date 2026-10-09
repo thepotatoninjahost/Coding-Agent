@@ -168,6 +168,34 @@ class ProjectFileServiceBoundaryTest {
         assertFalse(outside.resolve("sessions").exists())
     }
 
+
+    @Test
+    fun atomicRecoveryRejectsSymlinkedBackupAndPendingFiles() {
+        val root = Files.createTempDirectory("atomic-metadata-link").toFile()
+        val outside = Files.createTempDirectory("atomic-metadata-outside").toFile()
+        root.resolve(".coding-agent").mkdirs()
+        val secret = outside.resolve("secret.txt").apply { writeText("outside data") }
+
+        for (suffix in listOf(".bak", ".new")) {
+            val link = root.resolve(".coding-agent/open-job.json$suffix")
+            try {
+                Files.createSymbolicLink(link.toPath(), secret.toPath())
+            } catch (_: Exception) {
+                assumeTrue("Symbolic links are required for this regression test", false)
+            }
+
+            try {
+                OpenJobStore.load(root)
+                fail("Atomic recovery must reject symlinked $suffix files")
+            } catch (_: IllegalStateException) {
+                // Expected: recovery must never read or promote a symlink.
+            } finally {
+                Files.deleteIfExists(link.toPath())
+            }
+            assertEquals("outside data", secret.readText())
+        }
+    }
+
     private fun assertRejected(action: () -> Unit) {
         try {
             action()
