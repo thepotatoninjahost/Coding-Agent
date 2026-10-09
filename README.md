@@ -88,13 +88,13 @@ Unit tests currently live under `app/src/test/java/com/codingagent/core/` even t
 - Search the imported coding reference offline.
 - Keep knowledge retrieval behind the `AgentKnowledge` interface so additional providers can be added modularly.
 - Parse explicit create, replace, append, and remove operations.
-- Generate language-specific starter files for supported create requests.
+- Create files from explicit owner-provided content or meaningful model-generated implementations; generic starter placeholders do not count as completing substantive requests.
 - Apply workspace mutations through typed `ChangeSet` transactions.
 - Record each `ChangeRecord` with its operation, before/after content, reason, and checksums.
 - Write file changes atomically and persist transaction metadata under `.coding-agent/transactions/`.
 - Roll back one or more committed transactions only when current content still matches the recorded after-checksum.
 - Reject rollback when another change has modified the file, preventing silent data loss.
-- Run explicit verification commands with bounded timeouts.
+- Run static source-integrity verification. Imported project build/test scripts are not executed automatically because wrappers, build files, package scripts, and test suites can execute arbitrary code; requested checks are reported as not run until the owner reviews and runs them in the owner-controlled Terminal.
 - Persist task, document, and lesson records locally.
 - Persist task, document, lesson, and Chat workspace messages locally in app-private JSONL records.
 - Include prior Chat workspace messages in subsequent agent requests so follow-up work has conversation context.
@@ -139,7 +139,7 @@ The Terminal tab and the agent `run_command` tool use the same underlying runner
 - Timeout: 180 seconds (Stop sends `destroy` / `destroyForcibly`)
 - Output: stdout and stderr, each capture capped at 256 KiB
 
-The **Terminal tab is the owner-controlled terminal** and remains unrestricted. The **agent `run_command` tool is restricted** to project inspection and standard verification commands. Model commands cannot delete or modify files, chain shell commands, redirect output, access parent/absolute paths, use network tools, or change global Gradle configuration.
+The **Terminal tab is the owner-controlled terminal** and remains unrestricted. The **agent `run_command` tool is restricted** to project inspection commands. Model commands cannot execute project build/test tools, delete or modify files, chain shell commands, redirect output, access parent/absolute paths, use network tools, or change global Gradle configuration. Imported build/test scripts are not run automatically; review them before explicitly running them in the owner-controlled Terminal.
 
 This is the stock Android `sh` (toybox/toolbox on current devices). It is not bash, not a login shell, and not Termux. Typical available commands are basic Unix utilities already on the device (`ls`, `pwd`, `cat`, `echo`, limited `grep`). There is usually **no** JDK, **no** Gradle, **no** `git`, and **no** package manager. A command such as `./gradlew testDebugUnitTest` will fail on a normal phone unless those binaries are already on `PATH`.
 
