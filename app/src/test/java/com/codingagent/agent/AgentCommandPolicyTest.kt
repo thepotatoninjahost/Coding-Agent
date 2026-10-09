@@ -111,6 +111,25 @@ class AgentCommandPolicyTest {
     }
 
     @Test
+    fun checksDashPrefixedFilenamesAfterOptionTerminatorForSymlinkEscape() {
+        val root = Files.createTempDirectory("command-policy-dash-path").toFile()
+        val outside = Files.createTempDirectory("command-policy-dash-outside").toFile()
+        outside.resolve("secret.txt").writeText("must not be read")
+        root.resolve("-local.txt").writeText("safe local file")
+        try {
+            Files.createSymbolicLink(root.toPath().resolve("-linked-secret"), outside.resolve("secret.txt").toPath())
+        } catch (_: Exception) {
+            assumeTrue("Symbolic links are required for this regression test", false)
+        }
+
+        assertNull(AgentCommandPolicy.rejectionReason("cat -- -local.txt", root))
+        assertNotNull(
+            "The option terminator must not bypass canonical-path checks",
+            AgentCommandPolicy.rejectionReason("cat -- -linked-secret", root)
+        )
+    }
+
+    @Test
     fun blocksDirectAccessToPrivateAgentMetadata() {
         val root = Files.createTempDirectory("command-policy-metadata").toFile()
         root.resolve(".coding-agent").mkdirs()
