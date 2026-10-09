@@ -106,7 +106,7 @@ class AgentCommandPolicyTest {
         assertNotNull(AgentCommandPolicy.rejectionReason("cat nested/.git/config", root))
         assertNotNull(AgentCommandPolicy.rejectionReason("rg secret nested/.git/config", root))
         root.resolve("nested/.coding-agent").mkdirs()
-        root.resolve("nested/.coding-agent/private-state.json").writeText("{\\"secret\\":true}")
+        root.resolve("nested/.coding-agent/private-state.json").writeText("{\"secret\":true}")
         assertNotNull(AgentCommandPolicy.rejectionReason("cat nested/.coding-agent/private-state.json", root))
         assertNotNull(AgentCommandPolicy.rejectionReason("rg secret nested/.coding-agent/private-state.json", root))
         assertNotNull(AgentCommandPolicy.rejectionReason("find .coding-agent -type f", root))
