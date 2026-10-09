@@ -248,7 +248,7 @@ class AcceptancePathTest {
         val pendingFile = PendingProposalStore.file(root)
         assertTrue(pendingFile.delete())
         val outside = Files.createTempFile("pending-proposal-outside", ".json")
-        Files.writeString(outside, "untrusted proposal data")
+        outside.toFile().writeText("untrusted proposal data")
         try {
             Files.createSymbolicLink(pendingFile.toPath(), outside)
         } catch (_: Exception) {
