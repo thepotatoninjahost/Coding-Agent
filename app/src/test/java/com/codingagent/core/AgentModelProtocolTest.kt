@@ -13,5 +13,6 @@ class AgentModelProtocolTest {
         assertTrue(prompt.contains("Avoid jargon"))
         assertTrue(prompt.contains("Be direct and concise"))
         assertTrue(prompt.contains("Do not narrate internal planning"))
+        assertTrue(prompt.contains("Do not invoke git, find, gradle"))
     }
 }
