@@ -176,7 +176,7 @@ class AcceptancePathTest {
         assertTrue(proposed is MutationProposeResult.Proposed)
         assertTrue(OpenJobStore.file(root).delete())
 
-        val restarted = MutationCoordinator(ProjectWorkspace(root), postApplyVerifier = failingVerifier)
+        val restarted = MutationCoordinator(ProjectWorkspace(root))
 
         assertTrue(restarted.pending().isEmpty())
         assertEquals("fun main() = 1\n", root.resolve("Main.kt").readText())
@@ -798,7 +798,7 @@ class AcceptancePathTest {
             as MutationApprovalResult.RepairRequired).proposal
         assertEquals(1, repair.repairAttempt)
 
-        val restarted = MutationCoordinator(ProjectWorkspace(root))
+        val restarted = MutationCoordinator(ProjectWorkspace(root), postApplyVerifier = failingVerifier)
         restarted.setRepairProvider { _, attempt ->
             ProjectWorkspace(root).preview(
                 listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = ${attempt + 1}\n")),
