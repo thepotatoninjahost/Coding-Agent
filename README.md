@@ -14,7 +14,7 @@ It is not a chatbot that answers coding questions in one shot. It works like a c
 
 It does not quit early out of convenience. It only stops early when a specific missing input from the user is required that tools cannot supply.
 
-The runtime keeps a degraded offline knowledge path. Non-trivial coding requests that require external knowledge fail closed unless a web research provider is configured and returns evidence. The model-driven autonomous path uses an OpenAI-compatible gateway with tool calling and streamed server-sent-event deltas. Configure the gateway via the in-app Model settings screen (base URL, model id, API key).
+The runtime keeps a degraded offline knowledge path. Non-trivial coding requests that require external knowledge fail closed unless a web research provider is configured and returns evidence. The model-driven autonomous path uses an chat-completions-compatible gateway with tool calling and streamed server-sent-event deltas. Configure the gateway via the in-app Model settings screen (base URL, model id, API key).
 
 ## Current product status
 
@@ -26,7 +26,7 @@ The current APK supports:
 - Autonomous model loop with real tool calling (list_files, read_file, search_project, verify, mutations with dual approval, etc.)
 - Always-on static verification (unfinished-work marker scan) — never reports a fake pass
 - Evidence requirement: inspect/error/analyze requests must actually read or search project files before a final answer is accepted
-- Model settings UI for any OpenAI-compatible provider (Groq, SambaNova, OpenRouter, local, etc.)
+- Model settings UI for any chat-completions-compatible provider (Groq, SambaNova, OpenRouter, local, etc.)
 - Transactional file changes with checksum-backed rollback
 - Persisted chat history and task journal
 
@@ -44,7 +44,7 @@ Terminal behavior and limits are documented in **Terminal limitations**.
 - Model: `llama-3.3-70b-versatile`
 - API key: from console.groq.com
 
-Any other OpenAI-compatible endpoint works the same way.
+Any other chat-completions-compatible endpoint works the same way.
 
 ## Architecture
 
@@ -57,7 +57,7 @@ Production source is split by job under `app/src/main/java/com/codingagent/`:
 | `agent` | Single spine (`AutonomousAgent`), constitution, tool dispatch (`AgentToolDispatch`), planning (`AgentPlanner`), chat workspace, journal |
 | `intake` | Free text → typed goal (`TaskIntakeParser`, `GoalInterpreter`, `CodeSynthesisEngine`) |
 | `workspace` | Project import, index (`ProjectIndexer`), files, diffs, dual-approval mutations, terminal, verification, checksum rollback (`ProjectWorkspace`) |
-| `model` | User-configured OpenAI-compatible HTTP gateway (`RemoteHttpGateway`), settings, streamed SSE tool calls. No vendor is hardcoded. |
+| `model` | User-configured chat-completions-compatible HTTP gateway (`RemoteHttpGateway`), settings, streamed SSE tool calls. No vendor is hardcoded. |
 | `research` | Web evidence (`WebResearchProvider`, `DurableDeepResearchProvider`, `PersonalResearchProvider`, `SourceQuality`, `QueryLanes`) |
 | `knowledge` | Local searchable chunks behind `AgentKnowledge` / `KnowledgeProvider` |
 | `ui` | Compose workbench (`MainActivity`, screens, theme) |
