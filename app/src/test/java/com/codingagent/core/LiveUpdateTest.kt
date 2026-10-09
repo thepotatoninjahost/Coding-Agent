@@ -120,6 +120,27 @@ class LiveUpdateTest {
     }
 
 
+
+    @Test
+    fun activeModuleAndRollbackRejectSymlinkedModuleDirectories() {
+        val root = Files.createTempDirectory("coding-agent-module-pointer").toFile()
+        val store = LiveModuleStore(root)
+        val moduleRoot = root.resolve(".coding-agent/live-modules")
+        val outside = Files.createTempDirectory("coding-agent-module-outside").toFile()
+        outside.resolve("module.json").writeText(
+            """{"kind":"coding","version":1,"steps":[{"op":"emit","value":"outside"}]}"""
+        )
+        try {
+            Files.createSymbolicLink(moduleRoot.resolve("linked-module").toPath(), outside.toPath())
+        } catch (_: Exception) {
+            org.junit.Assume.assumeTrue("Symbolic links are required for this regression test", false)
+        }
+
+        moduleRoot.resolve("active-module").writeText("linked-module")
+        assertEquals(null, store.active())
+        assertEquals(false, store.rollback("linked-module"))
+    }
+
     @Test
     fun activeModelPointerRejectsTraversalAndSymlinkedModelDirectories() {
         val root = Files.createTempDirectory("coding-agent-model-pointer").toFile()
