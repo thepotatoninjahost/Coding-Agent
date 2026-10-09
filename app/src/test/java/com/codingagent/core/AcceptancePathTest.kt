@@ -5,6 +5,7 @@ import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Assume.assumeTrue
 import org.junit.Test
 import com.codingagent.intake.OperationKind
 import com.codingagent.intake.TaskOperation
@@ -233,6 +234,38 @@ class AcceptancePathTest {
             "missing-proposal-id",
             OwnerApprovalToken.authenticated("missing-proposal-id")
         ) is MutationApprovalResult.Rejected)
+    }
+
+    @Test
+    fun unreadablePendingProposalStorageFailsClosedWithoutCrashingStartup() {
+        val root = Files.createTempDirectory("accept-unreadable-pending").toFile()
+        root.resolve("Main.kt").writeText("fun main() = 1\\n")
+        val coordinator = MutationCoordinator(ProjectWorkspace(root))
+        coordinator.propose(
+            "protect unreadable approval state",
+            listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\\n", "fun main() = 2\\n"))
+        )
+        val pendingFile = PendingProposalStore.file(root)
+        assertTrue(pendingFile.delete())
+        val outside = Files.createTempFile("pending-proposal-outside", ".json")
+        Files.writeString(outside, "untrusted proposal data")
+        try {
+            Files.createSymbolicLink(pendingFile.toPath(), outside)
+        } catch (_: Exception) {
+            assumeTrue("Symbolic links are required for this regression test", false)
+            return
+        }
+
+        val restarted = runCatching { MutationCoordinator(ProjectWorkspace(root)) }
+
+        assertTrue("Unreadable private state must not crash project startup", restarted.isSuccess)
+        assertEquals("recovery-required", OpenJobStore.load(root)?.status)
+        assertTrue(OpenJobStore.load(root)?.recoveryReason.orEmpty().contains("Pending proposal state was unreadable"))
+        val blocked = restarted.getOrThrow().propose(
+            "must remain blocked",
+            listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\\n", "fun main() = 3\\n"))
+        )
+        assertTrue(blocked is MutationProposeResult.Rejected)
     }
 
     @Test
