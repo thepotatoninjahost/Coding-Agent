@@ -21,6 +21,7 @@ class AgentCommandPolicyTest {
         assertNotNull(AgentCommandPolicy.rejectionReason("ls -la"))
         assertNotNull(AgentCommandPolicy.rejectionReason("ls -Ra"))
         assertNotNull(AgentCommandPolicy.rejectionReason("ls -f"))
+        assertNotNull(AgentCommandPolicy.rejectionReason("ls \\-a"))
         assertNotNull(AgentCommandPolicy.rejectionReason("ls --all"))
         assertNotNull(AgentCommandPolicy.rejectionReason("ls --recursive"))
     }
