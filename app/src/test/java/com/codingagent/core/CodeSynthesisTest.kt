@@ -19,7 +19,7 @@ class CodeSynthesisTest {
     @Test fun explicitOperationBecomesProposal() {
         val root = Files.createTempDirectory("synthesis").toFile()
         val intake = TaskIntakeParser(root).parse("create file src/New.kt with class New")
-        val result = CodeSynthesisEngine(root, knowledge).synthesize(intake)
+        val result = CodeSynthesisEngine(knowledge).synthesize(intake)
         assertTrue(result is SynthesisResult.Ready)
         val proposal = (result as SynthesisResult.Ready).proposal
         assertEquals(OperationKind.CREATE_FILE, proposal.operations.single().kind)
@@ -30,7 +30,7 @@ class CodeSynthesisTest {
     @Test fun substantiveCreateDoesNotReturnGenericPlaceholderCode() {
         val root = Files.createTempDirectory("synthesis").toFile()
         val intake = TaskIntakeParser(root).parse("create a Kotlin helper in src/Helper.kt")
-        val result = CodeSynthesisEngine(root, knowledge).synthesize(intake)
+        val result = CodeSynthesisEngine(knowledge).synthesize(intake)
         assertTrue(result is SynthesisResult.NeedsInput)
         assertTrue((result as SynthesisResult.NeedsInput).question.contains("configured coding model"))
     }
@@ -38,6 +38,6 @@ class CodeSynthesisTest {
     @Test fun vagueChangeDoesNotInventAFile() {
         val root = Files.createTempDirectory("synthesis").toFile()
         val intake = TaskIntakeParser(root).parse("improve the login flow")
-        assertTrue(CodeSynthesisEngine(root, knowledge).synthesize(intake) is SynthesisResult.NeedsInput)
+        assertTrue(CodeSynthesisEngine(knowledge).synthesize(intake) is SynthesisResult.NeedsInput)
     }
 }
