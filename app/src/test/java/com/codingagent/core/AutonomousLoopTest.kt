@@ -90,7 +90,7 @@ class AutonomousLoopTest {
     }
 
     @Test
-    fun localInspectReadsNamedFileBeforeCompletingReport() {
+    fun localInspectReadsNamedFileWithoutModelGateway() {
         val root = Files.createTempDirectory("agent-evidence").toFile()
         root.resolve("SelfEvolution.kt").writeText("class SelfEvolution\\n")
         val gateway = ScriptedGateway(emptyList())
@@ -99,7 +99,7 @@ class AutonomousLoopTest {
         }
         val agent = AutonomousAgent(
             root, knowledge, gateway, AutonomousAgentConfig(maxTurns = 8))
-        val events = agent.run("Analyze the file SelfEvolution.kt then write a report about the file")
+        val events = agent.run("Inspect SelfEvolution.kt")
         assertTrue(events.last() is AutonomousAgentEvent.Completed)
         val summary = (events.last() as AutonomousAgentEvent.Completed).task.summary
         assertTrue(summary.contains("SelfEvolution.kt"))
