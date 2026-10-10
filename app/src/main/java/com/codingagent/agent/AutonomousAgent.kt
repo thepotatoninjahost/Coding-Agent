@@ -143,6 +143,7 @@ class AutonomousAgent(
     }
 
     fun pendingProposals(): List<PendingChangeProposal> = mutations.pending()
+    fun recentPersonalLogs(limit: Int = 100): List<String> = journal.recentEvents(limit)
     fun approveProposal(id: String, ownerApproval: OwnerApprovalToken): MutationApprovalResult = mutations.approve(id, ownerApproval)
     fun rejectProposal(id: String): Boolean = mutations.reject(id)
 
