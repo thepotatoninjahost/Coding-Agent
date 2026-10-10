@@ -286,18 +286,18 @@ class ChatWorkspace(
             agent == null -> "Personal logs are unavailable because the agent is not initialized."
             entries.isEmpty() -> "No personal log entries found yet. The log file is stored at .coding-agent/personal-log.jsonl under the current project root."
             else -> buildString {
-                append("Personal logs — newest first (showing ${entries.size} entries).\\n")
+                append("Personal logs — newest first (showing ${entries.size} entries).\n")
                 entries.forEach { line ->
                     val entry = runCatching { org.json.JSONObject(line) }.getOrNull()
                     if (entry == null) {
-                        append(line.take(1_000)).append('\\n')
+                        append(line.take(1_000)).append('\n')
                     } else {
                         val timestamp = runCatching {
                             java.time.Instant.ofEpochMilli(entry.optLong("timestamp")).toString()
                         }.getOrDefault("unknown time")
                         append('[').append(timestamp).append("] ")
-                            .append(entry.optString("type", "Event")).append('\\n')
-                        append(entry.optString("details").take(1_500)).append("\\n\\n")
+                            .append(entry.optString("type", "Event")).append('\n')
+                        append(entry.optString("details").take(1_500)).append("\n\n")
                     }
                 }
                 append("Entries are shortened in this chat view when necessary; the stored JSONL records retain the full event payloads.")
