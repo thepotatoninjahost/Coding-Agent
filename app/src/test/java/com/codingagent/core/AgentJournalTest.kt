@@ -22,15 +22,20 @@ class AgentJournalTest {
 
         journal.recordEvent("task-1", AutonomousAgentEvent.ToolStarted("read_file", """{"path":"src/Main.kt"}""", "inspect target"))
         journal.recordEvent("task-1", AutonomousAgentEvent.ToolFinished("read_file", "real file contents", true))
+        journal.recordEvent("task-1", AutonomousAgentEvent.ModelDelta("partial "))
+        journal.recordEvent("task-1", AutonomousAgentEvent.ModelDelta("stream"))
         journal.recordEvent("task-1", AutonomousAgentEvent.ModelMessage("Found the implementation and its call sites."))
 
-        val recent = journal.recentEvents(2)
+        val recent = journal.recentEvents(3)
 
-        assertEquals(2, recent.size)
+        assertEquals(3, recent.size)
         val newest = JSONObject(recent[0])
-        val previous = JSONObject(recent[1])
+        val stream = JSONObject(recent[1])
+        val previous = JSONObject(recent[2])
         assertEquals("ModelMessage", newest.getString("type"))
         assertTrue(newest.getString("details").contains("Found the implementation"))
+        assertEquals("ModelStream", stream.getString("type"))
+        assertEquals("partial stream", stream.getString("details"))
         assertEquals("ToolFinished", previous.getString("type"))
         assertTrue(previous.getString("details").contains("real file contents"))
         assertTrue(root.resolve(".coding-agent/personal-log.jsonl").isFile)
