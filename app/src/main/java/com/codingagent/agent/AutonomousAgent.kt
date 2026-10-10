@@ -168,7 +168,7 @@ class AutonomousAgent(
         val normalized = request.trim()
         require(normalized.isNotEmpty()) { "A coding request is required" }
         val taskId = UUID.randomUUID().toString()
-        val events = mutableListOf<AutonomousAgentEvent>(AutonomousAgentEvent.Started(taskId, normalized))
+        val events = mutableListOf<AutonomousAgentEvent>()
         var personalLogFailureReported = false
         fun emit(event: AutonomousAgentEvent) {
             events += event
@@ -184,6 +184,7 @@ class AutonomousAgent(
                 onEvent(warning)
             }
         }
+        emit(AutonomousAgentEvent.Started(taskId, normalized))
         emit(AutonomousAgentEvent.Phase("INTAKE", "Inspecting the request and repository"))
         // Keep the full packaged conversation for deterministic intake. GoalInterpreter
         // extracts the active job and prior owner instructions before the model sees them.
