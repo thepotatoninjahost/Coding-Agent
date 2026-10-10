@@ -38,6 +38,15 @@ class GoalInterpreterTest {
         assertTrue(contract.ambiguity.isEmpty())
     }
 
+    @Test fun writingTechnicalReportIsInspectNotCreate() {
+        val root = Files.createTempDirectory("goal-report").toFile()
+        val intake = TaskIntakeParser(root).parse(
+            "Write a deep technical report on how Report works end to end"
+        )
+        assertEquals(TaskIntent.INSPECT, intake.intent)
+        assertTrue(intake.executionReady)
+    }
+
     @Test fun naturalLanguageAuditRequestsAreActionableInspectTasks() {
         val root = Files.createTempDirectory("goal-audit").toFile()
         val intake = TaskIntakeParser(root).parse("run a full audit then give me your thoughts on it")
