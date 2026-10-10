@@ -31,6 +31,7 @@ class AgentPromptTest {
         assertTrue(prompt.contains("Do not ever create a hello world file or app", ignoreCase = true))
         assertTrue(prompt.contains("Owner constraints — binding requirements:"))
         assertTrue(prompt.contains("Exactly one tool call this turn"))
+        assertTrue(prompt.contains("purpose field"))
     }
 
     @Test fun promptAllowsAmbitiousWorkAndRequiresMilestoneVerification() {
