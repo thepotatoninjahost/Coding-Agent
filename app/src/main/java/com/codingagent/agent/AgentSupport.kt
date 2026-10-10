@@ -53,8 +53,8 @@ class AgentJournal(private val root: File) {
     fun record(task: AgentTask) {
         file.parentFile?.mkdirs()
         val line = listOf(task.id, task.status, task.request, task.changes.size, task.verification.passed, task.summary, task.events.joinToString(" | "))
-            .joinToString("\\t") { it.toString().replace('\\t', ' ').replace('\\n', ' ') }
-        file.appendText(line + "\\n")
+            .joinToString("\t") { it.toString().replace('\t', ' ').replace('\n', ' ') }
+        file.appendText(line + "\n")
     }
 
     /** Persist each observable event for later owner inspection. */
@@ -66,7 +66,7 @@ class AgentJournal(private val root: File) {
             .put("taskId", taskId)
             .put("type", event.javaClass.simpleName)
             .put("details", event.toString())
-        personalLog.appendText(entry.toString() + "\\n")
+        personalLog.appendText(entry.toString() + "\n")
     }
 
     fun recentEvents(limit: Int = 100): List<String> = recentLines(personalLog, limit)
@@ -82,7 +82,7 @@ class AgentJournal(private val root: File) {
             while (position >= 0 && result.size < limit) {
                 raf.seek(position--)
                 val value = raf.read()
-                if (value == '\\n'.code) {
+                if (value == '\n'.code) {
                     val line = bytes.toByteArray().reversedArray().toString(Charsets.UTF_8).trim()
                     if (line.isNotBlank()) {
                         result.addFirst(line)
