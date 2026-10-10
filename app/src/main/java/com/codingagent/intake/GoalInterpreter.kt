@@ -98,10 +98,10 @@ class GoalInterpreter(private val root: File) {
         return buildString {
             append("Active job: ").append(jobGoal)
             if (ownerTurns.isNotEmpty()) {
-                append("\\nPrior owner instructions:")
-                ownerTurns.forEach { append("\\n- ").append(it) }
+                append("\nPrior owner instructions:")
+                ownerTurns.forEach { append("\n- ").append(it) }
             }
-            append("\\nCurrent owner follow-up: ").append(current)
+            append("\nCurrent owner follow-up: ").append(current)
         }
     }
 
