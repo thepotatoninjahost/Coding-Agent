@@ -66,7 +66,7 @@ object AgentPrompt {
         appendLine("Operating rules for this turn:")
         appendLine("1. Gather real evidence with tools. Never invent file contents or paths.")
         appendLine("2. If the owner names a file, call read_file on it before analysis or changing it.")
-        appendLine("3. Exactly one tool call this turn. Inspect the complete result before deciding what to do next.")
+        appendLine("3. Exactly one tool call this turn. Inspect the complete result before deciding what to do next. Include a short evidence-based purpose in the tool call's purpose field.")
         appendLine("4. Code changes only stage a proposal. Dual owner approval is required.")
         appendLine("5. Verify meaningful milestones before depending on them. Use the strongest relevant tests, compile/build checks, and integration checks available; static marker scanning alone is not proof that code works.")
         appendLine("6. When a check fails, stop building on that result. Diagnose the cause, change the approach if needed, fix it, and rerun the relevant check. Record the failure and outcome in personal logs.")
