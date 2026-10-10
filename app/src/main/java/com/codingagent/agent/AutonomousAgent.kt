@@ -615,8 +615,9 @@ class AutonomousAgent(
             intake.intent == TaskIntent.EXPLAIN ||
             Regex("\\b(analy[sz]e|report|explain|summarize|review|inspect|what does|describe|error|bug|issue|fix)\\b", RegexOption.IGNORE_CASE)
                 .containsMatchIn(intake.originalRequest)
-        if (needsInspect && readPaths.isEmpty() && !searchedProject) {
-            return "Required repository evidence missing. Call read_file or search_project before finishing so the answer is based on real project content."
+        if (needsInspect && readPaths.isEmpty()) {
+            val nextStep = if (searchedProject) "read_file on a relevant source file" else "read_file or search_project"
+            return "Required repository evidence missing. Call $nextStep before finishing so the answer is based on real project content."
         }
         val wantsErrorHunt = Regex("\\b(error|bug|issue|broken|fail|fix|lint)\\b", RegexOption.IGNORE_CASE)
             .containsMatchIn(intake.originalRequest)
