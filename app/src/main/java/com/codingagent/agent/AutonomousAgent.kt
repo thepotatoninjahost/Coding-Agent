@@ -168,9 +168,20 @@ class AutonomousAgent(
         require(normalized.isNotEmpty()) { "A coding request is required" }
         val taskId = UUID.randomUUID().toString()
         val events = mutableListOf<AutonomousAgentEvent>(AutonomousAgentEvent.Started(taskId, normalized))
+        var personalLogFailureReported = false
         fun emit(event: AutonomousAgentEvent) {
             events += event
             onEvent(event)
+            val logFailure = runCatching { journal.recordEvent(taskId, event) }.exceptionOrNull()
+            if (logFailure != null && !personalLogFailureReported) {
+                personalLogFailureReported = true
+                val warning = AutonomousAgentEvent.Phase(
+                    "PERSONAL_LOG_ERROR",
+                    "Could not persist the personal log: ${logFailure.message ?: logFailure.javaClass.simpleName}. Some events may be missing from the log."
+                )
+                events += warning
+                onEvent(warning)
+            }
         }
         emit(AutonomousAgentEvent.Phase("INTAKE", "Inspecting the request and repository"))
         // Keep the full packaged conversation for deterministic intake. GoalInterpreter
