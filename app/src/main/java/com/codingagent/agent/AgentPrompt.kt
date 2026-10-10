@@ -20,16 +20,16 @@ object AgentPrompt {
                 append(" Languages: ")
                 append(summary.languages.entries.sortedByDescending { it.value }.joinToString { "${it.key}=${it.value}" })
             }
-            append('\\n')
+            append('\n')
             if (paths.isEmpty()) {
-                append("(no indexed source files)\\n")
+                append("(no indexed source files)\n")
             } else {
                 paths.take(maxPaths).forEach { path ->
                     append(path)
-                    append('\\n')
+                    append('\n')
                 }
                 if (paths.size > maxPaths) {
-                    append("… and ${paths.size - maxPaths} more (use list_files / search_project)\\n")
+                    append("… and ${paths.size - maxPaths} more (use list_files / search_project)\n")
                 }
             }
         }
@@ -96,12 +96,12 @@ object AgentPrompt {
     fun listingSummary(listing: String, report: VerificationReport, namesOnly: Boolean = true): String {
         return buildString {
             if (namesOnly) {
-                append("Indexed source files (extension whitelist — not a full disk listing):\\n")
+                append("Indexed source files (extension whitelist — not a full disk listing):\n")
             } else {
-                append("Directory listing:\\n")
+                append("Directory listing:\n")
             }
             append(listing.trim().ifBlank { "(none)" })
-            append("\\n\\nVerification: ")
+            append("\n\nVerification: ")
             if (report.passed) {
                 append("passed (static unfinished-work marker scan)")
             } else {
@@ -109,7 +109,7 @@ object AgentPrompt {
                 append(report.issues.size)
                 append(" issue(s)")
                 report.issues.take(20).forEach { issue ->
-                    append("\\n- ")
+                    append("\n- ")
                     append(issue.path)
                     append(":")
                     append(issue.line)
@@ -127,19 +127,19 @@ object AgentPrompt {
         maxChars: Int
     ): String {
         val draft = buildString {
-            append("Review from gathered evidence (model did not write a final after tools were closed).\\n\\n")
-            append("Request: ").append(request.trim()).append("\\n\\n")
+            append("Review from gathered evidence (model did not write a final after tools were closed).\n\n")
+            append("Request: ").append(request.trim()).append("\n\n")
             append(evidence.take(maxChars))
-            append("\\n\\nVerification: ")
+            append("\n\nVerification: ")
             if (report.passed) {
                 append("passed (static unfinished-work marker scan)")
             } else {
                 append("FAILED (").append(report.issues.size).append(" issue(s))")
                 report.issues.take(20).forEach { issue ->
-                    append("\\n- ").append(issue.path).append(":").append(issue.line).append(" — ").append(issue.message)
+                    append("\n- ").append(issue.path).append(":").append(issue.line).append(" — ").append(issue.message)
                 }
             }
-            append("\\n\\nIf this is thinner than you wanted, retry once. The next run starts with this evidence already in context.")
+            append("\n\nIf this is thinner than you wanted, retry once. The next run starts with this evidence already in context.")
         }
         return LogicReasoning.inspect(draft, evidence).displayText
     }
