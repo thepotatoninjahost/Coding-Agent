@@ -46,11 +46,11 @@ jobs:
             echo "ERROR: repository-stored private debug signing material is tracked."
             exit 1
           fi
-          if find . -type f -name "*.keystore" -o -type f -name "*.jks" -not -path "./.git/*" -not -path "./app/build/*" | grep -q .; then
+          if find . -type f \( -name "*.keystore" -o -name "*.jks" \) -not -path "./.git/*" -not -path "./app/build/*" | grep -q .; then
             echo "ERROR: private signing material exists in the source tree."
             exit 1
           fi
-          if git grep -n -E 'Mozilla/5\.0|Chrome/[0-9]+|Pixel 8' -- app/src/main >/dev/null 2>&1; then
+          if git grep -n -E 'Mozilla/5\\.0|Chrome/[0-9]+|Pixel 8' -- app/src/main >/dev/null 2>&1; then
             echo "ERROR: browser/device impersonation remains in application source."
             exit 1
           fi
