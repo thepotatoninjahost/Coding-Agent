@@ -52,6 +52,7 @@ class ChatWorkspace(
         require(trimmed.isNotEmpty()) { "A message is required" }
         store.recordChatMessage(ChatMessage(role = ChatRole.USER, content = trimmed))
 
+        parsePersonalLogCommand(trimmed)?.let { return handlePersonalLogCommand(it) }
         val memoryCommand = parseMemoryCommand(trimmed)
         if (memoryCommand != null && memoryStore != null) {
             return handleMemoryCommand(memoryCommand)
@@ -265,6 +266,46 @@ class ChatWorkspace(
             append("Current request:\n")
             append(current)
         }
+    }
+
+    private fun parsePersonalLogCommand(text: String): Int? {
+        val trimmed = text.trim()
+        val lower = trimmed.lowercase()
+        if (lower == "show personal logs" || lower == "read personal logs" || lower == "agent logs") return 20
+        if (lower == "#logs") return 20
+        if (lower.startsWith("#logs ")) {
+            return trimmed.substringAfter(' ').trim().toIntOrNull()?.coerceIn(1, 100) ?: 20
+        }
+        return null
+    }
+
+    private fun handlePersonalLogCommand(limit: Int): ChatTurn {
+        val agent = runtimeProvider()
+        val entries = agent?.recentPersonalLogs(limit).orEmpty()
+        val response = when {
+            agent == null -> "Personal logs are unavailable because the agent is not initialized."
+            entries.isEmpty() -> "No personal log entries found yet. The log file is stored at .coding-agent/personal-log.jsonl under the current project root."
+            else -> buildString {
+                append("Personal logs — newest first (showing ${entries.size} entries).\\n")
+                entries.forEach { line ->
+                    val entry = runCatching { org.json.JSONObject(line) }.getOrNull()
+                    if (entry == null) {
+                        append(line.take(1_000)).append('\\n')
+                    } else {
+                        val timestamp = runCatching {
+                            java.time.Instant.ofEpochMilli(entry.optLong("timestamp")).toString()
+                        }.getOrDefault("unknown time")
+                        append('[').append(timestamp).append("] ")
+                            .append(entry.optString("type", "Event")).append('\\n')
+                        append(entry.optString("details").take(1_500)).append("\\n\\n")
+                    }
+                }
+                append("Entries are shortened in this chat view when necessary; the stored JSONL records retain the full event payloads.")
+            }
+        }
+        val message = ChatMessage(role = ChatRole.AGENT, content = response)
+        store.recordChatMessage(message)
+        return ChatTurn(message, null)
     }
 
     private fun parseMemoryCommand(text: String): MemoryCommand? {
