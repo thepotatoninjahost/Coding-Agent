@@ -1,222 +1,165 @@
 # Coding Agent
 
-A phone-first **Coding-Agent**: an autonomous software-engineering system that plans, acts, observes, and iterates until the goal is completed.
+Coding Agent is an Android application written in Kotlin using Jetpack Compose. It is intended to help inspect a selected project, research technical questions, propose code changes, and run verification steps through an agent workflow.
 
-It is not a chatbot that answers coding questions in one shot. It works like a careful senior developer with tool access — evidence-first, precise, and persistent. The agentic loop:
+**Status: active development. Production readiness is not established.** The presence of a class, UI surface, test, or CI step is not proof that every end-to-end scenario works. Check CI for the exact commit you intend to use, and test the app on the target device and model provider.
 
-1. **Understands the goal** and decomposes it into ordered steps  
-2. **Gathers real context** from the imported project (list / search / read — never invents paths or contents)  
-3. **Plans** and revises the plan as new evidence appears  
-4. **Acts** with exactly one tool per turn (files, search, terminal, verification, staged mutations)  
-5. **Observes** the tool result; on failure, diagnoses and retries correctly  
-6. **Verifies** (static unfinished-work scan is always-on; never reports a fake pass)  
-7. **Hands over** a clear, evidence-based answer or a dual-approval change proposal  
+## Current verified build configuration
 
-It does not quit early out of convenience. It only stops early when a specific missing input from the user is required that tools cannot supply.
+From `app/build.gradle.kts`:
 
-The runtime keeps a degraded offline knowledge path. Non-trivial coding requests that require external knowledge fail closed unless a web research provider is configured and returns evidence. The model-driven autonomous path uses an OpenAI-compatible gateway with tool calling and streamed server-sent-event deltas. Configure the gateway via the in-app Model settings screen (base URL, model id, API key).
+- Application ID and namespace: `com.codingagent`
+- Compile SDK: 35
+- Target SDK: 35
+- Minimum SDK: 34
+- Java source/target compatibility: 17
+- Kotlin JVM target: 17
+- Android Gradle Plugin: 8.7.0
+- Kotlin and Compose compiler plugins: 2.1.0
+- Gradle wrapper distribution: Gradle 8.9
+- Release build: code shrinking enabled through R8/ProGuard rules
+- Release signing: no dedicated production signing configuration is declared in this module
 
-## Current product status
+The app's declared minimum Android version is API 34. Do not assume older devices are supported. A successful release APK assembly is not evidence that the artifact is production-signed, installable on every target, or correct at runtime.
 
-The repository contains the modular backend and an Android workbench with a persistent Chat workspace. Core agent loop, evidence gates, and static verification are implemented and hardened.
+## User-facing areas
 
-The current APK supports:
-- Project import via Storage Access Framework and indexing
-- Source search and local knowledge search
-- Autonomous model loop with real tool calling (list_files, read_file, search_project, verify, mutations with dual approval, etc.)
-- Always-on static verification (unfinished-work marker scan) — never reports a fake pass
-- Evidence requirement: inspect/error/analyze requests must actually read or search project files before a final answer is accepted
-- Model settings UI for any OpenAI-compatible provider (Groq, SambaNova, OpenRouter, local, etc.)
-- Transactional file changes with checksum-backed rollback
-- Persisted chat history and task journal
+The Compose workbench declares these surfaces in `UiTheme.kt`:
 
-Remaining product polish (not blockers for basic use):
-- Multi-file diff staging UI refinements
-- Broader document ingestion beyond the example asset
-- Extended physical-device verification of long streaming sessions
+- **Chat** — interact with the agent and view progress.
+- **Files** — browse and inspect files in the selected project.
+- **Review** — review pending proposed changes and approval actions.
+- **Terminal** — access the app's terminal/command-runner integration.
+- **Research** — view research functionality.
 
-Terminal behavior and limits are documented in **Terminal limitations**.
+The actual capabilities and constraints of each surface depend on the implementation, device environment, project, and configured model. In particular, the presence of a terminal surface does not mean that every desktop shell command or development tool is available on Android.
 
-## Recommended remote provider (as of 2026-08)
+## Source tree
 
+Production Kotlin source is under `app/src/main/java/com/codingagent/`.
 
-- Base URL: `https://api.groq.com/openai/v1`
-- Model: `llama-3.3-70b-versatile`
-- API key: from console.groq.com
+| Package | Responsibility represented in source |
+| --- | --- |
+| `agent/` | Autonomous execution loop, request classification, planning, tool selection and dispatch, progress events, journaling, response-quality checks, retry/repair support, user memory, and self-evolution/self-repair support |
+| `core/` | Local app storage, encrypted secret/settings storage, migration, user-memory persistence, and live-module bootstrap/runtime support |
+| `intake/` | Goal interpretation, task-intake parsing, typed operations, and code-synthesis proposals |
+| `knowledge/` | Document ingestion, local knowledge indexing/search, and knowledge-provider interfaces |
+| `model/` | Model request/response types, model settings, JSON response parsing, remote HTTP gateway, streaming, cancellation, and model rotation |
+| `research/` | Search providers, source relevance/quality checks, article extraction, research modes, progress, and durable research sessions |
+| `ui/` | Main Android activity, Compose screens, review binding, theme, and UI status mapping |
+| `workspace/` | Project indexing and file services, path checks, command execution, staged changes, approval coordination, integrity checks, atomic writes, persistence, and rollback |
 
-Any other OpenAI-compatible endpoint works the same way.
+Other repository areas:
 
-## Architecture
+- `app/src/main/AndroidManifest.xml` — app declaration and Android permissions.
+- `app/src/main/res/` — launcher artwork, theme resources, and data-extraction rules.
+- `app/src/main/assets/knowledge/coding-for-dummies.txt` — bundled knowledge text asset.
+- `app/src/test/java/com/codingagent/agent/` and `app/src/test/java/com/codingagent/core/` — JVM unit and acceptance-path tests.
+- `docs/` — owner instructions, tool-queue notes, anti-yes-man protocol, and a research design note. Some documents describe intended or historical behavior; compare them with current code before treating them as authoritative.
+- `scripts/package-source.sh` — source ZIP packaging and SHA-256 output.
+- `scripts/sync_to_github.sh` — a specialized sync helper with external script-path assumptions; it is not a general-purpose build or deployment command.
+- Root Gradle files and `gradle/wrapper/` — build configuration and wrapper.
 
-There is one execution spine: `AutonomousAgent` (`com.codingagent.agent`). Offline local lanes (hello, list, status, read, explicit synthesis edits) and the model-driven tool loop both run through that class. `AgentRuntime` holds shared result types only. There is no second orchestrator.
+These are responsibility summaries, not claims that every workflow is complete.
 
-Production source is split by job under `app/src/main/java/com/codingagent/`:
+## Model configuration and network behavior
 
-| Package | Job |
-|---|---|
-| `agent` | Single spine (`AutonomousAgent`), constitution, tool dispatch (`AgentToolDispatch`), planning (`AgentPlanner`), chat workspace, journal |
-| `intake` | Free text → typed goal (`TaskIntakeParser`, `GoalInterpreter`, `CodeSynthesisEngine`) |
-| `workspace` | Project import, index (`ProjectIndexer`), files, diffs, dual-approval mutations, terminal, verification, checksum rollback (`ProjectWorkspace`) |
-| `model` | User-configured OpenAI-compatible HTTP gateway (`RemoteHttpGateway`), settings, streamed SSE tool calls. No vendor is hardcoded. |
-| `research` | Web evidence (`WebResearchProvider`, `DurableDeepResearchProvider`, `PersonalResearchProvider`, `SourceQuality`, `QueryLanes`) |
-| `knowledge` | Local searchable chunks behind `AgentKnowledge` / `KnowledgeProvider` |
-| `ui` | Compose workbench (`MainActivity`, screens, theme) |
-| `core` | Residual device persistence (`LocalStore`). Not the agent loop. |
+The settings dialog currently exposes a **remote HTTP model backend** with a base URL, model ID, API key, and optional extra HTTP headers. The gateway targets an OpenAI-compatible `/chat/completions` endpoint and implements both non-streaming requests and Server-Sent Events (SSE) response parsing, including streamed tool-call argument assembly. The `ModelSettings` data class also contains `rotationModels` and `systemPrompt` fields, but the current settings dialog does not expose those fields. Code search found no call site for `effectiveSystemPrompt()`; agent requests use the built-in `AgentModelProtocol.SYSTEM` prompt. Therefore, custom system-prompt editing is **not currently wired up as a usable UI feature**.
 
-Execution path:
+Important constraints:
 
-1. `TaskIntakeParser` interprets a request into a typed goal contract and operation.
-2. `AutonomousAgent` owns the loop: gather evidence, plan, one tool per turn (queue extras), observe, verify, hand over.
-3. `AgentPlanner` produces and revises the plan from evidence.
-4. `ProjectIndexer` inventories project files, languages, imports, symbols, and checksums.
-5. `AgentKnowledge` supplies local evidence. `WebResearchProvider` / deep-research providers supply internet evidence when the request requires it. Empty research fails closed.
-6. `CodeSynthesisEngine` creates a proposal when the request does not contain an explicit operation.
-7. `ProjectWorkspace` + `MutationCoordinator` apply edits through typed transactions. Dual owner approval is required before a write hits disk.
-8. `VerificationReport` records static unfinished-work scans and command-check evidence. Verification never reports a fake pass.
-9. `CompilerTestRepairCycle` now participates in failed-change recovery: failed approved changes roll back, a model-synthesized repair is staged, and the repair must pass the same dual-approval flow before recheck.
-10. `AgentJournal`, lessons, and `LocalStore` persist task evidence and chat for later work.
+- Compatibility depends on the specific provider and model. An OpenAI-compatible URL does not guarantee compatible tool calling, streaming, or response formatting.
+- Remote non-loopback endpoints are required by the endpoint policy to use HTTPS. Plain HTTP is permitted only for recognized localhost/loopback endpoints.
+- The source supports model rotation when fallback model IDs are present in settings data, but the current settings dialog does not expose a fallback-model field. Rotation is not automatic failover to unrelated providers.
+- The `systemPrompt` data field is not currently connected to the agent request path. Do not assume the owner can customize the active system prompt through the UI.
+- The application source contains encrypted secret/settings storage backed by Android Keystore mechanisms and a legacy-preferences migration path. This does not remove the need to protect the device, backups, logs, and any credentials supplied to a provider.
+- Never commit API keys, provider credentials, signing material, local SDK paths, or private project data.
 
-Unit tests currently live under `app/src/test/java/com/codingagent/core/` even though production code is package-split as above.
+Test the exact provider URL, model ID, authentication, extra headers, streaming behavior, and tool-calling task that you intend to use.
 
-## Current capabilities
+## Project changes and safety boundaries
 
-- Import a project directory with Android's Storage Access Framework.
-- Copy imported project files into app-private storage.
-- Index files, languages, imports, symbols, line counts, and SHA-256 checksums.
-- Search project source.
-- Search the imported coding reference offline.
-- Keep knowledge retrieval behind the `AgentKnowledge` interface so additional providers can be added modularly.
-- Parse explicit create, replace, append, and remove operations.
-- Generate language-specific starter files for supported create requests.
-- Apply workspace mutations through typed `ChangeSet` transactions.
-- Record each `ChangeRecord` with its operation, before/after content, reason, and checksums.
-- Write file changes atomically and persist transaction metadata under `.coding-agent/transactions/`.
-- Roll back one or more committed transactions only when current content still matches the recorded after-checksum.
-- Reject rollback when another change has modified the file, preventing silent data loss.
-- Run explicit verification commands with bounded timeouts.
-- Persist task, document, and lesson records locally.
-- Persist task, document, lesson, and Chat workspace messages locally in app-private JSONL records.
-- Include prior Chat workspace messages in subsequent agent requests so follow-up work has conversation context.
-- Store versioned live modules and local model files outside the APK.
-- Reload changed modules and model bytes without rebuilding the Android host.
+Source code implements a proposal/review path and includes typed file operations, project-path checks, pre-apply content checksums, atomic file-writing/recovery helpers, post-write integrity checks, and rollback routines. The mutation coordinator includes approval records and constitution/policy checks. Command execution has a separate policy layer.
 
-## Knowledge and learning boundary
+These are safeguards, not a formal security guarantee. The repository still needs end-to-end validation for path/symlink edge cases, multi-file edits, concurrent changes, interruption during writes, failed rollback, command execution, imported projects, and hostile or malformed model output. Do not assume a change is safe solely because a proposal was generated or a unit test passed. Review the diff and verify the resulting project state before relying on a change.
 
-`Coding For Dummies` is an example reference asset used to exercise the local knowledge pipeline. It is not the product's knowledge limit or a hardcoded coding strategy.
+The research source code includes a composite search stack that can query GitHub, Stack Overflow, public Searx instances, MDN, and DuckDuckGo, with source filtering and relevance ranking. Public search services can be unavailable, rate-limited, or return incomplete results. Research output must be checked against the cited pages and the user's actual question; the code does not guarantee exhaustive web coverage.
 
-The intended ingestion workflow is:
+The bundled knowledge asset and local knowledge index are distinct from live web research. Do not assume that an indexed document is current unless its provenance and date have been checked.
 
-1. The user supplies documents, source files, reference material, or other supported input.
-2. An ingestion module extracts and normalizes the content.
-3. A knowledge module creates searchable chunks with source provenance.
-4. The agent retrieves relevant material during planning and synthesis.
-5. Lessons and verification evidence are stored locally for later tasks.
-6. Internet research will be added as another provider behind the same knowledge boundary.
+## Build locally
 
-The current implementation has the local knowledge example and the provider interfaces. General multi-file ingestion and internet-backed retrieval remain implementation work.
+Requirements:
 
-## Transaction and rollback behavior
+- JDK 17
+- Android SDK platform 35 and build tools 35.0.0
+- Android SDK platform-tools
+- Network access for Gradle dependency resolution, unless dependencies are already cached
 
-Workspace mutations are typed as `ChangeOperation` values: `CREATE`, `REPLACE`, `APPEND`, and `REMOVE`. A `ChangeSet` groups the records created by one transaction.
+Set `sdk.dir` in an untracked `local.properties` file to the SDK installation on your machine. For example, replace the path below with your actual SDK path:
 
-Each `ChangeRecord` stores:
+```properties
+sdk.dir=/opt/android-sdk
+```
 
-- Project-relative path
-- Operation type
-- Previous content, when a file previously existed
-- New content
-- Reason for the change
-- SHA-256 checksum before the change
-- SHA-256 checksum after the change
-
-Rollback is fail-closed. It returns `RollbackResult.Restored` only when every affected file still matches the expected after-checksum. If a file was changed externally, rollback returns `RollbackResult.Rejected` and leaves the conflicting file untouched.
-
-## Terminal limitations
-
-The Terminal tab and the agent `run_command` tool use the same underlying runner:
-
-- Command: `sh -c <your text>`
-- Working directory: the imported project copy in app-private storage
-- Timeout: 180 seconds (Stop sends `destroy` / `destroyForcibly`)
-- Output: stdout and stderr, each capture capped at 256 KiB
-
-The **Terminal tab is the owner-controlled terminal** and remains unrestricted. The **agent `run_command` tool is restricted** to project inspection and standard verification commands. Model commands cannot delete or modify files, chain shell commands, redirect output, access parent/absolute paths, use network tools, or change global Gradle configuration.
-
-This is the stock Android `sh` (toybox/toolbox on current devices). It is not bash, not a login shell, and not Termux. Typical available commands are basic Unix utilities already on the device (`ls`, `pwd`, `cat`, `echo`, limited `grep`). There is usually **no** JDK, **no** Gradle, **no** `git`, and **no** package manager. A command such as `./gradlew testDebugUnitTest` will fail on a normal phone unless those binaries are already on `PATH`.
-
-A passing shell command is not a file write. Source mutations still go through dual owner approval and checksum-backed transactions.
-
-## Local development
-
-Install the Android SDK command-line tools and packages required by the project, then create an untracked SDK configuration file:
+Then run from the repository root:
 
 ```bash
-printf 'sdk.dir=/opt/android-sdk\n' > local.properties
+chmod +x ./gradlew
+./gradlew --version
+./gradlew :app:compileDebugUnitTestKotlin --no-daemon --console=plain
 ./gradlew :app:testDebugUnitTest --no-daemon --console=plain
 ./gradlew :app:lintDebug --no-daemon --console=plain
 ./gradlew :app:assembleDebug --no-daemon --console=plain
+./gradlew :app:assembleRelease --no-daemon --console=plain
 ```
 
-The generated debug APK is written to:
+Expected APK locations after successful assembly:
 
-```text
-app/build/outputs/apk/debug/app-debug.apk
-```
+- Debug: `app/build/outputs/apk/debug/app-debug.apk`
+- Release: `app/build/outputs/apk/release/app-release.apk`
 
-`local.properties`, `.gradle/`, and `app/build/` are machine-local or generated state. They must not be committed.
+Confirm the actual output files after the build. The Gradle configuration shown here does not declare a production release-signing setup. Do not distribute an unsigned or otherwise unverified release artifact as a production release.
 
-## Verification coverage
+## CI workflow
 
-The project currently verifies:
+Workflow file: `.github/workflows/android-build.yml`.
 
-- Goal interpretation and task intake
-- Code-synthesis proposals
-- Project indexing and exact mutation behavior
-- Typed transaction records, checksum-backed rollback, and owner-approved repair staging
-- Live module and live model updates
-- Android lint
-- Debug APK assembly
+Triggers: pushes to `main`, pull requests targeting `main`, and manual dispatch. Its job installs JDK 17 and Android SDK packages, performs a limited security-baseline check, compiles test sources, runs the JVM unit-test task, explicitly reruns selected acceptance-path test classes, runs Android lint, assembles debug and release APKs, and uploads the debug APK artifact.
 
-The Android unit tests are JVM tests and run with:
+The security-baseline step checks for certain repository-stored signing files and specific browser/device-impersonation strings. **It is not a comprehensive secret scan, dependency audit, penetration test, or full security review.** The workflow does not upload the release APK in its current configuration.
 
-```bash
-./gradlew :app:testDebugUnitTest --no-daemon --console=plain
-```
+Read the result for the exact commit. A workflow in progress is not a pass; a successful workflow establishes only that the listed jobs completed successfully in that CI environment. It does not establish physical-device behavior, provider compatibility, production signing, accessibility, or release readiness.
 
-## Build on GitHub
+## Tests
 
-The repository includes `.github/workflows/android-build.yml`. GitHub Actions runs automatically on pushes to `main`, pull requests, and manual workflow dispatch. It installs the Android SDK, runs the unit tests, assembles the debug APK, and publishes the APK as the `coding-agent-debug-apk` workflow artifact.
+Tests are under `app/src/test/java/com/codingagent/`, in both the `agent` and `core` packages. They cover selected behavior such as command policy, tool-call outcomes, acceptance paths, agent-loop handling, local persistence, project/workspace integrity, model settings and parsing, research, storage guards, terminal cancellation, approval tokens, and tool selection.
 
-To run it manually:
+The CI workflow explicitly selects these test classes in its acceptance-path step:
 
-1. Open the repository on GitHub.
-2. Open **Actions**.
-3. Select **Android build**.
-4. Select **Run workflow**.
-5. Choose `main` and run it.
-6. Open the completed run and download `coding-agent-debug-apk` under **Artifacts**.
+- `com.codingagent.core.AcceptancePathTest`
+- `com.codingagent.core.StorageGuardTest`
+- `com.codingagent.core.AutonomousLoopTest`
 
-## Supported device contract
+The general `:app:testDebugUnitTest` task also runs the configured JVM unit tests. Test names and counts are not a substitute for inspecting assertions, and passing JVM tests do not prove end-to-end correctness.
 
-This build targets the Samsung Galaxy S25 class of devices: Android API 35 or newer, `arm64-v8a`, and 64-bit ARM. The APK intentionally does not claim x86_64 or 32-bit ARM support.
+## Source archive helper
 
-## Reproducible source packaging
+Run `scripts/package-source.sh [output.zip]` to create a source archive outside the repository tree. It excludes selected directories and file types such as Git metadata, local agent metadata, build/cache directories, `local.properties`, APKs, AABs, and class files, then prints a SHA-256 checksum.
 
-The repository is the canonical source tree. Do not commit Android SDK paths, Git metadata, Gradle caches, build outputs, APKs, AABs, class files, or local configuration.
+The script's `forbidden` list is currently initialized empty and is not populated with secret-detection findings. **The script is not a comprehensive credential or sensitive-data scanner.** Inspect the archive contents before sharing it; verify the checksum separately if you need integrity assurance.
 
-Create a clean source archive with:
+## Production-readiness checklist
 
-```bash
-./scripts/package-source.sh ../Coding-Agent-source.zip
-```
+Before claiming the app is production-ready, obtain and record evidence for all relevant items:
 
-The packager:
+- [ ] Clean build and all CI steps pass on the exact release commit.
+- [ ] Release signing is configured and verified, and the release APK is installed and exercised on supported physical devices.
+- [ ] The intended real model provider completes representative tasks, including streamed tool calls, errors, rate limits, cancellation, and malformed responses.
+- [ ] Project import, listing, indexing/search, file reads, proposed diffs, approvals, apply, verification, and rollback work end to end.
+- [ ] Multi-file operations survive interruption, concurrent edits, storage failures, and rollback failures without silent data loss.
+- [ ] Path and symlink boundaries, terminal restrictions, permissions, network/TLS handling, and sensitive-data logging are reviewed.
+- [ ] Lifecycle interruption, persistence recovery, long-running work, accessibility, and UI behavior are tested on target devices.
+- [ ] Source archives and distributed artifacts are inspected for credentials and private data.
 
-- Ignores Git metadata and `.coding-agent/` runtime data.
-- Rejects generated or machine-local files instead of silently hiding them.
-- Rejects `.gradle/`, `.idea/`, `build/`, `app/build/`, `local.properties`, APKs, AABs, and class files.
-- Orders entries by UTF-8 path bytes.
-- Normalizes ZIP timestamps and file metadata.
-- Prints the archive SHA-256 checksum.
-
-Two runs from the same clean source tree must produce byte-identical archives. Regenerate the checksum after changing source files; it is intentionally not hardcoded here because the README itself is part of the archive.
+Keep this README aligned with the code and reproducible evidence. Mark unverified behavior as unverified, and do not describe planned or partially implemented behavior as completed.
