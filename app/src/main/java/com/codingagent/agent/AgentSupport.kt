@@ -48,9 +48,11 @@ class AgentPlanner(private val workspace: ProjectWorkspace) {
 class AgentJournal(private val root: File) {
     private val file = root.resolve(".coding-agent/tasks.tsv")
     private val personalLog = root.resolve(".coding-agent/personal-log.jsonl")
+    private val pendingModelText = mutableMapOf<String, StringBuilder>()
 
     @Synchronized
     fun record(task: AgentTask) {
+        flushModelText(task.id)
         file.parentFile?.mkdirs()
         val line = listOf(task.id, task.status, task.request, task.changes.size, task.verification.passed, task.summary, task.events.joinToString(" | "))
             .joinToString("\t") { it.toString().replace('\t', ' ').replace('\n', ' ') }
@@ -60,12 +62,26 @@ class AgentJournal(private val root: File) {
     /** Persist each observable event for later owner inspection. */
     @Synchronized
     fun recordEvent(taskId: String, event: AutonomousAgentEvent) {
+        if (event is AutonomousAgentEvent.ModelDelta) {
+            pendingModelText.getOrPut(taskId) { StringBuilder() }.append(event.text)
+            return
+        }
+        flushModelText(taskId)
+        writeEvent(taskId, event.javaClass.simpleName, event.toString())
+    }
+
+    private fun flushModelText(taskId: String) {
+        val text = pendingModelText.remove(taskId)?.toString() ?: return
+        if (text.isNotEmpty()) writeEvent(taskId, "ModelStream", text)
+    }
+
+    private fun writeEvent(taskId: String, type: String, details: String) {
         personalLog.parentFile?.mkdirs()
         val entry = JSONObject()
             .put("timestamp", System.currentTimeMillis())
             .put("taskId", taskId)
-            .put("type", event.javaClass.simpleName)
-            .put("details", event.toString())
+            .put("type", type)
+            .put("details", details)
         personalLog.appendText(entry.toString() + "\n")
     }
 
