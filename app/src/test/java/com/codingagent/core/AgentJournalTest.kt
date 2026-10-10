@@ -10,6 +10,7 @@ import com.codingagent.agent.ChatWorkspace
 import com.codingagent.workspace.KnowledgeHit
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.nio.file.Files
@@ -39,6 +40,25 @@ class AgentJournalTest {
         assertEquals("ToolFinished", previous.getString("type"))
         assertTrue(previous.getString("details").contains("real file contents"))
         assertTrue(root.resolve(".coding-agent/personal-log.jsonl").isFile)
+    }
+
+    @Test
+    fun doesNotPublishAnEventWhenPersonalLogWriteFails() {
+        val root = Files.createTempDirectory("agent-personal-log-failure").toFile()
+        val logDirectory = root.resolve(".coding-agent/personal-log.jsonl")
+        assertTrue(logDirectory.mkdirs())
+        val knowledge = object : AgentKnowledge {
+            override fun search(query: String, limit: Int): List<KnowledgeHit> = emptyList()
+        }
+        val agent = AutonomousAgent(root, knowledge, gateway = null)
+        val observed = mutableListOf<AutonomousAgentEvent>()
+
+        agent.run("hello") { observed += it }
+
+        assertFalse(observed.any { it is AutonomousAgentEvent.Started })
+        assertTrue(observed.any {
+            it is AutonomousAgentEvent.Phase && it.name == "PERSONAL_LOG_ERROR"
+        })
     }
 
     @Test

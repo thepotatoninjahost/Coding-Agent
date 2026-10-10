@@ -66,7 +66,7 @@ class AutonomousAgent(
     private val experience = ExperienceRecorder(root)
     private val changeSets = mutableListOf<ChangeSet>()
     private var lastResearchProgress: String = "not started"
-    @Volatile private var lastJournalError: String? = null
+    @Volatile private var lastTaskJournalError: String? = null
     @Volatile private var lastExperienceError: String? = null
     private val lanes = AgentDirectLanes(workspace, files, mutations)
     private val tools = AgentToolDispatch(
@@ -122,7 +122,7 @@ class AutonomousAgent(
 
     private fun recordTask(task: AgentTask) {
         runCatching { journal.record(task) }.onFailure { error ->
-            lastJournalError = error.message ?: error.javaClass.simpleName
+            lastTaskJournalError = error.message ?: error.javaClass.simpleName
         }
         runCatching {
             experience.record(
@@ -163,7 +163,7 @@ class AutonomousAgent(
         try {
             changeSets.clear()
             lastResearchProgress = "not started"
-            lastJournalError = null
+            lastTaskJournalError = null
             lastExperienceError = null
             return runInternal(request, onEvent)
         } finally {
@@ -178,7 +178,38 @@ class AutonomousAgent(
         val taskId = UUID.randomUUID().toString()
         val events = mutableListOf<AutonomousAgentEvent>()
         var personalLogHealthy = true
+        fun failClosedOnLogFailure(error: Throwable) {
+            val detail = error.message ?: error.javaClass.simpleName
+            personalLogHealthy = false
+            val warning = AutonomousAgentEvent.Phase(
+                "PERSONAL_LOG_ERROR",
+                "Could not persist an audit event: $detail. The agent is stopping to preserve auditability."
+            )
+            events += warning
+            onEvent(warning)
+            cancel("Personal log write failed; stopped to preserve auditability")
+        }
         fun emit(event: AutonomousAgentEvent) {
+            if (!personalLogHealthy) return
+
+            val taskJournalError = lastTaskJournalError
+            if (taskJournalError != null) {
+                lastTaskJournalError = null
+                val warning = AutonomousAgentEvent.Phase(
+                    "TASK_JOURNAL_ERROR",
+                    "Could not persist the task journal: $taskJournalError. The agent is stopping before further work."
+                )
+                val warningFailure = runCatching { journal.recordEvent(taskId, warning) }.exceptionOrNull()
+                if (warningFailure != null) {
+                    failClosedOnLogFailure(warningFailure)
+                    return
+                }
+                events += warning
+                onEvent(warning)
+                cancel("Task journal write failed; stopped before further work")
+                return
+            }
+
             val experienceError = lastExperienceError
             if (experienceError != null) {
                 lastExperienceError = null
@@ -186,39 +217,23 @@ class AutonomousAgent(
                     "LEARNING_STORE_ERROR",
                     "Could not persist the learning record: $experienceError"
                 )
+                val warningFailure = runCatching { journal.recordEvent(taskId, warning) }.exceptionOrNull()
+                if (warningFailure != null) {
+                    failClosedOnLogFailure(warningFailure)
+                    return
+                }
                 events += warning
                 onEvent(warning)
-                if (personalLogHealthy) {
-                    val warningWriteFailure = runCatching { journal.recordEvent(taskId, warning) }.exceptionOrNull()
-                    if (warningWriteFailure != null) {
-                        lastJournalError = warningWriteFailure.message ?: warningWriteFailure.javaClass.simpleName
-                        personalLogHealthy = false
-                        val logWarning = AutonomousAgentEvent.Phase(
-                            "PERSONAL_LOG_ERROR",
-                            "Could not persist the personal log: ${lastJournalError}. The agent is stopping to avoid continuing without an audit record."
-                        )
-                        events += logWarning
-                        onEvent(logWarning)
-                        cancel("Personal log write failed; stopped to preserve auditability")
-                    }
-                }
+            }
+
+            // Persist the observable event before publishing it to the UI or the returned event list.
+            val logFailure = runCatching { journal.recordEvent(taskId, event) }.exceptionOrNull()
+            if (logFailure != null) {
+                failClosedOnLogFailure(logFailure)
+                return
             }
             events += event
             onEvent(event)
-            if (!personalLogHealthy) return
-            val logFailure = lastJournalError?.let { IllegalStateException(it) }
-                ?: runCatching { journal.recordEvent(taskId, event) }.exceptionOrNull()
-            if (logFailure != null) {
-                lastJournalError = logFailure.message ?: logFailure.javaClass.simpleName
-                personalLogHealthy = false
-                val warning = AutonomousAgentEvent.Phase(
-                    "PERSONAL_LOG_ERROR",
-                    "Could not persist the personal log: ${logFailure.message ?: logFailure.javaClass.simpleName}. The agent is stopping to avoid continuing without an audit record."
-                )
-                events += warning
-                onEvent(warning)
-                cancel("Personal log write failed; stopped to preserve auditability")
-            }
         }
         emit(AutonomousAgentEvent.Started(taskId, normalized))
         emit(AutonomousAgentEvent.Phase("INTAKE", "Inspecting the request and repository"))
