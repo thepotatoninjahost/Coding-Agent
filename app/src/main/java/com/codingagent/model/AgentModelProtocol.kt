@@ -22,6 +22,7 @@ You investigate the real project, then work toward completing the owner's object
 ## Hard rules
 - Evidence first. If the owner names a file, read it before analyzing or changing it.
 - Exactly one tool call per turn; inspect the complete result before the next call.
+- Include a short, evidence-based purpose in each tool call's optional purpose field so the decision can be reconstructed from personal logs.
 - Code and configuration changes are proposals only. The model cannot approve its own proposal. The owner must approve twice through the authenticated Review flow. Never claim a change was applied until an owner-controlled action returns APPLIED.
 - Owner constraints and the twelve constitution rules are binding. Do not invent additional rules from personal preferences or risk judgments. Offer candid advice, explain evidence and trade-offs, then follow the owner's decision unless it conflicts with one of the twelve rules or is technically impossible. If blocked, identify the exact rule or limitation.
 - Preserve the goal across follow-up turns. Do not silently drop parts of a plan or substitute a different task.
@@ -58,47 +59,47 @@ list_files, read_file, search_project, search_knowledge, research_web, replace_t
         ModelToolDefinition(
             "list_files",
             "List files and directories under a project-relative path. Use an empty path for the project root. Prefer this before guessing paths.",
-            """{"type":"object","properties":{"path":{"type":"string","description":"Project-relative directory path (empty or '.' for root)"}},"required":[]}"""
+            """{"type":"object","properties":{"path":{"type":"string","description":"Project-relative directory path (empty or '.' for root)"},"purpose":{"type":"string","description":"Short evidence-based reason for this tool call."}},"required":[]}"""
         ),
         ModelToolDefinition(
             "read_file",
             "Read the full content of one project file. Required before analyzing or modifying any named file.",
-            """{"type":"object","properties":{"path":{"type":"string","description":"Project-relative file path"}},"required":["path"]}"""
+            """{"type":"object","properties":{"path":{"type":"string","description":"Project-relative file path"},"purpose":{"type":"string","description":"Short evidence-based reason for this tool call."}},"required":["path"]}"""
         ),
         ModelToolDefinition(
             "search_project",
             "Search the project source for a text or regex-like query. Returns matching lines with paths.",
-            """{"type":"object","properties":{"query":{"type":"string","description":"Search query"}},"required":["query"]}"""
+            """{"type":"object","properties":{"query":{"type":"string","description":"Search query"},"purpose":{"type":"string","description":"Short evidence-based reason for this tool call."}},"required":["query"]}"""
         ),
         ModelToolDefinition(
             "search_knowledge",
             "Search the local offline knowledge base (reference material imported into the agent).",
-            """{"type":"object","properties":{"query":{"type":"string","description":"Search query"}},"required":["query"]}"""
+            """{"type":"object","properties":{"query":{"type":"string","description":"Search query"},"purpose":{"type":"string","description":"Short evidence-based reason for this tool call."}},"required":["query"]}"""
         ),
         ModelToolDefinition(
             "research_web",
             "Research the web for technical information. Use for APIs, errors, and external facts not in the project.",
-            """{"type":"object","properties":{"query":{"type":"string","description":"Research query"},"mode":{"type":"string","description":"BROAD or DEEP"},"sources":{"type":"integer","description":"Max sources to gather"}},"required":["query"]}"""
+            """{"type":"object","properties":{"query":{"type":"string","description":"Research query"},"mode":{"type":"string","description":"BROAD or DEEP"},"sources":{"type":"integer","description":"Max sources to gather"},"purpose":{"type":"string","description":"Short evidence-based reason for this tool call."}},"required":["query"]}"""
         ),
         ModelToolDefinition(
             "replace_text",
             "Stage an exact text replacement. Dual owner approval is required before it is applied.",
-            """{"type":"object","properties":{"path":{"type":"string"},"oldText":{"type":"string"},"newText":{"type":"string"},"reason":{"type":"string"}},"required":["path","oldText","newText"]}"""
+            """{"type":"object","properties":{"path":{"type":"string"},"oldText":{"type":"string"},"newText":{"type":"string"},"reason":{"type":"string"},"purpose":{"type":"string","description":"Short evidence-based reason for this tool call."}},"required":["path","oldText","newText"]}"""
         ),
         ModelToolDefinition(
             "create_file",
             "Stage a new file. Dual owner approval is required before it is written.",
-            """{"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"},"reason":{"type":"string"}},"required":["path","content"]}"""
+            """{"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"},"reason":{"type":"string"},"purpose":{"type":"string","description":"Short evidence-based reason for this tool call."}},"required":["path","content"]}"""
         ),
         ModelToolDefinition(
             "run_command",
             "Run a restricted project inspection or verification command. Model commands cannot delete files, chain shell commands, redirect output, access parent/absolute paths, use network tools, or change global Gradle configuration.",
-            """{"type":"object","properties":{"command":{"type":"string"}},"required":["command"]}"""
+            """{"type":"object","properties":{"command":{"type":"string"},"purpose":{"type":"string","description":"Short evidence-based reason for this tool call."}},"required":["command"]}"""
         ),
         ModelToolDefinition(
             "verify",
             "Run static verification (unfinished-work marker scan). Never reports a fake pass.",
-            """{"type":"object","properties":{},"required":[]}"""
+            """{"type":"object","properties":{"purpose":{"type":"string","description":"Short evidence-based reason for this tool call."}},"required":[]}"""
         )
     )
 
