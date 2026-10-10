@@ -1,17 +1,27 @@
 # Deep research and durable learning
 
-## Decision
+**Status: implementation note. This document describes the current source structure at the time it was reviewed; it is not a promise of exhaustive research or complete end-to-end reliability.** Update it whenever the research pipeline changes.
 
-Research means collecting and retaining evidence, not displaying one search snippet. A coding research session will expand a request into five focused query lanes: primary documentation, implementation examples, community solutions, standards/papers, and failure modes. It will collect up to 50 distinct URLs across multiple domains, fetch each page with bounded concurrency, extract readable text and code blocks, and persist a provenance-bearing report under the project’s `.coding-agent/research/` directory.
+## Current implementation map
 
-The report is the learning artifact. Each fetched source records its URL, title, domain, query lane, status, word count, extracted text, and code examples. The session also stores normalized searchable chunks, so later tasks can retrieve prior research without repeating the crawl. A session is considered useful only when it has enough successful sources and extracted content; snippets alone do not satisfy the gate.
+- `WebResearchProvider` defines the search boundary.
+- `CompositeWebResearchProvider` combines source-specific providers and applies source acceptability, query relevance, deduplication, and ranking rules. Current providers include GitHub, Stack Overflow, public Searx instances, MDN, and DuckDuckGo.
+- `DeepResearchProvider` defines the deep-research API, including mode, target source count, cancellation, and progress callbacks.
+- `DurableDeepResearchProvider` coordinates research sessions. Broad mode delegates to `PersonalResearchProvider`; specialized modes use the multi-lane research path.
+- `ArticleExtractor` contains URL validation and page-text extraction helpers.
+- `ResearchBriefBuilder` creates bounded evidence text from a research session.
+- Research sessions are persisted by the research provider under its configured research root.
+- `AgentToolDispatch.researchWeb()` calls the research provider and returns a bounded evidence brief to the agent. The tool path currently clamps its requested source count to 1–12; other entry points may use different limits.
+- The Compose UI has a Research surface that starts a research session and displays progress/results.
 
-## Runtime behavior
+These are code-path descriptions, not a guarantee that all public search services are available, that a requested number of sources will be found, or that every fetched page will be extracted successfully.
 
-`WebResearchProvider.deepResearch()` is the explicit deep-research boundary. `CodingAgentRuntime` calls it before non-trivial execution, saves the report, and records source/chunk counts in the task journal. `AutonomousAgent` performs the same deep phase before model turns and injects the bounded evidence context into the model prompt. Existing `search()` remains for quick lookup and UI previews.
+## Evidence and limitations
 
-The Android research surface starts a 50-source session, shows progress/result counts, lists the learned sources, and reports failures separately. Network work runs off the main thread. Source extraction is capped per page and bounded by a fixed worker pool. Existing transactional workspace behavior remains unchanged.
+Research results can be incomplete, stale, duplicated, blocked, or irrelevant despite filtering. Search providers may be down or rate-limited. Extracted page text can omit context, dynamic content, tables, or code. Verify important claims against the original source pages and dates; do not treat the brief as a substitute for the sources.
+
+The bundled knowledge text and local knowledge index are separate from live web research. An indexed document is not necessarily current.
 
 ## Verification
 
-Add pure tests for query-lane expansion, HTML extraction, source deduplication, report persistence/search, and the runtime’s research gate. Run unit tests, lint, and debug APK assembly after implementation.
+Relevant tests include `DeepResearchTest` and `ResearchModeTest`. They cover selected query-lane, extraction, and research-mode behavior; they do not establish exhaustive live-web coverage or provider availability. Use CI for the exact commit and perform an end-to-end run against the intended network environment before relying on research output.
