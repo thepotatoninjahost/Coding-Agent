@@ -37,7 +37,8 @@ object LoopControl {
         }
 
         val forcedByRefusal = writeRefusals >= 2
-        val lateTurn = turn >= (maxTurns - 2).coerceAtLeast(1)
+        val lateTurnReserve = if (wholeProjectReview) 1 else 2
+        val lateTurn = turn >= (maxTurns - lateTurnReserve).coerceAtLeast(1)
         // Never force a code change from zero evidence. If the turn budget expires without
         // useful evidence, the caller must fail truthfully instead of guessing.
         val shouldDemandWrite = usefulGathers > 0 && (forcedByRefusal || lateTurn)
