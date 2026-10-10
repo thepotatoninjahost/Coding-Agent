@@ -416,15 +416,12 @@ class AutonomousAgent(
                         continue
                     }
                     emit(AutonomousAgentEvent.ModelMessage(response.content))
-                    // A change/debug/create/refactor task is not complete merely because the
-                    // model produced prose. Once the loop has reached its write gate, a textual
-                    // response before any mutation is a refusal to act, not task completion.
-                    // Keep the execution spine alive long enough for the model to produce the
-                    // required staged mutation, then fail closed if it repeatedly refuses.
-                    if (writeNow && changeWork && !state.mutationOccurred) {
+                    // A change task must not be reported complete until its requested mutation is staged.
+                    // Prose may indicate the model needs more evidence, so do not force a write after one gather.
+                    if (changeWork && !state.mutationOccurred) {
                         state.writeNowRefusals++
-                        if (state.writeNowRefusals >= 2) {
-                            val msg = "The model reached the execution gate twice without staging the requested change. No code was written."
+                        if (writeNow && state.writeNowRefusals >= 3) {
+                            val msg = "The model repeatedly reached the change gate without staging the requested change. No code was written."
                             val task = failedTask(taskId, normalized, plan, msg, changeSets.flatMap { it.changes })
                             emit(AutonomousAgentEvent.Failed(task, msg))
                             recordTask(task)
@@ -434,11 +431,12 @@ class AutonomousAgent(
                             "assistant",
                             response.content.take(1_200)
                         )
-                        transcript += com.codingagent.model.ModelMessage(
-                            "user",
-                            "SYSTEM: This is a change task and no mutation has been staged yet. " +
-                                "Do not report completion. Call replace_text or create_file now using the evidence already gathered."
-                        )
+                        val instruction = if (writeNow) {
+                            "SYSTEM: This is change work and no mutation has been staged. Stage the requested change if the evidence supports it. If a correct change still requires more evidence, use the relevant read, search, research, or verification tool instead of guessing."
+                        } else {
+                            "SYSTEM: This is change work and no mutation has been staged. Do not report completion. Continue with the next useful evidence-gathering tool call, or stage the change when the relevant evidence is sufficient. Keep one tool call per turn."
+                        }
+                        transcript += com.codingagent.model.ModelMessage("user", instruction)
                         continue
                     }
                     val missing = missingEvidenceMessage(intake, state.readPaths, state.searchedProject)
