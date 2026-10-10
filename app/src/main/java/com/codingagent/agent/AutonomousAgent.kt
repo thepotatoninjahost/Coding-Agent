@@ -169,23 +169,26 @@ class AutonomousAgent(
         require(normalized.isNotEmpty()) { "A coding request is required" }
         val taskId = UUID.randomUUID().toString()
         val events = mutableListOf<AutonomousAgentEvent>()
-        var personalLogFailureReported = false
+        var personalLogHealthy = true
         fun emit(event: AutonomousAgentEvent) {
             events += event
             onEvent(event)
+            if (!personalLogHealthy) return
             val logFailure = runCatching { journal.recordEvent(taskId, event) }.exceptionOrNull()
-            if (logFailure != null && !personalLogFailureReported) {
-                personalLogFailureReported = true
+            if (logFailure != null) {
+                personalLogHealthy = false
                 val warning = AutonomousAgentEvent.Phase(
                     "PERSONAL_LOG_ERROR",
-                    "Could not persist the personal log: ${logFailure.message ?: logFailure.javaClass.simpleName}. Some events may be missing from the log."
+                    "Could not persist the personal log: ${logFailure.message ?: logFailure.javaClass.simpleName}. The agent is stopping to avoid continuing without an audit record."
                 )
                 events += warning
                 onEvent(warning)
+                cancel("Personal log write failed; stopped to preserve auditability")
             }
         }
         emit(AutonomousAgentEvent.Started(taskId, normalized))
         emit(AutonomousAgentEvent.Phase("INTAKE", "Inspecting the request and repository"))
+        if (isCancelled()) return stopNow(taskId, normalized, AgentPlanner(workspace).plan(normalized), events) { emit(it) }
         // Keep the full packaged conversation for deterministic intake. GoalInterpreter
         // extracts the active job and prior owner instructions before the model sees them.
         // The current-turn focus remains the execution-facing request for direct lanes.
