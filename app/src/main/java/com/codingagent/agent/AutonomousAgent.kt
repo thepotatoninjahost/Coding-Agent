@@ -66,6 +66,7 @@ class AutonomousAgent(
     private val experience = ExperienceRecorder(root)
     private val changeSets = mutableListOf<ChangeSet>()
     private var lastResearchProgress: String = "not started"
+    @Volatile private var lastJournalError: String? = null
     private val lanes = AgentDirectLanes(workspace, files, mutations)
     private val tools = AgentToolDispatch(
         files = files,
@@ -119,7 +120,9 @@ class AutonomousAgent(
     }
 
     private fun recordTask(task: AgentTask) {
-        journal.record(task)
+        runCatching { journal.record(task) }.onFailure { error ->
+            lastJournalError = error.message ?: error.javaClass.simpleName
+        }
         runCatching {
             experience.record(
                 task = task.request,
@@ -128,6 +131,8 @@ class AutonomousAgent(
                 evidence = task.changes.joinToString(", ") { it.path },
                 passed = task.verification.passed
             )
+        }.onFailure { error ->
+            if (lastJournalError == null) lastJournalError = error.message ?: error.javaClass.simpleName
         }
     }
 
@@ -157,6 +162,7 @@ class AutonomousAgent(
         try {
             changeSets.clear()
             lastResearchProgress = "not started"
+            lastJournalError = null
             return runInternal(request, onEvent)
         } finally {
             activeRunGeneration = -1L
@@ -174,8 +180,10 @@ class AutonomousAgent(
             events += event
             onEvent(event)
             if (!personalLogHealthy) return
-            val logFailure = runCatching { journal.recordEvent(taskId, event) }.exceptionOrNull()
+            val logFailure = lastJournalError?.let { IllegalStateException(it) }
+                ?: runCatching { journal.recordEvent(taskId, event) }.exceptionOrNull()
             if (logFailure != null) {
+                lastJournalError = logFailure.message ?: logFailure.javaClass.simpleName
                 personalLogHealthy = false
                 val warning = AutonomousAgentEvent.Phase(
                     "PERSONAL_LOG_ERROR",
