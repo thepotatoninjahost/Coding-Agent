@@ -64,13 +64,14 @@ These are responsibility summaries, not claims that every workflow is complete.
 
 ## Model configuration and network behavior
 
-The current model settings define a **remote HTTP model backend** with a base URL, model ID, API key, optional fallback model IDs, optional extra headers, and a configurable system prompt. The gateway targets an OpenAI-compatible `/chat/completions` endpoint and implements both non-streaming requests and Server-Sent Events (SSE) response parsing, including streamed tool-call argument assembly.
+The settings dialog currently exposes a **remote HTTP model backend** with a base URL, model ID, API key, and optional extra HTTP headers. The gateway targets an OpenAI-compatible `/chat/completions` endpoint and implements both non-streaming requests and Server-Sent Events (SSE) response parsing, including streamed tool-call argument assembly. The `ModelSettings` data class also contains `rotationModels` and `systemPrompt` fields, but the current settings dialog does not expose those fields. Code search found no call site for `effectiveSystemPrompt()`; agent requests use the built-in `AgentModelProtocol.SYSTEM` prompt. Therefore, custom system-prompt editing is **not currently wired up as a usable UI feature**.
 
 Important constraints:
 
 - Compatibility depends on the specific provider and model. An OpenAI-compatible URL does not guarantee compatible tool calling, streaming, or response formatting.
 - Remote non-loopback endpoints are required by the endpoint policy to use HTTPS. Plain HTTP is permitted only for recognized localhost/loopback endpoints.
-- Model rotation retries configured model IDs against the configured endpoint; it is not automatic failover to unrelated providers.
+- The source supports model rotation when fallback model IDs are present in settings data, but the current settings dialog does not expose a fallback-model field. Rotation is not automatic failover to unrelated providers.
+- The `systemPrompt` data field is not currently connected to the agent request path. Do not assume the owner can customize the active system prompt through the UI.
 - The application source contains encrypted secret/settings storage backed by Android Keystore mechanisms and a legacy-preferences migration path. This does not remove the need to protect the device, backups, logs, and any credentials supplied to a provider.
 - Never commit API keys, provider credentials, signing material, local SDK paths, or private project data.
 
