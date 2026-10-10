@@ -55,6 +55,7 @@ class GoalInterpreter(private val root: File) {
             }
         }
         return when {
+            matches(request, "write (?:a )?(?:deep )?(?:technical )?report|write (?:a )?summary|generate (?:a )?(?:technical )?report") -> TaskIntent.INSPECT
             matches(request, "create|add|new file|write a|generate|build\\s+(?:me|a|an)\\s+") -> TaskIntent.CREATE
             matches(request, "test|tests|testing|verify|build\\s+(?:the|this|my)\\s+(?:project|app|application|module)") -> TaskIntent.TEST
             matches(request, "fix|debug|broken|error|crash|bug|repair|patch") -> TaskIntent.DEBUG
