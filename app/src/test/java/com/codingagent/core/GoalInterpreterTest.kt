@@ -134,6 +134,9 @@ class GoalInterpreterTest {
         assertTrue(contract.constraints.any {
             it.contains("do not ever create a hello world file", ignoreCase = true)
         })
+        assertTrue(contract.goal.contains("\nPrior owner instructions:"))
+        assertTrue(contract.goal.contains("\nCurrent owner follow-up: Kotlin and Python"))
+        assertTrue(!contract.goal.contains("\\nPrior owner instructions:"))
     }
 
     @Test fun buildMeACompilerIsCreateNotProjectTest() {
