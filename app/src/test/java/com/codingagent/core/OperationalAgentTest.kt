@@ -130,8 +130,8 @@ class OperationalAgentTest {
         root.resolve("src/Main.kt").writeText("fun main() = 1\n")
         val responses = ArrayDeque<ModelResponse>().apply {
             add(ModelResponse.ToolCall(
-                name = "search_project",
-                arguments = """{"query":"Main.kt"}"""
+                name = "read_file",
+                arguments = """{"path":"src/Main.kt"}"""
             ))
             add(ModelResponse.Text("I reviewed the file and the requested change is straightforward."))
             add(ModelResponse.ToolCall(
