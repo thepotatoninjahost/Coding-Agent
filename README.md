@@ -1,34 +1,111 @@
 # Coding Agent
 
-Coding Agent is an Android application written in Kotlin with a Jetpack Compose interface. The repository includes an autonomous agent loop, task-intake and tool-dispatch code, an OpenAI-compatible HTTP chat-completions gateway, and a project workspace for file inspection and proposed changes.
+Coding Agent is an Android application written in Kotlin using Jetpack Compose. It is intended to help inspect a selected project, research technical questions, propose code changes, and run verification steps through an agent workflow.
 
-**Status: active development. Production readiness has not been established.** This README records source and CI facts, not aspirations. Check the current [GitHub Actions runs](../../actions) for the status of the exact commit you plan to use.
+**Status: active development. Production readiness is not established.** The presence of a class, UI surface, test, or CI step is not proof that every end-to-end scenario works. Check CI for the exact commit you intend to use, and test the app on the target device and model provider.
 
-## Android build configuration
+## Current verified build configuration
 
-The app module declares application ID `com.codingagent`, compile SDK 35, target SDK 35, minimum SDK 34, and Java/Kotlin target 17. Release builds enable code shrinking. A successful APK assembly alone does not prove signing, distribution readiness, or runtime correctness.
+From `app/build.gradle.kts`:
 
-## Source layout
+- Application ID and namespace: `com.codingagent`
+- Compile SDK: 35
+- Target SDK: 35
+- Minimum SDK: 34
+- Java source/target compatibility: 17
+- Kotlin JVM target: 17
+- Android Gradle Plugin: 8.7.0
+- Kotlin and Compose compiler plugins: 2.1.0
+- Gradle wrapper distribution: Gradle 8.9
+- Release build: code shrinking enabled through R8/ProGuard rules
+- Release signing: no dedicated production signing configuration is declared in this module
 
-Production source is under `app/src/main/java/com/codingagent/`.
+The app's declared minimum Android version is API 34. Do not assume older devices are supported. A successful release APK assembly is not evidence that the artifact is production-signed, installable on every target, or correct at runtime.
 
-- `agent`: autonomous execution loop, task planning support, tool dispatch, chat workspace, journaling
-- `model`: model protocol and OpenAI-compatible HTTP gateway with streamed response parsing
-- `workspace`: project files, indexing/search, transactional edits, checksums, verification, rollback
-- `intake`: task interpretation and typed operation data
-- `research`: research provider interfaces and implementations
-- `ui`: Android/Compose interface
-- `core`: supporting local persistence
+## User-facing areas
 
-These package names describe source organization; they do not imply that every workflow is complete.
+The Compose workbench declares these surfaces in `UiTheme.kt`:
 
-## Build and test
+- **Chat** — interact with the agent and view progress.
+- **Files** — browse and inspect files in the selected project.
+- **Review** — review pending proposed changes and approval actions.
+- **Terminal** — access the app's terminal/command-runner integration.
+- **Research** — view research functionality.
 
-Install JDK 17 and Android SDK platform/build tools 35. Create an untracked `local.properties` with the correct SDK path, then run:
+The actual capabilities and constraints of each surface depend on the implementation, device environment, project, and configured model. In particular, the presence of a terminal surface does not mean that every desktop shell command or development tool is available on Android.
+
+## Source tree
+
+Production Kotlin source is under `app/src/main/java/com/codingagent/`.
+
+| Package | Responsibility represented in source |
+| --- | --- |
+| `agent/` | Autonomous execution loop, request classification, planning, tool selection and dispatch, progress events, journaling, response-quality checks, retry/repair support, user memory, and self-evolution/self-repair support |
+| `core/` | Local app storage, encrypted secret/settings storage, migration, user-memory persistence, and live-module bootstrap/runtime support |
+| `intake/` | Goal interpretation, task-intake parsing, typed operations, and code-synthesis proposals |
+| `knowledge/` | Document ingestion, local knowledge indexing/search, and knowledge-provider interfaces |
+| `model/` | Model request/response types, model settings, JSON response parsing, remote HTTP gateway, streaming, cancellation, and model rotation |
+| `research/` | Search providers, source relevance/quality checks, article extraction, research modes, progress, and durable research sessions |
+| `ui/` | Main Android activity, Compose screens, review binding, theme, and UI status mapping |
+| `workspace/` | Project indexing and file services, path checks, command execution, staged changes, approval coordination, integrity checks, atomic writes, persistence, and rollback |
+
+Other repository areas:
+
+- `app/src/main/AndroidManifest.xml` — app declaration and Android permissions.
+- `app/src/main/res/` — launcher artwork, theme resources, and data-extraction rules.
+- `app/src/main/assets/knowledge/coding-for-dummies.txt` — bundled knowledge text asset.
+- `app/src/test/java/com/codingagent/agent/` and `app/src/test/java/com/codingagent/core/` — JVM unit and acceptance-path tests.
+- `docs/` — owner instructions, tool-queue notes, anti-yes-man protocol, and a research design note. Some documents describe intended or historical behavior; compare them with current code before treating them as authoritative.
+- `scripts/package-source.sh` — source ZIP packaging and SHA-256 output.
+- `scripts/sync_to_github.sh` — a specialized sync helper with external script-path assumptions; it is not a general-purpose build or deployment command.
+- Root Gradle files and `gradle/wrapper/` — build configuration and wrapper.
+
+These are responsibility summaries, not claims that every workflow is complete.
+
+## Model configuration and network behavior
+
+The current model settings define a **remote HTTP model backend** with a base URL, model ID, API key, optional fallback model IDs, optional extra headers, and a configurable system prompt. The gateway targets an OpenAI-compatible `/chat/completions` endpoint and implements both non-streaming requests and Server-Sent Events (SSE) response parsing, including streamed tool-call argument assembly.
+
+Important constraints:
+
+- Compatibility depends on the specific provider and model. An OpenAI-compatible URL does not guarantee compatible tool calling, streaming, or response formatting.
+- Remote non-loopback endpoints are required by the endpoint policy to use HTTPS. Plain HTTP is permitted only for recognized localhost/loopback endpoints.
+- Model rotation retries configured model IDs against the configured endpoint; it is not automatic failover to unrelated providers.
+- The application source contains encrypted secret/settings storage backed by Android Keystore mechanisms and a legacy-preferences migration path. This does not remove the need to protect the device, backups, logs, and any credentials supplied to a provider.
+- Never commit API keys, provider credentials, signing material, local SDK paths, or private project data.
+
+Test the exact provider URL, model ID, authentication, extra headers, streaming behavior, and tool-calling task that you intend to use.
+
+## Project changes and safety boundaries
+
+Source code implements a proposal/review path and includes typed file operations, project-path checks, pre-apply content checksums, atomic file-writing/recovery helpers, post-write integrity checks, and rollback routines. The mutation coordinator includes approval records and constitution/policy checks. Command execution has a separate policy layer.
+
+These are safeguards, not a formal security guarantee. The repository still needs end-to-end validation for path/symlink edge cases, multi-file edits, concurrent changes, interruption during writes, failed rollback, command execution, imported projects, and hostile or malformed model output. Do not assume a change is safe solely because a proposal was generated or a unit test passed. Review the diff and verify the resulting project state before relying on a change.
+
+The research source code includes a composite search stack that can query GitHub, Stack Overflow, public Searx instances, MDN, and DuckDuckGo, with source filtering and relevance ranking. Public search services can be unavailable, rate-limited, or return incomplete results. Research output must be checked against the cited pages and the user's actual question; the code does not guarantee exhaustive web coverage.
+
+The bundled knowledge asset and local knowledge index are distinct from live web research. Do not assume that an indexed document is current unless its provenance and date have been checked.
+
+## Build locally
+
+Requirements:
+
+- JDK 17
+- Android SDK platform 35 and build tools 35.0.0
+- Android SDK platform-tools
+- Network access for Gradle dependency resolution, unless dependencies are already cached
+
+Set `sdk.dir` in an untracked `local.properties` file to the SDK installation on your machine. For example, replace the path below with your actual SDK path:
+
+```properties
+sdk.dir=/opt/android-sdk
+```
+
+Then run from the repository root:
 
 ```bash
-printf 'sdk.dir=/opt/android-sdk\n' > local.properties
 chmod +x ./gradlew
+./gradlew --version
 ./gradlew :app:compileDebugUnitTestKotlin --no-daemon --console=plain
 ./gradlew :app:testDebugUnitTest --no-daemon --console=plain
 ./gradlew :app:lintDebug --no-daemon --console=plain
@@ -36,31 +113,52 @@ chmod +x ./gradlew
 ./gradlew :app:assembleRelease --no-daemon --console=plain
 ```
 
-Replace `/opt/android-sdk` with the actual SDK path. Debug APK output is `app/build/outputs/apk/debug/app-debug.apk`; release APK output is `app/build/outputs/apk/release/app-release.apk`.
+Expected APK locations after successful assembly:
 
-## CI
+- Debug: `app/build/outputs/apk/debug/app-debug.apk`
+- Release: `app/build/outputs/apk/release/app-release.apk`
 
-`.github/workflows/android-build.yml` runs on pushes and pull requests targeting `main`, and on manual dispatch. It compiles unit-test sources, runs JVM unit tests and selected acceptance-path tests, runs Android lint, assembles debug and release APKs, and uploads the debug APK artifact. A result is valid only for the commit and steps actually completed. CI does not prove physical-device behavior or production readiness.
+Confirm the actual output files after the build. The Gradle configuration shown here does not declare a production release-signing setup. Do not distribute an unsigned or otherwise unverified release artifact as a production release.
 
-## Implemented safety mechanisms in source
+## CI workflow
 
-The workspace includes typed file operations, pre-change checks, atomic writes, checksum verification, and rollback logic. The agent includes a mutation-approval flow. These mechanisms still require end-to-end testing across multi-file changes, interruption, concurrent edits, and failure recovery; do not infer that every case is safe from the existence of the code alone.
+Workflow file: `.github/workflows/android-build.yml`.
 
-The model gateway uses an OpenAI-compatible `/chat/completions` endpoint and supports streamed server-sent-event parsing. Provider compatibility varies. Test the exact endpoint/model and a complete tool-calling task. Never commit API keys, credentials, signing material, SDK paths, or private project data.
+Triggers: pushes to `main`, pull requests targeting `main`, and manual dispatch. Its job installs JDK 17 and Android SDK packages, performs a limited security-baseline check, compiles test sources, runs the JVM unit-test task, explicitly reruns selected acceptance-path test classes, runs Android lint, assembles debug and release APKs, and uploads the debug APK artifact.
 
-## Production-readiness gates
+The security-baseline step checks for certain repository-stored signing files and specific browser/device-impersonation strings. **It is not a comprehensive secret scan, dependency audit, penetration test, or full security review.** The workflow does not upload the release APK in its current configuration.
 
-Before describing a build as production-ready, obtain current evidence for:
+Read the result for the exact commit. A workflow in progress is not a pass; a successful workflow establishes only that the listed jobs completed successfully in that CI environment. It does not establish physical-device behavior, provider compatibility, production signing, accessibility, or release readiness.
 
-- Full end-to-end tasks against the intended real model provider, including streamed tool calls and provider failures
-- Project import, indexing, file reads/search, proposal review, approval, apply, verification, and rollback
-- Cancellation, timeout, lifecycle interruption, and persistence recovery
-- Storage boundaries, network/TLS behavior, permissions, and sensitive-data logging
-- Release signing and installation of the release build on target physical devices
-- Long-running streaming and accessibility/lifecycle behavior
+## Tests
 
-Tests live under `app/src/test/java/com/codingagent/core/`. CI explicitly runs `AcceptancePathTest`, `StorageGuardTest`, and `AutonomousLoopTest` in addition to the unit-test task. Passing these checks is useful evidence, not a substitute for the release gates above.
+Tests are under `app/src/test/java/com/codingagent/`, in both the `agent` and `core` packages. They cover selected behavior such as command policy, tool-call outcomes, acceptance paths, agent-loop handling, local persistence, project/workspace integrity, model settings and parsing, research, storage guards, terminal cancellation, approval tokens, and tool selection.
 
-The repository includes `scripts/package-source.sh` for source archives. Inspect its behavior and verify its output/checksum for the specific source tree being packaged.
+The CI workflow explicitly selects these test classes in its acceptance-path step:
 
-Keep this file aligned with source and reproducible test evidence. Document unverified behavior as unverified, and do not describe planned functionality as implemented.
+- `com.codingagent.core.AcceptancePathTest`
+- `com.codingagent.core.StorageGuardTest`
+- `com.codingagent.core.AutonomousLoopTest`
+
+The general `:app:testDebugUnitTest` task also runs the configured JVM unit tests. Test names and counts are not a substitute for inspecting assertions, and passing JVM tests do not prove end-to-end correctness.
+
+## Source archive helper
+
+Run `scripts/package-source.sh [output.zip]` to create a source archive outside the repository tree. It excludes selected directories and file types such as Git metadata, local agent metadata, build/cache directories, `local.properties`, APKs, AABs, and class files, then prints a SHA-256 checksum.
+
+The script's `forbidden` list is currently initialized empty and is not populated with secret-detection findings. **The script is not a comprehensive credential or sensitive-data scanner.** Inspect the archive contents before sharing it; verify the checksum separately if you need integrity assurance.
+
+## Production-readiness checklist
+
+Before claiming the app is production-ready, obtain and record evidence for all relevant items:
+
+- [ ] Clean build and all CI steps pass on the exact release commit.
+- [ ] Release signing is configured and verified, and the release APK is installed and exercised on supported physical devices.
+- [ ] The intended real model provider completes representative tasks, including streamed tool calls, errors, rate limits, cancellation, and malformed responses.
+- [ ] Project import, listing, indexing/search, file reads, proposed diffs, approvals, apply, verification, and rollback work end to end.
+- [ ] Multi-file operations survive interruption, concurrent edits, storage failures, and rollback failures without silent data loss.
+- [ ] Path and symlink boundaries, terminal restrictions, permissions, network/TLS handling, and sensitive-data logging are reviewed.
+- [ ] Lifecycle interruption, persistence recovery, long-running work, accessibility, and UI behavior are tested on target devices.
+- [ ] Source archives and distributed artifacts are inspected for credentials and private data.
+
+Keep this README aligned with the code and reproducible evidence. Mark unverified behavior as unverified, and do not describe planned or partially implemented behavior as completed.
