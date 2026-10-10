@@ -1,6 +1,7 @@
 package com.codingagent.agent
 
 import java.io.File
+import org.json.JSONObject
 import com.codingagent.intake.GoalContract
 import com.codingagent.intake.OperationKind
 import com.codingagent.intake.TaskIntake
@@ -9,9 +10,7 @@ import com.codingagent.workspace.KnowledgeHit
 import com.codingagent.workspace.ProjectWorkspace
 import com.codingagent.workspace.AgentTask
 
-/**
- * ONE JOB: Shared support types — knowledge search, planning, journaling.
- */
+/** ONE JOB: Shared support types — knowledge search, planning, journaling. */
 interface AgentKnowledge {
     fun search(query: String, limit: Int = 8): List<KnowledgeHit>
 }
@@ -48,25 +47,42 @@ class AgentPlanner(private val workspace: ProjectWorkspace) {
 
 class AgentJournal(private val root: File) {
     private val file = root.resolve(".coding-agent/tasks.tsv")
+    private val personalLog = root.resolve(".coding-agent/personal-log.jsonl")
 
     @Synchronized
     fun record(task: AgentTask) {
         file.parentFile?.mkdirs()
         val line = listOf(task.id, task.status, task.request, task.changes.size, task.verification.passed, task.summary, task.events.joinToString(" | "))
-            .joinToString("\t") { it.toString().replace('\t', ' ').replace('\n', ' ') }
-        file.appendText(line + "\n")
+            .joinToString("\\t") { it.toString().replace('\\t', ' ').replace('\\n', ' ') }
+        file.appendText(line + "\\n")
     }
 
-    fun recent(limit: Int = 20): List<String> {
-        if (!file.isFile || limit <= 0) return emptyList()
+    /** Persist each observable event for later owner inspection. */
+    @Synchronized
+    fun recordEvent(taskId: String, event: AutonomousAgentEvent) {
+        personalLog.parentFile?.mkdirs()
+        val entry = JSONObject()
+            .put("timestamp", System.currentTimeMillis())
+            .put("taskId", taskId)
+            .put("type", event.javaClass.simpleName)
+            .put("details", event.toString())
+        personalLog.appendText(entry.toString() + "\\n")
+    }
+
+    fun recentEvents(limit: Int = 100): List<String> = recentLines(personalLog, limit)
+
+    fun recent(limit: Int = 20): List<String> = recentLines(file, limit)
+
+    private fun recentLines(source: File, limit: Int): List<String> {
+        if (!source.isFile || limit <= 0) return emptyList()
         val result = ArrayDeque<String>(limit)
-        java.io.RandomAccessFile(file, "r").use { raf ->
+        java.io.RandomAccessFile(source, "r").use { raf ->
             var position = raf.length() - 1
             val bytes = java.io.ByteArrayOutputStream()
             while (position >= 0 && result.size < limit) {
                 raf.seek(position--)
                 val value = raf.read()
-                if (value == '\n'.code) {
+                if (value == '\\n'.code) {
                     val line = bytes.toByteArray().reversedArray().toString(Charsets.UTF_8).trim()
                     if (line.isNotBlank()) {
                         result.addFirst(line)
