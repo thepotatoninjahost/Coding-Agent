@@ -67,6 +67,7 @@ class AutonomousAgent(
     private val changeSets = mutableListOf<ChangeSet>()
     private var lastResearchProgress: String = "not started"
     @Volatile private var lastJournalError: String? = null
+    @Volatile private var lastExperienceError: String? = null
     private val lanes = AgentDirectLanes(workspace, files, mutations)
     private val tools = AgentToolDispatch(
         files = files,
@@ -132,7 +133,7 @@ class AutonomousAgent(
                 passed = task.verification.passed
             )
         }.onFailure { error ->
-            if (lastJournalError == null) lastJournalError = error.message ?: error.javaClass.simpleName
+            lastExperienceError = error.message ?: error.javaClass.simpleName
         }
     }
 
@@ -163,6 +164,7 @@ class AutonomousAgent(
             changeSets.clear()
             lastResearchProgress = "not started"
             lastJournalError = null
+            lastExperienceError = null
             return runInternal(request, onEvent)
         } finally {
             activeRunGeneration = -1L
@@ -177,6 +179,30 @@ class AutonomousAgent(
         val events = mutableListOf<AutonomousAgentEvent>()
         var personalLogHealthy = true
         fun emit(event: AutonomousAgentEvent) {
+            val experienceError = lastExperienceError
+            if (experienceError != null) {
+                lastExperienceError = null
+                val warning = AutonomousAgentEvent.Phase(
+                    "LEARNING_STORE_ERROR",
+                    "Could not persist the learning record: $experienceError"
+                )
+                events += warning
+                onEvent(warning)
+                if (personalLogHealthy) {
+                    val warningWriteFailure = runCatching { journal.recordEvent(taskId, warning) }.exceptionOrNull()
+                    if (warningWriteFailure != null) {
+                        lastJournalError = warningWriteFailure.message ?: warningWriteFailure.javaClass.simpleName
+                        personalLogHealthy = false
+                        val logWarning = AutonomousAgentEvent.Phase(
+                            "PERSONAL_LOG_ERROR",
+                            "Could not persist the personal log: ${lastJournalError}. The agent is stopping to avoid continuing without an audit record."
+                        )
+                        events += logWarning
+                        onEvent(logWarning)
+                        cancel("Personal log write failed; stopped to preserve auditability")
+                    }
+                }
+            }
             events += event
             onEvent(event)
             if (!personalLogHealthy) return
