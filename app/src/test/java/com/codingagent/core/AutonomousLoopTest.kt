@@ -43,6 +43,7 @@ class AutonomousLoopTest {
         val gateway = ScriptedGateway(
             listOf(
                 ModelResponse.ToolCall("list_files", """{"path":"src"}"""),
+                ModelResponse.ToolCall("read_file", """{"path":"src/Hello.kt"}"""),
                 ModelResponse.Text("Found the source tree under src/.")
             )
         )
