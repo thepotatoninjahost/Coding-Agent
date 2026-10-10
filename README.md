@@ -14,7 +14,7 @@ It is not a chatbot that answers coding questions in one shot. It works like a c
 
 It does not quit early out of convenience. It only stops early when a specific missing input from the user is required that tools cannot supply.
 
-The runtime keeps a degraded offline knowledge path. Non-trivial coding requests that require external knowledge fail closed unless a web research provider is configured and returns evidence. The model-driven autonomous path uses an OpenAI-compatible gateway with tool calling and streamed server-sent-event deltas. Configure the gateway via the in-app Model settings screen (base URL, model id, API key).
+The runtime keeps a degraded offline knowledge path. Explicit web-research requests and requests for current framework/API documentation fail closed if research returns no usable source evidence; debugging requests may continue with local evidence when web research is optional. The model-driven autonomous path uses an OpenAI-compatible gateway with tool calling and streamed server-sent-event deltas. Configure the gateway via the in-app Model settings screen (base URL, model id, API key).
 
 ## Current product status
 
@@ -111,7 +111,7 @@ The intended ingestion workflow is:
 3. A knowledge module creates searchable chunks with source provenance.
 4. The agent retrieves relevant material during planning and synthesis.
 5. Lessons and verification evidence are stored locally for later tasks.
-6. Internet research will be added as another provider behind the same knowledge boundary.
+6. Web research is implemented through research providers; broader document ingestion and additional knowledge providers remain extension work.
 
 The current implementation has the local knowledge example and the provider interfaces. General multi-file ingestion and internet-backed retrieval remain implementation work.
 
