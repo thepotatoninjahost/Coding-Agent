@@ -63,7 +63,7 @@ class RepairLifecycleAcceptanceTest {
 
         val failedApply = coordinator.approve(
             original.id,
-            OwnerApprovalToken.authenticated(original.id)
+            testApprovalToken(coordinator, original.id)
         )
         assertTrue("Expected repair proposal after failed verification: $failedApply", failedApply is MutationApprovalResult.RepairRequired)
         val repair = (failedApply as MutationApprovalResult.RepairRequired).proposal
@@ -80,7 +80,7 @@ class RepairLifecycleAcceptanceTest {
 
         val repaired = coordinator.approve(
             repair.id,
-            OwnerApprovalToken.authenticated(repair.id)
+            testApprovalToken(coordinator, repair.id)
         )
         assertTrue("Expected verified repair to apply: $repaired", repaired is MutationApprovalResult.Applied)
         assertEquals("fun main() = 2\n", source.readText())
