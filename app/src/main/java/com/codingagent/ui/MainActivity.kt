@@ -202,7 +202,6 @@ private fun CodingAgentApp(privateDir: File) {
     var pendingProposal by remember { mutableStateOf<PendingChangeProposal?>(null) }
     var approvalPromptOpen by remember { mutableStateOf(false) }
     var showCreateApprovalPhraseDialog by remember { mutableStateOf(false) }
-    var ownerCreatedApprovalPhrase by remember { mutableStateOf("") }
     var newOwnerPhraseText by remember { mutableStateOf("") }
     var showTypedApprovalDialog by remember { mutableStateOf(false) }
     var typedApprovalText by remember { mutableStateOf("") }
@@ -354,7 +353,6 @@ private fun CodingAgentApp(privateDir: File) {
                         pendingProposal = null
                         approvalCount = 0
                         pendingApproval = false
-                        ownerCreatedApprovalPhrase = ""
                         newOwnerPhraseText = ""
                         status = AgentStatus.READY
                         detail = "${fileList.size} files indexed"
@@ -378,7 +376,6 @@ private fun CodingAgentApp(privateDir: File) {
         pendingApproval = false
         pendingProposal = null
         pendingProposalId = null
-        ownerCreatedApprovalPhrase = ""
         newOwnerPhraseText = ""
         status = AgentStatus.READY
         detail = "APPLIED ${paths.size} file(s): ${paths.joinToString().take(100)}"
@@ -410,7 +407,6 @@ private fun CodingAgentApp(privateDir: File) {
                             status = AgentStatus.APPROVAL
                         }
                         is MutationApprovalResult.RepairRequired -> {
-                            ownerCreatedApprovalPhrase = ""
                             newOwnerPhraseText = ""
                             pendingProposal = result.proposal
                             pendingProposalId = result.proposal.id
@@ -512,18 +508,9 @@ private fun CodingAgentApp(privateDir: File) {
             return
         }
         if (proposal.approvalCount == 0) {
-            if (ownerCreatedApprovalPhrase.isBlank()) {
-                newOwnerPhraseText = ""
-                showCreateApprovalPhraseDialog = true
-                return
-            }
-            requestSpokenApproval(id, coordinator, ownerCreatedApprovalPhrase)
+            newOwnerPhraseText = ""
+            showCreateApprovalPhraseDialog = true
         } else {
-            if (ownerCreatedApprovalPhrase.isBlank()) {
-                status = AgentStatus.STOPPED
-                detail = "The owner-created phrase is no longer in memory. Reject and restage this proposal to restart both approval channels."
-                return
-            }
             typedApprovalText = ""
             showTypedApprovalDialog = true
         }
@@ -777,7 +764,7 @@ private fun CodingAgentApp(privateDir: File) {
                         onApprove = ::approvePendingProposal
                     )
                     SurfaceTab.FILES -> FilesSurface(fileList, projectQuery, { projectQuery = it }, editorPath, { editorPath = it }, editorContent, { editorContent = it }, editorDocument, tools, mutationCoordinator, onStatus = { status = it.first; detail = it.second })
-                    SurfaceTab.REVIEW -> ReviewSurface(pendingApproval, approvalCount, pendingReason, onApprove = ::approvePendingProposal, onReject = { pendingProposalId?.let { mutationCoordinator?.reject(it) }; pendingProposal = null; pendingApproval = false; pendingProposalId = null; approvalCount = 0; ownerCreatedApprovalPhrase = ""; newOwnerPhraseText = ""; status = AgentStatus.STOPPED; detail = "Proposed changes rejected" })
+                    SurfaceTab.REVIEW -> ReviewSurface(pendingApproval, approvalCount, pendingReason, onApprove = ::approvePendingProposal, onReject = { pendingProposalId?.let { mutationCoordinator?.reject(it) }; pendingProposal = null; pendingApproval = false; pendingProposalId = null; approvalCount = 0; newOwnerPhraseText = ""; status = AgentStatus.STOPPED; detail = "Proposed changes rejected" })
                     SurfaceTab.TERMINAL -> TerminalSurface(
                         command = terminalCommand,
                         onCommand = { terminalCommand = it },
@@ -978,12 +965,11 @@ private fun CodingAgentApp(privateDir: File) {
                             detail = "Choose a phrase with at least 8 non-whitespace characters and no leading or trailing spaces."
                             return@TextButton
                         }
-                        ownerCreatedApprovalPhrase = phrase
+                        newOwnerPhraseText = ""
                         showCreateApprovalPhraseDialog = false
                         val id = pendingProposalId
                         val coordinator = mutationCoordinator
                         if (id == null || coordinator == null || coordinator.get(id) == null) {
-                            ownerCreatedApprovalPhrase = ""
                             detail = "The proposal is no longer pending. No approval was recorded."
                             return@TextButton
                         }
@@ -1019,11 +1005,11 @@ private fun CodingAgentApp(privateDir: File) {
                         val coordinator = mutationCoordinator
                         val current = id?.let { coordinator?.get(it) }
                         showTypedApprovalDialog = false
-                        if (id == null || coordinator == null || current == null || ownerCreatedApprovalPhrase.isBlank()) {
+                        if (id == null || coordinator == null || current == null) {
                             detail = "The proposal is no longer pending. No approval was recorded."
                             return@TextButton
                         }
-                        val token = OwnerApprovalToken.typed(id, ownerCreatedApprovalPhrase, typedApprovalText)
+                        val token = OwnerApprovalToken.typed(id, typedApprovalText, typedApprovalText)
                         if (token == null) {
                             status = AgentStatus.STOPPED
                             detail = "Typed phrase must exactly match the phrase you created. No approval was recorded."
