@@ -46,25 +46,36 @@
   - `./gradlew :app:assembleRelease --no-daemon --stacktrace`
 - Code/test inspection confirms coverage for rollback after a failed repair attempt, rejection of corrupted snapshot checksums, and restore changes remaining unapplied until dual approval.
 
-### Follow-up defect found; not merged
+### Recovery-target validation fix — PR #74, not merged
 
 - A review found that `promoteSource` on the baseline used an empty-string fallback when recovery-target metadata was absent. That could mark a snapshot active even though no safe recovery target could be restored.
 - Fix and regression tests are isolated in PR #74: https://github.com/thepotatoninjahost/Coding-Agent/pull/74
 - PR head: `2ae101043ed8de05d6a04b8db95da8f4d8e63202`
 - Added checks reject missing/unsafe project-relative recovery targets and unknown version IDs; restore tests assert the file is unchanged before the second approval.
 - PR CI run #1272, ID `38210516271`: https://github.com/thepotatoninjahost/Coding-Agent/actions/runs/38210516271
-- The rerun completed successfully: all steps passed, including test compilation, full unit tests, explicit acceptance-path tests, Android lint, debug APK assembly, release APK assembly, and debug APK upload. Run conclusion: `success`.
+- Run conclusion: `success`. Test compilation, full unit tests, explicit acceptance-path tests, Android lint, debug APK assembly, release APK assembly, and debug APK upload all passed.
 
-## Phase 1 status — not complete
+### End-to-end repair lifecycle — PR #76, not merged
 
-Completed: immutable baseline identified; recursive tree and tracked-file counts reconciled; file types counted; merged-commit CI success recorded; several recovery/rollback safety tests inspected.
+- PR: https://github.com/thepotatoninjahost/Coding-Agent/pull/76
+- Head: `10a231863b57d9743fd0cba8280536a4ac67b8c4`
+- Added `RepairLifecycleAcceptanceTest.kt` exercises this sequence: a broken replacement fails verification; approval one leaves disk unchanged; approval two permits application; failed verification rolls the change back; a repair proposal is staged; the first repair approval leaves the file unchanged; the second approval applies the repair; post-apply verification passes and the result is `Applied`.
+- CI run #1274, ID `38211267466`: https://github.com/thepotatoninjahost/Coding-Agent/actions/runs/38211267466
+- Verified terminal conclusion: `success`. Security baseline audit, test-source compilation, full unit tests (including the new lifecycle test), explicit acceptance-path tests, Android lint, debug APK assembly, release APK assembly, and debug APK upload all passed.
 
-Remaining before claiming Phase 1 complete:
-1. Confirm PR #74 CI reaches a successful terminal conclusion; fix any failure and rerun.
-2. Run CI for the new end-to-end repair lifecycle test in PR #76 (https://github.com/thepotatoninjahost/Coding-Agent/pull/76). It asserts failed-change detection and rollback, repair proposal staging, no disk change after first approval, apply after second approval, and successful post-apply verification. The CI run #1274, ID `38211267466`, had passed test-source compilation, the full unit-test suite (including this new test), and explicit acceptance-path tests; Android lint and APK assembly were still running at the time of this update. Final CI success is still required.
-3. Confirm rollback after a forced post-apply verification failure and record the exact test/result.
-4. Confirm dual-owner approval enforcement for the recovery path and no target-file modification before the second approval.
-5. Recheck the final commit/tree and update this evidence after any merged fix.
-6. Continue the file-by-file ledger; its existing rows explicitly distinguish inventory from completed review, and the full repository audit is not complete.
+## Phase 1 status — evidence improved; audit not yet complete
 
-No claim is made here that the entire Phase 1 audit or all end-to-end behavior is 100% complete.
+Completed:
+- Exact baseline commit and recursive Git tree identified.
+- Recursive tree captured path by path; tracked-file count and previous 153-file count reconciled.
+- Current tracked file types counted; uploaded ZIP mismatch recorded.
+- Baseline CI and both follow-up PR CI runs confirmed successful, including all configured build steps.
+- Recovery-target validation regression tests and end-to-end repair/approval/rollback lifecycle test added on separate branches.
+
+Still outstanding:
+1. The recovery fix (PR #74), lifecycle test (PR #76), and evidence documentation (PR #75) remain separate, open pull requests; they are not part of `main` unless merged.
+2. The final commit SHA, recursive tree, tracked-file count, and CI evidence must be refreshed after any accepted changes land on `main`.
+3. Finish the file-by-file audit ledger. An inventory or a test suite passing does not prove every repository file has been reviewed.
+4. Review remaining Phase 1 acceptance criteria against explicit test evidence, especially the dual-owner approval boundary and rejection cases for corrupted checksums, unsafe paths, and invalid snapshot versions. Existing coverage was inspected, but the complete matrix must be documented with exact test names/results before declaring every criterion closed.
+
+Therefore, all configured builds in runs #1271, #1272, and #1274 are green. That does **not** mean Phase 1 is 100% complete: changes are unmerged, the final post-merge baseline is not yet available, and the file-by-file audit/acceptance-criteria reconciliation remains open.
