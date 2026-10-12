@@ -241,4 +241,31 @@ private class ScriptedGateway(private val script: List<ModelResponse>) : ModelGa
         if (response is ModelResponse.Text) onDelta(response.content)
         return response
     }
+    @Test
+    fun configuredSystemInstructionsReachTheModelWithoutRemovingBaseRules() {
+        val root = Files.createTempDirectory("agent-system-prompt").toFile()
+        root.resolve("Main.kt").writeText("fun main() = 1\\n")
+        val requests = mutableListOf<ModelRequest>()
+        val gateway = object : ModelGateway {
+            override fun complete(request: ModelRequest): ModelResponse {
+                requests += request
+                return ModelResponse.Text("I need to inspect the files before making claims.")
+            }
+        }
+        val knowledge = object : AgentKnowledge {
+            override fun search(query: String, limit: Int) = emptyList<KnowledgeHit>()
+        }
+        val agent = AutonomousAgent(root, knowledge, gateway)
+        agent.setSystemPrompt(
+            AgentModelProtocol.DEFAULT_SYSTEM +
+                "\\n\\nOWNER-PROVIDED ADDITIONAL INSTRUCTIONS: Prefer concise Kotlin examples."
+        )
+
+        agent.run("Summarize the project architecture after inspecting the source files")
+
+        assertTrue("The model should have received a request", requests.isNotEmpty())
+        assertTrue(requests.first().system.contains("Code changes (create_file, replace_text) only STAGE a proposal"))
+        assertTrue(requests.first().system.contains("Prefer concise Kotlin examples."))
+    }
+
 }
