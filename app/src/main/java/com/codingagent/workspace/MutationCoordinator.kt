@@ -257,8 +257,20 @@ class MutationCoordinator(
         if (requiredChannel == ApprovalChannel.TYPED_PHRASE) {
             val firstFingerprint = proposal.approvals.singleOrNull()?.phraseFingerprint
             if (firstFingerprint.isNullOrBlank() || firstFingerprint != ownerApproval.phraseFingerprint) {
+                val invalidated = reject(id)
+                if (!invalidated) {
+                    runCatching {
+                        OpenJobStore.markRecoveryRequired(
+                            workspace.projectRoot(),
+                            "Typed approval phrase mismatch; pending approval could not be safely invalidated"
+                        )
+                    }
+                    return MutationApprovalResult.Rejected(
+                        "Typed phrase mismatch; invalidation failed, so the workspace is locked for recovery. No mutation was applied."
+                    )
+                }
                 return MutationApprovalResult.Rejected(
-                    "The typed confirmation does not match the owner-created spoken phrase. Reject and restage this proposal to restart both channels."
+                    "Typed phrase mismatch; the pending approval was invalidated. Restage and repeat both approval channels."
                 )
             }
         }
