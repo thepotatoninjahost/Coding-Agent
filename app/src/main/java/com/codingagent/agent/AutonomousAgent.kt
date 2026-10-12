@@ -53,6 +53,13 @@ class AutonomousAgent(
      */
     @Volatile
     private var gateway: ModelGateway? = gateway
+    @Volatile
+    private var configuredSystemPrompt: String = AgentModelProtocol.DEFAULT_SYSTEM
+
+    fun setSystemPrompt(prompt: String?) {
+        configuredSystemPrompt = prompt.orEmpty().trim().take(24_000)
+            .ifBlank { AgentModelProtocol.DEFAULT_SYSTEM }
+    }
     // FIX: derive workspace from the shared MutationCoordinator instance so both always
     // reference the same ProjectWorkspace. The previous `ProjectWorkspace(root)` here
     // created a second, divergent instance that could silently drift from mutations.workspace.
@@ -352,7 +359,7 @@ class AutonomousAgent(
                 gateway = activeGateway,
                 request = {
                     ModelRequest(
-                        AgentModelProtocol.SYSTEM,
+                        configuredSystemPrompt,
                         buildPrompt(normalized, intake, state.lastEvidence),
                         toolsThisTurn,
                         transcript.toList(),
@@ -621,7 +628,7 @@ class AutonomousAgent(
             gateway = model,
             request = {
                 ModelRequest(
-                    AgentModelProtocol.SYSTEM,
+                    configuredSystemPrompt,
                     "You are repairing a failed approved code change. $evidence\n" +
                         "Return exactly one replace_text or create_file tool call that fixes the diagnosed failure. " +
                         "Do not explain. Do not use any other tool. Never weaken tests or safety controls.",
