@@ -63,11 +63,22 @@
 - CI run #1274, ID `38211267466`: https://github.com/thepotatoninjahost/Coding-Agent/actions/runs/38211267466
 - Verified terminal conclusion: `success`. Security baseline audit, test-source compilation, full unit tests (including the new lifecycle test), explicit acceptance-path tests, Android lint, debug APK assembly, release APK assembly, and debug APK upload all passed.
 
-### Approval identity limitation identified during audit
+### Required dual-approval semantics — confirmed by owner
 
-- `OwnerApprovalTokenTest` verifies that a token is bound to one proposal, expires, and is consumed once.
-- `MutationCoordinator.approve` records each accepted approval under the literal actor label `device-owner`. Existing acceptance tests call the same authenticated-token factory for both approvals.
-- This demonstrates two separate fresh authentication events, but it does **not** demonstrate that the approvals came from two distinct people/owner identities. The phase checklist's phrase “dual-owner approval” must be clarified against the intended security requirement. Do not describe distinct-owner enforcement as verified unless identity separation is actually implemented and tested.
+The required dual approval is **two different modalities from the same owner**, not two different people and not two biometric prompts:
+
+1. The owner speaks the displayed confirmation word or phrase through a live speech-recognition interaction.
+2. The owner separately types that exact word or phrase into the app.
+3. Both events must bind to the same pending proposal and be independently validated before any write is authorized.
+4. The agent must not be able to create, skip, replay, or substitute either event. A missing or mismatched spoken transcript or typed phrase must leave the project files unchanged.
+
+### Current implementation fails this acceptance criterion
+
+- `MainActivity.approvePendingProposal` currently requests Android biometric/device-credential authentication on each confirmation.
+- `OwnerApprovalToken.authenticated` represents only a generic authenticated event; it carries no speech transcript, typed phrase, or approval modality.
+- `MutationCoordinator.approve` accepts two such generic events and records both under the literal actor label `device-owner`.
+- Existing tests manufacture both tokens using `OwnerApprovalToken.authenticated`; they do not exercise speech recognition or typed phrase matching.
+- Therefore the current implementation **does not meet the owner's stated dual-approval requirement**. This is a confirmed implementation blocker, not an unresolved interpretation of “dual-owner approval.” Do not merge this as a completed audit or claim the approval safeguard is verified until the implementation and tests enforce spoken phrase + exact typed confirmation.
 
 ## Phase 1 status — evidence improved; audit not yet complete
 
@@ -82,7 +93,7 @@ Still outstanding:
 1. The recovery fix (PR #74), lifecycle test (PR #76), and evidence documentation (PR #75) remain separate, open pull requests; they are not part of `main` unless merged.
 2. The final commit SHA, recursive tree, tracked-file count, and CI evidence must be refreshed after any accepted changes land on `main`.
 3. Finish the file-by-file audit ledger. An inventory or a test suite passing does not prove every repository file has been reviewed.
-4. Resolve the approval identity requirement: confirm whether it means two fresh authenticated approvals by the same device owner or two distinct owners. If distinct owners are required, implement and test distinct identity enforcement.
+4. Implement and test the owner's confirmed dual-modality approval: live spoken confirmation of the proposal-bound phrase followed by exact typed confirmation of that phrase; reject missing, mismatched, replayed, expired, or cross-proposal confirmations without changing files.
 5. Document the complete acceptance matrix with exact test names/results for corrupted checksums, unsafe paths, invalid snapshot versions, approval sequencing, failed-verification rollback, and repair verification.
 
 Therefore, all configured builds in runs #1271, #1272, and #1274 are green. That does **not** mean Phase 1 is 100% complete: changes are unmerged, the final post-merge baseline is not yet available, and the file-by-file audit/acceptance-criteria reconciliation remains open.
