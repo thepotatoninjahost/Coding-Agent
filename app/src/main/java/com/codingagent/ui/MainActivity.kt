@@ -731,7 +731,7 @@ private fun CodingAgentApp(privateDir: File) {
                         onApprove = ::approvePendingProposal
                     )
                     SurfaceTab.FILES -> FilesSurface(fileList, projectQuery, { projectQuery = it }, editorPath, { editorPath = it }, editorContent, { editorContent = it }, editorDocument, tools, mutationCoordinator, onStatus = { status = it.first; detail = it.second })
-                    SurfaceTab.REVIEW -> ReviewSurface(pendingApproval, approvalCount, pendingReason, ownerCreatedApprovalPhrase, onApprove = ::approvePendingProposal, onReject = { pendingProposalId?.let { mutationCoordinator?.reject(it) }; pendingProposal = null; pendingApproval = false; pendingProposalId = null; approvalCount = 0; status = AgentStatus.STOPPED; detail = "Proposed changes rejected" })
+                    SurfaceTab.REVIEW -> ReviewSurface(pendingApproval, approvalCount, pendingReason, ownerCreatedApprovalPhrase, onApprove = ::approvePendingProposal, onReject = { pendingProposalId?.let { mutationCoordinator?.reject(it) }; pendingProposal = null; pendingApproval = false; pendingProposalId = null; approvalCount = 0; ownerCreatedApprovalPhrase = ""; newOwnerPhraseText = ""; status = AgentStatus.STOPPED; detail = "Proposed changes rejected" })
                     SurfaceTab.TERMINAL -> TerminalSurface(
                         command = terminalCommand,
                         onCommand = { terminalCommand = it },
