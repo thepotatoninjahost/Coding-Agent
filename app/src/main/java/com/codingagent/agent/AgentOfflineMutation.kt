@@ -64,7 +64,7 @@ object AgentOfflineStager {
                         " Name the file to create (example: src/Agent.kt) or the exact replace."
                     val task = AgentTask(
                         taskId, request, "needs-input", plan, emptyList(),
-                        VerificationReport(true, emptyList()),
+                        VerificationReport(false, emptyList()),
                         listOf("${Instant.now()}: offline staging needs input"),
                         question
                     )
@@ -78,7 +78,7 @@ object AgentOfflineStager {
                 val proposal = proposeResult.proposal
                 val task = AgentTask(
                     taskId, request, "needs-approval", plan, proposal.changeSet.changes,
-                    VerificationReport(true, emptyList()),
+                    proposal.verification,
                     listOf("${Instant.now()}: offline proposal ${proposal.id} staged; awaiting two owner approvals"),
                     ChangeDiff.ownerReviewText(proposal)
                 )
