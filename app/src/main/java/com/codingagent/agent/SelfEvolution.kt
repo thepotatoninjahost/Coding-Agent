@@ -18,6 +18,17 @@ sealed class SnapshotRestoreResult {
     data class Rejected(val reason: String) : SnapshotRestoreResult()
 }
 
+sealed class SnapshotCandidateResult {
+    data class Ready(val candidate: EvolutionRestoreCandidate) : SnapshotCandidateResult()
+    data class Rejected(val reason: String) : SnapshotCandidateResult()
+}
+
+data class EvolutionRestoreCandidate(
+    val version: EvolutionVersion,
+    val snapshot: File,
+    val destination: File
+)
+
 data class EvolutionVersion(
     val id: String,
     val kind: String,
@@ -103,6 +114,26 @@ class SelfEvolution(private val root: File) {
     }
 
     /**
+     * Resolve and integrity-check a historical snapshot without mutating project files.
+     * Callers can use this to stage a restore through the ordinary approval workflow.
+     */
+    fun prepareRestoreCandidate(versionId: String): SnapshotCandidateResult {
+        val version = history().lastOrNull { it.id == versionId }
+            ?: return SnapshotCandidateResult.Rejected("Evolution version was not found in history")
+        if (!version.evaluationPassed) {
+            return SnapshotCandidateResult.Rejected("Evolution version has no passing source evaluation")
+        }
+        val snapshot = managedSnapshot(File(version.sourcePath))
+            ?: return SnapshotCandidateResult.Rejected("Evolution snapshot is missing or outside the managed versions directory")
+        if (runCatching { checksum(snapshot) != version.checksum }.getOrDefault(true)) {
+            return SnapshotCandidateResult.Rejected("Evolution snapshot checksum does not match its recorded history")
+        }
+        val destination = safeTarget(version.targetPath)
+            ?: return SnapshotCandidateResult.Rejected("Evolution version has no safe project-relative recovery target")
+        return SnapshotCandidateResult.Ready(EvolutionRestoreCandidate(version, snapshot, destination))
+    }
+
+    /**
      * Restore a promoted snapshot to its original project-relative path.
      * The caller must verify the proposed restored source before invoking recovery.
      */
@@ -113,20 +144,17 @@ class SelfEvolution(private val root: File) {
         approvalAt: Long? = null
     ): SnapshotRestoreResult {
         if (!evaluation.passed) return SnapshotRestoreResult.Rejected("Snapshot recovery requires a passing evaluation")
-        val version = history().lastOrNull { it.id == versionId }
-            ?: return SnapshotRestoreResult.Rejected("Evolution version was not found in history")
-        if (!version.evaluationPassed) return SnapshotRestoreResult.Rejected("Evolution version has no passing source evaluation")
+        val candidate = when (val result = prepareRestoreCandidate(versionId)) {
+            is SnapshotCandidateResult.Ready -> result.candidate
+            is SnapshotCandidateResult.Rejected -> return SnapshotRestoreResult.Rejected(result.reason)
+        }
+        val version = candidate.version
+        val snapshot = candidate.snapshot
+        val destination = candidate.destination
         val violations = AgentConstitution.check(action.copy(sandboxPassed = true), approvalAt = approvalAt)
         if (violations.isNotEmpty()) {
             return SnapshotRestoreResult.Rejected(violations.joinToString("; ") { "${it.rule}: ${it.message}" })
         }
-        val snapshot = managedSnapshot(File(version.sourcePath))
-            ?: return SnapshotRestoreResult.Rejected("Evolution snapshot is missing or outside the managed versions directory")
-        if (runCatching { checksum(snapshot) != version.checksum }.getOrDefault(true)) {
-            return SnapshotRestoreResult.Rejected("Evolution snapshot checksum does not match its recorded history")
-        }
-        val destination = safeTarget(version.targetPath)
-            ?: return SnapshotRestoreResult.Rejected("Evolution version has no safe project-relative recovery target")
         val originalBytes = if (destination.isFile) runCatching { destination.readBytes() }.getOrElse {
             return SnapshotRestoreResult.Rejected("Could not read the current recovery target: ${it.message.orEmpty()}")
         } else null
