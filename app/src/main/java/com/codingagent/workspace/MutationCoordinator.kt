@@ -12,7 +12,6 @@ import com.codingagent.agent.SelfEvolution
 import com.codingagent.agent.SelfRepair
 import com.codingagent.agent.RepairCycleConfig
 import com.codingagent.intake.TaskOperation
-import com.codingagent.intake.TaskIntakeParser
 
 /**
  * ONE JOB: Dual-approval staging, constitution checks, and apply/reject of code changes.
@@ -48,9 +47,10 @@ class MutationCoordinator(
     private val ledger: ApprovalLedger = ApprovalLedger(),
     private val now: () -> Long = { System.currentTimeMillis() },
     private val repairConfig: RepairCycleConfig = RepairCycleConfig(),
-    private val postApplyVerifier: ((PendingChangeProposal) -> VerificationReport)? = null
+    private val postApplyVerifier: (() -> VerificationReport)? = null
 ) {
     private val pending = linkedMapOf<String, PendingChangeProposal>()
+    private var pendingReconciliationFailed = false
     private val evolution = SelfEvolution(workspace.projectRoot())
     @Volatile private var repairProvider: ((String, Int) -> ChangeSet?)? = null
 
@@ -63,7 +63,7 @@ class MutationCoordinator(
         PendingProposalStore.load(workspace.projectRoot()).forEach { pending[it.id] = it }
         clearExpired()
         reconcilePendingJobConsistency()
-        reconcileDurableApplyState()
+        if (!pendingReconciliationFailed) reconcileDurableApplyState()
     }
 
     @Synchronized
@@ -75,8 +75,25 @@ class MutationCoordinator(
         clearExpired()
         if (request.isBlank()) return MutationProposeResult.Rejected("A mutation request is required")
         if (operations.isEmpty()) return MutationProposeResult.Rejected("At least one mutation operation is required")
-        if (OpenJobStore.load(workspace.projectRoot())?.status == "recovery-required") {
+        if (pending.isNotEmpty()) {
+            return MutationProposeResult.Rejected(
+                "An unresolved pending proposal exists; approve, reject, or recover it before staging another mutation"
+            )
+        }
+        val durableJob = try {
+            OpenJobStore.load(workspace.projectRoot())
+        } catch (error: Exception) {
+            return MutationProposeResult.Rejected(
+                "Durable job state is unreadable; refusing to stage a mutation: ${error.message.orEmpty()}"
+            )
+        }
+        if (durableJob?.status == "recovery-required") {
             return MutationProposeResult.Rejected("This job requires recovery before another mutation can be staged")
+        }
+        if (durableJob?.status == "waiting-approval" || durableJob?.status == "applying") {
+            return MutationProposeResult.Rejected(
+                "An existing mutation is still pending or applying; resolve it before staging another proposal"
+            )
         }
 
         val changeSet = runCatching { workspace.preview(operations, reason) }
@@ -132,6 +149,47 @@ class MutationCoordinator(
         return MutationProposeResult.Proposed(proposal)
     }
 
+    /**
+     * Stage a historical source snapshot as a normal change proposal. Restoration is not
+     * written directly: the owner must still review and approve the resulting file diff.
+     */
+    @Synchronized
+    fun proposeEvolutionRestore(versionId: String): MutationProposeResult {
+        val candidate = when (val result = evolution.prepareRestoreCandidate(versionId)) {
+            is com.codingagent.agent.SnapshotCandidateResult.Ready -> result.candidate
+            is com.codingagent.agent.SnapshotCandidateResult.Rejected ->
+                return MutationProposeResult.Rejected(result.reason)
+        }
+        val targetPath = candidate.version.targetPath
+        val snapshotText = runCatching { candidate.snapshot.readText(Charsets.UTF_8) }.getOrElse {
+            return MutationProposeResult.Rejected("Could not read evolution snapshot: ${it.message.orEmpty()}")
+        }
+        val target = candidate.destination
+        val operation = if (!target.exists()) {
+            TaskOperation(kind = com.codingagent.intake.OperationKind.CREATE_FILE, path = targetPath, text = snapshotText)
+        } else {
+            if (!target.isFile) return MutationProposeResult.Rejected("Evolution restore target is not a regular file")
+            val current = runCatching { target.readText(Charsets.UTF_8) }.getOrElse {
+                return MutationProposeResult.Rejected("Could not read current restore target: ${it.message.orEmpty()}")
+            }
+            if (current == snapshotText) return MutationProposeResult.Rejected("Evolution snapshot already matches the current source")
+            if (current.isEmpty()) {
+                return MutationProposeResult.Rejected("Cannot stage a restore over an empty file with the current change operations")
+            }
+            TaskOperation(
+                kind = com.codingagent.intake.OperationKind.REPLACE,
+                path = targetPath,
+                oldText = current,
+                newText = snapshotText
+            )
+        }
+        return propose(
+            request = "Restore evolution version $versionId to $targetPath",
+            operations = listOf(operation),
+            reason = "Restore verified evolution snapshot $versionId"
+        )
+    }
+
     @Synchronized
     fun get(id: String): PendingChangeProposal? {
         clearExpired()
@@ -141,16 +199,46 @@ class MutationCoordinator(
     @Synchronized
     fun approve(id: String, ownerApproval: OwnerApprovalToken): MutationApprovalResult {
         clearExpired()
+        if (pendingReconciliationFailed) {
+            return MutationApprovalResult.Rejected(
+                "Pending proposal state could not be reconciled durably; restart the agent and restage the change before approval"
+            )
+        }
         val proposal = pending[id] ?: return MutationApprovalResult.Rejected("Change proposal does not exist")
-        val openJob = OpenJobStore.load(workspace.projectRoot())
+        val root = workspace.projectRoot()
+        val openJob = try {
+            OpenJobStore.load(root)
+        } catch (error: Exception) {
+            pendingReconciliationFailed = true
+            runCatching {
+                OpenJobStore.markRecoveryRequired(
+                    root,
+                    "Durable open-job state became unreadable before approval: ${error.message.orEmpty()}"
+                )
+            }
+            return MutationApprovalResult.Rejected(
+                "Durable open-job state is unreadable; approval was refused and recovery is required"
+            )
+        }
+        if (openJob == null) {
+            return MutationApprovalResult.Rejected(
+                "Durable open-job state is missing; this proposal cannot be approved until it is restaged"
+            )
+        }
         when {
-            openJob?.status == "recovery-required" -> return MutationApprovalResult.Rejected("This job requires recovery before another approval can be accepted")
-            openJob?.status == "applying" && openJob.proposalId == id -> return MutationApprovalResult.Rejected("This proposal is already in the apply phase; recover the job before approving again")
-            openJob?.status == "applied" && openJob.appliedProposalId == id -> {
+            openJob.status == "recovery-required" ->
+                return MutationApprovalResult.Rejected("This job requires recovery before another approval can be accepted")
+            openJob.status == "applying" && openJob.proposalId == id ->
+                return MutationApprovalResult.Rejected("This proposal is already in the apply phase; recover the job before approving again")
+            openJob.status == "applied" && openJob.appliedProposalId == id -> {
                 pending.remove(id)
                 persist()
                 return MutationApprovalResult.Rejected("This proposal has already been applied")
             }
+            openJob.status != "waiting-approval" || openJob.proposalId != id ->
+                return MutationApprovalResult.Rejected(
+                    "Durable open-job state does not authorize this proposal; restage the change before approval"
+                )
         }
         val timestamp = now()
         if (timestamp > proposal.expiresAt) {
@@ -172,7 +260,7 @@ class MutationCoordinator(
             category = AgentActionCategory.CODE_CHANGE,
             ownerVerified = true,
             approvalCount = candidate.approvalCount,
-            sandboxPassed = proposal.verification.passed,
+            evaluationPassed = proposal.verification.passed,
             clearPermission = true
         )
         val violations = AgentConstitution.check(action, timestamp, proposal.createdAt)
@@ -197,7 +285,7 @@ class MutationCoordinator(
             }
             return MutationApprovalResult.AwaitingSecond(candidate, approval)
         }
-        var appliedChangeSet: ChangeSet? = null
+        var applied: ChangeSet? = null
         return try {
             try {
                 OpenJobStore.markApplying(workspace.projectRoot(), proposal.id, proposal.changeSet.changes.map { it.path }.distinct(), proposal.request)
@@ -205,16 +293,14 @@ class MutationCoordinator(
                 return MutationApprovalResult.Rejected("Could not durably enter the apply phase; no mutation was attempted")
             }
 
-            val applied = workspace.applyApproved(proposal.changeSet)
-            appliedChangeSet = applied
-            val postApply = postApplyVerifier?.invoke(proposal) ?: run {
-                val intake = TaskIntakeParser(workspace.projectRoot()).parse(proposal.request)
-                if (intake.verificationCommands.isEmpty()) {
-                    workspace.verify()
-                } else {
-                    workspace.runChecks(intake.verificationCommands, 180)
-                }
-            }
+            val appliedChangeSet = workspace.applyApproved(proposal.changeSet)
+            applied = appliedChangeSet
+            // Approval authorizes this exact file mutation, not execution of imported project scripts.
+            // Static verification is local and bounded. Build/test commands require explicit owner action.
+            val staticReport = postApplyVerifier?.invoke() ?: workspace.verify()
+            val postApply = staticReport.copy(
+                warnings = staticReport.warnings + "Static verification completed; project build/test commands were not executed automatically. Review scripts and run them explicitly in the owner-controlled terminal."
+            )
             if (!postApply.passed) {
                 val details = buildString {
                     append("Approved change failed post-apply checks")
@@ -229,17 +315,32 @@ class MutationCoordinator(
                         append(postApply.issues.joinToString { "${it.path}:${it.line}: ${it.message}" })
                     }
                 }
-                val rollback = workspace.rollback(applied)
+                val rollback = workspace.rollback(appliedChangeSet)
                 if (rollback == RollbackResult.Restored) {
                     pending.remove(id)
                     if (!persist()) {
                         pending[id] = proposal
-                        runCatching { OpenJobStore.markReady(workspace.projectRoot()) }
+                        val readyState = markReadyOrRecovery(
+                            "Rollback restored files, but pending-state persistence failed while clearing the applying job"
+                        )
                         return MutationApprovalResult.Rejected(
-                            "$details; rollback restored files, but pending-state persistence failed"
+                            if (readyState == ReadyState.READY) "$details; rollback restored files, but pending-state persistence failed"
+                            else "$details; rollback restored files, but the job remains in recovery-required state"
                         )
                     }
-                    runCatching { OpenJobStore.markReady(workspace.projectRoot()) }
+                    val readyState = markReadyOrRecovery(
+                        "Rollback restored files after failed verification, but ready-state persistence failed"
+                    )
+                    if (readyState != ReadyState.READY) {
+                        val recoveryDetails = when (readyState) {
+                            ReadyState.RECOVERY_REQUIRED -> "the job remains in recovery-required state"
+                            ReadyState.FAILED -> "durable recovery state could not be persisted"
+                            ReadyState.READY -> "the job state is ready"
+                        }
+                        return MutationApprovalResult.Rejected(
+                            "$details; rollback restored files, but $recoveryDetails"
+                        )
+                    }
                 }
                 if (rollback == RollbackResult.Restored) {
                     val nextRepairAttempt = proposal.repairAttempt + 1
@@ -266,8 +367,14 @@ class MutationCoordinator(
                     }
                     return MutationApprovalResult.Rejected("$details; changes were rolled back")
                 }
+                runCatching {
+                    OpenJobStore.markRecoveryRequired(
+                        workspace.projectRoot(),
+                        "Post-apply verification failed and rollback was incomplete: $rollback"
+                    )
+                }
                 return MutationApprovalResult.Rejected(
-                    "$details; rollback was incomplete: $rollback"
+                    "CRITICAL: $details; rollback was incomplete and the job was marked recovery-required: $rollback"
                 )
             }
             try {
@@ -275,10 +382,21 @@ class MutationCoordinator(
             } catch (_: Exception) {
                 val rollback = runCatching { workspace.rollback(applied) }.getOrElse { RollbackResult.Rejected(it.message.orEmpty()) }
                 if (rollback == RollbackResult.Restored) {
-                    runCatching { OpenJobStore.markReady(workspace.projectRoot()) }
-                    return MutationApprovalResult.Rejected("Change was rolled back because completed-job persistence failed")
+                    val readyState = markReadyOrRecovery(
+                        "Completed-job persistence failed after rollback restored the files"
+                    )
+                    return MutationApprovalResult.Rejected(
+                        if (readyState == ReadyState.READY) "Change was rolled back because completed-job persistence failed"
+                        else "CRITICAL: change was rolled back, but the job remains in recovery-required state"
+                    )
                 }
-                return MutationApprovalResult.Rejected("CRITICAL: completed-job persistence failed and rollback was incomplete: $rollback")
+                runCatching {
+                    OpenJobStore.markRecoveryRequired(
+                        workspace.projectRoot(),
+                        "Completed-job persistence failed and rollback was incomplete: $rollback"
+                    )
+                }
+                return MutationApprovalResult.Rejected("CRITICAL: completed-job persistence failed and rollback was incomplete; recovery is required: $rollback")
             }
 
             pending.remove(id)
@@ -286,38 +404,99 @@ class MutationCoordinator(
                 pending[id] = proposal
                 val rollback = runCatching { workspace.rollback(applied) }.getOrElse { RollbackResult.Rejected(it.message.orEmpty()) }
                 return if (rollback == RollbackResult.Restored) {
-                    runCatching { OpenJobStore.markReady(workspace.projectRoot()) }
-                    MutationApprovalResult.Rejected("Change was rolled back because approved-state persistence failed")
-                } else {
+                    val readyState = markReadyOrRecovery(
+                        "Approved-state persistence failed after rollback restored the files"
+                    )
                     MutationApprovalResult.Rejected(
-                        "CRITICAL: change was applied but could not be durably persisted or rolled back: $rollback"
+                        if (readyState == ReadyState.READY) "Change was rolled back because approved-state persistence failed"
+                        else "CRITICAL: change was rolled back, but the job remains in recovery-required state"
+                    )
+                } else {
+                    runCatching {
+                        OpenJobStore.markRecoveryRequired(
+                            workspace.projectRoot(),
+                            "Approved-state persistence failed and rollback was incomplete: $rollback"
+                        )
+                    }
+                    MutationApprovalResult.Rejected(
+                        "CRITICAL: change was applied but could not be durably persisted or rolled back; recovery is required: $rollback"
                     )
                 }
             }
-            recordEvolution(candidate, applied)
-            MutationApprovalResult.Applied(candidate, applied)
+            val completedProposal = candidate.copy(verification = postApply)
+            recordEvolution(completedProposal, appliedChangeSet, postApply)
+            MutationApprovalResult.Applied(completedProposal, appliedChangeSet)
         } catch (error: Exception) {
-            val applied = appliedChangeSet
-            if (applied != null) {
-                val rollback = runCatching { workspace.rollback(applied) }
+            val completedChangeSet = applied
+            if (completedChangeSet != null) {
+                val rollback = runCatching { workspace.rollback(completedChangeSet) }
                     .getOrElse { RollbackResult.Rejected(it.message.orEmpty()) }
                 if (rollback == RollbackResult.Restored) {
-                    runCatching { OpenJobStore.markReady(workspace.projectRoot()) }
+                    val previousPending = pending.remove(id)
+                    val pendingCleared = persist()
+                    if (!pendingCleared && previousPending != null) pending[id] = previousPending
+                    val ready = pendingCleared &&
+                        runCatching { OpenJobStore.markReady(workspace.projectRoot()) }.isSuccess
+                    if (!ready) {
+                        runCatching {
+                            OpenJobStore.markRecoveryRequired(
+                                workspace.projectRoot(),
+                                if (pendingCleared) {
+                                    "An approved mutation was rolled back after an unexpected failure, but ready-state persistence failed"
+                                } else {
+                                    "An approved mutation was rolled back after an unexpected failure, but pending-state cleanup failed"
+                                }
+                            )
+                        }
+                    }
                     return MutationApprovalResult.Rejected(
-                        "Approved change was rolled back because post-apply processing failed: ${error.message.orEmpty().ifBlank { error.javaClass.simpleName }}"
+                        if (ready) {
+                            "Approved change was rolled back after an unexpected failure; pending proposal was cleared: ${error.message.orEmpty()}"
+                        } else {
+                            "CRITICAL: approved change was rolled back after an unexpected failure, but durable cleanup failed; recovery is required: ${error.message.orEmpty()}"
+                        }
                     )
                 }
                 runCatching {
                     OpenJobStore.markRecoveryRequired(
                         workspace.projectRoot(),
-                        "An approved mutation reached disk, but post-apply processing failed and rollback was incomplete: ${rollback}"
+                        "An approved mutation could not be rolled back after an unexpected failure"
                     )
                 }
                 return MutationApprovalResult.Rejected(
-                    "CRITICAL: post-apply processing failed and rollback was incomplete; recovery is required: ${rollback}"
+                    "CRITICAL: approved change could not be safely rolled back: $rollback"
                 )
             }
-            MutationApprovalResult.Rejected("Approved change could not be applied: ${error.message.orEmpty()}")
+
+            when (diskState(proposal.changeSet)) {
+                DiskState.BEFORE -> runCatching {
+                    OpenJobStore.markWaiting(
+                        workspace.projectRoot(),
+                        proposal.id,
+                        proposal.changeSet.changes.map { it.path }.distinct(),
+                        proposal.request
+                    )
+                }
+                DiskState.AFTER -> {
+                    val markedApplied = runCatching {
+                        OpenJobStore.markApplied(workspace.projectRoot(), proposal.id)
+                    }.isSuccess
+                    if (markedApplied) {
+                        pending.remove(id)
+                        if (persist()) {
+                            return MutationApprovalResult.Applied(candidate, proposal.changeSet)
+                        }
+                        pending[id] = proposal
+                    }
+                }
+                DiskState.MIXED -> runCatching {
+                    OpenJobStore.markRecoveryRequired(
+                        workspace.projectRoot(),
+                        "An approved mutation failed during application and left a mixed on-disk state"
+                    )
+                }
+            }
+            MutationApprovalResult.Rejected("Approved change could not be safely completed: ${error.message.orEmpty()}")
         }
     }
 
@@ -329,26 +508,32 @@ class MutationCoordinator(
 
     @Synchronized
     fun clear(id: String): Boolean {
-        val gone = pending.remove(id) != null
-        if (gone && !persist()) {
+        val removed = pending.remove(id) ?: return false
+        if (!persist()) {
+            pending[id] = removed
             return false
         }
-        if (gone) {
-            runCatching { OpenJobStore.markReady(workspace.projectRoot()) }
+        if (!runCatching { OpenJobStore.markReady(workspace.projectRoot()) }.isSuccess) {
+            pending[id] = removed
+            persist()
+            return false
         }
-        return gone
+        return true
     }
 
     @Synchronized
     fun reject(id: String): Boolean {
-        val gone = pending.remove(id) != null
-        if (gone && !persist()) {
+        val removed = pending.remove(id) ?: return false
+        if (!persist()) {
+            pending[id] = removed
             return false
         }
-        if (gone) {
-            runCatching { OpenJobStore.markReady(workspace.projectRoot()) }
+        if (!runCatching { OpenJobStore.markReady(workspace.projectRoot()) }.isSuccess) {
+            pending[id] = removed
+            persist()
+            return false
         }
-        return gone
+        return true
     }
 
     @Synchronized
@@ -363,7 +548,10 @@ class MutationCoordinator(
             expired.forEach { (id, proposal) -> pending[id] = proposal }
             return
         }
-        runCatching { OpenJobStore.markReady(workspace.projectRoot()) }
+        if (!runCatching { OpenJobStore.markReady(workspace.projectRoot()) }.isSuccess) {
+            expired.forEach { (id, proposal) -> pending[id] = proposal }
+            persist()
+        }
     }
 
     @Synchronized
@@ -417,7 +605,22 @@ class MutationCoordinator(
         return proposal
     }
 
-    private fun recordEvolution(proposal: PendingChangeProposal, changeSet: ChangeSet) {
+    private enum class ReadyState { READY, RECOVERY_REQUIRED, FAILED }
+
+    private fun markReadyOrRecovery(reason: String): ReadyState {
+        val root = workspace.projectRoot()
+        if (runCatching { OpenJobStore.markReady(root) }.isSuccess) return ReadyState.READY
+        return if (runCatching {
+                OpenJobStore.markRecoveryRequired(root, reason.take(600))
+            }.isSuccess
+        ) {
+            ReadyState.RECOVERY_REQUIRED
+        } else {
+            ReadyState.FAILED
+        }
+    }
+
+    private fun recordEvolution(proposal: PendingChangeProposal, changeSet: ChangeSet, evaluation: VerificationReport) {
         runCatching {
             val latestApproval = proposal.approvals.maxOfOrNull { it.approvedAt }
             val kind = if (SelfRepair.isRequest(proposal.request)) "self-repair" else "code-change"
@@ -430,59 +633,145 @@ class MutationCoordinator(
                     category = AgentActionCategory.CODE_CHANGE,
                     ownerVerified = true,
                     approvalCount = proposal.approvalCount,
-                    sandboxPassed = proposal.verification.passed,
+                    evaluationPassed = proposal.verification.passed,
                     clearPermission = true
                 )
-                evolution.promoteSource(staged, kind, proposal.verification, action, latestApproval)
+                evolution.promoteSource(staged, kind, evaluation, action, latestApproval)
             }
         }
     }
 
     private fun reconcilePendingJobConsistency() {
         val root = workspace.projectRoot()
-        val job = OpenJobStore.load(root)
-        if (pending.isEmpty()) return
-
-        if (job == null) {
-            pending.clear()
-            persist()
-            return
-        }
-
-        if (job.status == "recovery-required") return
-
-        val expectedProposalId = job.proposalId ?: job.appliedProposalId
-        if (expectedProposalId == null) {
-            pending.clear()
-            persist()
-            return
-        }
-
-        val orphaned = pending.keys.filter { it != expectedProposalId }
-        if (orphaned.isNotEmpty()) {
-            orphaned.forEach(pending::remove)
-            persist()
-        }
-    }
-
-    private fun reconcileDurableApplyState() {
-        val root = workspace.projectRoot()
-        val job = OpenJobStore.load(root) ?: return
-        val proposalId = job.proposalId ?: job.appliedProposalId ?: return
-        val proposal = pending[proposalId]
-        if (proposal == null) {
+        val job = try {
+            OpenJobStore.load(root)
+        } catch (error: Exception) {
+            pendingReconciliationFailed = true
             runCatching {
                 OpenJobStore.markRecoveryRequired(
                     root,
-                    "Durable job state references proposal $proposalId, but that proposal is missing from the pending store"
+                    "Durable open-job state was unreadable during startup reconciliation: ${error.message.orEmpty()}"
                 )
             }
             return
         }
 
+        when (job?.status) {
+            null -> {
+                // A missing job marker is safe to clean up only when every pending proposal's
+                // files are still in the exact pre-apply state. AFTER/MIXED means an interrupted
+                // apply cannot be ruled out, so retain the evidence and require recovery.
+                val diskMayHaveChanged = pending.values.any { proposal ->
+                    runCatching { diskState(proposal.changeSet) != DiskState.BEFORE }
+                        .getOrDefault(true)
+                }
+                if (diskMayHaveChanged) {
+                    pendingReconciliationFailed = true
+                    runCatching {
+                        OpenJobStore.markRecoveryRequired(
+                            root,
+                            "Durable job state is missing and a pending proposal no longer matches its pre-apply disk state"
+                        )
+                    }
+                } else {
+                    discardPendingProposalsExcept(
+                        expectedProposalId = null,
+                        failureReason = "Orphaned pending proposals could not be removed durably"
+                    )
+                }
+            }
+            "recovery-required" -> return
+            "waiting-approval", "applying" -> {
+                val expectedId = job.proposalId
+                if (expectedId.isNullOrBlank() || expectedId !in pending) {
+                    pendingReconciliationFailed = true
+                    runCatching {
+                        OpenJobStore.markRecoveryRequired(
+                            root,
+                            "Durable job is ${job.status} but its authorized pending proposal is missing"
+                        )
+                    }
+                    return
+                }
+                discardPendingProposalsExcept(
+                    expectedProposalId = expectedId,
+                    failureReason = "Pending proposal consistency could not be persisted during startup reconciliation"
+                )
+            }
+            "applied" -> {
+                val expectedId = job.appliedProposalId ?: job.proposalId
+                if (expectedId.isNullOrBlank()) {
+                    pendingReconciliationFailed = true
+                    runCatching {
+                        OpenJobStore.markRecoveryRequired(
+                            root,
+                            "Durable job is marked applied but has no applied proposal identifier"
+                        )
+                    }
+                    return
+                }
+                discardPendingProposalsExcept(
+                    expectedProposalId = expectedId,
+                    failureReason = "Pending proposal consistency could not be persisted during startup reconciliation"
+                )
+            }
+            "open" -> discardPendingProposalsExcept(
+                expectedProposalId = null,
+                failureReason = "Stale pending proposals could not be removed from durable storage"
+            )
+            else -> {
+                pendingReconciliationFailed = true
+                runCatching {
+                    OpenJobStore.markRecoveryRequired(
+                        root,
+                        "Durable open-job state has an unsupported status: ${job.status}"
+                    )
+                }
+            }
+        }
+    }
+
+    private fun discardPendingProposalsExcept(expectedProposalId: String?, failureReason: String) {
+        val orphanedIds = pending.keys.filter { it != expectedProposalId }
+        if (orphanedIds.isEmpty()) return
+
+        val root = workspace.projectRoot()
+        val orphaned = orphanedIds.associateWith { pending.getValue(it) }
+        orphanedIds.forEach(pending::remove)
+        if (!persist()) {
+            pending.putAll(orphaned)
+            pendingReconciliationFailed = true
+            runCatching { OpenJobStore.markRecoveryRequired(root, failureReason) }
+        }
+    }
+
+    private fun reconcileDurableApplyState() {
+        val root = workspace.projectRoot()
+        val job = try {
+            OpenJobStore.load(root)
+        } catch (error: Exception) {
+            pendingReconciliationFailed = true
+            runCatching {
+                OpenJobStore.markRecoveryRequired(
+                    root,
+                    "Durable open-job state was unreadable during apply-state reconciliation: ${error.message.orEmpty()}"
+                )
+            }
+            return
+        } ?: return
+        val proposalId = job.proposalId ?: job.appliedProposalId ?: return
+        val proposal = pending[proposalId] ?: return
+
         when (job.status) {
             "applying" -> when (diskState(proposal.changeSet)) {
-                DiskState.BEFORE -> runCatching { OpenJobStore.markReady(root) }
+                DiskState.BEFORE -> runCatching {
+                    OpenJobStore.markWaiting(
+                        root,
+                        proposal.id,
+                        proposal.changeSet.changes.map { it.path }.distinct(),
+                        proposal.request
+                    )
+                }
                 DiskState.AFTER -> {
                     runCatching { OpenJobStore.markApplied(root, proposal.id) }
                         .onSuccess {
@@ -543,7 +832,14 @@ class MutationCoordinator(
         require(path.isNotBlank() && !path.startsWith('/') && !path.contains("..") && !path.contains('\\')) {
             "Unsafe project path"
         }
-        return workspace.projectRoot().resolve(path)
+        val root = workspace.projectRoot().canonicalFile
+        val candidate = root.resolve(path).canonicalFile
+        require(candidate.toPath().startsWith(root.toPath())) { "Unsafe project path" }
+        val relative = root.toPath().relativize(candidate.toPath()).toString().replace('\\', '/')
+        require(!relative.substringBefore('/').equals(".coding-agent", ignoreCase = true)) {
+            "Coding Agent internal metadata is not a recoverable project path"
+        }
+        return candidate
     }
 
     private fun persist(): Boolean =
