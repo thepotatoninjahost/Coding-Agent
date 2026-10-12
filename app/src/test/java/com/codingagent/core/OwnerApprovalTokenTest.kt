@@ -1,36 +1,63 @@
 package com.codingagent.core
 
+import com.codingagent.workspace.ApprovalChannel
+import com.codingagent.workspace.ApprovalPhrase
 import com.codingagent.workspace.OwnerApprovalToken
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class OwnerApprovalTokenTest {
     @Test
-    fun tokenIsBoundToOneProposalAndConsumedOnce() {
-        val token = OwnerApprovalToken.authenticated("proposal-1", now = 1_000L)
+    fun proposalChallengeUsesSixProposalSpecificWords() {
+        val first = ApprovalPhrase.forProposal("proposal-1234")
+        val second = ApprovalPhrase.forProposal("proposal-5678")
 
-        assertTrue(token.consume("proposal-1", 1_001L))
-        assertFalse(token.consume("proposal-1", 1_002L))
-        assertFalse(token.consume("proposal-2", 1_003L))
+        assertFalse(first == second)
+        assertEquals(8, first.split(" ").size)
+        assertTrue(first.startsWith("APPROVE CHANGE "))
     }
 
     @Test
-    fun tokenExpiresAfterOneMinute() {
-        val token = OwnerApprovalToken.authenticated("proposal-1", now = 1_000L)
-
-        assertTrue(token.consume("proposal-1", 61_000L))
-        assertFalse(
-            OwnerApprovalToken.authenticated("proposal-1", now = 1_000L)
-                .consume("proposal-1", 61_001L)
-        )
+    fun spokenPhraseMustMatchProposalBoundChallenge() {
+        val phrase = ApprovalPhrase.forProposal("proposal-1234")
+        assertNotNull(OwnerApprovalToken.spoken("proposal-1234", phrase.lowercase()))
+        assertNull(OwnerApprovalToken.spoken("proposal-1234", "APPROVE CHANGE DIFFERENT"))
+        assertNull(OwnerApprovalToken.spoken("proposal-1234", "APPROVE CHANGE"))
     }
 
     @Test
-    fun tokenCannotBeUsedBeforeItsIssueTime() {
-        val token = OwnerApprovalToken.authenticated("proposal-1", now = 2_000L)
+    fun typedPhraseMustMatchExactly() {
+        val phrase = ApprovalPhrase.forProposal("proposal-1234")
+        assertNotNull(OwnerApprovalToken.typed("proposal-1234", phrase))
+        assertNull(OwnerApprovalToken.typed("proposal-1234", phrase.lowercase()))
+        assertNull(OwnerApprovalToken.typed("proposal-1234", "$phrase "))
+    }
 
-        assertFalse(token.consume("proposal-1", 1_999L))
-        assertTrue(token.consume("proposal-1", 2_000L))
+    @Test
+    fun tokenIsBoundToProposalChannelAndConsumedOnce() {
+        val phrase = ApprovalPhrase.forProposal("proposal-1234")
+        val token = OwnerApprovalToken.spoken("proposal-1234", phrase, now = 1_000L)!!
+
+        assertEquals(ApprovalChannel.SPOKEN_PHRASE, token.channel)
+        assertTrue(token.consume("proposal-1234", ApprovalChannel.SPOKEN_PHRASE, 1_001L))
+        assertFalse(token.consume("proposal-1234", ApprovalChannel.SPOKEN_PHRASE, 1_002L))
+        val other = OwnerApprovalToken.spoken("proposal-1234", phrase, now = 1_000L)!!
+        assertFalse(other.consume("proposal-2", ApprovalChannel.SPOKEN_PHRASE, 1_001L))
+        assertFalse(other.consume("proposal-1234", ApprovalChannel.TYPED_PHRASE, 1_001L))
+    }
+
+    @Test
+    fun tokenExpiresAndCannotBeUsedBeforeIssueTime() {
+        val phrase = ApprovalPhrase.forProposal("proposal-1234")
+        val early = OwnerApprovalToken.typed("proposal-1234", phrase, now = 2_000L)!!
+        assertFalse(early.consume("proposal-1234", ApprovalChannel.TYPED_PHRASE, 1_999L))
+        assertTrue(early.consume("proposal-1234", ApprovalChannel.TYPED_PHRASE, 2_000L))
+
+        val expired = OwnerApprovalToken.typed("proposal-1234", phrase, now = 1_000L)!!
+        assertFalse(expired.consume("proposal-1234", ApprovalChannel.TYPED_PHRASE, 61_001L))
     }
 }
