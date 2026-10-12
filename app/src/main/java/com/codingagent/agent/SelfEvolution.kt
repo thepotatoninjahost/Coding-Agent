@@ -242,7 +242,7 @@ class SelfEvolution(private val root: File) {
 
     private fun isSafeRelativePath(path: String): Boolean {
         if (path.isBlank() || path.startsWith('/') || path.contains('\\') ||
-            path.split('/').any { it == ".." || it.isBlank() }
+            path.split('/').any { it == "." || it == ".." || it.isBlank() || it.contains('\t') || it.contains('\n') || it.contains('\r') }
         ) return false
         return !path.substringBefore('/').equals(".coding-agent", ignoreCase = true)
     }
