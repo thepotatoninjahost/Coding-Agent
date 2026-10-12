@@ -79,7 +79,6 @@ object PendingProposalStore {
                     .put("approvedAt", a.approvedAt)
                     .put("ownerLabel", a.ownerLabel)
                     .put("confirmationNumber", a.confirmationNumber)
-                    .put("phraseFingerprint", a.phraseFingerprint ?: JSONObject.NULL)
             )
         }
         return JSONObject()
@@ -131,8 +130,7 @@ object PendingProposalStore {
                 actionId = a.getString("actionId"),
                 approvedAt = a.getLong("approvedAt"),
                 ownerLabel = a.getString("ownerLabel"),
-                confirmationNumber = a.getInt("confirmationNumber"),
-                phraseFingerprint = if (a.isNull("phraseFingerprint")) null else a.optString("phraseFingerprint").ifBlank { null }
+                confirmationNumber = a.getInt("confirmationNumber")
             )
         }
         return PendingChangeProposal(
