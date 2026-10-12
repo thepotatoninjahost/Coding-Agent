@@ -58,7 +58,7 @@ class LiveUpdateTest {
         packageDir.resolve("weights.bin").writeBytes(byteArrayOf(1))
         packageDir.resolve("config.json").writeBytes(byteArrayOf(2))
         val store = LiveModelStore(root)
-        val action = AgentAction("install-package", AgentActionCategory.CODE_CHANGE, ownerVerified = true, approvalCount = 2)
+        val action = AgentAction("install-package", AgentActionCategory.MODEL_CHANGE, ownerVerified = true, approvalCount = 2)
         val result = store.installPackage(packageDir, "demo-model", "generic", action, VerificationReport(true, emptyList()))
         assertTrue(result is ModelInstallResult.Installed)
         assertEquals(2L, store.active()?.sizeBytes)
@@ -100,7 +100,7 @@ class LiveUpdateTest {
         val root = Files.createTempDirectory("coding-agent-model").toFile()
         val source = File(root, "model.bin").apply { writeBytes(byteArrayOf(1, 2, 3)) }
         val store = LiveModelStore(root)
-        val action = AgentAction("install-model", AgentActionCategory.CODE_CHANGE, ownerVerified = true, approvalCount = 2)
+        val action = AgentAction("install-model", AgentActionCategory.MODEL_CHANGE, ownerVerified = true, approvalCount = 2)
         assertTrue(store.install(source, "test", "raw", action, VerificationReport(true, emptyList())) is ModelInstallResult.Installed)
         val router = LiveModelRouter(store)
         assertEquals(3, router.loadedBytes())
