@@ -65,6 +65,37 @@ class LiveUpdateTest {
     }
 
     @Test
+    fun readOnlyActionCannotInstallModuleOrModel() {
+        val root = Files.createTempDirectory("live-install-read-only").toFile()
+        val readOnly = AgentAction("read-only", AgentActionCategory.READ_ONLY)
+        val moduleStore = LiveModuleStore(root)
+        val moduleResult = moduleStore.install(
+            """{"kind":"coding","version":1,"steps":[{"op":"emit","value":"blocked"}]}""",
+            "coding", 1, readOnly, VerificationReport(true, emptyList())
+        )
+        assertTrue(moduleResult is ModuleInstallResult.Rejected)
+        assertTrue(moduleStore.active() == null)
+        assertTrue(moduleStore.history().isEmpty())
+
+        val modelStore = LiveModelStore(root)
+        val source = root.resolve("model.bin").apply { writeBytes(byteArrayOf(1, 2, 3)) }
+        val modelResult = modelStore.install(
+            source, "read-only-model", "raw", readOnly, VerificationReport(true, emptyList())
+        )
+        assertTrue(modelResult is ModelInstallResult.Rejected)
+        assertTrue(modelStore.active() == null)
+
+        val packageDir = root.resolve("package").apply { mkdirs() }
+        packageDir.resolve("model.manifest").writeText("""{"name":"blocked","files":[{"name":"weights.bin"}]}""")
+        packageDir.resolve("weights.bin").writeBytes(byteArrayOf(1))
+        val packageResult = modelStore.installPackage(
+            packageDir, "read-only-package", "generic", readOnly, VerificationReport(true, emptyList())
+        )
+        assertTrue(packageResult is ModelInstallResult.Rejected)
+        assertTrue(modelStore.active() == null)
+    }
+
+    @Test
     fun `model router replaces loaded model bytes`() {
         val root = Files.createTempDirectory("coding-agent-model").toFile()
         val source = File(root, "model.bin").apply { writeBytes(byteArrayOf(1, 2, 3)) }
