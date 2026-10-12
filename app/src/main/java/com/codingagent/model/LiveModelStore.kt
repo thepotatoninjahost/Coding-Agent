@@ -156,10 +156,17 @@ class LiveModelStore(private val root: File) {
         val directory = modelRoot.resolve(id)
         if (!directory.isDirectory) return null
         val fields = history().firstOrNull { it.id == id } ?: return null
-        if (runCatching { checksumDirectory(directory) != fields.checksum }.getOrDefault(true)) return null
         val payload = directory.listFiles()
             ?.filter { it.isFile && it.name != MANIFEST_NAME }
             .orEmpty()
+        val recordedContentMatches = runCatching {
+            if (directory.resolve(MANIFEST_NAME).isFile) {
+                checksumDirectory(directory) == fields.checksum
+            } else {
+                payload.singleOrNull()?.let { checksum(it) == fields.checksum } == true
+            }
+        }.getOrDefault(false)
+        if (!recordedContentMatches) return null
         val source = payload.singleOrNull() ?: directory
         return fields.copy(sourcePath = source.absolutePath)
     }
