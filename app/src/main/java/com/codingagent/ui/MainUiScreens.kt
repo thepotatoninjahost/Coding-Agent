@@ -136,7 +136,6 @@ internal fun ChatSurface(
     pendingApproval: Boolean,
     approvalCount: Int,
     reason: String,
-    approvalPhrase: String,
     onApprove: () -> Unit
 ) {
     val listState = rememberLazyListState()
@@ -162,7 +161,7 @@ internal fun ChatSurface(
             }
             items(messages, key = { it.id }) { ChatBubble(it) }
         }
-        if (pendingApproval) ApprovalCard(approvalCount, reason, approvalPhrase, onApprove)
+        if (pendingApproval) ApprovalCard(approvalCount, reason, onApprove)
         if (busy) {
             Text("Agent is working…", color = FluoroOrange, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp))
         }
@@ -201,7 +200,7 @@ internal fun ChatSurface(
 }
 
 @Composable
-internal fun ApprovalCard(approvalCount: Int, reason: String, approvalPhrase: String, onApprove: () -> Unit) {
+internal fun ApprovalCard(approvalCount: Int, reason: String, onApprove: () -> Unit) {
     Card(
         Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
         colors = CardDefaults.cardColors(containerColor = RaisedPurple),
@@ -211,7 +210,6 @@ internal fun ApprovalCard(approvalCount: Int, reason: String, approvalPhrase: St
             Text("CODE CHANGE REVIEW", color = FluoroOrange, fontWeight = FontWeight.Bold)
             Text(reason, color = NeonGreen, fontSize = 13.sp)
             Text("Create your own phrase, speak it, then type the exact same phrase. Both steps are required for this proposal.", color = SoftGreen, fontSize = 12.sp)
-            Text(approvalPhrase, color = FluoroOrange, fontWeight = FontWeight.Bold, fontSize = 13.sp)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("${approvalCount}/2", color = SoftGreen, modifier = Modifier.weight(1f))
                 Button(
@@ -336,7 +334,7 @@ internal fun highlightCode(content: String): AnnotatedString = buildAnnotatedStr
 }
 
 @Composable
-internal fun ReviewSurface(pending: Boolean, approvals: Int, reason: String, approvalPhrase: String, onApprove: () -> Unit, onReject: () -> Unit) {
+internal fun ReviewSurface(pending: Boolean, approvals: Int, reason: String, onApprove: () -> Unit, onReject: () -> Unit) {
     Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("CHANGE REVIEW", color = NeonGreen, fontSize = 18.sp, fontWeight = FontWeight.Bold)
         if (!pending) {
@@ -347,7 +345,6 @@ internal fun ReviewSurface(pending: Boolean, approvals: Int, reason: String, app
                     Text("Pending transactional proposal", color = FluoroOrange, fontWeight = FontWeight.Bold)
                     Text(reason, color = NeonGreen)
                     Text("Review changed files before confirming. Transactional writes remain checksum-guarded.", color = SoftGreen, fontSize = 12.sp)
-                    Text(if (approvalPhrase.isBlank()) "Create your own phrase when you confirm" else "Your phrase: $approvalPhrase", color = FluoroOrange, fontWeight = FontWeight.Bold)
                     Text("Create your own phrase, speak it, then type the exact same phrase.", color = SoftGreen, fontSize = 12.sp)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(onClick = onReject, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4A2030))) { Text("Reject", color = NeonGreen) }
