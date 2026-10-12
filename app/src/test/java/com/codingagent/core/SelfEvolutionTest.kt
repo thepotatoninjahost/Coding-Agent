@@ -11,7 +11,6 @@ import com.codingagent.agent.PromotionResult
 import com.codingagent.agent.SelfEvolution
 import com.codingagent.workspace.VerificationReport
 import com.codingagent.workspace.ApprovalPhrase
-import com.codingagent.workspace.OwnerApprovalToken
 import com.codingagent.workspace.MutationCoordinator
 import com.codingagent.workspace.MutationProposeResult
 import com.codingagent.workspace.MutationApprovalResult
