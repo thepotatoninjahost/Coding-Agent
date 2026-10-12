@@ -2,9 +2,10 @@
 
 - Repository: `thepotatoninjahost/Coding-Agent`
 - Baseline ref: `main`
-- Baseline commit: `5910ac4841c893de5a5dca25d95b5f9f3591bbce`
-- Inventory tree SHA: `81cf30532b85357715520eaa6d92326b1abf58b6`
-- Ledger scope: every blob in the recursive Git tree at the baseline commit.
+- Baseline commit: `83002089d1a0a7b356e3dbf81a70cfb35c40721a`
+- Inventory tree SHA: `c108371fe02cdf9c07c472bcfd17ac1af18f0c17`
+- Inventory: 189 recursive tree entries = 155 tracked files + 34 directories.
+- Ledger scope: every tracked blob in the recursive Git tree at the baseline commit.
 - Important: inventory is not inspection. Rows start `in progress`; no file is represented as reviewed or verified until evidence is recorded.
 
 | Path | Type | Size (bytes) | Line count | Purpose | Dependencies / dependents | Review method | Findings | Action | Verification evidence | Status |
@@ -143,6 +144,7 @@
 | `app/src/test/java/com/codingagent/core/ResearchModeTest.kt` | test | 8795 | pending | pending content inspection | pending dependency mapping | pending | pending; no conclusion yet | investigate | pending | in progress |
 | `app/src/test/java/com/codingagent/core/ReviewBinderTest.kt` | test | 2302 | pending | pending content inspection | pending dependency mapping | pending | pending; no conclusion yet | investigate | pending | in progress |
 | `app/src/test/java/com/codingagent/core/SelfRepairTest.kt` | test | 3856 | pending | pending content inspection | pending dependency mapping | pending | pending; no conclusion yet | investigate | pending | in progress |
+| `app/src/test/java/com/codingagent/core/SelfEvolutionTest.kt` | test | 6085 | 144 | Tests evolution snapshot promotion, integrity, safe restore candidate selection, and routing restore through a normal mutation proposal. | SelfEvolution; MutationCoordinator; ProjectWorkspace; VerificationReport; JUnit temporary directories. | Full-file test inspection and comparison with the implementation under test. | Adds lifecycle coverage for snapshot integrity and approval staging; test pass/fail must be backed by CI. | review implementation/test alignment; run in Android unit-test CI. | Source inspected at baseline commit; current PR CI evidence is separate. | in progress |
 | `app/src/test/java/com/codingagent/core/StorageGuardTest.kt` | test | 1553 | pending | pending content inspection | pending dependency mapping | pending | pending; no conclusion yet | investigate | pending | in progress |
 | `app/src/test/java/com/codingagent/core/TaskIntakeTest.kt` | test | 2263 | pending | pending content inspection | pending dependency mapping | pending | pending; no conclusion yet | investigate | pending | in progress |
 | `app/src/test/java/com/codingagent/core/TerminalCancelTest.kt` | test | 7825 | pending | pending content inspection | pending dependency mapping | pending | pending; no conclusion yet | investigate | pending | in progress |
@@ -153,6 +155,7 @@
 | `docs/ANTI_YES_MAN.md` | documentation | 2034 | pending | pending content inspection | pending dependency mapping | pending | pending; no conclusion yet | investigate | pending | in progress |
 | `docs/OWNER_SYSTEM_PROMPT.md` | documentation | 614 | pending | pending content inspection | pending dependency mapping | pending | pending; no conclusion yet | investigate | pending | in progress |
 | `docs/TOOL_QUEUE.md` | documentation | 1013 | pending | pending content inspection | pending dependency mapping | pending | pending; no conclusion yet | investigate | pending | in progress |
+| `docs/audit/FILE_BY_FILE_AUDIT_LEDGER.md` | documentation/audit | 40619 | 169 | Tracks baseline inventory, per-file inspection, findings, actions, and verification evidence. | Phase 1 evidence document; recursive Git tree; review/verification workflow. | Self-review of ledger structure and comparison of baseline metadata against the recorded commit/tree. | F-2.3-08: ledger previously named commit 5910ac4/tree 81cf305 while Phase 1 baseline is commit 8300208/tree c108371; 2 tracked files were omitted from the ledger inventory. | align baseline metadata and include all 155 tracked files; leave uninspected rows explicitly in progress. | Commit/tree/count reconciled against the Phase 1 baseline evidence. | reviewed |
 | `docs/plans/2026-07-28-deep-research-design.md` | documentation | 1955 | pending | pending content inspection | pending dependency mapping | pending | pending; no conclusion yet | investigate | pending | in progress |
 | `gradle.properties` | configuration/build | 109 | 3 | Enables AndroidX and non-transitive R classes; sets Gradle JVM heap and file encoding. | Gradle and Android Gradle Plugin. | Full-file line-by-line settings inspection. | none found in static inspection. | retain. | Contents inspected; effective Gradle properties/build not executed in this review. | reviewed |
 | `gradle/wrapper/gradle-wrapper.jar` | dependency/lock | 43453 | pending | pending content inspection | pending dependency mapping | pending | pending; no conclusion yet | investigate | pending | in progress |
