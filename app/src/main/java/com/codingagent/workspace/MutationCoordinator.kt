@@ -41,6 +41,7 @@ data class PendingChangeProposal(
     val repairRootRequest: String = request
 ) {
     val approvalCount: Int get() = approvals.size
+    val approvalPhrase: String get() = ApprovalPhrase.forProposal(id)
 }
 
 class MutationCoordinator(
@@ -246,14 +247,24 @@ class MutationCoordinator(
                 "Change proposal approval window expired. Open Review, reject, and the agent will restage the same files."
             )
         }
-        if (!ownerApproval.consume(proposal.id, timestamp)) {
-            return MutationApprovalResult.Rejected("A fresh authenticated owner approval is required for this proposal")
+        val requiredChannel = when {
+            proposal.approvals.isEmpty() -> ApprovalChannel.SPOKEN_PHRASE
+            proposal.approvals.size == 1 && proposal.approvals.single().ownerLabel == "spoken-phrase" -> ApprovalChannel.TYPED_PHRASE
+            proposal.approvals.size == 1 -> return MutationApprovalResult.Rejected(
+                "The existing approval was not a spoken challenge; reject and restage this proposal to restart both channels"
+            )
+            else -> return MutationApprovalResult.Rejected("This proposal already has the required two approvals")
+        }
+        if (!ownerApproval.consume(proposal.id, requiredChannel, timestamp)) {
+            val required = if (requiredChannel == ApprovalChannel.SPOKEN_PHRASE) "spoken challenge" else "exact typed challenge"
+            return MutationApprovalResult.Rejected("A fresh $required approval is required for this proposal")
         }
         if (proposal.approvalCount >= 2) {
             return MutationApprovalResult.Rejected("This proposal already has the required two approvals")
         }
         val confirmationNumber = proposal.approvalCount + 1
-        val approval = ledger.record(id, "device-owner", timestamp, confirmationNumber)
+        val channelLabel = if (requiredChannel == ApprovalChannel.SPOKEN_PHRASE) "spoken-phrase" else "typed-phrase"
+        val approval = ledger.record(id, channelLabel, timestamp, confirmationNumber)
         val candidate = proposal.copy(approvals = proposal.approvals + approval)
         val action = AgentAction(
             description = proposal.request,
