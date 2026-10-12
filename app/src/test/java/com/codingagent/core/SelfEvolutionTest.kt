@@ -14,6 +14,7 @@ import com.codingagent.workspace.MutationCoordinator
 import com.codingagent.workspace.MutationProposeResult
 import com.codingagent.workspace.MutationApprovalResult
 import com.codingagent.workspace.OwnerApprovalToken
+import com.codingagent.workspace.ApprovalPhrase
 import com.codingagent.workspace.ProjectWorkspace
 
 class SelfEvolutionTest {
@@ -143,7 +144,7 @@ class SelfEvolutionTest {
 
         val firstApproval = mutations.approve(
             proposal.id,
-            OwnerApprovalToken.authenticated(proposal.id)
+            testApprovalToken(mutations, proposal.id)
         )
         assertTrue(firstApproval is MutationApprovalResult.AwaitingSecond)
         assertEquals("class Broken\n", target.readText())
@@ -206,4 +207,12 @@ class SelfEvolutionTest {
         assertTrue((missing as com.codingagent.agent.SnapshotCandidateResult.Rejected).reason.contains("not found"))
     }
 
+    private fun testApprovalToken(coordinator: MutationCoordinator, proposalId: String): OwnerApprovalToken {
+        val phrase = ApprovalPhrase.forProposal(proposalId)
+        return if (coordinator.get(proposalId)?.approvalCount == 1) {
+            OwnerApprovalToken.typed(proposalId, phrase)!!
+        } else {
+            OwnerApprovalToken.spoken(proposalId, phrase)!!
+        }
+    }
 }
