@@ -30,6 +30,13 @@ class OwnerApprovalTokenTest {
     }
 
     @Test
+    fun phraseLengthIsChosenByOwnerRatherThanHardCodedByApplication() {
+        val ownerChosenPhrase = "x"
+        assertTrue(OwnerApprovalToken.spoken("proposal-short", ownerChosenPhrase, ownerChosenPhrase) != null)
+        assertTrue(OwnerApprovalToken.typed("proposal-short", ownerChosenPhrase, ownerChosenPhrase) != null)
+    }
+
+    @Test
     fun spokenPhraseMustMatchOwnerCreatedPhrase() {
         assertTrue(OwnerApprovalToken.spoken("proposal-1234", ownerPhrase, ownerPhrase.lowercase()) != null)
         assertNull(OwnerApprovalToken.spoken("proposal-1234", ownerPhrase, "different phrase"))
