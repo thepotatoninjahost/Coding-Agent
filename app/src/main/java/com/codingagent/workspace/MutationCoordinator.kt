@@ -260,7 +260,7 @@ class MutationCoordinator(
             category = AgentActionCategory.CODE_CHANGE,
             ownerVerified = true,
             approvalCount = candidate.approvalCount,
-            sandboxPassed = proposal.verification.passed,
+            evaluationPassed = proposal.verification.passed,
             clearPermission = true
         )
         val violations = AgentConstitution.check(action, timestamp, proposal.createdAt)
@@ -633,7 +633,7 @@ class MutationCoordinator(
                     category = AgentActionCategory.CODE_CHANGE,
                     ownerVerified = true,
                     approvalCount = proposal.approvalCount,
-                    sandboxPassed = proposal.verification.passed,
+                    evaluationPassed = proposal.verification.passed,
                     clearPermission = true
                 )
                 evolution.promoteSource(staged, kind, evaluation, action, latestApproval)

@@ -11,6 +11,8 @@ import java.nio.charset.StandardCharsets
 /**
  * ONE JOB: Project tree → indexed file records with symbols and checksums.
  */
+private const val MAX_INDEXED_FILE_BYTES = 5L * 1024 * 1024
+private const val MAX_SEARCH_QUERY_LENGTH = 256
 private val SYMBOL_PATTERN = Regex("\\b(class|interface|object|fun|function|def|const|val|var|public|private|protected|static)\\s+([A-Za-z_][A-Za-z0-9_]*)")
 
 class ProjectIndexer {
@@ -23,7 +25,8 @@ class ProjectIndexer {
     fun index(root: File): List<ProjectFile> = root.walkTopDown()
         .onEnter { it.name !in ignored && isSafeProjectPath(root, it) }
         .filter {
-            it.isFile && !java.nio.file.Files.isSymbolicLink(it.toPath()) &&
+            it.isFile && it.length() <= MAX_INDEXED_FILE_BYTES &&
+                !java.nio.file.Files.isSymbolicLink(it.toPath()) &&
                 isSafeProjectPath(root, it) &&
                 (it.extension.lowercase() in extensions || it.name == "Makefile")
         }
@@ -52,18 +55,18 @@ class ProjectIndexer {
 
     fun search(root: File, query: String): List<SearchHit> {
         val normalized = query.trim()
-        if (normalized.isBlank()) return emptyList()
+        if (normalized.isBlank() || normalized.length > MAX_SEARCH_QUERY_LENGTH) return emptyList()
 
-        // The model-facing contract describes this as regex-like search. Compile once per
-        // request and fall back to literal matching for malformed expressions.
-        val matcher = runCatching { Regex(normalized, RegexOption.IGNORE_CASE) }.getOrNull()
+        // Use bounded literal matching. Arbitrary regular expressions can cause catastrophic
+        // backtracking on imported source and stall the app's worker thread.
         // Search is a line-oriented operation; do not build the full metadata index first.
         // Indexing reads every source file to calculate imports, symbols, line counts, and hashes,
         // which doubled I/O and memory work for every search request.
         return root.walkTopDown()
             .onEnter { it.name !in ignored && isSafeProjectPath(root, it) }
             .filter {
-                it.isFile && !java.nio.file.Files.isSymbolicLink(it.toPath()) &&
+                it.isFile && it.length() <= MAX_INDEXED_FILE_BYTES &&
+                    !java.nio.file.Files.isSymbolicLink(it.toPath()) &&
                     isSafeProjectPath(root, it) &&
                     (it.extension.lowercase() in extensions || it.name == "Makefile")
             }
@@ -71,7 +74,7 @@ class ProjectIndexer {
                 val path = ProjectPaths.relative(root, file)
                 file.useLines { lines ->
                     lines.mapIndexedNotNull { index, text ->
-                        val matches = matcher?.containsMatchIn(text) ?: text.contains(normalized, ignoreCase = true)
+                        val matches = text.contains(normalized, ignoreCase = true)
                         if (matches) SearchHit(path, index + 1, text.trim()) else null
                     }.toList()
                 }
@@ -80,7 +83,8 @@ class ProjectIndexer {
     private fun isSafeProjectPath(root: File, candidate: File): Boolean = runCatching {
         val canonicalRoot = root.canonicalFile.toPath()
         val canonicalCandidate = candidate.canonicalFile.toPath()
-        canonicalCandidate.startsWith(canonicalRoot)
+        canonicalCandidate.startsWith(canonicalRoot) &&
+            !ProjectPaths.isSensitivePath(ProjectPaths.relative(root, candidate))
     }.getOrDefault(false)
 
     private data class FileMetadata(

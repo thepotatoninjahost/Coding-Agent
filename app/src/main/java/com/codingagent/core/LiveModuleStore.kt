@@ -54,7 +54,7 @@ class LiveModuleStore(private val root: File) {
                 "Module evaluation failed: ${evaluation.issues.joinToString { "${it.path}:${it.line}: ${it.message}" }}"
             )
         }
-        val violations = AgentConstitution.check(action.copy(sandboxPassed = evaluation.passed))
+        val violations = AgentConstitution.check(action.copy(evaluationPassed = evaluation.passed))
         if (violations.isNotEmpty()) return ModuleInstallResult.Rejected(violations.joinToString("; ") { "${it.rule}: ${it.message}" })
         val parsed = runCatching { parse(source) }.getOrElse { return ModuleInstallResult.Rejected("Invalid module: ${it.message}") }
         if (parsed.kind != safeKind) return ModuleInstallResult.Rejected("Module kind does not match requested kind")

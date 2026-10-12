@@ -15,6 +15,7 @@ import com.codingagent.workspace.DeepResearchProgress
 import com.codingagent.workspace.ResearchHit
 import com.codingagent.workspace.ResearchSession
 import com.codingagent.workspace.ResearchSource
+import com.codingagent.workspace.AtomicFileWriter
 
 /**
  * ONE JOB: Multi-lane deep research with durable sessions and progress callbacks.
@@ -240,7 +241,7 @@ class DurableDeepResearchProvider(
                     .put("error", s.error)
             )
         }
-        file.writeText(
+        AtomicFileWriter.write(file, 
             JSONObject()
                 .put("id", session.id)
                 .put("query", session.query)

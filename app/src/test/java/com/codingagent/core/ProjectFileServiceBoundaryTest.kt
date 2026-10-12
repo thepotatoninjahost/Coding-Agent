@@ -2,6 +2,7 @@ package com.codingagent.core
 
 import com.codingagent.workspace.ProjectFileService
 import com.codingagent.workspace.ProjectWorkspace
+import com.codingagent.workspace.ProjectPaths
 import com.codingagent.workspace.OpenJobStore
 import com.codingagent.intake.OperationKind
 import com.codingagent.intake.TaskOperation
@@ -20,15 +21,31 @@ class ProjectFileServiceBoundaryTest {
         root.resolve("Main.kt").writeText("fun main() = Unit\n")
         root.resolve(".coding-agent").apply { mkdirs() }
             .resolve("private-state.json").writeText("{\"private\":true}")
+        root.resolve(".git").apply { mkdirs() }.resolve("config").writeText("[remote]\nurl=secret\n")
+        root.resolve(".env").writeText("API_KEY=secret\n")
+        root.resolve("signing.key").writeText("PRIVATE KEY\n")
 
         val service = ProjectFileService(ProjectWorkspace(root))
 
         assertTrue(service.list().any { it == "Main.kt" })
-        assertFalse(service.list().any { it.equals(".coding-agent", ignoreCase = true) })
+        assertFalse(service.list().any { ProjectPaths.isSensitivePath(it) })
         assertRejected { service.list(".coding-agent") }
+        assertRejected { service.list(".git") }
+        assertRejected { service.read(".git/config") }
+        assertRejected { service.read(".env") }
+        assertRejected { service.read("signing.key") }
         assertRejected { service.read(".coding-agent/private-state.json") }
         assertRejected { service.read("nested/../.coding-agent/private-state.json") }
         assertRejected { service.read(".CODING-AGENT/private-state.json") }
+    }
+
+
+    @Test
+    fun modelFileReadsRejectFilesAboveTheBoundedSize() {
+        val root = Files.createTempDirectory("project-read-size-cap").toFile()
+        root.resolve("large.kt").writeBytes(ByteArray(2 * 1024 * 1024 + 1) { 'x'.code.toByte() })
+        val service = ProjectFileService(ProjectWorkspace(root))
+        assertRejected { service.read("large.kt") }
     }
 
     @Test
@@ -47,6 +64,16 @@ class ProjectFileServiceBoundaryTest {
             )
         }
         assertEquals(before, jobFile.readText())
+    }
+
+
+    @Test
+    fun projectSearchTreatsRegexMetacharactersAsLiteralText() {
+        val root = Files.createTempDirectory("project-search-literal").toFile()
+        root.resolve("Literal.kt").writeText("val dotted = \"a.b\"\nval plain = \"axb\"\n")
+        val hits = ProjectWorkspace(root).search(".")
+        assertTrue(hits.any { it.text.contains("\"a.b\"") })
+        assertFalse(hits.any { it.text.contains("\"axb\"") })
     }
 
     @Test

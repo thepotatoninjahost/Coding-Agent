@@ -22,7 +22,7 @@ class SelfEvolutionTest {
         category = category,
         ownerVerified = true,
         approvalCount = 2,
-        sandboxPassed = true,
+        evaluationPassed = true,
         clearPermission = true
     )
 

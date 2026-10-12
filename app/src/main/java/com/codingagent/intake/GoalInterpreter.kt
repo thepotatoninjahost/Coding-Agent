@@ -67,7 +67,7 @@ class GoalInterpreter(private val root: File) {
             matches(request, "inspect|list files|search project|find file|analy[sz]e|analysis|review|audit|assess|evaluate|thoughts|look over|report on|summarize") -> TaskIntent.INSPECT
             matches(request, "research|learn|study|investigate|compare|explore") -> TaskIntent.EXPLAIN
             isGreetingOrChat(request) -> TaskIntent.UNKNOWN
-            else -> TaskIntent.CHANGE
+            else -> TaskIntent.UNKNOWN
         }
     }
 
@@ -97,10 +97,10 @@ class GoalInterpreter(private val root: File) {
         return buildString {
             append("Active job: ").append(jobGoal)
             if (ownerTurns.isNotEmpty()) {
-                append("\\nPrior owner instructions:")
-                ownerTurns.forEach { append("\\n- ").append(it) }
+                append("\nPrior owner instructions:")
+                ownerTurns.forEach { append("\n- ").append(it) }
             }
-            append("\\nCurrent owner follow-up: ").append(current)
+            append("\nCurrent owner follow-up: ").append(current)
         }
     }
 

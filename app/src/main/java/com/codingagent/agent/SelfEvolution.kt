@@ -70,7 +70,7 @@ class SelfEvolution(private val root: File) {
         if (action.category != AgentActionCategory.CODE_CHANGE) {
             return PromotionResult.Rejected("Source promotion requires CODE_CHANGE authorization")
         }
-        val violations = AgentConstitution.check(action.copy(sandboxPassed = true), approvalAt = approvalAt)
+        val violations = AgentConstitution.check(action.copy(evaluationPassed = true), approvalAt = approvalAt)
         if (violations.isNotEmpty()) return PromotionResult.Rejected(violations.joinToString("; ") { "${it.rule}: ${it.message}" })
         if (!staged.isFile) return PromotionResult.Rejected("Staged source does not exist")
         val parent = staged.parentFile ?: return PromotionResult.Rejected("Staged source directory is missing")

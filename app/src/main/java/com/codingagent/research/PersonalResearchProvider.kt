@@ -12,6 +12,7 @@ import com.codingagent.workspace.DeepResearchProgress
 import com.codingagent.workspace.ResearchHit
 import com.codingagent.workspace.ResearchSession
 import com.codingagent.workspace.ResearchSource
+import com.codingagent.workspace.AtomicFileWriter
 
 /**
  * ONE JOB: BROAD research path for personal/general queries.
@@ -165,7 +166,7 @@ class PersonalResearchProvider(
                     .put("error", s.error)
             )
         }
-        file.writeText(
+        AtomicFileWriter.write(file, 
             JSONObject()
                 .put("id", session.id)
                 .put("query", session.query)

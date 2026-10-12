@@ -88,7 +88,7 @@ class LiveModelStore(private val root: File) {
                 "Model evaluation failed: ${evaluation.issues.joinToString { "${it.path}:${it.line}: ${it.message}" }}"
             )
         }
-        val violations = AgentConstitution.check(action.copy(sandboxPassed = evaluation.passed))
+        val violations = AgentConstitution.check(action.copy(evaluationPassed = evaluation.passed))
         if (violations.isNotEmpty()) {
             return ModelInstallResult.Rejected(violations.joinToString("; ") { "${it.rule}: ${it.message}" })
         }
@@ -131,7 +131,7 @@ class LiveModelStore(private val root: File) {
                 "Model evaluation failed: ${evaluation.issues.joinToString { "${it.path}:${it.line}: ${it.message}" }}"
             )
         }
-        val violations = AgentConstitution.check(action.copy(sandboxPassed = evaluation.passed))
+        val violations = AgentConstitution.check(action.copy(evaluationPassed = evaluation.passed))
         if (violations.isNotEmpty()) {
             return ModelInstallResult.Rejected(violations.joinToString("; ") { "${it.rule}: ${it.message}" })
         }
