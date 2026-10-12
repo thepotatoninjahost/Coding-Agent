@@ -9,6 +9,7 @@ import com.codingagent.agent.AgentAction
 import com.codingagent.agent.AgentActionCategory
 import com.codingagent.agent.PromotionResult
 import com.codingagent.agent.SelfEvolution
+import com.codingagent.agent.SnapshotRestoreResult
 import com.codingagent.workspace.VerificationReport
 
 class SelfEvolutionTest {
