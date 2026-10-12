@@ -446,7 +446,7 @@ class AcceptancePathTest {
     }
 
     @Test
-    fun persistedFirstApprovalSurvivesCoordinatorRestartAndSecondConfirmationIsNumberedTwo() {
+    fun persistedFirstApprovalRequiresRestagingBecausePhraseIsNotPersisted() {
         val root = Files.createTempDirectory("accept-approval-restart").toFile()
         root.resolve("Main.kt").writeText("fun main() = 1\n")
 
@@ -456,21 +456,24 @@ class AcceptancePathTest {
             listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 2\n"))
         ) as MutationProposeResult.Proposed
 
-        val first = firstCoordinator.approve(proposed.proposal.id, testApprovalToken(firstCoordinator, proposed.proposal.id))
+        val first = firstCoordinator.approve(
+            proposed.proposal.id,
+            OwnerApprovalToken.spoken(proposed.proposal.id, testOwnerPhrase, testOwnerPhrase)!!
+        )
         assertTrue(first is MutationApprovalResult.AwaitingSecond)
         assertEquals(1, (first as MutationApprovalResult.AwaitingSecond).approval.confirmationNumber)
 
         val restartedCoordinator = MutationCoordinator(ProjectWorkspace(root))
         val restored = restartedCoordinator.pending().single()
         assertEquals(1, restored.approvalCount)
-        assertEquals(1, restored.approvals.single().confirmationNumber)
 
-        val second = restartedCoordinator.approve(restored.id, testApprovalToken(restartedCoordinator, restored.id))
-        assertTrue(second is MutationApprovalResult.Applied)
-        val applied = second as MutationApprovalResult.Applied
-        assertEquals(2, applied.proposal.approvalCount)
-        assertEquals(listOf(1, 2), applied.proposal.approvals.map { it.confirmationNumber })
-        assertEquals("fun main() = 2\n", root.resolve("Main.kt").readText())
+        val second = restartedCoordinator.approve(
+            restored.id,
+            OwnerApprovalToken.typed(restored.id, testOwnerPhrase, testOwnerPhrase)!!
+        )
+        assertTrue(second is MutationApprovalResult.Rejected)
+        assertEquals("fun main() = 1\n", root.resolve("Main.kt").readText())
+        assertTrue(restartedCoordinator.reject(restored.id))
     }
 
     @Test
