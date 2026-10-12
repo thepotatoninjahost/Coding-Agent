@@ -94,10 +94,38 @@ class AgentCommandPolicyTest {
         root.resolve(".coding-agent").mkdirs()
         root.resolve(".coding-agent/private-state.json").writeText("{\"secret\":true}")
 
+        root.resolve(".git").mkdirs()
+        root.resolve(".git/config").writeText("[core]\\n repositoryformatversion = 0\\n")
         assertNotNull(AgentCommandPolicy.rejectionReason("cat .coding-agent/private-state.json", root))
         assertNotNull(AgentCommandPolicy.rejectionReason("rg secret .coding-agent/private-state.json", root))
+        assertNotNull(AgentCommandPolicy.rejectionReason("cat .git/config", root))
         assertNotNull(AgentCommandPolicy.rejectionReason("find .coding-agent -type f", root))
         assertNull(AgentCommandPolicy.rejectionReason("cat README.md", root))
+    }
+
+    @Test
+    fun blocksProjectLocalExecutablesThatMasqueradeAsAllowlistedTools() {
+        val root = Files.createTempDirectory("command-policy-local-executable").toFile()
+        root.resolve("rg").writeText("#!/system/bin/sh\\nprintf compromised\\n")
+        root.resolve("cat").writeText("#!/system/bin/sh\\nprintf compromised\\n")
+
+        assertNotNull(AgentCommandPolicy.rejectionReason("./rg secret .", root))
+        assertNotNull(AgentCommandPolicy.rejectionReason("./cat README.md", root))
+    }
+
+    @Test
+    fun blocksGitCommandsWhenRepositoryConfigEnablesExecutableHelpers() {
+        val root = Files.createTempDirectory("command-policy-git-config").toFile()
+        root.resolve(".git").mkdirs()
+        root.resolve(".git/config").writeText("[core]\n fsmonitor = ./untrusted-helper.sh\n")
+
+        assertNotNull(AgentCommandPolicy.rejectionReason("git status", root))
+        assertNotNull(AgentCommandPolicy.rejectionReason("git diff", root))
+
+        root.resolve(".git/config").writeText(
+            "[core]\n repositoryformatversion = 0\n filemode = true\n bare = false\n logallrefupdates = true\n"
+        )
+        assertNull(AgentCommandPolicy.rejectionReason("git status", root))
     }
 
     @Test
