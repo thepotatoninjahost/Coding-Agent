@@ -47,6 +47,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -190,6 +191,7 @@ private fun CodingAgentApp(privateDir: File) {
     var draftModelName by remember { mutableStateOf(modelSettings.modelName) }
     var draftBaseUrl by remember { mutableStateOf(modelSettings.baseUrl) }
     var draftExtraHeaders by remember { mutableStateOf(modelSettings.extraHeaders) }
+    var draftSystemPrompt by remember { mutableStateOf(modelSettings.systemPrompt) }
     var probeMessage by remember { mutableStateOf<String?>(null) }
 
     val density = LocalDensity.current
@@ -203,6 +205,7 @@ private fun CodingAgentApp(privateDir: File) {
         draftModelName = normalized.modelName
         draftBaseUrl = normalized.baseUrl
         draftExtraHeaders = normalized.extraHeaders
+        draftSystemPrompt = normalized.systemPrompt
         val gateway = normalized.remoteGateway()
         if (gateway != null) {
             modelGateway = gateway
@@ -270,6 +273,10 @@ private fun CodingAgentApp(privateDir: File) {
             )
         }
     }
+    SideEffect {
+        agent?.setSystemPrompt(modelSettings.effectiveSystemPrompt())
+    }
+
     // Tie agent-owned blocking work to the activity composition lifecycle.
     // Coroutine cancellation alone cannot interrupt synchronous gateway/terminal calls.
     DisposableEffect(agent) {
@@ -660,6 +667,7 @@ private fun CodingAgentApp(privateDir: File) {
                         draftModelName = modelSettings.modelName
                         draftBaseUrl = modelSettings.baseUrl
                         draftExtraHeaders = modelSettings.extraHeaders
+                        draftSystemPrompt = modelSettings.systemPrompt
                         probeMessage = null
                         showModelSettings = true
                     },
@@ -807,6 +815,22 @@ private fun CodingAgentApp(privateDir: File) {
                         )
                         Spacer(Modifier.height(8.dp))
                         OutlinedTextField(
+                            value = draftSystemPrompt,
+                            onValueChange = { draftSystemPrompt = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            label = { Text("Additional system instructions (optional)", color = SoftGreen) },
+                            placeholder = { Text("Extra guidance for how the agent should work", color = SoftGreen.copy(alpha = 0.5f)) },
+                            minLines = 3,
+                            maxLines = 8,
+                            colors = fieldColors()
+                        )
+                        Text(
+                            "Added to the built-in instructions; safety, evidence, and approval rules remain in force.",
+                            color = SoftGreen,
+                            fontSize = 10.sp
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        OutlinedTextField(
                             value = draftExtraHeaders,
                             onValueChange = { draftExtraHeaders = it },
                             modifier = Modifier.fillMaxWidth(),
@@ -837,6 +861,7 @@ private fun CodingAgentApp(privateDir: File) {
                                         baseUrl = draftBaseUrl,
                                         apiKey = draftApiKey,
                                         modelName = draftModelName,
+                                        systemPrompt = draftSystemPrompt,
                                         extraHeaders = draftExtraHeaders,
                                         onboarded = true
                                     )
@@ -858,6 +883,7 @@ private fun CodingAgentApp(privateDir: File) {
                                         baseUrl = draftBaseUrl,
                                         apiKey = draftApiKey,
                                         modelName = draftModelName,
+                                        systemPrompt = draftSystemPrompt,
                                         extraHeaders = draftExtraHeaders,
                                         onboarded = true
                                     )
