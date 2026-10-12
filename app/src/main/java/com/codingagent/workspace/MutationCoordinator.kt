@@ -46,7 +46,8 @@ class MutationCoordinator(
     internal val workspace: ProjectWorkspace,
     private val ledger: ApprovalLedger = ApprovalLedger(),
     private val now: () -> Long = { System.currentTimeMillis() },
-    private val repairConfig: RepairCycleConfig = RepairCycleConfig()
+    private val repairConfig: RepairCycleConfig = RepairCycleConfig(),
+    private val postApplyVerifier: (() -> VerificationReport)? = null
 ) {
     private val pending = linkedMapOf<String, PendingChangeProposal>()
     private var pendingReconciliationFailed = false
@@ -296,7 +297,7 @@ class MutationCoordinator(
             applied = appliedChangeSet
             // Approval authorizes this exact file mutation, not execution of imported project scripts.
             // Static verification is local and bounded. Build/test commands require explicit owner action.
-            val staticReport = workspace.verify()
+            val staticReport = postApplyVerifier?.invoke() ?: workspace.verify()
             val postApply = staticReport.copy(
                 warnings = staticReport.warnings + "Static verification completed; project build/test commands were not executed automatically. Review scripts and run them explicitly in the owner-controlled terminal."
             )
