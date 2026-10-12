@@ -422,8 +422,9 @@ class MutationCoordinator(
                     )
                 }
             }
-            recordEvolution(candidate, appliedChangeSet, postApply)
-            MutationApprovalResult.Applied(candidate, appliedChangeSet)
+            val completedProposal = candidate.copy(verification = postApply)
+            recordEvolution(completedProposal, appliedChangeSet, postApply)
+            MutationApprovalResult.Applied(completedProposal, appliedChangeSet)
         } catch (error: Exception) {
             val completedChangeSet = applied
             if (completedChangeSet != null) {
