@@ -11,18 +11,22 @@ import com.codingagent.workspace.MutationCoordinator
 import com.codingagent.workspace.MutationProposeResult
 import com.codingagent.workspace.OwnerApprovalToken
 import com.codingagent.workspace.ProjectWorkspace
+import com.codingagent.workspace.VerificationIssue
+import com.codingagent.workspace.VerificationReport
 
 class RepairLifecycleAcceptanceTest {
     @Test
     fun failedChangeRollsBackThenApprovedRepairPassesVerification() {
         val root = Files.createTempDirectory("repair-lifecycle").toFile()
         val source = root.resolve("Main.kt").apply { writeText("fun main() = 1\n") }
-        root.resolve("Broken.kt").writeText("// TODO force static verification failure\n")
 
         val workspace = ProjectWorkspace(root)
-        val coordinator = MutationCoordinator(workspace)
+        var verificationRuns = 0
+        val coordinator = MutationCoordinator(workspace, postApplyVerifier = {
+            verificationRuns++
+            if (verificationRuns == 1) VerificationReport(false, listOf(VerificationIssue("Main.kt", 1, "simulated post-apply failure"))) else workspace.verify()
+        })
         coordinator.setRepairProvider { _, _ ->
-            assertTrue("Failure marker should be removed before repair verification", root.resolve("Broken.kt").delete())
             workspace.preview(
                 listOf(
                     TaskOperation(
