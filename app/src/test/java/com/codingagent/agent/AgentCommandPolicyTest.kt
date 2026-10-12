@@ -9,24 +9,16 @@ import java.nio.file.Files
 class AgentCommandPolicyTest {
     @Test
     fun allowsProjectInspectionCommands() {
-        assertNull(AgentCommandPolicy.rejectionReason("git status --short"))
-        assertNull(AgentCommandPolicy.rejectionReason("find app -type f"))
+        assertNotNull(AgentCommandPolicy.rejectionReason("git status --short"))
+        assertNotNull(AgentCommandPolicy.rejectionReason("find app -type f"))
         assertNull(AgentCommandPolicy.rejectionReason("rg UserMemory app/src"))
         assertNull(AgentCommandPolicy.rejectionReason("cat app/src/main/AndroidManifest.xml"))
     }
 
     @Test
-    fun allowsStandardVerificationGradleCommands() {
-        assertNull(
-            AgentCommandPolicy.rejectionReason(
-                "./gradlew :app:testDebugUnitTest --no-daemon --console=plain"
-            )
-        )
-        assertNull(
-            AgentCommandPolicy.rejectionReason(
-                "./gradlew :app:lintDebug :app:assembleDebug --no-daemon --console=plain"
-            )
-        )
+    fun blocksProjectControlledGradleCommands() {
+        assertNotNull(AgentCommandPolicy.rejectionReason("./gradlew :app:testDebugUnitTest --no-daemon --console=plain"))
+        assertNotNull(AgentCommandPolicy.rejectionReason("gradle test"))
     }
 
     @Test
@@ -62,9 +54,9 @@ class AgentCommandPolicyTest {
         assertNotNull(AgentCommandPolicy.rejectionReason("git branch -D feature"))
         assertNotNull(AgentCommandPolicy.rejectionReason("git branch -m old new"))
         assertNotNull(AgentCommandPolicy.rejectionReason("git branch -f feature"))
-        assertNull(AgentCommandPolicy.rejectionReason("git branch"))
-        assertNull(AgentCommandPolicy.rejectionReason("git branch --list feature"))
-        assertNull(AgentCommandPolicy.rejectionReason("git branch --merged main"))
+        assertNotNull(AgentCommandPolicy.rejectionReason("git branch"))
+        assertNotNull(AgentCommandPolicy.rejectionReason("git branch --list feature"))
+        assertNotNull(AgentCommandPolicy.rejectionReason("git branch --merged main"))
     }
 
     @Test
@@ -83,6 +75,15 @@ class AgentCommandPolicyTest {
         } catch (_: java.nio.file.FileSystemException) {
             return
         }
+    }
+
+    @Test
+    fun blocksBackslashHiddenMetadataRecursiveSearchAndQualifiedExecutables() {
+        assertNotNull(AgentCommandPolicy.rejectionReason("cat .coding-agent/private.json"))
+        assertNotNull(AgentCommandPolicy.rejectionReason("rg --hidden secret ."))
+        assertNotNull(AgentCommandPolicy.rejectionReason("grep -R secret app"))
+        assertNotNull(AgentCommandPolicy.rejectionReason("cat app\\\\secret.txt"))
+        assertNotNull(AgentCommandPolicy.rejectionReason("./cat app/src/main/AndroidManifest.xml"))
     }
 
     @Test
