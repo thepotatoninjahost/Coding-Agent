@@ -129,7 +129,7 @@ class AcceptancePathTest {
     }
 
     @Test
-    fun rollbackStateFailureIsReportedAsCriticalInsteadOfSilentlyClearingNothing() {
+    fun projectBuildScriptCannotCorruptDurableJobStateDuringApproval() {
         val root = Files.createTempDirectory("accept-rollback-state-failure").toFile()
         root.resolve("Main.kt").writeText("fun main() = 1\n")
         root.resolve(".coding-agent").mkdirs()
@@ -150,10 +150,9 @@ class AcceptancePathTest {
         )
         val result = coordinator.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id))
 
-        assertTrue(result is MutationApprovalResult.Rejected)
-        assertTrue((result as MutationApprovalResult.Rejected).reason.contains("recovery-required"))
-        assertEquals("recovery-required", OpenJobStore.load(root)?.status)
-        assertEquals("fun main() = 1\n", root.resolve("Main.kt").readText())
+        assertTrue("Expected approved mutation, got $result", result is MutationApprovalResult.Applied)
+        assertEquals("applied", OpenJobStore.load(root)?.status)
+        assertEquals("fun main() = 2\n", root.resolve("Main.kt").readText())
     }
 
     @Test
@@ -647,12 +646,12 @@ class AcceptancePathTest {
     @Test
     fun failedApprovedChangeStagesRepairAfterRollback() {
         val root = Files.createTempDirectory("accept-repair").toFile()
-        root.resolve("gradlew").writeText("#!/bin/sh\nexit 1\n")
-        root.resolve("gradlew").setExecutable(true)
+        root.resolve("Broken.kt").writeText("// TODO force static verification failure\n")
         root.resolve("Main.kt").writeText("fun main() = 1\n")
         val workspace = ProjectWorkspace(root)
         val coordinator = MutationCoordinator(workspace)
         coordinator.setRepairProvider { _, _ ->
+            assertTrue("Failure marker should be removed before the staged repair is verified", root.resolve("Broken.kt").delete())
             workspace.preview(
                 listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 2\n")),
                 "repair"
@@ -677,8 +676,7 @@ class AcceptancePathTest {
     @Test
     fun failedRepairStagesNextAttemptAndPreservesRootRequest() {
         val root = Files.createTempDirectory("accept-repair-retry").toFile()
-        root.resolve("gradlew").writeText("#!/bin/sh\nexit 1\n")
-        root.resolve("gradlew").setExecutable(true)
+        root.resolve("Broken.kt").writeText("// TODO force static verification failure\n")
         root.resolve("Main.kt").writeText("fun main() = 1\n")
         val workspace = ProjectWorkspace(root)
         val coordinator = MutationCoordinator(workspace)
@@ -722,8 +720,7 @@ class AcceptancePathTest {
     @Test
     fun repairApprovalSurvivesCoordinatorRestart() {
         val root = Files.createTempDirectory("accept-repair-restart").toFile()
-        root.resolve("gradlew").writeText("#!/bin/sh\nexit 1\n")
-        root.resolve("gradlew").setExecutable(true)
+        root.resolve("Broken.kt").writeText("// TODO force static verification failure\n")
         root.resolve("Main.kt").writeText("fun main() = 1\n")
         val workspace = ProjectWorkspace(root)
         val first = MutationCoordinator(workspace)
@@ -765,8 +762,7 @@ class AcceptancePathTest {
     @Test
     fun repairAttemptsAreBoundedAndStopAfterConfiguredMaximum() {
         val root = Files.createTempDirectory("accept-repair-bound").toFile()
-        root.resolve("gradlew").writeText("#!/bin/sh\nexit 1\n")
-        root.resolve("gradlew").setExecutable(true)
+        root.resolve("Broken.kt").writeText("// TODO force static verification failure\n")
         root.resolve("Main.kt").writeText("fun main() = 1\n")
         val workspace = ProjectWorkspace(root)
         val coordinator = MutationCoordinator(workspace)
