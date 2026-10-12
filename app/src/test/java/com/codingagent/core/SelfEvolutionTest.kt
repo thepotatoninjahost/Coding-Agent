@@ -227,4 +227,11 @@ class SelfEvolutionTest {
         assertTrue((missing as com.codingagent.agent.SnapshotCandidateResult.Rejected).reason.contains("not found"))
     }
 
+
+    @Test
+    fun approvalChallengeIsBoundToProposalId() {
+        assertEquals(ApprovalPhrase.forProposal("proposal-a"), ApprovalPhrase.forProposal("proposal-a"))
+        assertFalse(ApprovalPhrase.forProposal("proposal-a") == ApprovalPhrase.forProposal("proposal-b"))
+    }
+
 }
