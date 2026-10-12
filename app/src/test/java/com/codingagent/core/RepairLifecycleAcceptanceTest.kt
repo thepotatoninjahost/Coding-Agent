@@ -17,18 +17,12 @@ class RepairLifecycleAcceptanceTest {
     fun failedChangeRollsBackThenApprovedRepairPassesVerification() {
         val root = Files.createTempDirectory("repair-lifecycle").toFile()
         val source = root.resolve("Main.kt").apply { writeText("fun main() = 1\n") }
-        root.resolve("gradlew").apply {
-            writeText(
-                "#!/bin/sh\n" +
-                    "if grep -q broken Main.kt; then exit 1; fi\n" +
-                    "exit 0\n"
-            )
-            setExecutable(true)
-        }
+        root.resolve("Broken.kt").writeText("// TODO force static verification failure\n")
 
         val workspace = ProjectWorkspace(root)
         val coordinator = MutationCoordinator(workspace)
         coordinator.setRepairProvider { _, _ ->
+            assertTrue("Failure marker should be removed before repair verification", root.resolve("Broken.kt").delete())
             workspace.preview(
                 listOf(
                     TaskOperation(
