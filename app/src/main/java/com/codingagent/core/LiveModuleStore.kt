@@ -96,8 +96,12 @@ class LiveModuleStore(private val root: File) {
         if (!id.matches(SAFE_ID)) return null
         val source = moduleRoot.resolve(id).resolve("module.json")
         if (!source.isFile) return null
-        val parsed = runCatching { parse(source.readText()) }.getOrNull() ?: return null
-        return LiveModule(id, parsed.kind, parsed.version, source.absolutePath, checksum(source.readText()), source.parentFile?.lastModified() ?: 0L)
+        val recorded = history().lastOrNull { it.id == id } ?: return null
+        val content = runCatching { source.readText() }.getOrNull() ?: return null
+        if (checksum(content) != recorded.checksum) return null
+        val parsed = runCatching { parse(content) }.getOrNull() ?: return null
+        if (parsed.kind != recorded.kind || parsed.version != recorded.version) return null
+        return LiveModule(id, parsed.kind, parsed.version, source.absolutePath, recorded.checksum, recorded.createdAt)
     }
 
     fun source(module: LiveModule): String = File(module.sourcePath).readText()
