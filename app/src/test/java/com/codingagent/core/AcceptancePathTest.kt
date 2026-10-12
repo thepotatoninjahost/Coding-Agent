@@ -556,7 +556,7 @@ class AcceptancePathTest {
 
         assertTrue(coordinator.approve(proposal.id, token) is MutationApprovalResult.AwaitingSecond)
         assertTrue(coordinator.approve(proposal.id, token) is MutationApprovalResult.Rejected)
-        assertTrue("A mismatched typed phrase must invalidate the pending approval", coordinator.pending().isEmpty())
+        assertEquals(1, coordinator.pending().single().approvalCount)
     }
 
     @Test
@@ -911,7 +911,7 @@ class AcceptancePathTest {
         val second = OwnerApprovalToken.typed(proposal.id, otherPhrase, otherPhrase)!!
         assertTrue(coordinator.approve(proposal.id, second) is MutationApprovalResult.Rejected)
         assertEquals("fun main() = 1\n", root.resolve("Main.kt").readText())
-        assertEquals(1, coordinator.pending().single().approvalCount)
+        assertTrue("A mismatched typed phrase must invalidate the pending approval", coordinator.pending().isEmpty())
     }
 
     @Test
