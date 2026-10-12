@@ -79,8 +79,8 @@ class AgentTools(private val workspace: ProjectWorkspace) {
         val root = workspace.projectRoot().canonicalFile
         val direct = root.resolve(path).canonicalFile
         require(direct.toPath().startsWith(root.toPath())) { "Unsafe project path" }
-        require(!isReservedAgentMetadataPath(root, direct)) {
-            "Coding Agent internal metadata is not accessible as project source"
+        require(!isReservedProjectMetadataPath(root, direct)) {
+            "Private agent and Git metadata are not accessible as project source"
         }
         if (direct.isFile) return direct
 
@@ -88,16 +88,17 @@ class AgentTools(private val workspace: ProjectWorkspace) {
         val match = findCaseInsensitive(root, normalized)
             ?: throw IllegalArgumentException("File does not exist: $path")
         require(match.canonicalFile.toPath().startsWith(root.toPath())) { "Unsafe project path" }
-        require(!isReservedAgentMetadataPath(root, match)) {
-            "Coding Agent internal metadata is not accessible as project source"
+        require(!isReservedProjectMetadataPath(root, match)) {
+            "Private agent and Git metadata are not accessible as project source"
         }
         return match
     }
 
-    private fun isReservedAgentMetadataPath(root: File, candidate: File): Boolean {
+    private fun isReservedProjectMetadataPath(root: File, candidate: File): Boolean {
         val relative = root.toPath().relativize(candidate.canonicalFile.toPath())
             .toString().replace('\\', '/')
-        return relative.substringBefore('/').equals(".coding-agent", ignoreCase = true)
+        val first = relative.substringBefore('/')
+        return first.equals(".coding-agent", ignoreCase = true) || first.equals(".git", ignoreCase = true)
     }
 
     private fun findCaseInsensitive(root: File, relative: String): File? {
