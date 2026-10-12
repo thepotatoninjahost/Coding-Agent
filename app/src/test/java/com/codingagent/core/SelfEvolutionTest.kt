@@ -144,14 +144,14 @@ class SelfEvolutionTest {
 
         val firstApproval = mutations.approve(
             proposal.id,
-            testApprovalToken(mutations, proposal.id)
+            OwnerApprovalToken.authenticated(proposal.id)
         )
         assertTrue(firstApproval is MutationApprovalResult.AwaitingSecond)
         assertEquals("class Broken\n", target.readText())
 
         val secondApproval = mutations.approve(
             proposal.id,
-            testApprovalToken(mutations, proposal.id)
+            OwnerApprovalToken.authenticated(proposal.id)
         )
         assertTrue(secondApproval is MutationApprovalResult.Applied)
         assertEquals("class Main\n", target.readText())
