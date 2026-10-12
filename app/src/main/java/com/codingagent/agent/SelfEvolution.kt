@@ -95,7 +95,7 @@ class SelfEvolution(private val root: File) {
                     version.targetPath
                 ).joinToString("\t") + "\n"
             )
-            activeFile.writeText(version.id)
+            writeTextAtomically(activeFile, version.id)
             PromotionResult.Promoted(version)
         }.getOrElse { error ->
             PromotionResult.Rejected("Could not durably record the promoted version: ${error.message.orEmpty()}")
@@ -138,7 +138,7 @@ class SelfEvolution(private val root: File) {
             moveReplacing(temporary, destination)
             temporary = null
             activeFile.parentFile?.mkdirs()
-            activeFile.writeText(version.id)
+            writeTextAtomically(activeFile, version.id)
             SnapshotRestoreResult.Restored(version, destination)
         } catch (error: Exception) {
             temporary?.delete()
@@ -224,6 +224,17 @@ class SelfEvolution(private val root: File) {
             Files.move(source.toPath(), destination.toPath(), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
         } catch (_: AtomicMoveNotSupportedException) {
             Files.move(source.toPath(), destination.toPath(), StandardCopyOption.REPLACE_EXISTING)
+        }
+    }
+
+    private fun writeTextAtomically(destination: File, text: String) {
+        destination.parentFile?.mkdirs()
+        val temporary = Files.createTempFile(destination.parentFile.toPath(), ".evolution-state-", ".tmp").toFile()
+        try {
+            temporary.writeText(text)
+            moveReplacing(temporary, destination)
+        } finally {
+            temporary.delete()
         }
     }
 
