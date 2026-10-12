@@ -96,7 +96,9 @@ data class ApprovalRecord(
     val actionId: String,
     val approvedAt: Long,
     val ownerLabel: String,
-    val confirmationNumber: Int
+    val confirmationNumber: Int,
+    /** Fingerprint binds the typed confirmation to the exact owner-created spoken phrase. */
+    val phraseFingerprint: String? = null
 )
 
 class ApprovalLedger {
@@ -107,11 +109,12 @@ class ApprovalLedger {
         actionId: String,
         ownerLabel: String,
         at: Long = System.currentTimeMillis(),
-        confirmationNumber: Int? = null
+        confirmationNumber: Int? = null,
+        phraseFingerprint: String? = null
     ): ApprovalRecord {
         val current = records.getOrPut(actionId) { mutableListOf() }
         val number = confirmationNumber ?: (current.size + 1)
-        val record = ApprovalRecord(actionId, at, ownerLabel, number)
+        val record = ApprovalRecord(actionId, at, ownerLabel, number, phraseFingerprint)
         current += record
         return record
     }
