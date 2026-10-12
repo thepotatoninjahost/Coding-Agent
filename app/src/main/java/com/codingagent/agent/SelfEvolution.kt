@@ -64,11 +64,11 @@ class SelfEvolution(private val root: File) {
         action: AgentAction,
         approvalAt: Long? = null
     ): PromotionResult {
-        if (action.category != AgentActionCategory.CODE_CHANGE) {
-            return PromotionResult.Rejected("Source promotion requires CODE_CHANGE authorization")
-        }
         if (!evaluation.passed) {
             return PromotionResult.Rejected("Evolution source cannot be promoted without a passing evaluation")
+        }
+        if (action.category != AgentActionCategory.CODE_CHANGE) {
+            return PromotionResult.Rejected("Source promotion requires CODE_CHANGE authorization")
         }
         val violations = AgentConstitution.check(action.copy(sandboxPassed = true), approvalAt = approvalAt)
         if (violations.isNotEmpty()) return PromotionResult.Rejected(violations.joinToString("; ") { "${it.rule}: ${it.message}" })
