@@ -11,6 +11,9 @@ import com.codingagent.agent.PromotionResult
 import com.codingagent.agent.SelfEvolution
 import com.codingagent.agent.SnapshotRestoreResult
 import com.codingagent.workspace.VerificationReport
+import com.codingagent.workspace.MutationCoordinator
+import com.codingagent.workspace.MutationProposeResult
+import com.codingagent.workspace.ProjectWorkspace
 
 class SelfEvolutionTest {
     private fun approvedAction(category: AgentActionCategory = AgentActionCategory.CODE_CHANGE) = AgentAction(
@@ -148,6 +151,33 @@ class SelfEvolutionTest {
         assertTrue(corrupted is SnapshotRestoreResult.Rejected)
         assertTrue((corrupted as SnapshotRestoreResult.Rejected).reason.contains("checksum"))
         assertEquals("current\n", target.readText())
+    }
+
+
+    @Test
+    fun historicalRestoreIsStagedForDualApprovalInsteadOfWrittenDirectly() {
+        val root = Files.createTempDirectory("evolution-restore-proposal").toFile()
+        val target = root.resolve("Main.kt").apply { writeText("class Main\n") }
+        val evolution = SelfEvolution(root)
+        val staged = evolution.stageSource(target, "self-repair")
+        val promoted = evolution.promoteSource(
+            staged,
+            "self-repair",
+            VerificationReport(true, emptyList()),
+            approvedAction(),
+            approvalAt = System.currentTimeMillis()
+        ) as PromotionResult.Promoted
+        target.writeText("class Broken\n")
+
+        val workspace = ProjectWorkspace(root)
+        val mutations = MutationCoordinator(workspace)
+        val result = mutations.proposeEvolutionRestore(promoted.version.id)
+
+        assertTrue(result is MutationProposeResult.Proposed)
+        val proposal = (result as MutationProposeResult.Proposed).proposal
+        assertEquals(0, proposal.approvalCount)
+        assertEquals("class Main\n", proposal.changeSet.changes.single().after)
+        assertEquals("class Broken\n", target.readText())
     }
 
 }
