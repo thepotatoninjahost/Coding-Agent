@@ -10,8 +10,12 @@ import com.codingagent.agent.AgentActionCategory
 import com.codingagent.agent.PromotionResult
 import com.codingagent.agent.SelfEvolution
 import com.codingagent.workspace.VerificationReport
+import com.codingagent.workspace.ApprovalPhrase
+import com.codingagent.workspace.OwnerApprovalToken
 import com.codingagent.workspace.MutationCoordinator
 import com.codingagent.workspace.MutationProposeResult
+import com.codingagent.workspace.MutationApprovalResult
+import com.codingagent.workspace.OwnerApprovalToken
 import com.codingagent.workspace.ProjectWorkspace
 
 class SelfEvolutionTest {
@@ -40,6 +44,26 @@ class SelfEvolutionTest {
 
         assertTrue(result is PromotionResult.Rejected)
         assertTrue((result as PromotionResult.Rejected).reason.contains("passing evaluation"))
+        assertEquals(null, evolution.activeVersion())
+        assertTrue(evolution.history().isEmpty())
+    }
+
+    @Test
+    fun rejectsReadOnlyActionEvenWhenEvaluationPasses() {
+        val root = Files.createTempDirectory("evolution-read-only").toFile()
+        val evolution = SelfEvolution(root)
+        val source = root.resolve("Main.kt").apply { writeText("fun main() = Unit\n") }
+        val staged = evolution.stageSource(source, "self-repair")
+
+        val result = evolution.promoteSource(
+            staged,
+            "self-repair",
+            VerificationReport(true, emptyList()),
+            approvedAction(AgentActionCategory.READ_ONLY)
+        )
+
+        assertTrue(result is PromotionResult.Rejected)
+        assertTrue((result as PromotionResult.Rejected).reason.contains("CODE_CHANGE"))
         assertEquals(null, evolution.activeVersion())
         assertTrue(evolution.history().isEmpty())
     }
@@ -138,6 +162,70 @@ class SelfEvolutionTest {
         assertEquals(0, proposal.approvalCount)
         assertEquals("class Main\n", proposal.changeSet.changes.single().after)
         assertEquals("class Broken\n", target.readText())
+
+        val firstApproval = mutations.approve(
+            proposal.id,
+            OwnerApprovalToken.spoken(proposal.id, ApprovalPhrase.forProposal(proposal.id))!!
+        )
+        assertTrue(firstApproval is MutationApprovalResult.AwaitingSecond)
+        assertEquals("class Broken\n", target.readText())
+
+        val secondApproval = mutations.approve(
+            proposal.id,
+            OwnerApprovalToken.typed(proposal.id, ApprovalPhrase.forProposal(proposal.id))!!
+        )
+        assertTrue(secondApproval is MutationApprovalResult.Applied)
+        assertEquals("class Main\n", target.readText())
+    }
+
+    @Test
+    fun rejectsSnapshotWithNoSafeRecoveryTarget() {
+        val root = Files.createTempDirectory("evolution-outside-target").toFile()
+        val evolution = SelfEvolution(root)
+        val outsideRoot = Files.createTempDirectory("evolution-outside-source")
+            .resolve("Outside.kt").toFile().apply { writeText("class Outside\n") }
+        val staged = evolution.stageSource(outsideRoot, "self-repair")
+
+        val result = evolution.promoteSource(
+            staged,
+            "self-repair",
+            VerificationReport(true, emptyList()),
+            approvedAction(),
+            approvalAt = System.currentTimeMillis()
+        )
+
+        assertTrue(result is PromotionResult.Rejected)
+        assertTrue((result as PromotionResult.Rejected).reason.contains("safe project-relative recovery target"))
+        assertTrue(evolution.history().isEmpty())
+        assertEquals(null, evolution.activeVersion())
+    }
+
+    @Test
+    fun rejectsUnsafeHistoricalRecoveryTargetAndUnknownVersion() {
+        val root = Files.createTempDirectory("evolution-unsafe-history-target").toFile()
+        val target = root.resolve("Main.kt").apply { writeText("class Main\n") }
+        val evolution = SelfEvolution(root)
+        val staged = evolution.stageSource(target, "self-repair")
+        val promoted = evolution.promoteSource(
+            staged,
+            "self-repair",
+            VerificationReport(true, emptyList()),
+            approvedAction(),
+            approvalAt = System.currentTimeMillis()
+        ) as PromotionResult.Promoted
+
+        val historyFile = root.resolve(".coding-agent/evolution/history.tsv")
+        val fields = historyFile.readText().trimEnd().split('\t').toMutableList()
+        fields[6] = "../outside.kt"
+        historyFile.writeText(fields.joinToString("\t") + "\n")
+
+        val unsafe = evolution.prepareRestoreCandidate(promoted.version.id)
+        assertTrue(unsafe is com.codingagent.agent.SnapshotCandidateResult.Rejected)
+        assertTrue((unsafe as com.codingagent.agent.SnapshotCandidateResult.Rejected).reason.contains("safe project-relative recovery target"))
+
+        val missing = evolution.prepareRestoreCandidate("not-a-real-version")
+        assertTrue(missing is com.codingagent.agent.SnapshotCandidateResult.Rejected)
+        assertTrue((missing as com.codingagent.agent.SnapshotCandidateResult.Rejected).reason.contains("not found"))
     }
 
 }
