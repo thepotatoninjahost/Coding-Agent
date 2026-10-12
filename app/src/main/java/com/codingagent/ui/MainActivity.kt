@@ -536,7 +536,6 @@ private fun CodingAgentApp(privateDir: File) {
         pendingProposal = null
         approvalCount = 0
         pendingApproval = false
-        ownerCreatedApprovalPhrase = ""
         newOwnerPhraseText = ""
         status = AgentStatus.READY
         detail = detailText
@@ -575,7 +574,6 @@ private fun CodingAgentApp(privateDir: File) {
         pendingProposal = null
         approvalCount = 0
         pendingApproval = false
-        ownerCreatedApprovalPhrase = ""
         newOwnerPhraseText = ""
         status = AgentStatus.READY
         detail = "No project — New, Import, or say create project"
@@ -944,7 +942,7 @@ private fun CodingAgentApp(privateDir: File) {
 
         if (showCreateApprovalPhraseDialog) {
             AlertDialog(
-                onDismissRequest = { showCreateApprovalPhraseDialog = false },
+                onDismissRequest = { showCreateApprovalPhraseDialog = false; newOwnerPhraseText = "" },
                 title = { Text("Create your own approval phrase") },
                 text = {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -977,15 +975,14 @@ private fun CodingAgentApp(privateDir: File) {
                     }) { Text("Use my phrase and speak it") }
                 },
                 dismissButton = {
-                    TextButton(onClick = { showCreateApprovalPhraseDialog = false }) { Text("Cancel") }
+                    TextButton(onClick = { showCreateApprovalPhraseDialog = false; newOwnerPhraseText = "" }) { Text("Cancel") }
                 }
             )
         }
 
         if (showTypedApprovalDialog) {
-            val proposal = pendingProposal
             AlertDialog(
-                onDismissRequest = { showTypedApprovalDialog = false },
+                onDismissRequest = { showTypedApprovalDialog = false; typedApprovalText = "" },
                 title = { Text("Type the approval phrase exactly") },
                 text = {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1005,21 +1002,23 @@ private fun CodingAgentApp(privateDir: File) {
                         val coordinator = mutationCoordinator
                         val current = id?.let { coordinator?.get(it) }
                         showTypedApprovalDialog = false
+                        val enteredPhrase = typedApprovalText
+                        typedApprovalText = ""
                         if (id == null || coordinator == null || current == null) {
                             detail = "The proposal is no longer pending. No approval was recorded."
                             return@TextButton
                         }
-                        val token = OwnerApprovalToken.typed(id, typedApprovalText, typedApprovalText)
+                        val token = OwnerApprovalToken.typed(id, enteredPhrase, enteredPhrase)
                         if (token == null) {
                             status = AgentStatus.STOPPED
-                            detail = "Typed phrase must exactly match the phrase you created. No approval was recorded."
+                            detail = "Typed phrase did not match the spoken approval phrase. No approval was recorded."
                             return@TextButton
                         }
                         recordApprovalToken(id, coordinator, token)
                     }) { Text("Confirm typed phrase") }
                 },
                 dismissButton = {
-                    TextButton(onClick = { showTypedApprovalDialog = false }) { Text("Cancel") }
+                    TextButton(onClick = { showTypedApprovalDialog = false; typedApprovalText = "" }) { Text("Cancel") }
                 }
             )
         }
