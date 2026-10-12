@@ -556,7 +556,7 @@ class AcceptancePathTest {
 
         assertTrue(coordinator.approve(proposal.id, token) is MutationApprovalResult.AwaitingSecond)
         assertTrue(coordinator.approve(proposal.id, token) is MutationApprovalResult.Rejected)
-        assertEquals(1, coordinator.pending().single().approvalCount)
+        assertTrue("A mismatched typed phrase must invalidate the pending approval", coordinator.pending().isEmpty())
     }
 
     @Test
