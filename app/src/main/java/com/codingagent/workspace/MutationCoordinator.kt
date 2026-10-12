@@ -149,6 +149,47 @@ class MutationCoordinator(
         return MutationProposeResult.Proposed(proposal)
     }
 
+    /**
+     * Stage a historical source snapshot as a normal change proposal. Restoration is not
+     * written directly: the owner must still review and approve the resulting file diff.
+     */
+    @Synchronized
+    fun proposeEvolutionRestore(versionId: String): MutationProposeResult {
+        val candidate = when (val result = evolution.prepareRestoreCandidate(versionId)) {
+            is com.codingagent.agent.SnapshotCandidateResult.Ready -> result.candidate
+            is com.codingagent.agent.SnapshotCandidateResult.Rejected ->
+                return MutationProposeResult.Rejected(result.reason)
+        }
+        val targetPath = candidate.version.targetPath
+        val snapshotText = runCatching { candidate.snapshot.readText(Charsets.UTF_8) }.getOrElse {
+            return MutationProposeResult.Rejected("Could not read evolution snapshot: ${it.message.orEmpty()}")
+        }
+        val target = candidate.destination
+        val operation = if (!target.exists()) {
+            TaskOperation(kind = com.codingagent.intake.OperationKind.CREATE_FILE, path = targetPath, text = snapshotText)
+        } else {
+            if (!target.isFile) return MutationProposeResult.Rejected("Evolution restore target is not a regular file")
+            val current = runCatching { target.readText(Charsets.UTF_8) }.getOrElse {
+                return MutationProposeResult.Rejected("Could not read current restore target: ${it.message.orEmpty()}")
+            }
+            if (current == snapshotText) return MutationProposeResult.Rejected("Evolution snapshot already matches the current source")
+            if (current.isEmpty()) {
+                return MutationProposeResult.Rejected("Cannot stage a restore over an empty file with the current change operations")
+            }
+            TaskOperation(
+                kind = com.codingagent.intake.OperationKind.REPLACE,
+                path = targetPath,
+                oldText = current,
+                newText = snapshotText
+            )
+        }
+        return propose(
+            request = "Restore evolution version $versionId to $targetPath",
+            operations = listOf(operation),
+            reason = "Restore verified evolution snapshot $versionId"
+        )
+    }
+
     @Synchronized
     fun get(id: String): PendingChangeProposal? {
         clearExpired()

@@ -45,6 +45,7 @@ class CompilerTestRepairCycle(
         applyApprovedRepair: (ChangeSet) -> ChangeSet
     ): RepairCycleResult {
         val attempts = mutableListOf<RepairAttempt>()
+        val rollbackChangeSets = existingChangeSets.toMutableList()
         var report = execute(plan)
         attempts += RepairAttempt(0, classify(report), report, diagnose(report), emptyList())
         if (report.passed) return RepairCycleResult(true, report, attempts, false)
@@ -53,11 +54,11 @@ class CompilerTestRepairCycle(
             val diagnosis = diagnose(report)
             val changeSet = runCatching { repair(diagnosis, attempt) }.getOrElse {
                 attempts += RepairAttempt(attempt, RepairStage.FAILED, report, "Repair synthesis failed: ${it.message}", emptyList())
-                return revertAndFail(attempts, report, existingChangeSets)
+                return revertAndFail(attempts, report, rollbackChangeSets)
             }
             if (changeSet.changes.isEmpty()) {
                 attempts += RepairAttempt(attempt, RepairStage.FAILED, report, "No repair was produced for: $diagnosis", emptyList())
-                return revertAndFail(attempts, report, existingChangeSets)
+                return revertAndFail(attempts, report, rollbackChangeSets)
             }
             val applied = runCatching { applyApprovedRepair(changeSet) }.getOrElse {
                 attempts += RepairAttempt(
@@ -68,14 +69,15 @@ class CompilerTestRepairCycle(
                     emptyList(),
                     listOf(changeSet)
                 )
-                return revertAndFail(attempts, report, existingChangeSets)
+                return revertAndFail(attempts, report, rollbackChangeSets)
             }
+            rollbackChangeSets += applied
             report = execute(plan)
             attempts += RepairAttempt(attempt, classify(report), report, diagnosis, applied.changes, listOf(applied))
             if (report.passed) return RepairCycleResult(true, report, attempts, false)
             attempt++
         }
-        return revertAndFail(attempts, report, existingChangeSets)
+        return revertAndFail(attempts, report, rollbackChangeSets)
     }
 
     fun prepareRepair(
