@@ -959,8 +959,8 @@ private fun CodingAgentApp(privateDir: File) {
                 confirmButton = {
                     TextButton(onClick = {
                         val phrase = newOwnerPhraseText
-                        if (phrase != phrase.trim() || phrase.trim().length < 8) {
-                            detail = "Choose a phrase with at least 8 non-whitespace characters and no leading or trailing spaces."
+                        if (phrase.isBlank()) {
+                            detail = "Enter the passphrase you chose. The app will not choose a minimum length or alter it."
                             return@TextButton
                         }
                         newOwnerPhraseText = ""
