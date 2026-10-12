@@ -53,7 +53,7 @@
 - PR head: `2ae101043ed8de05d6a04b8db95da8f4d8e63202`
 - Added checks reject missing/unsafe project-relative recovery targets and unknown version IDs; restore tests assert the file is unchanged before the second approval.
 - PR CI run #1272, ID `38210516271`: https://github.com/thepotatoninjahost/Coding-Agent/actions/runs/38210516271
-- At the time this report was prepared, the rerun had passed unit-test source compilation, unit tests, acceptance-path tests, and Android lint; debug APK assembly was still in progress. Do not treat the PR as fully validated until the workflow concludes successfully.
+- The rerun completed successfully: all steps passed, including test compilation, full unit tests, explicit acceptance-path tests, Android lint, debug APK assembly, release APK assembly, and debug APK upload. Run conclusion: `success`.
 
 ## Phase 1 status — not complete
 
@@ -61,7 +61,7 @@ Completed: immutable baseline identified; recursive tree and tracked-file counts
 
 Remaining before claiming Phase 1 complete:
 1. Confirm PR #74 CI reaches a successful terminal conclusion; fix any failure and rerun.
-2. Run CI for the new end-to-end repair lifecycle test in PR #76 (https://github.com/thepotatoninjahost/Coding-Agent/pull/76). It asserts failed-change detection and rollback, repair proposal staging, no disk change after first approval, apply after second approval, and successful post-apply verification. The test's CI was still running when this evidence was updated.
+2. Run CI for the new end-to-end repair lifecycle test in PR #76 (https://github.com/thepotatoninjahost/Coding-Agent/pull/76). It asserts failed-change detection and rollback, repair proposal staging, no disk change after first approval, apply after second approval, and successful post-apply verification. The CI run #1274, ID `38211267466`, had passed test-source compilation, the full unit-test suite (including this new test), and explicit acceptance-path tests; Android lint and APK assembly were still running at the time of this update. Final CI success is still required.
 3. Confirm rollback after a forced post-apply verification failure and record the exact test/result.
 4. Confirm dual-owner approval enforcement for the recovery path and no target-file modification before the second approval.
 5. Recheck the final commit/tree and update this evidence after any merged fix.
