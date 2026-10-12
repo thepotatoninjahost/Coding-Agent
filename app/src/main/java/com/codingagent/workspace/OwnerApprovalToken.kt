@@ -7,37 +7,30 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 enum class ApprovalChannel { SPOKEN_PHRASE, TYPED_PHRASE }
 
-/** Proposal-bound challenge text used by both independent approval channels. */
+/** Normalization used only to compare speech-recognition output with the phrase supplied by the owner. */
 object ApprovalPhrase {
-    private val words = listOf(
-        "amber", "apple", "apricot", "atlas", "autumn", "beacon", "birch", "blue",
-        "bravo", "cabin", "cactus", "candle", "canyon", "cedar", "cello", "cinder",
-        "circle", "cobalt", "comet", "coral", "cosmos", "cricket", "dawn", "delta",
-        "dune", "eagle", "echo", "ember", "fern", "field", "finch", "forest",
-        "frost", "garden", "glacier", "golden", "harbor", "hazel", "helium", "honey",
-        "indigo", "island", "jasmine", "juniper", "kestrel", "lantern", "laurel", "lemon",
-        "lilac", "lunar", "maple", "marble", "meadow", "mercury", "meteor", "mint",
-        "mosaic", "nectar", "ocean", "olive", "orbit", "orchid", "otter", "pebble"
-    )
-
-    fun forProposal(proposalId: String): String {
-        val digest = MessageDigest.getInstance("SHA-256").digest(proposalId.toByteArray(Charsets.UTF_8))
-        val indices = (0 until 6).map { index -> digest[index].toInt() and 63 }
-        return "APPROVE CHANGE " + indices.joinToString(" ") { words[it] }
-    }
-
     internal fun normalizeSpeech(value: String): String = value
         .trim()
         .replace(Regex("\\s+"), " ")
         .replace(Regex("[.,!?]+$"), "")
         .uppercase(Locale.ROOT)
+
+    internal fun fingerprint(value: String): String =
+        MessageDigest.getInstance("SHA-256").digest(value.toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it) }
 }
 
-/** One-time, proposal-bound evidence from one explicit owner approval channel. */
+/**
+ * One-time evidence for one approval channel. The phrase is supplied by the owner;
+ * this class never generates, embeds, or defaults a password or passphrase.
+ *
+ * This records explicit interaction confirmation, not proof of speaker identity.
+ */
 class OwnerApprovalToken private constructor(
     val proposalId: String,
     val channel: ApprovalChannel,
     val issuedAt: Long,
+    internal val phraseFingerprint: String,
     private val nonce: String
 ) {
     private val consumed = AtomicBoolean(false)
@@ -51,26 +44,35 @@ class OwnerApprovalToken private constructor(
     companion object {
         private const val MAX_AGE_MS = 60_000L
 
-        /** Create only after Android speech recognition returns the spoken challenge. */
+        /** Called after the owner supplies a phrase and speech recognition returns a matching transcript. */
         internal fun spoken(
             proposalId: String,
+            ownerPhrase: String,
             transcript: String,
             now: Long = System.currentTimeMillis()
         ): OwnerApprovalToken? {
             require(proposalId.isNotBlank()) { "Proposal id is required" }
-            if (ApprovalPhrase.normalizeSpeech(transcript) != ApprovalPhrase.normalizeSpeech(ApprovalPhrase.forProposal(proposalId))) return null
-            return OwnerApprovalToken(proposalId, ApprovalChannel.SPOKEN_PHRASE, now, UUID.randomUUID().toString())
+            if (ownerPhrase.isBlank()) return null
+            if (ApprovalPhrase.normalizeSpeech(transcript) != ApprovalPhrase.normalizeSpeech(ownerPhrase)) return null
+            return OwnerApprovalToken(
+                proposalId, ApprovalChannel.SPOKEN_PHRASE, now,
+                ApprovalPhrase.fingerprint(ownerPhrase), UUID.randomUUID().toString()
+            )
         }
 
-        /** Create only after the owner types the challenge exactly, character for character. */
+        /** Called after the owner types the exact phrase they supplied for this proposal. */
         internal fun typed(
             proposalId: String,
+            ownerPhrase: String,
             typedPhrase: String,
             now: Long = System.currentTimeMillis()
         ): OwnerApprovalToken? {
             require(proposalId.isNotBlank()) { "Proposal id is required" }
-            if (typedPhrase != ApprovalPhrase.forProposal(proposalId)) return null
-            return OwnerApprovalToken(proposalId, ApprovalChannel.TYPED_PHRASE, now, UUID.randomUUID().toString())
+            if (ownerPhrase.isBlank() || typedPhrase != ownerPhrase) return null
+            return OwnerApprovalToken(
+                proposalId, ApprovalChannel.TYPED_PHRASE, now,
+                ApprovalPhrase.fingerprint(ownerPhrase), UUID.randomUUID().toString()
+            )
         }
     }
 }
