@@ -9,7 +9,6 @@ import com.codingagent.agent.AgentAction
 import com.codingagent.agent.AgentActionCategory
 import com.codingagent.agent.PromotionResult
 import com.codingagent.agent.SelfEvolution
-import com.codingagent.agent.SnapshotRestoreResult
 import com.codingagent.workspace.VerificationReport
 import com.codingagent.workspace.MutationCoordinator
 import com.codingagent.workspace.MutationProposeResult
@@ -89,8 +88,8 @@ class SelfEvolutionTest {
     }
 
     @Test
-    fun restoresVerifiedSnapshotToItsOriginalTarget() {
-        val root = Files.createTempDirectory("evolution-restore").toFile()
+    fun recoveryCandidateRequiresAnIntactManagedSnapshot() {
+        val root = Files.createTempDirectory("evolution-candidate").toFile()
         val evolution = SelfEvolution(root)
         val target = root.resolve("src/Main.kt")
         target.parentFile.mkdirs()
@@ -103,56 +102,17 @@ class SelfEvolutionTest {
             approvedAction(),
             approvalAt = System.currentTimeMillis()
         ) as PromotionResult.Promoted
-        target.writeText("broken source\n")
 
-        val restored = evolution.restoreSnapshot(
-            promoted.version.id,
-            VerificationReport(true, emptyList()),
-            approvedAction(),
-            approvalAt = System.currentTimeMillis()
-        )
+        val candidate = evolution.prepareRestoreCandidate(promoted.version.id)
+        assertTrue(candidate is com.codingagent.agent.SnapshotCandidateResult.Ready)
+        assertEquals(target.canonicalFile, (candidate as com.codingagent.agent.SnapshotCandidateResult.Ready).candidate.destination)
 
-        assertTrue(restored is SnapshotRestoreResult.Restored)
+        staged.writeText("tampered source\n")
+        val corrupted = evolution.prepareRestoreCandidate(promoted.version.id)
+        assertTrue(corrupted is com.codingagent.agent.SnapshotCandidateResult.Rejected)
+        assertTrue((corrupted as com.codingagent.agent.SnapshotCandidateResult.Rejected).reason.contains("checksum"))
         assertEquals("approved source\n", target.readText())
-        assertEquals(promoted.version.id, evolution.activeVersion())
     }
-
-    @Test
-    fun refusesRestoreWhenEvaluationFailsOrSnapshotIsCorrupted() {
-        val root = Files.createTempDirectory("evolution-corrupt").toFile()
-        val evolution = SelfEvolution(root)
-        val target = root.resolve("Main.kt").apply { writeText("good\n") }
-        val staged = evolution.stageSource(target, "self-repair")
-        val promoted = evolution.promoteSource(
-            staged,
-            "self-repair",
-            VerificationReport(true, emptyList()),
-            approvedAction(),
-            approvalAt = System.currentTimeMillis()
-        ) as PromotionResult.Promoted
-        target.writeText("current\n")
-
-        val failedEvaluation = evolution.restoreSnapshot(
-            promoted.version.id,
-            VerificationReport(false, emptyList()),
-            approvedAction(),
-            approvalAt = System.currentTimeMillis()
-        )
-        assertTrue(failedEvaluation is SnapshotRestoreResult.Rejected)
-        assertEquals("current\n", target.readText())
-
-        staged.writeText("tampered\n")
-        val corrupted = evolution.restoreSnapshot(
-            promoted.version.id,
-            VerificationReport(true, emptyList()),
-            approvedAction(),
-            approvalAt = System.currentTimeMillis()
-        )
-        assertTrue(corrupted is SnapshotRestoreResult.Rejected)
-        assertTrue((corrupted as SnapshotRestoreResult.Rejected).reason.contains("checksum"))
-        assertEquals("current\n", target.readText())
-    }
-
 
     @Test
     fun historicalRestoreIsStagedForDualApprovalInsteadOfWrittenDirectly() {
