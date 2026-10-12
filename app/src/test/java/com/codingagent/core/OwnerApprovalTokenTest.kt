@@ -12,6 +12,16 @@ import org.junit.Test
 
 class OwnerApprovalTokenTest {
     @Test
+    fun proposalChallengeUsesSixProposalSpecificWords() {
+        val first = ApprovalPhrase.forProposal("proposal-1234")
+        val second = ApprovalPhrase.forProposal("proposal-5678")
+
+        assertFalse(first == second)
+        assertEquals(8, first.split(" ").size)
+        assertTrue(first.startsWith("APPROVE CHANGE "))
+    }
+
+    @Test
     fun spokenPhraseMustMatchProposalBoundChallenge() {
         val phrase = ApprovalPhrase.forProposal("proposal-1234")
         assertNotNull(OwnerApprovalToken.spoken("proposal-1234", phrase.lowercase()))
