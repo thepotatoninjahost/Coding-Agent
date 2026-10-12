@@ -48,10 +48,20 @@ class SelfEvolution(private val root: File) {
         action: AgentAction,
         approvalAt: Long? = null
     ): PromotionResult {
-        val violations = AgentConstitution.check(action.copy(sandboxPassed = evaluation.passed), approvalAt = approvalAt)
+        if (!evaluation.passed) {
+            return PromotionResult.Rejected("Evolution source cannot be promoted without a passing evaluation")
+        }
+        val violations = AgentConstitution.check(action.copy(sandboxPassed = true), approvalAt = approvalAt)
         if (violations.isNotEmpty()) return PromotionResult.Rejected(violations.joinToString("; ") { "${it.rule}: ${it.message}" })
         if (!staged.isFile) return PromotionResult.Rejected("Staged source does not exist")
         val parent = staged.parentFile ?: return PromotionResult.Rejected("Staged source directory is missing")
+        val expectedParent = runCatching { versionsRoot.canonicalFile }.getOrNull()
+            ?: return PromotionResult.Rejected("Evolution versions directory is unavailable")
+        val actualParent = runCatching { parent.canonicalFile }.getOrNull()
+            ?: return PromotionResult.Rejected("Staged source directory is unavailable")
+        if (actualParent.parentFile != expectedParent) {
+            return PromotionResult.Rejected("Only snapshots created under the evolution versions directory can be promoted")
+        }
         val version = EvolutionVersion(
             id = parent.name,
             kind = kind,
@@ -60,19 +70,23 @@ class SelfEvolution(private val root: File) {
             evaluationPassed = evaluation.passed,
             createdAt = System.currentTimeMillis()
         )
-        activeFile.parentFile?.mkdirs()
-        activeFile.writeText(version.id)
-        historyFile.appendText(
-            listOf(
-                version.id,
-                kind,
-                version.checksum,
-                version.evaluationPassed,
-                version.createdAt,
-                staged.name
-            ).joinToString("\t") + "\n"
-        )
-        return PromotionResult.Promoted(version)
+        return runCatching {
+            activeFile.parentFile?.mkdirs()
+            historyFile.appendText(
+                listOf(
+                    version.id,
+                    kind,
+                    version.checksum,
+                    version.evaluationPassed,
+                    version.createdAt,
+                    staged.absolutePath
+                ).joinToString("\t") + "\n"
+            )
+            activeFile.writeText(version.id)
+            PromotionResult.Promoted(version)
+        }.getOrElse { error ->
+            PromotionResult.Rejected("Could not durably record the promoted version: ${error.message.orEmpty()}")
+        }
     }
 
     fun activeVersion(): String? = activeFile.takeIf { it.isFile }?.readText()?.trim()?.ifBlank { null }
