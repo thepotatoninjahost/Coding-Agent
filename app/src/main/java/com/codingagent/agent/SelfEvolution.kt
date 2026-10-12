@@ -78,7 +78,10 @@ class SelfEvolution(private val root: File) {
         if (actualParent.parentFile != expectedParent) {
             return PromotionResult.Rejected("Only snapshots created under the evolution versions directory can be promoted")
         }
-        val targetPath = readStagedTargetPath(staged).orEmpty()
+        val targetPath = readStagedTargetPath(staged)
+            ?: return PromotionResult.Rejected(
+                "Evolution snapshot has no safe project-relative recovery target"
+            )
         val version = EvolutionVersion(
             id = parent.name,
             kind = kind,
