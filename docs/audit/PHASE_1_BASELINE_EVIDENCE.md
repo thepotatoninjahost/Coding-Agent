@@ -7,7 +7,7 @@
 - Audited commit: `83002089d1a0a7b356e3dbf81a70cfb35c40721a`
 - Commit: `Complete self-evolution snapshot recovery lifecycle (#73)`
 - Recursive Git tree SHA: `c108371fe02cdf9c07c472bcfd17ac1af18f0c17`
-- Current recursive tree: 189 entries = 155 tracked files + 34 directory entries; tree response was not truncated.
+- Current recursive tree: 189 entries = 155 tracked files + 34 directory entries; tree response was not truncated. The full path-by-path capture is in `docs/audit/PHASE_1_RECURSIVE_TREE.txt`.
 - Previous inventory baseline: commit `5910ac4841c893de5a5dca25d95b5f9f3591bbce`, tree `81cf30532b85357715520eaa6d92326b1abf58b6`, 186 entries = 153 tracked files + 33 directory entries.
 - Reconciliation: the prior 153-file count was correct for the earlier commit. Comparing that commit to the current baseline shows four commits ahead and two added tracked files: `app/src/test/java/com/codingagent/core/SelfEvolutionTest.kt` and `docs/audit/FILE_BY_FILE_AUDIT_LEDGER.md`. Current count is therefore 155, not 153.
 - Uploaded source archive `Coding-Agent-main.zip` contains 154 files and does not include `app/src/test/java/com/codingagent/core/SelfEvolutionTest.kt`; it is not a complete mirror of the audited Git tree. Use the commit SHA above as the source of truth.
@@ -61,7 +61,7 @@ Completed: immutable baseline identified; recursive tree and tracked-file counts
 
 Remaining before claiming Phase 1 complete:
 1. Confirm PR #74 CI reaches a successful terminal conclusion; fix any failure and rerun.
-2. Complete an explicit end-to-end repair path test proving failure detection → repair proposal → required approvals → apply → verification, rather than treating separate tests as proof of the whole path.
+2. Run CI for the new end-to-end repair lifecycle test in PR #76 (https://github.com/thepotatoninjahost/Coding-Agent/pull/76). It asserts failed-change detection and rollback, repair proposal staging, no disk change after first approval, apply after second approval, and successful post-apply verification. The test's CI was still running when this evidence was updated.
 3. Confirm rollback after a forced post-apply verification failure and record the exact test/result.
 4. Confirm dual-owner approval enforcement for the recovery path and no target-file modification before the second approval.
 5. Recheck the final commit/tree and update this evidence after any merged fix.
