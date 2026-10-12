@@ -201,11 +201,19 @@ class AutonomousAgent(
         // Intake and the initial repository view are real execution prerequisites, not
         // observational plan entries. Complete them only after the same workspace instance
         // used by mutations has produced its repository summary.
-        runCatching { workspace.summary() }.onSuccess {
-            planningLoop.completePhase("intake", "request parsed")
-            planningLoop.completePhase("understand", "repository summary established")
-            toolSelectionLoop.completeKind(ToolKind.INDEX_REPOSITORY, "repository summary established")
+        val repositorySummary = runCatching { workspace.summary() }
+        if (repositorySummary.isFailure) {
+            val error = repositorySummary.exceptionOrNull()
+            val message = "Repository inspection failed before execution could begin: " +
+                (error?.message?.takeIf { it.isNotBlank() } ?: error?.javaClass?.simpleName ?: "unknown error")
+            val task = failedTask(taskId, normalized, plan, message, emptyList())
+            emit(AutonomousAgentEvent.Failed(task, message))
+            recordTask(task)
+            return events
         }
+        planningLoop.completePhase("intake", "request parsed")
+        planningLoop.completePhase("understand", "repository summary established")
+        toolSelectionLoop.completeKind(ToolKind.INDEX_REPOSITORY, "repository summary established")
         emit(AutonomousAgentEvent.Phase("PLAN", plan.steps.joinToString(" → ") { it.phase }))
 
         // Direct lanes: do not force the full tool loop for social / status / explicit read.

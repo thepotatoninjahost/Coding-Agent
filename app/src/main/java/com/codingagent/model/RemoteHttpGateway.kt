@@ -78,7 +78,7 @@ class RemoteHttpGateway(
 
         input.bufferedReader(StandardCharsets.UTF_8).useLines { lines ->
             for (rawLine in lines) {
-                if (isCancelled(generation)) return@useLines ModelResponse.Failure("Cancelled")
+                if (isCancelled(generation)) return@useLines
                 val line = rawLine.trim()
                 if (!line.startsWith("data:")) continue
                 val payload = line.removePrefix("data:").trim()
@@ -107,6 +107,8 @@ class RemoteHttpGateway(
                 }
             }
         }
+
+        if (isCancelled(generation)) return ModelResponse.Failure("Cancelled")
 
         val merged = JSONObject().put("role", "assistant")
         if (mergedContent.isNotEmpty()) merged.put("content", mergedContent.toString())
