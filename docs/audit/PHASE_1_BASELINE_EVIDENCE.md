@@ -80,6 +80,17 @@ The required dual approval is **two different modalities from the same owner**, 
 - Existing tests manufacture both tokens using `OwnerApprovalToken.authenticated`; they do not exercise speech recognition or typed phrase matching.
 - Therefore the current implementation **does not meet the owner's stated dual-approval requirement**. This is a confirmed implementation blocker, not an unresolved interpretation of “dual-owner approval.” Do not merge this as a completed audit or claim the approval safeguard is verified until the implementation and tests enforce spoken phrase + exact typed confirmation.
 
+### Spoken phrase + exact typed confirmation — PR #77, not merged
+
+- PR: https://github.com/thepotatoninjahost/Coding-Agent/pull/77
+- Branch: `security/spoken-typed-approval`
+- Current head at this update: `6e380486f9cc4cf259bf6b19ee3b975cbefb4054`
+- Replaces generic approval events with ordered, proposal-bound channels: a recognized spoken challenge phrase first, then an exact typed match. The coordinator records channel-specific labels and rejects channel substitution, replay, cross-proposal use, expiry, and legacy generic approval state.
+- Adds acceptance coverage for skipped channels, wrong phrases, replay, and legacy approval state. The Chat and Review surfaces display the challenge phrase.
+- CI run #1282, ID `38213296409`, failed in unit tests because the first implementation compared uppercase speech normalization with lowercase challenge words. The comparison was corrected in commit `6e380486f9cc4cf259bf6b19ee3b975cbefb4054`.
+- Latest CI run #1285, ID `38213579380`, is in progress at the time of this update. Do not call the implementation verified or merge it until the latest CI run passes all tests, lint, and debug/release builds.
+- Limitation: the Android speech-recognition activity returns a transcript; this enforces the requested interaction flow but is not a cryptographic guarantee against a compromised device or a malicious recognition provider.
+
 ## Phase 1 status — evidence improved; audit not yet complete
 
 Completed:
