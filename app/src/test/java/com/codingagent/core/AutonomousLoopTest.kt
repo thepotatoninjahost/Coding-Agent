@@ -225,22 +225,6 @@ class AutonomousLoopTest {
         if (events.last() !is AutonomousAgentEvent.Failed) throw AssertionError(events.joinToString("\n"))
         assertTrue((events.last() as AutonomousAgentEvent.Failed).message.contains("repeated"))
     }
-}
-
-/** Deterministic gateway that returns scripted responses in order. */
-private class ScriptedGateway(private val script: List<ModelResponse>) : ModelGateway {
-    private var index = 0
-    override fun complete(request: ModelRequest): ModelResponse {
-        val response = script.getOrElse(index) { ModelResponse.Text("done") }
-        index++
-        return response
-    }
-
-    override fun stream(request: ModelRequest, onDelta: (String) -> Unit): ModelResponse {
-        val response = complete(request)
-        if (response is ModelResponse.Text) onDelta(response.content)
-        return response
-    }
 
     @Test
     fun configuredSystemInstructionsReachTheModelWithoutRemovingBaseRules() {
@@ -268,5 +252,22 @@ private class ScriptedGateway(private val script: List<ModelResponse>) : ModelGa
         assertTrue(requests.first().system.contains("Code changes (create_file, replace_text) only STAGE a proposal"))
         assertTrue(requests.first().system.contains("Prefer concise Kotlin examples."))
     }
+}
+
+/** Deterministic gateway that returns scripted responses in order. */
+private class ScriptedGateway(private val script: List<ModelResponse>) : ModelGateway {
+    private var index = 0
+    override fun complete(request: ModelRequest): ModelResponse {
+        val response = script.getOrElse(index) { ModelResponse.Text("done") }
+        index++
+        return response
+    }
+
+    override fun stream(request: ModelRequest, onDelta: (String) -> Unit): ModelResponse {
+        val response = complete(request)
+        if (response is ModelResponse.Text) onDelta(response.content)
+        return response
+    }
+
 
 }
