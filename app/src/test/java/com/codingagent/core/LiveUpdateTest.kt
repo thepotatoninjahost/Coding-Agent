@@ -65,6 +65,21 @@ class LiveUpdateTest {
     }
 
     @Test
+    fun activeModuleRejectsSourceChangedAfterInstall() {
+        val root = Files.createTempDirectory("live-module-tamper").toFile()
+        val store = LiveModuleStore(root)
+        val action = AgentAction("install-module", AgentActionCategory.CODE_CHANGE, ownerVerified = true, approvalCount = 2)
+        val source = """{"kind":"coding","version":1,"steps":[{"op":"emit","value":"approved"}]}"""
+        assertTrue(store.install(source, "coding", 1, action, VerificationReport(true, emptyList())) is ModuleInstallResult.Installed)
+        val active = store.active()
+        assertTrue(active != null)
+
+        File(active!!.sourcePath).writeText("""{"kind":"coding","version":1,"steps":[{"op":"emit","value":"tampered"}]}""")
+
+        assertTrue("A module whose source no longer matches its recorded checksum must not load", store.active() == null)
+    }
+
+    @Test
     fun readOnlyActionCannotInstallModuleOrModel() {
         val root = Files.createTempDirectory("live-install-read-only").toFile()
         val readOnly = AgentAction("read-only", AgentActionCategory.READ_ONLY)
