@@ -573,7 +573,7 @@ class AcceptancePathTest {
         now = proposal.expiresAt + 1L
         val result = coordinator.approve(
             proposal.id,
-            OwnerApprovalToken.spoken(proposal.id, testOwnerPhrase, now = now)!!
+            OwnerApprovalToken.spoken(proposal.id, testOwnerPhrase, testOwnerPhrase, now = now)!!
         )
 
         assertTrue(result is MutationApprovalResult.Rejected)
@@ -876,7 +876,7 @@ class AcceptancePathTest {
         assertTrue(OwnerApprovalToken.typed(proposal.id, phrase, phrase.lowercase()) == null)
         assertEquals("fun main() = 1\n", root.resolve("Main.kt").readText())
 
-        val typed = OwnerApprovalToken.typed(proposal.id, phrase)!!
+        val typed = OwnerApprovalToken.typed(proposal.id, phrase, phrase)!!
         assertTrue(coordinator.approve(proposal.id, typed) is MutationApprovalResult.Applied)
         assertTrue(coordinator.approve(proposal.id, typed) is MutationApprovalResult.Rejected)
         assertEquals("fun main() = 2\n", root.resolve("Main.kt").readText())
