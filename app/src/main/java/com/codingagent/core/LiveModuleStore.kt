@@ -41,6 +41,9 @@ class LiveModuleStore(private val root: File) {
     init { moduleRoot.mkdirs() }
 
     fun install(source: String, kind: String, version: Int = 1, action: AgentAction, evaluation: VerificationReport): ModuleInstallResult {
+        if (action.category != AgentActionCategory.CODE_CHANGE) {
+            return ModuleInstallResult.Rejected("Live-module installation requires CODE_CHANGE authorization")
+        }
         val safeKind = kind.trim()
         if (!safeKind.matches(SAFE_ID)) {
             return ModuleInstallResult.Rejected("Module kind contains unsafe path characters")
