@@ -50,26 +50,6 @@ class SelfEvolutionTest {
     fun rejectsReadOnlyActionEvenWhenEvaluationPasses() {
         val root = Files.createTempDirectory("evolution-read-only").toFile()
         val evolution = SelfEvolution(root)
-        val source = root.resolve("Main.kt").apply { writeText("fun main() = Unit\\n") }
-        val staged = evolution.stageSource(source, "self-repair")
-
-        val result = evolution.promoteSource(
-            staged,
-            "self-repair",
-            VerificationReport(true, emptyList()),
-            approvedAction(AgentActionCategory.READ_ONLY)
-        )
-
-        assertTrue(result is PromotionResult.Rejected)
-        assertTrue((result as PromotionResult.Rejected).reason.contains("CODE_CHANGE"))
-        assertEquals(null, evolution.activeVersion())
-        assertTrue(evolution.history().isEmpty())
-    }
-
-    @Test
-    fun rejectsReadOnlyActionEvenWhenEvaluationPasses() {
-        val root = Files.createTempDirectory("evolution-read-only").toFile()
-        val evolution = SelfEvolution(root)
         val source = root.resolve("Main.kt").apply { writeText("fun main() = Unit\n") }
         val staged = evolution.stageSource(source, "self-repair")
 
