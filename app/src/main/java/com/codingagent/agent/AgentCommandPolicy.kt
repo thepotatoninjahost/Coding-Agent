@@ -89,9 +89,14 @@ object AgentCommandPolicy {
         } else null
 
     private fun validateFilesystemOperands(executable: String, tokens: List<String>, root: java.io.File): String? {
+        val optionTerminator = tokens.indexOf("--")
         val operands = when (executable) {
-            "cat", "head", "tail", "wc", "ls" -> tokens.drop(1).filterNot { it.startsWith("-") }
-            "grep", "rg" -> tokens.drop(2).filterNot { it.startsWith("-") }
+            "cat", "head", "tail", "wc", "ls" ->
+                if (optionTerminator >= 0) tokens.drop(optionTerminator + 1)
+                else tokens.drop(1).filterNot { it.startsWith("-") }
+            "grep", "rg" ->
+                if (optionTerminator >= 0) tokens.drop(optionTerminator + 2)
+                else tokens.drop(2).filterNot { it.startsWith("-") }
             else -> emptyList()
         }
         val canonicalRoot = runCatching { root.canonicalFile }.getOrElse { return "Project root could not be resolved safely" }
