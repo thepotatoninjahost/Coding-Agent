@@ -118,7 +118,7 @@ class SelfEvolution(private val root: File) {
         if (!version.evaluationPassed) return SnapshotRestoreResult.Rejected("Evolution version has no passing source evaluation")
         val violations = AgentConstitution.check(action.copy(sandboxPassed = true), approvalAt = approvalAt)
         if (violations.isNotEmpty()) {
-            return SnapshotRestoreResult.Rejected(violations.joinToString("; ") { "\${it.rule}: \${it.message}" })
+            return SnapshotRestoreResult.Rejected(violations.joinToString("; ") { "${it.rule}: ${it.message}" })
         }
         val snapshot = managedSnapshot(File(version.sourcePath))
             ?: return SnapshotRestoreResult.Rejected("Evolution snapshot is missing or outside the managed versions directory")
@@ -128,7 +128,7 @@ class SelfEvolution(private val root: File) {
         val destination = safeTarget(version.targetPath)
             ?: return SnapshotRestoreResult.Rejected("Evolution version has no safe project-relative recovery target")
         val originalBytes = if (destination.isFile) runCatching { destination.readBytes() }.getOrElse {
-            return SnapshotRestoreResult.Rejected("Could not read the current recovery target: \${it.message.orEmpty()}")
+            return SnapshotRestoreResult.Rejected("Could not read the current recovery target: ${it.message.orEmpty()}")
         } else null
         var temporary: File? = null
         return try {
@@ -156,7 +156,7 @@ class SelfEvolution(private val root: File) {
                 }
             }.isSuccess
             SnapshotRestoreResult.Rejected(
-                "Snapshot recovery failed: \${error.message.orEmpty()}" +
+                "Snapshot recovery failed: ${error.message.orEmpty()}" +
                     if (rollbackSucceeded) "; the original target was restored" else "; target rollback failed and manual recovery is required"
             )
         }
