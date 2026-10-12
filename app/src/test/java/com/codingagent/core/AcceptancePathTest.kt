@@ -856,18 +856,18 @@ class AcceptancePathTest {
     @Test
     fun approvedMutationDoesNotExecuteImportedBuildScriptsAutomatically() {
         val root = Files.createTempDirectory("accept-no-auto-build").toFile()
-        root.resolve("Main.kt").writeText("fun main() = 1\\n")
+        root.resolve("Main.kt").writeText("fun main() = 1\n")
         val marker = root.resolve("build-script-ran.txt")
         val wrapper = root.resolve("gradlew")
-        wrapper.writeText("#!/bin/sh\\nprintf ran > build-script-ran.txt\\nexit 1\\n")
+        wrapper.writeText("#!/bin/sh\nprintf ran > build-script-ran.txt\nexit 1\n")
         assertTrue("Test requires an executable imported wrapper", wrapper.setExecutable(true))
         root.resolve("app").mkdirs()
-        root.resolve("app/build.gradle.kts").writeText("plugins {}\\n")
+        root.resolve("app/build.gradle.kts").writeText("plugins {}\n")
 
         val coordinator = MutationCoordinator(ProjectWorkspace(root))
         val proposal = (coordinator.propose(
             "change Main.kt",
-            listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\\n", "fun main() = 2\\n"))
+            listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 2\n"))
         ) as MutationProposeResult.Proposed).proposal
 
         val first = coordinator.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id))
@@ -875,7 +875,7 @@ class AcceptancePathTest {
         val result = coordinator.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id))
         assertTrue("Mutation should be applied after both approvals: $result", result is MutationApprovalResult.Applied)
         assertFalse("Imported build script must not execute as an approval side effect", marker.exists())
-        assertEquals("fun main() = 2\\n", root.resolve("Main.kt").readText())
+        assertEquals("fun main() = 2\n", root.resolve("Main.kt").readText())
 
         val verification = (result as MutationApprovalResult.Applied).proposal.verification
         assertTrue("Static verification should pass", verification.passed)
