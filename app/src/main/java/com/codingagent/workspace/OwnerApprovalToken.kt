@@ -1,6 +1,7 @@
 package com.codingagent.workspace
 
-import java.security.MessageDigest
+import javax.crypto.SecretKeyFactory
+import javax.crypto.spec.PBEKeySpec
 import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
@@ -15,9 +16,19 @@ object ApprovalPhrase {
         .replace(Regex("[.,!?]+$"), "")
         .uppercase(Locale.ROOT)
 
-    internal fun fingerprint(value: String): String =
-        MessageDigest.getInstance("SHA-256").digest(value.toByteArray(Charsets.UTF_8))
-            .joinToString("") { "%02x".format(it) }
+    /**
+     * Use a deliberately expensive verifier so a stored approval record is not
+     * a cheap SHA-256 passphrase-cracking oracle. Proposal id is public, per-proposal salt.
+     */
+    internal fun fingerprint(proposalId: String, value: String): String {
+        val spec = PBEKeySpec(value.toCharArray(), proposalId.toByteArray(Charsets.UTF_8), 600_000, 256)
+        return try {
+            SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(spec).encoded
+                .joinToString("") { "%02x".format(it) }
+        } finally {
+            spec.clearPassword()
+        }
+    }
 }
 
 /**
@@ -56,7 +67,7 @@ class OwnerApprovalToken private constructor(
             if (ApprovalPhrase.normalizeSpeech(transcript) != ApprovalPhrase.normalizeSpeech(ownerPhrase)) return null
             return OwnerApprovalToken(
                 proposalId, ApprovalChannel.SPOKEN_PHRASE, now,
-                ApprovalPhrase.fingerprint(ownerPhrase), UUID.randomUUID().toString()
+                ApprovalPhrase.fingerprint(proposalId, ownerPhrase), UUID.randomUUID().toString()
             )
         }
 
