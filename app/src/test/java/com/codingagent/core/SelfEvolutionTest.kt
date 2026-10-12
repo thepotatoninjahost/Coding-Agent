@@ -193,9 +193,9 @@ class SelfEvolutionTest {
         ) as PromotionResult.Promoted
 
         val historyFile = root.resolve(".coding-agent/evolution/history.tsv")
-        val fields = historyFile.readText().trimEnd().split("\\t").toMutableList()
+        val fields = historyFile.readText().trimEnd().split('\t').toMutableList()
         fields[6] = "../outside.kt"
-        historyFile.writeText(fields.joinToString("\\t") + "\\n")
+        historyFile.writeText(fields.joinToString("\t") + "\n")
 
         val unsafe = evolution.prepareRestoreCandidate(promoted.version.id)
         assertTrue(unsafe is com.codingagent.agent.SnapshotCandidateResult.Rejected)
