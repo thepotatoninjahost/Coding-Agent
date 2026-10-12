@@ -13,5 +13,12 @@ class AgentModelProtocolTest {
         assertTrue(prompt.contains("Avoid jargon"))
         assertTrue(prompt.contains("Be direct and concise"))
         assertTrue(prompt.contains("Do not narrate internal planning"))
+        assertTrue(prompt.contains("Do not invoke git, find, gradle"))
+        assertTrue(prompt.contains("There is no fixed tool-call count"))
+        assertTrue(prompt.contains("Inspect relevant callers, dependencies, tests, and failure paths"))
+        assertTrue(prompt.contains("Do not stop at a plan, a diagnosis, or a superficial edit"))
+        assertTrue(prompt.contains("Prefer official documentation and tested reference implementations"))
+        assertTrue(prompt.contains("Verification honesty: distinguish static source checks from actual builds and tests"))
+        assertTrue(prompt.contains("never claim it passed or imply the app is correct based only on static checks"))
     }
 }

@@ -3,6 +3,7 @@ package com.codingagent.workspace
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
+import java.nio.file.Files
 
 /**
  * Crash-safe text persistence for app-private filesystem state.
@@ -56,6 +57,9 @@ internal object AtomicFileWriter {
 
     @Synchronized
     fun delete(file: File) {
+        rejectSymbolicLink(file)
+        rejectSymbolicLink(backup(file))
+        rejectSymbolicLink(pending(file))
         if (!file.delete() && file.exists()) {
             throw IllegalStateException("Atomic delete failed: " + file)
         }
@@ -79,6 +83,9 @@ internal object AtomicFileWriter {
     fun recover(file: File) {
         val backup = backup(file)
         val pending = pending(file)
+        rejectSymbolicLink(file)
+        rejectSymbolicLink(backup)
+        rejectSymbolicLink(pending)
 
         if (backup.exists()) {
             file.delete()
@@ -96,6 +103,12 @@ internal object AtomicFileWriter {
             if (file.exists() && !pending.delete()) {
                 throw IllegalStateException("Atomic recovery failed: could not remove " + pending)
             }
+        }
+    }
+
+    private fun rejectSymbolicLink(file: File) {
+        if (Files.isSymbolicLink(file.toPath())) {
+            throw IllegalStateException("Atomic persistence refuses symbolic-link paths: " + file.name)
         }
     }
 

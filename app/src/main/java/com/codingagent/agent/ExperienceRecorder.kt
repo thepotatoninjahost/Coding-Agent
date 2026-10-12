@@ -6,7 +6,7 @@ import java.io.File
  * ONE JOB: Persist per-task outcomes to experience.tsv for later sessions.
  */
 class ExperienceRecorder(private val root: File) {
-    private val file = root.resolve(".coding-agent/experience.tsv")
+    private val file = com.codingagent.workspace.ProjectMetadataBoundary.normalizePath(root.resolve(".coding-agent/experience.tsv"))
 
     init {
         LessonContext.bindExperience(::all)

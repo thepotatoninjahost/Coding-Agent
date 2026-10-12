@@ -28,7 +28,12 @@ class ProjectWorkspace(private val root: File) {
 
     init {
         require(root.isDirectory) { "Project root is not a directory" }
-        transactionDir.mkdirs()
+        ProjectMetadataBoundary.resolve(root, ".coding-agent")
+        ProjectMetadataBoundary.resolve(root, ".coding-agent/transactions")
+        if (!transactionDir.mkdirs() && !transactionDir.isDirectory) {
+            throw IllegalStateException("Could not create private transaction directory")
+        }
+        ProjectMetadataBoundary.resolve(root, ".coding-agent/transactions")
     }
 
     fun projectRoot(): File = root
