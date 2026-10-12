@@ -41,7 +41,6 @@ data class PendingChangeProposal(
     val repairRootRequest: String = request
 ) {
     val approvalCount: Int get() = approvals.size
-    val approvalPhrase: String get() = ApprovalPhrase.forProposal(id)
 }
 
 class MutationCoordinator(
@@ -255,8 +254,16 @@ class MutationCoordinator(
             )
             else -> return MutationApprovalResult.Rejected("This proposal already has the required two approvals")
         }
+        if (requiredChannel == ApprovalChannel.TYPED_PHRASE) {
+            val firstFingerprint = proposal.approvals.singleOrNull()?.phraseFingerprint
+            if (firstFingerprint.isNullOrBlank() || firstFingerprint != ownerApproval.phraseFingerprint) {
+                return MutationApprovalResult.Rejected(
+                    "The typed confirmation does not match the owner-created spoken phrase. Reject and restage this proposal to restart both channels."
+                )
+            }
+        }
         if (!ownerApproval.consume(proposal.id, requiredChannel, timestamp)) {
-            val required = if (requiredChannel == ApprovalChannel.SPOKEN_PHRASE) "spoken challenge" else "exact typed challenge"
+            val required = if (requiredChannel == ApprovalChannel.SPOKEN_PHRASE) "spoken phrase" else "exact typed phrase"
             return MutationApprovalResult.Rejected("A fresh $required approval is required for this proposal")
         }
         if (proposal.approvalCount >= 2) {
@@ -264,7 +271,9 @@ class MutationCoordinator(
         }
         val confirmationNumber = proposal.approvalCount + 1
         val channelLabel = if (requiredChannel == ApprovalChannel.SPOKEN_PHRASE) "spoken-phrase" else "typed-phrase"
-        val approval = ledger.record(id, channelLabel, timestamp, confirmationNumber)
+        val approval = ledger.record(
+            id, channelLabel, timestamp, confirmationNumber, ownerApproval.phraseFingerprint
+        )
         val candidate = proposal.copy(approvals = proposal.approvals + approval)
         val action = AgentAction(
             description = proposal.request,
