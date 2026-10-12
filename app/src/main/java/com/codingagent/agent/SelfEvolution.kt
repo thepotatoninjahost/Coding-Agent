@@ -13,11 +13,6 @@ sealed class PromotionResult {
     data class Rejected(val reason: String) : PromotionResult()
 }
 
-sealed class SnapshotRestoreResult {
-    data class Restored(val version: EvolutionVersion, val destination: File) : SnapshotRestoreResult()
-    data class Rejected(val reason: String) : SnapshotRestoreResult()
-}
-
 sealed class SnapshotCandidateResult {
     data class Ready(val candidate: EvolutionRestoreCandidate) : SnapshotCandidateResult()
     data class Rejected(val reason: String) : SnapshotCandidateResult()
@@ -131,63 +126,6 @@ class SelfEvolution(private val root: File) {
         val destination = safeTarget(version.targetPath)
             ?: return SnapshotCandidateResult.Rejected("Evolution version has no safe project-relative recovery target")
         return SnapshotCandidateResult.Ready(EvolutionRestoreCandidate(version, snapshot, destination))
-    }
-
-    /**
-     * Restore a promoted snapshot to its original project-relative path.
-     * The caller must verify the proposed restored source before invoking recovery.
-     */
-    fun restoreSnapshot(
-        versionId: String,
-        evaluation: VerificationReport,
-        action: AgentAction,
-        approvalAt: Long? = null
-    ): SnapshotRestoreResult {
-        if (!evaluation.passed) return SnapshotRestoreResult.Rejected("Snapshot recovery requires a passing evaluation")
-        val candidate = when (val result = prepareRestoreCandidate(versionId)) {
-            is SnapshotCandidateResult.Ready -> result.candidate
-            is SnapshotCandidateResult.Rejected -> return SnapshotRestoreResult.Rejected(result.reason)
-        }
-        val version = candidate.version
-        val snapshot = candidate.snapshot
-        val destination = candidate.destination
-        val violations = AgentConstitution.check(action.copy(sandboxPassed = true), approvalAt = approvalAt)
-        if (violations.isNotEmpty()) {
-            return SnapshotRestoreResult.Rejected(violations.joinToString("; ") { "${it.rule}: ${it.message}" })
-        }
-        val originalBytes = if (destination.isFile) runCatching { destination.readBytes() }.getOrElse {
-            return SnapshotRestoreResult.Rejected("Could not read the current recovery target: ${it.message.orEmpty()}")
-        } else null
-        var temporary: File? = null
-        return try {
-            destination.parentFile?.mkdirs()
-            temporary = Files.createTempFile(destination.parentFile.toPath(), ".evolution-restore-", ".tmp").toFile()
-            Files.copy(snapshot.toPath(), temporary.toPath(), StandardCopyOption.REPLACE_EXISTING)
-            moveReplacing(temporary, destination)
-            temporary = null
-            activeFile.parentFile?.mkdirs()
-            writeTextAtomically(activeFile, version.id)
-            SnapshotRestoreResult.Restored(version, destination)
-        } catch (error: Exception) {
-            temporary?.delete()
-            val rollbackSucceeded = runCatching {
-                if (originalBytes == null) {
-                    destination.delete()
-                } else {
-                    val rollbackFile = Files.createTempFile(destination.parentFile.toPath(), ".evolution-rollback-", ".tmp").toFile()
-                    try {
-                        rollbackFile.writeBytes(originalBytes)
-                        moveReplacing(rollbackFile, destination)
-                    } finally {
-                        rollbackFile.delete()
-                    }
-                }
-            }.isSuccess
-            SnapshotRestoreResult.Rejected(
-                "Snapshot recovery failed: ${error.message.orEmpty()}" +
-                    if (rollbackSucceeded) "; the original target was restored" else "; target rollback failed and manual recovery is required"
-            )
-        }
     }
 
     fun activeVersion(): String? = activeFile.takeIf { it.isFile }?.readText()?.trim()?.ifBlank { null }
