@@ -241,10 +241,11 @@ private class ScriptedGateway(private val script: List<ModelResponse>) : ModelGa
         if (response is ModelResponse.Text) onDelta(response.content)
         return response
     }
+
     @Test
     fun configuredSystemInstructionsReachTheModelWithoutRemovingBaseRules() {
         val root = Files.createTempDirectory("agent-system-prompt").toFile()
-        root.resolve("Main.kt").writeText("fun main() = 1\\n")
+        root.resolve("Main.kt").writeText("fun main() = 1")
         val requests = mutableListOf<ModelRequest>()
         val gateway = object : ModelGateway {
             override fun complete(request: ModelRequest): ModelResponse {
@@ -258,7 +259,7 @@ private class ScriptedGateway(private val script: List<ModelResponse>) : ModelGa
         val agent = AutonomousAgent(root, knowledge, gateway)
         agent.setSystemPrompt(
             AgentModelProtocol.DEFAULT_SYSTEM +
-                "\\n\\nOWNER-PROVIDED ADDITIONAL INSTRUCTIONS: Prefer concise Kotlin examples."
+                " OWNER-PROVIDED ADDITIONAL INSTRUCTIONS: Prefer concise Kotlin examples."
         )
 
         agent.run("Summarize the project architecture after inspecting the source files")
