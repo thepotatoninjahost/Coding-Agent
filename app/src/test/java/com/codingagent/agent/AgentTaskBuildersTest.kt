@@ -2,6 +2,7 @@ package com.codingagent.agent
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AgentTaskBuildersTest {
@@ -17,10 +18,6 @@ class AgentTaskBuildersTest {
 
         assertEquals("failed", task.status)
         assertFalse("A failed task must not claim verification passed", task.verification.passed)
-        assertTrueNoVerificationCommands(task.verification.commands.isEmpty())
-    }
-
-    private fun assertTrueNoVerificationCommands(noCommands: Boolean) {
-        org.junit.Assert.assertTrue("Failure outcome has no verification commands", noCommands)
+        assertTrue("No verification commands ran", task.verification.commands.isEmpty())
     }
 }
