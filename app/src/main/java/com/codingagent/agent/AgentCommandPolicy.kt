@@ -19,9 +19,6 @@ object AgentCommandPolicy {
         val command = raw.trim()
         if (command.isBlank()) return "Command is empty"
         if (command.length > 1_000) return "Command is too long"
-        if (command.contains('\\')) {
-            return "Backslash escaping is not allowed for model commands"
-        }
         if (shellMetacharacters.containsMatchIn(command)) {
             return "Shell chaining, redirection, substitution, quotes, and control characters are not allowed for model commands"
         }
@@ -30,30 +27,19 @@ object AgentCommandPolicy {
         }
 
         val tokens = command.split(Regex("\\s+")).filter { it.isNotBlank() }
-        if (tokens.any { token ->
-                token.replace('\\', '/').split('/').any {
-                    it.equals(".git", ignoreCase = true) || it.equals(".coding-agent", ignoreCase = true)
-                }
-            }) {
-            return "Private Git and agent metadata are not accessible to model commands"
-        }
         if (tokens.any { it.startsWith("/") || it.startsWith("~") || forbiddenPathTokens.containsMatchIn(it) }) {
             return "Model commands may use only project-relative paths"
         }
 
-        val rawExecutable = tokens.first()
-        if (rawExecutable.contains('/') || rawExecutable.contains('\\')) {
-            return "Path-qualified executables are not allowed for model commands"
-        }
-        val executable = rawExecutable
+        val executable = tokens.first().removePrefix("./")
         if (projectRoot != null) {
             validateFilesystemOperands(executable, tokens, projectRoot)?.let { return it }
         }
         return when (executable) {
             "gradlew", "gradlew.bat", "gradle" ->
                 "Build tools execute project-controlled scripts and are not permitted through the autonomous command channel; use the owner-controlled Terminal after reviewing the project scripts"
-            "git" -> "Git commands are disabled in the autonomous command channel because repository configuration can invoke external helpers"
-            "find" -> "Recursive filesystem traversal is disabled in the autonomous command channel; use project inspection tools"
+            "git" -> validateGit(tokens)
+            "find" -> validateFind(tokens)
             "cat", "head", "tail", "wc", "file", "grep", "rg", "ls", "pwd", "printf" -> null
             else -> "Model command '$executable' is not permitted; use project inspection tools or a standard verification command"
         }
@@ -101,10 +87,8 @@ object AgentCommandPolicy {
             }
             val relative = canonicalRoot.toPath().relativize(canonical.toPath())
                 .toString().replace('\\', '/')
-            if (relative.split('/').any {
-                    it.equals(".coding-agent", ignoreCase = true) || it.equals(".git", ignoreCase = true)
-                }) {
-                return "Private Git and agent metadata are not accessible to model commands"
+            if (relative.substringBefore("/").equals(".coding-agent", ignoreCase = true)) {
+                return "Coding Agent internal metadata is not accessible to model commands"
             }
         }
         return null
