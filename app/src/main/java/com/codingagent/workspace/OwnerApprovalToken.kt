@@ -82,7 +82,7 @@ class OwnerApprovalToken private constructor(
             if (ownerPhrase.isBlank() || typedPhrase != ownerPhrase) return null
             return OwnerApprovalToken(
                 proposalId, ApprovalChannel.TYPED_PHRASE, now,
-                ApprovalPhrase.fingerprint(ownerPhrase), UUID.randomUUID().toString()
+                ApprovalPhrase.fingerprint(proposalId, ownerPhrase), UUID.randomUUID().toString()
             )
         }
     }
