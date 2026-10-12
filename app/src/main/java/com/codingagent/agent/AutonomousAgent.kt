@@ -56,6 +56,10 @@ class AutonomousAgent(
     @Volatile
     private var configuredSystemPrompt: String = AgentModelProtocol.DEFAULT_SYSTEM
 
+    fun setGateway(gateway: ModelGateway?) {
+        this.gateway = gateway
+    }
+
     fun setSystemPrompt(prompt: String?) {
         configuredSystemPrompt = prompt.orEmpty().trim().take(24_000)
             .ifBlank { AgentModelProtocol.DEFAULT_SYSTEM }
