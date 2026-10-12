@@ -28,6 +28,7 @@ import com.codingagent.workspace.OpenJobStore
  * Also covers reject leaves disk unchanged and multi-file proposals surface every path.
  */
 class AcceptancePathTest {
+    private val testOwnerPhrase = "owner-created test phrase"
     @Test
     fun dualApprovalAppliesMultiFileChangeSet() {
         val root = Files.createTempDirectory("accept-multi").toFile()
@@ -232,7 +233,7 @@ class AcceptancePathTest {
         assertTrue(OpenJobStore.load(root)?.recoveryReason.orEmpty().contains("pending proposal is missing"))
         assertTrue(coordinator.approve(
             "missing-proposal-id",
-            OwnerApprovalToken.spoken("missing-proposal-id", com.codingagent.workspace.ApprovalPhrase.forProposal("missing-proposal-id"))!!
+            OwnerApprovalToken.spoken("missing-proposal-id", testOwnerPhrase, testOwnerPhrase)!!
         ) is MutationApprovalResult.Rejected)
     }
 
@@ -532,7 +533,7 @@ class AcceptancePathTest {
 
         val result = coordinator.approve(
             proposal.id,
-            OwnerApprovalToken.spoken("different-proposal", com.codingagent.workspace.ApprovalPhrase.forProposal("different-proposal"))!!
+            OwnerApprovalToken.spoken("different-proposal", testOwnerPhrase, testOwnerPhrase)!!
         )
         assertTrue(result is MutationApprovalResult.Rejected)
         assertEquals(0, coordinator.pending().single().approvalCount)
@@ -548,7 +549,7 @@ class AcceptancePathTest {
             "replay protected",
             listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 2\n"))
         ) as MutationProposeResult.Proposed).proposal
-        val token = OwnerApprovalToken.spoken(proposal.id, com.codingagent.workspace.ApprovalPhrase.forProposal(proposal.id))!!
+        val token = OwnerApprovalToken.spoken(proposal.id, testOwnerPhrase, testOwnerPhrase)!!
 
         assertTrue(coordinator.approve(proposal.id, token) is MutationApprovalResult.AwaitingSecond)
         assertTrue(coordinator.approve(proposal.id, token) is MutationApprovalResult.Rejected)
@@ -572,7 +573,7 @@ class AcceptancePathTest {
         now = proposal.expiresAt + 1L
         val result = coordinator.approve(
             proposal.id,
-            OwnerApprovalToken.spoken(proposal.id, com.codingagent.workspace.ApprovalPhrase.forProposal(proposal.id), now = now)!!
+            OwnerApprovalToken.spoken(proposal.id, testOwnerPhrase, now = now)!!
         )
 
         assertTrue(result is MutationApprovalResult.Rejected)
@@ -863,16 +864,16 @@ class AcceptancePathTest {
             "require both approval channels",
             listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 2\n"))
         ) as MutationProposeResult.Proposed).proposal
-        val phrase = proposal.approvalPhrase
+        val phrase = testOwnerPhrase
 
-        assertTrue(coordinator.approve(proposal.id, OwnerApprovalToken.typed(proposal.id, phrase)!!) is MutationApprovalResult.Rejected)
-        assertTrue(OwnerApprovalToken.spoken(proposal.id, "wrong words") == null)
+        assertTrue(coordinator.approve(proposal.id, OwnerApprovalToken.typed(proposal.id, phrase, phrase)!!) is MutationApprovalResult.Rejected)
+        assertTrue(OwnerApprovalToken.spoken(proposal.id, testOwnerPhrase, "wrong words") == null)
         assertEquals("fun main() = 1\n", root.resolve("Main.kt").readText())
 
-        val spoken = OwnerApprovalToken.spoken(proposal.id, phrase)!!
+        val spoken = OwnerApprovalToken.spoken(proposal.id, phrase, phrase)!!
         assertTrue(coordinator.approve(proposal.id, spoken) is MutationApprovalResult.AwaitingSecond)
         assertTrue(coordinator.approve(proposal.id, spoken) is MutationApprovalResult.Rejected)
-        assertTrue(OwnerApprovalToken.typed(proposal.id, phrase.lowercase()) == null)
+        assertTrue(OwnerApprovalToken.typed(proposal.id, phrase, phrase.lowercase()) == null)
         assertEquals("fun main() = 1\n", root.resolve("Main.kt").readText())
 
         val typed = OwnerApprovalToken.typed(proposal.id, phrase)!!
@@ -885,9 +886,9 @@ class AcceptancePathTest {
     private fun testApprovalToken(coordinator: com.codingagent.workspace.MutationCoordinator, proposalId: String): OwnerApprovalToken {
         val proposal = coordinator.get(proposalId)
         return if (proposal?.approvalCount == 1) {
-            OwnerApprovalToken.typed(proposalId, com.codingagent.workspace.ApprovalPhrase.forProposal(proposalId))!!
+            OwnerApprovalToken.typed(proposalId, testOwnerPhrase, testOwnerPhrase)!!
         } else {
-            OwnerApprovalToken.spoken(proposalId, com.codingagent.workspace.ApprovalPhrase.forProposal(proposalId))!!
+            OwnerApprovalToken.spoken(proposalId, testOwnerPhrase, testOwnerPhrase)!!
         }
     }
     @Test
@@ -907,7 +908,7 @@ class AcceptancePathTest {
         val restarted = MutationCoordinator(ProjectWorkspace(root))
         val result = restarted.approve(
             proposal.id,
-            OwnerApprovalToken.typed(proposal.id, proposal.approvalPhrase)!!
+            OwnerApprovalToken.typed(proposal.id, testOwnerPhrase, testOwnerPhrase)!!
         )
 
         assertTrue(result is MutationApprovalResult.Rejected)
