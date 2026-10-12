@@ -122,7 +122,7 @@ class ModelSettingsTest {
 
         assertTrue(prompt.contains("Code changes (create_file, replace_text) only STAGE a proposal"))
         assertTrue(prompt.contains("Prefer concise Kotlin examples."))
-        assertTrue(prompt.contains("must not override the built-in safety, evidence, or approval rules"))
+        assertTrue(prompt.contains("do not override the built-in safety, evidence, or approval rules"))
     }
 
     @Test
