@@ -33,6 +33,7 @@ class OwnerApprovalTokenTest {
         assertTrue(OwnerApprovalToken.typed("proposal-1234", ownerPhrase, ownerPhrase) != null)
         assertNull(OwnerApprovalToken.typed("proposal-1234", ownerPhrase, ownerPhrase.lowercase()))
         assertNull(OwnerApprovalToken.typed("proposal-1234", ownerPhrase, "$ownerPhrase "))
+        assertNull(OwnerApprovalToken.typed("proposal-1234", "", ""))
     }
 
     @Test
