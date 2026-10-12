@@ -4,6 +4,7 @@ import java.io.File
 import java.security.MessageDigest
 import java.util.UUID
 import com.codingagent.agent.AgentAction
+import com.codingagent.agent.AgentActionCategory
 import com.codingagent.agent.AgentConstitution
 import com.codingagent.workspace.VerificationReport
 
@@ -72,6 +73,9 @@ class LiveModelStore(private val root: File) {
         action: AgentAction,
         evaluation: VerificationReport
     ): ModelInstallResult {
+        if (action.category != AgentActionCategory.MODEL_CHANGE) {
+            return ModelInstallResult.Rejected("Model installation requires MODEL_CHANGE authorization")
+        }
         val pack = inspectPackage(directory)
         if (!pack.complete) {
             return ModelInstallResult.Rejected(
@@ -118,6 +122,9 @@ class LiveModelStore(private val root: File) {
         action: AgentAction,
         evaluation: VerificationReport
     ): ModelInstallResult {
+        if (action.category != AgentActionCategory.MODEL_CHANGE) {
+            return ModelInstallResult.Rejected("Model installation requires MODEL_CHANGE authorization")
+        }
         if (!source.isFile) return ModelInstallResult.Rejected("Model file does not exist")
         if (!evaluation.passed) {
             return ModelInstallResult.Rejected(
