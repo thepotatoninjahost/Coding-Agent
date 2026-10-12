@@ -111,6 +111,21 @@ class LiveUpdateTest {
     }
 
     @Test
+    fun activeModelRejectsPayloadChangedAfterInstall() {
+        val root = Files.createTempDirectory("live-model-tamper").toFile()
+        val source = root.resolve("model.bin").apply { writeBytes(byteArrayOf(1, 2, 3)) }
+        val store = LiveModelStore(root)
+        val action = AgentAction("install-model", AgentActionCategory.MODEL_CHANGE, ownerVerified = true, approvalCount = 2)
+        assertTrue(store.install(source, "tamper-test", "raw", action, VerificationReport(true, emptyList())) is ModelInstallResult.Installed)
+        val active = store.active()
+        assertTrue(active != null)
+
+        File(active!!.sourcePath).writeBytes(byteArrayOf(9, 8, 7))
+
+        assertTrue("A model whose payload no longer matches its recorded checksum must not load", store.active() == null)
+    }
+
+    @Test
     fun `model router replaces loaded model bytes`() {
         val root = Files.createTempDirectory("coding-agent-model").toFile()
         val source = File(root, "model.bin").apply { writeBytes(byteArrayOf(1, 2, 3)) }
