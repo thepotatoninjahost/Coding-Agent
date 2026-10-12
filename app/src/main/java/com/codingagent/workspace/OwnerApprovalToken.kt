@@ -8,7 +8,27 @@ enum class ApprovalChannel { SPOKEN_PHRASE, TYPED_PHRASE }
 
 /** Proposal-bound challenge text used by both independent approval channels. */
 object ApprovalPhrase {
-    fun forProposal(proposalId: String): String = "APPROVE CHANGE ${proposalId.take(8).uppercase(Locale.ROOT)}"
+    private val words = listOf(
+        "amber", "apple", "apricot", "atlas", "autumn", "beacon", "birch", "blue",
+        "bravo", "cabin", "cactus", "candle", "canyon", "cedar", "cello", "cinder",
+        "circle", "cobalt", "comet", "coral", "cosmos", "cricket", "dawn", "delta",
+        "dune", "eagle", "echo", "ember", "fern", "field", "finch", "forest",
+        "frost", "garden", "glacier", "golden", "harbor", "hazel", "helium", "honey",
+        "indigo", "island", "jasmine", "juniper", "kestrel", "lantern", "laurel", "lemon",
+        "lilac", "lunar", "maple", "marble", "meadow", "mercury", "meteor", "mint",
+        "mosaic", "nectar", "ocean", "olive", "orbit", "orchid", "otter", "pebble"
+    )
+
+    fun forProposal(proposalId: String): String {
+        val hash = proposalId.hashCode()
+        val indices = listOf(
+            hash and 63,
+            (hash ushr 6) and 63,
+            (hash ushr 12) and 63,
+            ((hash ushr 18) xor hash) and 63
+        )
+        return "APPROVE CHANGE " + indices.joinToString(" ") { words[it] }
+    }
 
     internal fun normalizeSpeech(value: String): String = value
         .trim()
