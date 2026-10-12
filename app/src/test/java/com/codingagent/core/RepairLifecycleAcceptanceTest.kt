@@ -9,11 +9,11 @@ import com.codingagent.intake.TaskOperation
 import com.codingagent.workspace.MutationApprovalResult
 import com.codingagent.workspace.MutationCoordinator
 import com.codingagent.workspace.MutationProposeResult
-import com.codingagent.workspace.ApprovalPhrase
 import com.codingagent.workspace.OwnerApprovalToken
 import com.codingagent.workspace.ProjectWorkspace
 
 class RepairLifecycleAcceptanceTest {
+    private val ownerPhrase = "owner-created test phrase"
     @Test
     fun failedChangeRollsBackThenApprovedRepairPassesVerification() {
         val root = Files.createTempDirectory("repair-lifecycle").toFile()
@@ -57,14 +57,14 @@ class RepairLifecycleAcceptanceTest {
 
         assertEquals("fun main() = 1\n", source.readText())
         assertTrue(
-            coordinator.approve(original.id, OwnerApprovalToken.spoken(original.id, ApprovalPhrase.forProposal(original.id))!!)
+            coordinator.approve(original.id, OwnerApprovalToken.spoken(original.id, ownerPhrase, ownerPhrase)!!)
                 is MutationApprovalResult.AwaitingSecond
         )
         assertEquals("fun main() = 1\n", source.readText())
 
         val failedApply = coordinator.approve(
             original.id,
-            OwnerApprovalToken.typed(original.id, ApprovalPhrase.forProposal(original.id))!!
+            OwnerApprovalToken.typed(original.id, ownerPhrase, ownerPhrase)!!
         )
         assertTrue("Expected repair proposal after failed verification: $failedApply", failedApply is MutationApprovalResult.RepairRequired)
         val repair = (failedApply as MutationApprovalResult.RepairRequired).proposal
@@ -74,14 +74,14 @@ class RepairLifecycleAcceptanceTest {
         assertEquals("fun main() = 2\n", repair.changeSet.changes.single().after)
 
         assertTrue(
-            coordinator.approve(repair.id, OwnerApprovalToken.spoken(repair.id, ApprovalPhrase.forProposal(repair.id))!!)
+            coordinator.approve(repair.id, OwnerApprovalToken.spoken(repair.id, ownerPhrase, ownerPhrase)!!)
                 is MutationApprovalResult.AwaitingSecond
         )
         assertEquals("fun main() = 1\n", source.readText())
 
         val repaired = coordinator.approve(
             repair.id,
-            OwnerApprovalToken.typed(repair.id, ApprovalPhrase.forProposal(repair.id))!!
+            OwnerApprovalToken.typed(repair.id, ownerPhrase, ownerPhrase)!!
         )
         assertTrue("Expected verified repair to apply: $repaired", repaired is MutationApprovalResult.Applied)
         assertEquals("fun main() = 2\n", source.readText())
