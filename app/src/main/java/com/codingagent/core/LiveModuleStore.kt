@@ -4,6 +4,7 @@ import java.io.File
 import java.security.MessageDigest
 import java.util.UUID
 import com.codingagent.agent.AgentAction
+import com.codingagent.agent.AgentActionCategory
 import com.codingagent.agent.AgentConstitution
 import com.codingagent.workspace.VerificationReport
 
