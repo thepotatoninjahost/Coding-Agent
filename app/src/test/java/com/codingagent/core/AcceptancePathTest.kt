@@ -320,7 +320,7 @@ class AcceptancePathTest {
     }
 
     @Test
-    fun interruptedApplyingStateResetsWhenMutationNeverReachedDisk() {
+    fun interruptedApplyingStateRequiresPhraseRestagingAfterRestart() {
         val root = Files.createTempDirectory("accept-apply-not-started").toFile()
         root.resolve("Main.kt").writeText("fun main() = 1\n")
         val workspace = ProjectWorkspace(root)
@@ -338,9 +338,9 @@ class AcceptancePathTest {
         assertEquals(proposal.id, OpenJobStore.load(root)?.proposalId)
         assertEquals(1, restarted.pending().single().approvalCount)
         assertTrue(
-            restarted.approve(proposal.id, testApprovalToken(restarted, proposal.id)) is MutationApprovalResult.Applied
+            restarted.approve(proposal.id, testApprovalToken(restarted, proposal.id)) is MutationApprovalResult.Rejected
         )
-        assertEquals("fun main() = 2\n", root.resolve("Main.kt").readText())
+        assertEquals("fun main() = 1\n", root.resolve("Main.kt").readText())
     }
 
     @Test
