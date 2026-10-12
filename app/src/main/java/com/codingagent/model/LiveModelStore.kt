@@ -4,6 +4,7 @@ import java.io.File
 import java.security.MessageDigest
 import java.util.UUID
 import com.codingagent.agent.AgentAction
+import com.codingagent.agent.AgentActionCategory
 import com.codingagent.agent.AgentConstitution
 import com.codingagent.workspace.VerificationReport
 
@@ -72,6 +73,9 @@ class LiveModelStore(private val root: File) {
         action: AgentAction,
         evaluation: VerificationReport
     ): ModelInstallResult {
+        if (action.category != AgentActionCategory.MODEL_CHANGE) {
+            return ModelInstallResult.Rejected("Model installation requires MODEL_CHANGE authorization")
+        }
         val pack = inspectPackage(directory)
         if (!pack.complete) {
             return ModelInstallResult.Rejected(
@@ -118,6 +122,9 @@ class LiveModelStore(private val root: File) {
         action: AgentAction,
         evaluation: VerificationReport
     ): ModelInstallResult {
+        if (action.category != AgentActionCategory.MODEL_CHANGE) {
+            return ModelInstallResult.Rejected("Model installation requires MODEL_CHANGE authorization")
+        }
         if (!source.isFile) return ModelInstallResult.Rejected("Model file does not exist")
         if (!evaluation.passed) {
             return ModelInstallResult.Rejected(
@@ -152,6 +159,14 @@ class LiveModelStore(private val root: File) {
         val payload = directory.listFiles()
             ?.filter { it.isFile && it.name != MANIFEST_NAME }
             .orEmpty()
+        val recordedContentMatches = runCatching {
+            if (directory.resolve(MANIFEST_NAME).isFile) {
+                checksumDirectory(directory) == fields.checksum
+            } else {
+                payload.singleOrNull()?.let { checksum(it) == fields.checksum } == true
+            }
+        }.getOrDefault(false)
+        if (!recordedContentMatches) return null
         val source = payload.singleOrNull() ?: directory
         return fields.copy(sourcePath = source.absolutePath)
     }

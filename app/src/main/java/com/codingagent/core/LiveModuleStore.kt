@@ -4,6 +4,7 @@ import java.io.File
 import java.security.MessageDigest
 import java.util.UUID
 import com.codingagent.agent.AgentAction
+import com.codingagent.agent.AgentActionCategory
 import com.codingagent.agent.AgentConstitution
 import com.codingagent.workspace.VerificationReport
 
@@ -41,6 +42,9 @@ class LiveModuleStore(private val root: File) {
     init { moduleRoot.mkdirs() }
 
     fun install(source: String, kind: String, version: Int = 1, action: AgentAction, evaluation: VerificationReport): ModuleInstallResult {
+        if (action.category != AgentActionCategory.CODE_CHANGE) {
+            return ModuleInstallResult.Rejected("Live-module installation requires CODE_CHANGE authorization")
+        }
         val safeKind = kind.trim()
         if (!safeKind.matches(SAFE_ID)) {
             return ModuleInstallResult.Rejected("Module kind contains unsafe path characters")
@@ -92,8 +96,12 @@ class LiveModuleStore(private val root: File) {
         if (!id.matches(SAFE_ID)) return null
         val source = moduleRoot.resolve(id).resolve("module.json")
         if (!source.isFile) return null
-        val parsed = runCatching { parse(source.readText()) }.getOrNull() ?: return null
-        return LiveModule(id, parsed.kind, parsed.version, source.absolutePath, checksum(source.readText()), source.parentFile?.lastModified() ?: 0L)
+        val recorded = history().lastOrNull { it.id == id } ?: return null
+        val content = runCatching { source.readText() }.getOrNull() ?: return null
+        if (checksum(content) != recorded.checksum) return null
+        val parsed = runCatching { parse(content) }.getOrNull() ?: return null
+        if (parsed.kind != recorded.kind || parsed.version != recorded.version) return null
+        return LiveModule(id, parsed.kind, parsed.version, source.absolutePath, recorded.checksum, recorded.createdAt)
     }
 
     fun source(module: LiveModule): String = File(module.sourcePath).readText()
