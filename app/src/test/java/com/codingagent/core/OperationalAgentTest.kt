@@ -158,6 +158,17 @@ class OperationalAgentTest {
     }
 
     @Test
+    fun underspecifiedOfflineEditDoesNotClaimVerificationPassed() {
+        val root = Files.createTempDirectory("agent-offline-needs-input").toFile()
+        val event = agent(root).run("improve this project").last()
+
+        assertTrue(event is AutonomousAgentEvent.Completed)
+        val task = (event as AutonomousAgentEvent.Completed).task
+        assertEquals("needs-input", task.status)
+        assertFalse("No verification ran while asking for clarification", task.verification.passed)
+    }
+
+    @Test
     fun offlineExplicitReplaceStagesProposalWithoutModel() {
         val root = Files.createTempDirectory("agent-offline-replace").toFile()
         root.resolve("src").mkdirs()
