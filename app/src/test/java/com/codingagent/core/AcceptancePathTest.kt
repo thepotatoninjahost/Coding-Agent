@@ -6,6 +6,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import com.codingagent.agent.ApprovalRecord
 import com.codingagent.intake.OperationKind
 import com.codingagent.intake.TaskOperation
 import com.codingagent.knowledge.KnowledgeIndex
@@ -889,4 +890,28 @@ class AcceptancePathTest {
             OwnerApprovalToken.spoken(proposalId, com.codingagent.workspace.ApprovalPhrase.forProposal(proposalId))!!
         }
     }
+    @Test
+    fun legacyGenericApprovalCannotSkipTheSpokenChannel() {
+        val root = Files.createTempDirectory("accept-legacy-approval").toFile()
+        root.resolve("Main.kt").writeText("fun main() = 1\n")
+        val coordinator = MutationCoordinator(ProjectWorkspace(root))
+        val proposal = (coordinator.propose(
+            "reject legacy approval state",
+            listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 2\n"))
+        ) as MutationProposeResult.Proposed).proposal
+        PendingProposalStore.save(
+            root,
+            listOf(proposal.copy(approvals = listOf(ApprovalRecord(proposal.id, proposal.createdAt, "device-owner", 1))))
+        )
+
+        val restarted = MutationCoordinator(ProjectWorkspace(root))
+        val result = restarted.approve(
+            proposal.id,
+            OwnerApprovalToken.typed(proposal.id, proposal.approvalPhrase)!!
+        )
+
+        assertTrue(result is MutationApprovalResult.Rejected)
+        assertEquals("fun main() = 1\n", root.resolve("Main.kt").readText())
+    }
+
 }
