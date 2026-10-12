@@ -10,7 +10,6 @@ import com.codingagent.agent.AgentActionCategory
 import com.codingagent.agent.PromotionResult
 import com.codingagent.agent.SelfEvolution
 import com.codingagent.workspace.VerificationReport
-import com.codingagent.workspace.ApprovalPhrase
 import com.codingagent.workspace.MutationCoordinator
 import com.codingagent.workspace.MutationProposeResult
 import com.codingagent.workspace.MutationApprovalResult
@@ -18,6 +17,7 @@ import com.codingagent.workspace.OwnerApprovalToken
 import com.codingagent.workspace.ProjectWorkspace
 
 class SelfEvolutionTest {
+    private val ownerPhrase = "owner-created test phrase"
     private fun approvedAction(category: AgentActionCategory = AgentActionCategory.CODE_CHANGE) = AgentAction(
         description = "Promote verified source",
         category = category,
@@ -164,14 +164,14 @@ class SelfEvolutionTest {
 
         val firstApproval = mutations.approve(
             proposal.id,
-            OwnerApprovalToken.spoken(proposal.id, ApprovalPhrase.forProposal(proposal.id))!!
+            OwnerApprovalToken.spoken(proposal.id, ownerPhrase, ownerPhrase)!!
         )
         assertTrue(firstApproval is MutationApprovalResult.AwaitingSecond)
         assertEquals("class Broken\n", target.readText())
 
         val secondApproval = mutations.approve(
             proposal.id,
-            OwnerApprovalToken.typed(proposal.id, ApprovalPhrase.forProposal(proposal.id))!!
+            OwnerApprovalToken.typed(proposal.id, ownerPhrase, ownerPhrase)!!
         )
         assertTrue(secondApproval is MutationApprovalResult.Applied)
         assertEquals("class Main\n", target.readText())
@@ -229,13 +229,14 @@ class SelfEvolutionTest {
 
 
     @Test
-    fun approvalChallengeIsBoundToProposalId() {
-        assertEquals(ApprovalPhrase.forProposal("proposal-a"), ApprovalPhrase.forProposal("proposal-a"))
-        val phraseA = ApprovalPhrase.forProposal("proposal-a")
-        val phraseB = ApprovalPhrase.forProposal("proposal-b")
-        assertTrue(phraseA.startsWith("APPROVE CHANGE "))
-        assertEquals(8, phraseA.split(" ").size)
-        assertFalse(phraseA == phraseB)
+    fun approvalPhraseIsSuppliedByOwnerAndNotDerivedFromProposalId() {
+        val phraseA = "owner-created phrase A"
+        val phraseB = "owner-created phrase B"
+        assertTrue(OwnerApprovalToken.spoken("proposal-a", phraseA, phraseA) != null)
+        assertTrue(OwnerApprovalToken.spoken("proposal-b", phraseB, phraseB) != null)
+        assertFalse(
+            OwnerApprovalToken.typed("proposal-a", phraseA, phraseB) != null
+        )
     }
 
 }
