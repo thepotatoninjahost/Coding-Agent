@@ -71,6 +71,7 @@ class ModelSettingsTest {
             baseUrl = "https://example.com/v1/",
             apiKey = "secret-value",
             modelName = "whatever-the-user-picked",
+            systemPrompt = "Prefer concise Kotlin examples.",
             onboarded = true
         )
         val restored = ModelSettings.fromJson(ModelSettings.toJson(original))
@@ -78,6 +79,7 @@ class ModelSettingsTest {
         assertEquals("https://example.com/v1", restored.baseUrl)
         assertEquals("secret-value", restored.apiKey)
         assertEquals("whatever-the-user-picked", restored.modelName)
+        assertEquals("Prefer concise Kotlin examples.", restored.systemPrompt)
         assertTrue(restored.onboarded)
         assertFalse(restored.statusSummary().contains("secret-value"))
     }
