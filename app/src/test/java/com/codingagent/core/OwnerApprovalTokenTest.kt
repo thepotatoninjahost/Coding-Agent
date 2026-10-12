@@ -5,59 +5,59 @@ import com.codingagent.workspace.ApprovalPhrase
 import com.codingagent.workspace.OwnerApprovalToken
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class OwnerApprovalTokenTest {
-    @Test
-    fun proposalChallengeUsesSixProposalSpecificWords() {
-        val first = ApprovalPhrase.forProposal("proposal-1234")
-        val second = ApprovalPhrase.forProposal("proposal-5678")
+    private val ownerPhrase = "owner-created test phrase"
 
-        assertFalse(first == second)
-        assertEquals(8, first.split(" ").size)
-        assertTrue(first.startsWith("APPROVE CHANGE "))
+    @Test
+    fun phraseFingerprintChangesWhenOwnerPhraseChanges() {
+        assertNotEquals(
+            ApprovalPhrase.fingerprint(ownerPhrase),
+            ApprovalPhrase.fingerprint("a different owner-created phrase")
+        )
     }
 
     @Test
-    fun spokenPhraseMustMatchProposalBoundChallenge() {
-        val phrase = ApprovalPhrase.forProposal("proposal-1234")
-        assertNotNull(OwnerApprovalToken.spoken("proposal-1234", phrase.lowercase()))
-        assertNull(OwnerApprovalToken.spoken("proposal-1234", "APPROVE CHANGE DIFFERENT"))
-        assertNull(OwnerApprovalToken.spoken("proposal-1234", "APPROVE CHANGE"))
+    fun spokenPhraseMustMatchOwnerCreatedPhrase() {
+        assertTrue(OwnerApprovalToken.spoken("proposal-1234", ownerPhrase, ownerPhrase.lowercase()) != null)
+        assertNull(OwnerApprovalToken.spoken("proposal-1234", ownerPhrase, "different phrase"))
+        assertNull(OwnerApprovalToken.spoken("proposal-1234", " ", ownerPhrase))
     }
 
     @Test
     fun typedPhraseMustMatchExactly() {
-        val phrase = ApprovalPhrase.forProposal("proposal-1234")
-        assertNotNull(OwnerApprovalToken.typed("proposal-1234", phrase))
-        assertNull(OwnerApprovalToken.typed("proposal-1234", phrase.lowercase()))
-        assertNull(OwnerApprovalToken.typed("proposal-1234", "$phrase "))
+        assertTrue(OwnerApprovalToken.typed("proposal-1234", ownerPhrase, ownerPhrase) != null)
+        assertNull(OwnerApprovalToken.typed("proposal-1234", ownerPhrase, ownerPhrase.lowercase()))
+        assertNull(OwnerApprovalToken.typed("proposal-1234", ownerPhrase, "$ownerPhrase "))
     }
 
     @Test
-    fun tokenIsBoundToProposalChannelAndConsumedOnce() {
-        val phrase = ApprovalPhrase.forProposal("proposal-1234")
-        val token = OwnerApprovalToken.spoken("proposal-1234", phrase, now = 1_000L)!!
+    fun tokenIsBoundToProposalChannelPhraseAndConsumedOnce() {
+        val token = OwnerApprovalToken.spoken("proposal-1234", ownerPhrase, ownerPhrase, now = 1_000L)!!
 
         assertEquals(ApprovalChannel.SPOKEN_PHRASE, token.channel)
         assertTrue(token.consume("proposal-1234", ApprovalChannel.SPOKEN_PHRASE, 1_001L))
         assertFalse(token.consume("proposal-1234", ApprovalChannel.SPOKEN_PHRASE, 1_002L))
-        val other = OwnerApprovalToken.spoken("proposal-1234", phrase, now = 1_000L)!!
+        val other = OwnerApprovalToken.spoken("proposal-1234", ownerPhrase, ownerPhrase, now = 1_000L)!!
         assertFalse(other.consume("proposal-2", ApprovalChannel.SPOKEN_PHRASE, 1_001L))
         assertFalse(other.consume("proposal-1234", ApprovalChannel.TYPED_PHRASE, 1_001L))
+        assertNotEquals(
+            other.phraseFingerprint,
+            OwnerApprovalToken.typed("proposal-1234", "different owner phrase", "different owner phrase")!!.phraseFingerprint
+        )
     }
 
     @Test
     fun tokenExpiresAndCannotBeUsedBeforeIssueTime() {
-        val phrase = ApprovalPhrase.forProposal("proposal-1234")
-        val early = OwnerApprovalToken.typed("proposal-1234", phrase, now = 2_000L)!!
+        val early = OwnerApprovalToken.typed("proposal-1234", ownerPhrase, ownerPhrase, now = 2_000L)!!
         assertFalse(early.consume("proposal-1234", ApprovalChannel.TYPED_PHRASE, 1_999L))
         assertTrue(early.consume("proposal-1234", ApprovalChannel.TYPED_PHRASE, 2_000L))
 
-        val expired = OwnerApprovalToken.typed("proposal-1234", phrase, now = 1_000L)!!
+        val expired = OwnerApprovalToken.typed("proposal-1234", ownerPhrase, ownerPhrase, now = 1_000L)!!
         assertFalse(expired.consume("proposal-1234", ApprovalChannel.TYPED_PHRASE, 61_001L))
     }
 }
