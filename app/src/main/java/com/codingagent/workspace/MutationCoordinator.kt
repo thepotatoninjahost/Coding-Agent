@@ -12,7 +12,6 @@ import com.codingagent.agent.SelfEvolution
 import com.codingagent.agent.SelfRepair
 import com.codingagent.agent.RepairCycleConfig
 import com.codingagent.intake.TaskOperation
-import com.codingagent.intake.TaskIntakeParser
 
 /**
  * ONE JOB: Dual-approval staging, constitution checks, and apply/reject of code changes.
@@ -47,7 +46,8 @@ class MutationCoordinator(
     internal val workspace: ProjectWorkspace,
     private val ledger: ApprovalLedger = ApprovalLedger(),
     private val now: () -> Long = { System.currentTimeMillis() },
-    private val repairConfig: RepairCycleConfig = RepairCycleConfig()
+    private val repairConfig: RepairCycleConfig = RepairCycleConfig(),
+    private val postApplyVerifier: (() -> VerificationReport)? = null
 ) {
     private val pending = linkedMapOf<String, PendingChangeProposal>()
     private var pendingReconciliationFailed = false
@@ -295,12 +295,12 @@ class MutationCoordinator(
 
             val appliedChangeSet = workspace.applyApproved(proposal.changeSet)
             applied = appliedChangeSet
-            val intake = TaskIntakeParser(workspace.projectRoot()).parse(proposal.request)
-            val postApply = if (intake.verificationCommands.isEmpty()) {
-                workspace.verify()
-            } else {
-                workspace.runChecks(intake.verificationCommands, 180)
-            }
+            // Approval authorizes this exact file mutation, not execution of imported project scripts.
+            // Static verification is local and bounded. Build/test commands require explicit owner action.
+            val staticReport = postApplyVerifier?.invoke() ?: workspace.verify()
+            val postApply = staticReport.copy(
+                warnings = staticReport.warnings + "Static verification completed; project build/test commands were not executed automatically. Review scripts and run them explicitly in the owner-controlled terminal."
+            )
             if (!postApply.passed) {
                 val details = buildString {
                     append("Approved change failed post-apply checks")
@@ -423,8 +423,9 @@ class MutationCoordinator(
                     )
                 }
             }
-            recordEvolution(candidate, appliedChangeSet, postApply)
-            MutationApprovalResult.Applied(candidate, appliedChangeSet)
+            val completedProposal = candidate.copy(verification = postApply)
+            recordEvolution(completedProposal, appliedChangeSet, postApply)
+            MutationApprovalResult.Applied(completedProposal, appliedChangeSet)
         } catch (error: Exception) {
             val completedChangeSet = applied
             if (completedChangeSet != null) {

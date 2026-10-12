@@ -336,6 +336,18 @@ private fun CodingAgentApp(privateDir: File) {
 
     fun onChangeApplied(result: MutationApprovalResult.Applied) {
         val paths = result.changeSet.changes.map { it.path }.distinct()
+        val verification = result.proposal.verification
+        val verificationSummary = buildString {
+            append(if (verification.passed) "Static verification passed." else "Static verification failed.")
+            if (verification.issues.isNotEmpty()) {
+                append("\nIssues:\n")
+                append(verification.issues.joinToString("\n") { "- ${it.path}:${it.line}: ${it.message}" })
+            }
+            if (verification.warnings.isNotEmpty()) {
+                append("\nWarnings:\n")
+                append(verification.warnings.joinToString("\n") { "- $it" })
+            }
+        }
         workspace?.let { ws ->
             fileList = ws.summary().files.map { it.path }.sorted()
         }
@@ -344,13 +356,13 @@ private fun CodingAgentApp(privateDir: File) {
         pendingProposal = null
         pendingProposalId = null
         status = AgentStatus.READY
-        detail = "APPLIED ${paths.size} file(s): ${paths.joinToString().take(100)}"
+        detail = "APPLIED ${paths.size} file(s): ${paths.joinToString().take(100)}\n$verificationSummary"
         store.recordChatMessage(
             ChatMessage(
                 role = ChatRole.SYSTEM,
                 content = "APPLIED to disk after dual approval.\nFiles:\n" +
                     paths.joinToString("\n") { "- $it" } +
-                    "\nRequest: ${result.proposal.request.take(200)}"
+                    "\nRequest: ${result.proposal.request.take(200)}\n$verificationSummary"
             )
         )
         chatMessages = store.recentChatMessages().asReversed()
