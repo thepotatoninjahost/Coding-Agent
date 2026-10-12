@@ -54,11 +54,11 @@ class AcceptancePathTest {
         assertEquals("fun a() = 1\n", root.resolve("src/A.kt").readText())
         assertEquals("fun b() = 1\n", root.resolve("src/B.kt").readText())
 
-        val first = coordinator.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id))
+        val first = coordinator.approve(proposal.id, testApprovalToken(coordinator, proposal.id))
         assertTrue(first is MutationApprovalResult.AwaitingSecond)
         assertEquals("fun a() = 1\n", root.resolve("src/A.kt").readText())
 
-        val second = coordinator.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id))
+        val second = coordinator.approve(proposal.id, testApprovalToken(coordinator, proposal.id))
         assertTrue(second is MutationApprovalResult.Applied)
         assertEquals("fun a() = 2\n", root.resolve("src/A.kt").readText())
         assertEquals("fun b() = 2\n", root.resolve("src/B.kt").readText())
@@ -115,10 +115,10 @@ class AcceptancePathTest {
             listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 2\n"))
         ) as MutationProposeResult.Proposed).proposal
 
-        assertTrue(coordinator.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id)) is MutationApprovalResult.AwaitingSecond)
+        assertTrue(coordinator.approve(proposal.id, testApprovalToken(coordinator, proposal.id)) is MutationApprovalResult.AwaitingSecond)
         assertTrue("Test requires filesystem read permissions", unreadable.setReadable(false, false))
         try {
-            val result = coordinator.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id))
+            val result = coordinator.approve(proposal.id, testApprovalToken(coordinator, proposal.id))
             assertTrue("Unexpected result: $result", result is MutationApprovalResult.Rejected)
             assertEquals("fun main() = 1\n", root.resolve("Main.kt").readText())
             assertEquals("open", OpenJobStore.load(root)?.status)
@@ -146,9 +146,9 @@ class AcceptancePathTest {
         ) as MutationProposeResult.Proposed).proposal
 
         assertTrue(
-            coordinator.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id)) is MutationApprovalResult.AwaitingSecond
+            coordinator.approve(proposal.id, testApprovalToken(coordinator, proposal.id)) is MutationApprovalResult.AwaitingSecond
         )
-        val result = coordinator.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id))
+        val result = coordinator.approve(proposal.id, testApprovalToken(coordinator, proposal.id))
 
         assertTrue(result is MutationApprovalResult.Rejected)
         assertTrue((result as MutationApprovalResult.Rejected).reason.contains("recovery-required"))
@@ -186,7 +186,7 @@ class AcceptancePathTest {
         ) as MutationProposeResult.Proposed).proposal
 
         assertTrue(OpenJobStore.file(root).delete())
-        val result = coordinator.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id))
+        val result = coordinator.approve(proposal.id, testApprovalToken(coordinator, proposal.id))
 
         assertTrue(result is MutationApprovalResult.Rejected)
         assertEquals("fun main() = 1\n", root.resolve("Main.kt").readText())
@@ -202,7 +202,7 @@ class AcceptancePathTest {
             "recover interrupted apply with missing job marker",
             listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 2\n"))
         ) as MutationProposeResult.Proposed).proposal
-        assertTrue(coordinator.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id)) is MutationApprovalResult.AwaitingSecond)
+        assertTrue(coordinator.approve(proposal.id, testApprovalToken(coordinator, proposal.id)) is MutationApprovalResult.AwaitingSecond)
 
         OpenJobStore.markApplying(root, proposal.id, listOf("Main.kt"), proposal.request)
         workspace.applyApproved(proposal.changeSet)
@@ -215,7 +215,7 @@ class AcceptancePathTest {
         assertEquals("fun main() = 2\n", root.resolve("Main.kt").readText())
         assertTrue(restarted.approve(
             proposal.id,
-            OwnerApprovalToken.authenticated(proposal.id)
+            testApprovalToken(coordinator, proposal.id)
         ) is MutationApprovalResult.Rejected)
     }
 
@@ -231,7 +231,7 @@ class AcceptancePathTest {
         assertTrue(OpenJobStore.load(root)?.recoveryReason.orEmpty().contains("pending proposal is missing"))
         assertTrue(coordinator.approve(
             "missing-proposal-id",
-            OwnerApprovalToken.authenticated("missing-proposal-id")
+            OwnerApprovalToken.spoken("missing-proposal-id", com.codingagent.workspace.ApprovalPhrase.forProposal("missing-proposal-id"))!!
         ) is MutationApprovalResult.Rejected)
     }
 
@@ -246,7 +246,7 @@ class AcceptancePathTest {
         ) as MutationProposeResult.Proposed).proposal
 
         OpenJobStore.file(root).writeText("not valid json")
-        val result = coordinator.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id))
+        val result = coordinator.approve(proposal.id, testApprovalToken(coordinator, proposal.id))
 
         assertTrue(result is MutationApprovalResult.Rejected)
         assertEquals("recovery-required", OpenJobStore.load(root)?.status)
@@ -269,7 +269,7 @@ class AcceptancePathTest {
 
         assertTrue(second is MutationProposeResult.Rejected)
         assertEquals(first.id, OpenJobStore.load(root)?.proposalId)
-        assertTrue(coordinator.approve(first.id, OwnerApprovalToken.authenticated(first.id)) is MutationApprovalResult.AwaitingSecond)
+        assertTrue(coordinator.approve(first.id, testApprovalToken(coordinator, first.id)) is MutationApprovalResult.AwaitingSecond)
         assertEquals("fun main() = 1\n", root.resolve("Main.kt").readText())
     }
 
@@ -289,7 +289,7 @@ class AcceptancePathTest {
             listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 3\n"))
         )
         assertTrue(restaged is MutationProposeResult.Rejected)
-        val result = coordinator.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id))
+        val result = coordinator.approve(proposal.id, testApprovalToken(coordinator, proposal.id))
 
         assertTrue(result is MutationApprovalResult.Rejected)
         assertEquals("open", OpenJobStore.load(root)?.status)
@@ -307,7 +307,7 @@ class AcceptancePathTest {
             listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 2\n"))
         ) as MutationProposeResult.Proposed).proposal
 
-        assertTrue(first.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id)) is MutationApprovalResult.AwaitingSecond)
+        assertTrue(first.approve(proposal.id, testApprovalToken(first, proposal.id)) is MutationApprovalResult.AwaitingSecond)
         OpenJobStore.markApplying(root, proposal.id, listOf("Main.kt"), proposal.request)
         workspace.applyApproved(proposal.changeSet)
 
@@ -328,7 +328,7 @@ class AcceptancePathTest {
             listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 2\n"))
         ) as MutationProposeResult.Proposed).proposal
 
-        assertTrue(first.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id)) is MutationApprovalResult.AwaitingSecond)
+        assertTrue(first.approve(proposal.id, testApprovalToken(first, proposal.id)) is MutationApprovalResult.AwaitingSecond)
         OpenJobStore.markApplying(root, proposal.id, listOf("Main.kt"), proposal.request)
 
         val restarted = MutationCoordinator(ProjectWorkspace(root))
@@ -336,7 +336,7 @@ class AcceptancePathTest {
         assertEquals(proposal.id, OpenJobStore.load(root)?.proposalId)
         assertEquals(1, restarted.pending().single().approvalCount)
         assertTrue(
-            restarted.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id)) is MutationApprovalResult.Applied
+            restarted.approve(proposal.id, testApprovalToken(restarted, proposal.id)) is MutationApprovalResult.Applied
         )
         assertEquals("fun main() = 2\n", root.resolve("Main.kt").readText())
     }
@@ -357,13 +357,13 @@ class AcceptancePathTest {
             )
         ) as MutationProposeResult.Proposed).proposal
 
-        assertTrue(first.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id)) is MutationApprovalResult.AwaitingSecond)
+        assertTrue(first.approve(proposal.id, testApprovalToken(first, proposal.id)) is MutationApprovalResult.AwaitingSecond)
         OpenJobStore.markApplying(root, proposal.id, proposal.changeSet.changes.map { it.path }, proposal.request)
         workspace.replace("src/A.kt", "fun a() = 1\n", "fun a() = 2\n", "simulated partial apply")
 
         val restarted = MutationCoordinator(ProjectWorkspace(root))
         assertEquals("recovery-required", OpenJobStore.load(root)?.status)
-        val blocked = restarted.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id))
+        val blocked = restarted.approve(proposal.id, testApprovalToken(restarted, proposal.id))
         assertTrue(blocked is MutationApprovalResult.Rejected)
         assertEquals("fun a() = 2\n", root.resolve("src/A.kt").readText())
         assertEquals("fun b() = 1\n", root.resolve("src/B.kt").readText())
@@ -454,7 +454,7 @@ class AcceptancePathTest {
             listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 2\n"))
         ) as MutationProposeResult.Proposed
 
-        val first = firstCoordinator.approve(proposed.proposal.id, OwnerApprovalToken.authenticated(proposed.proposal.id))
+        val first = firstCoordinator.approve(proposed.proposal.id, testApprovalToken(firstCoordinator, proposed.proposal.id))
         assertTrue(first is MutationApprovalResult.AwaitingSecond)
         assertEquals(1, (first as MutationApprovalResult.AwaitingSecond).approval.confirmationNumber)
 
@@ -463,7 +463,7 @@ class AcceptancePathTest {
         assertEquals(1, restored.approvalCount)
         assertEquals(1, restored.approvals.single().confirmationNumber)
 
-        val second = restartedCoordinator.approve(restored.id, OwnerApprovalToken.authenticated(restored.id))
+        val second = restartedCoordinator.approve(restored.id, testApprovalToken(restartedCoordinator, restored.id))
         assertTrue(second is MutationApprovalResult.Applied)
         val applied = second as MutationApprovalResult.Applied
         assertEquals(2, applied.proposal.approvalCount)
@@ -531,7 +531,7 @@ class AcceptancePathTest {
 
         val result = coordinator.approve(
             proposal.id,
-            OwnerApprovalToken.authenticated("different-proposal")
+            OwnerApprovalToken.spoken("different-proposal", com.codingagent.workspace.ApprovalPhrase.forProposal("different-proposal"))!!
         )
         assertTrue(result is MutationApprovalResult.Rejected)
         assertEquals(0, coordinator.pending().single().approvalCount)
@@ -547,7 +547,7 @@ class AcceptancePathTest {
             "replay protected",
             listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 2\n"))
         ) as MutationProposeResult.Proposed).proposal
-        val token = OwnerApprovalToken.authenticated(proposal.id)
+        val token = OwnerApprovalToken.spoken(proposal.id, com.codingagent.workspace.ApprovalPhrase.forProposal(proposal.id))!!
 
         assertTrue(coordinator.approve(proposal.id, token) is MutationApprovalResult.AwaitingSecond)
         assertTrue(coordinator.approve(proposal.id, token) is MutationApprovalResult.Rejected)
@@ -571,7 +571,7 @@ class AcceptancePathTest {
         now = proposal.expiresAt + 1L
         val result = coordinator.approve(
             proposal.id,
-            OwnerApprovalToken.authenticated(proposal.id, now = now)
+            OwnerApprovalToken.spoken(proposal.id, com.codingagent.workspace.ApprovalPhrase.forProposal(proposal.id), now = now)!!
         )
 
         assertTrue(result is MutationApprovalResult.Rejected)
@@ -592,14 +592,14 @@ class AcceptancePathTest {
         assertTrue(
             coordinator.approve(
                 proposal.id,
-                OwnerApprovalToken.authenticated(proposal.id)
+                testApprovalToken(coordinator, proposal.id)
             ) is MutationApprovalResult.AwaitingSecond
         )
 
         root.resolve("Main.kt").writeText("fun main() = 99\n")
         val result = coordinator.approve(
             proposal.id,
-            OwnerApprovalToken.authenticated(proposal.id)
+            testApprovalToken(coordinator, proposal.id)
         )
 
         assertTrue(result is MutationApprovalResult.Rejected)
@@ -622,9 +622,9 @@ class AcceptancePathTest {
         val proposal = (proposeResult as MutationProposeResult.Proposed).proposal
 
         assertFalse(root.resolve("src/New.kt").exists())
-        coordinator.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id))
+        coordinator.approve(proposal.id, testApprovalToken(coordinator, proposal.id))
         assertFalse(root.resolve("src/New.kt").exists())
-        val applied = coordinator.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id))
+        val applied = coordinator.approve(proposal.id, testApprovalToken(coordinator, proposal.id))
         assertTrue(applied is MutationApprovalResult.Applied)
         assertEquals("class New\n", root.resolve("src/New.kt").readText())
     }
@@ -664,8 +664,8 @@ class AcceptancePathTest {
         )
         assertTrue(proposed is MutationProposeResult.Proposed)
         val original = (proposed as MutationProposeResult.Proposed).proposal
-        assertTrue(coordinator.approve(original.id, OwnerApprovalToken.authenticated(original.id)) is MutationApprovalResult.AwaitingSecond)
-        val result = coordinator.approve(original.id, OwnerApprovalToken.authenticated(original.id))
+        assertTrue(coordinator.approve(original.id, testApprovalToken(coordinator, original.id)) is MutationApprovalResult.AwaitingSecond)
+        val result = coordinator.approve(original.id, testApprovalToken(coordinator, original.id))
         assertTrue(result is MutationApprovalResult.RepairRequired)
         val repair = (result as MutationApprovalResult.RepairRequired).proposal
         assertEquals("fun main() = 1\n", root.resolve("Main.kt").readText())
@@ -702,15 +702,15 @@ class AcceptancePathTest {
         ) as MutationProposeResult.Proposed
         var proposal = proposed.proposal
 
-        coordinator.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id))
-        var result = coordinator.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id))
+        coordinator.approve(proposal.id, testApprovalToken(coordinator, proposal.id))
+        var result = coordinator.approve(proposal.id, testApprovalToken(coordinator, proposal.id))
         assertTrue("Unexpected first repair result: $result", result is MutationApprovalResult.RepairRequired)
         proposal = (result as MutationApprovalResult.RepairRequired).proposal
         assertEquals(1, proposal.repairAttempt)
         assertEquals("Self-repair attempt 1 after failed change: run the tests", proposal.request)
 
-        coordinator.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id))
-        result = coordinator.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id))
+        coordinator.approve(proposal.id, testApprovalToken(coordinator, proposal.id))
+        result = coordinator.approve(proposal.id, testApprovalToken(coordinator, proposal.id))
         assertTrue(result is MutationApprovalResult.RepairRequired)
         proposal = (result as MutationApprovalResult.RepairRequired).proposal
         assertEquals(2, proposal.repairAttempt)
@@ -738,8 +738,8 @@ class AcceptancePathTest {
             "run the tests",
             listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = broken\n"))
         ) as MutationProposeResult.Proposed).proposal
-        first.approve(original.id, OwnerApprovalToken.authenticated(original.id))
-        val repair = (first.approve(original.id, OwnerApprovalToken.authenticated(original.id))
+        first.approve(original.id, testApprovalToken(first, original.id))
+        val repair = (first.approve(original.id, testApprovalToken(first, original.id))
             as MutationApprovalResult.RepairRequired).proposal
         assertEquals(1, repair.repairAttempt)
 
@@ -754,8 +754,8 @@ class AcceptancePathTest {
         assertEquals(repair.id, restored.id)
         assertEquals(1, restored.repairAttempt)
 
-        restarted.approve(restored.id, OwnerApprovalToken.authenticated(restored.id))
-        val next = restarted.approve(restored.id, OwnerApprovalToken.authenticated(restored.id))
+        restarted.approve(restored.id, testApprovalToken(restarted, restored.id))
+        val next = restarted.approve(restored.id, testApprovalToken(restarted, restored.id))
         assertTrue(next is MutationApprovalResult.RepairRequired)
         assertEquals(2, (next as MutationApprovalResult.RepairRequired).proposal.repairAttempt)
         assertEquals("run the tests", next.proposal.repairRootRequest)
@@ -783,15 +783,15 @@ class AcceptancePathTest {
         ) as MutationProposeResult.Proposed).proposal
 
         repeat(3) { attempt ->
-            coordinator.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id))
-            val result = coordinator.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id))
+            coordinator.approve(proposal.id, testApprovalToken(coordinator, proposal.id))
+            val result = coordinator.approve(proposal.id, testApprovalToken(coordinator, proposal.id))
             assertTrue("repair attempt ${attempt + 1} should be staged", result is MutationApprovalResult.RepairRequired)
             proposal = (result as MutationApprovalResult.RepairRequired).proposal
             assertEquals(attempt + 1, proposal.repairAttempt)
         }
 
-        coordinator.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id))
-        val terminal = coordinator.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id))
+        coordinator.approve(proposal.id, testApprovalToken(coordinator, proposal.id))
+        val terminal = coordinator.approve(proposal.id, testApprovalToken(coordinator, proposal.id))
         assertTrue("fourth repair must not be staged", terminal is MutationApprovalResult.Rejected)
         assertTrue(coordinator.pending().isEmpty())
         assertEquals("fun main() = 1\n", root.resolve("Main.kt").readText())
@@ -852,5 +852,41 @@ class AcceptancePathTest {
             ),
             names
         )
+    }
+    @Test
+    fun spokenThenExactTypedPhraseAreRequiredAndCannotBeReplayed() {
+        val root = Files.createTempDirectory("accept-spoken-typed-approval").toFile()
+        root.resolve("Main.kt").writeText("fun main() = 1\n")
+        val coordinator = MutationCoordinator(ProjectWorkspace(root))
+        val proposal = (coordinator.propose(
+            "require both approval channels",
+            listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 2\n"))
+        ) as MutationProposeResult.Proposed).proposal
+        val phrase = proposal.approvalPhrase
+
+        assertTrue(coordinator.approve(proposal.id, OwnerApprovalToken.typed(proposal.id, phrase)!!) is MutationApprovalResult.Rejected)
+        assertTrue(OwnerApprovalToken.spoken(proposal.id, "wrong words") == null)
+        assertEquals("fun main() = 1\n", root.resolve("Main.kt").readText())
+
+        val spoken = OwnerApprovalToken.spoken(proposal.id, phrase)!!
+        assertTrue(coordinator.approve(proposal.id, spoken) is MutationApprovalResult.AwaitingSecond)
+        assertTrue(coordinator.approve(proposal.id, spoken) is MutationApprovalResult.Rejected)
+        assertTrue(OwnerApprovalToken.typed(proposal.id, phrase.lowercase()) == null)
+        assertEquals("fun main() = 1\n", root.resolve("Main.kt").readText())
+
+        val typed = OwnerApprovalToken.typed(proposal.id, phrase)!!
+        assertTrue(coordinator.approve(proposal.id, typed) is MutationApprovalResult.Applied)
+        assertTrue(coordinator.approve(proposal.id, typed) is MutationApprovalResult.Rejected)
+        assertEquals("fun main() = 2\n", root.resolve("Main.kt").readText())
+    }
+
+
+    private fun testApprovalToken(coordinator: com.codingagent.workspace.MutationCoordinator, proposalId: String): OwnerApprovalToken {
+        val proposal = coordinator.get(proposalId)
+        return if (proposal?.approvalCount == 1) {
+            OwnerApprovalToken.typed(proposalId, com.codingagent.workspace.ApprovalPhrase.forProposal(proposalId))!!
+        } else {
+            OwnerApprovalToken.spoken(proposalId, com.codingagent.workspace.ApprovalPhrase.forProposal(proposalId))!!
+        }
     }
 }
