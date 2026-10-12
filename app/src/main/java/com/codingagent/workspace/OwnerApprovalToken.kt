@@ -62,7 +62,7 @@ class OwnerApprovalToken private constructor(
             now: Long = System.currentTimeMillis()
         ): OwnerApprovalToken? {
             require(proposalId.isNotBlank()) { "Proposal id is required" }
-            if (ApprovalPhrase.normalizeSpeech(transcript) != ApprovalPhrase.forProposal(proposalId)) return null
+            if (ApprovalPhrase.normalizeSpeech(transcript) != ApprovalPhrase.normalizeSpeech(ApprovalPhrase.forProposal(proposalId))) return null
             return OwnerApprovalToken(proposalId, ApprovalChannel.SPOKEN_PHRASE, now, UUID.randomUUID().toString())
         }
 
