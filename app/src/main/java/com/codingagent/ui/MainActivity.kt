@@ -888,6 +888,7 @@ private fun CodingAgentApp(privateDir: File) {
                     }
                 }
             }
+        }
 
         if (showTypedApprovalDialog) {
             val proposal = pendingProposal
@@ -931,7 +932,6 @@ private fun CodingAgentApp(privateDir: File) {
                     TextButton(onClick = { showTypedApprovalDialog = false }) { Text("Cancel") }
                 }
             )
-        }
         }
     }
 }
