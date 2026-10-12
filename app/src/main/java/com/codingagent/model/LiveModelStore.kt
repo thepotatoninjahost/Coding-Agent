@@ -156,6 +156,7 @@ class LiveModelStore(private val root: File) {
         val directory = modelRoot.resolve(id)
         if (!directory.isDirectory) return null
         val fields = history().firstOrNull { it.id == id } ?: return null
+        if (runCatching { checksumDirectory(directory) != fields.checksum }.getOrDefault(true)) return null
         val payload = directory.listFiles()
             ?.filter { it.isFile && it.name != MANIFEST_NAME }
             .orEmpty()
