@@ -28,6 +28,7 @@ import com.codingagent.workspace.TerminalSession
  * Operational checks against the single spine ([AutonomousAgent]).
  */
 class OperationalAgentTest {
+    private val testOwnerPhrase = "owner-created test phrase"
     private val emptyKnowledge = object : AgentKnowledge {
         override fun search(query: String, limit: Int): List<KnowledgeHit> = emptyList()
     }
@@ -154,8 +155,8 @@ class OperationalAgentTest {
         assertTrue(result.proposalId.isNotBlank())
         assertEquals("fun main() = 1\n", root.resolve("src/Main.kt").readText())
 
-        assertTrue(spine.approveProposal(result.proposalId, OwnerApprovalToken.spoken(result.proposalId, com.codingagent.workspace.ApprovalPhrase.forProposal(result.proposalId))!!) is MutationApprovalResult.AwaitingSecond)
-        assertTrue(spine.approveProposal(result.proposalId, OwnerApprovalToken.typed(result.proposalId, com.codingagent.workspace.ApprovalPhrase.forProposal(result.proposalId))!!) is MutationApprovalResult.Applied)
+        assertTrue(spine.approveProposal(result.proposalId, OwnerApprovalToken.spoken(result.proposalId, testOwnerPhrase, testOwnerPhrase)!!) is MutationApprovalResult.AwaitingSecond)
+        assertTrue(spine.approveProposal(result.proposalId, OwnerApprovalToken.typed(result.proposalId, testOwnerPhrase, testOwnerPhrase)!!) is MutationApprovalResult.Applied)
         assertEquals("fun main() = 2\n", root.resolve("src/Main.kt").readText())
     }
 
@@ -170,8 +171,8 @@ class OperationalAgentTest {
         assertTrue(result.proposalId.isNotBlank())
         assertTrue(!root.resolve("src/Helper.kt").exists())
 
-        assertTrue(spine.approveProposal(result.proposalId, OwnerApprovalToken.spoken(result.proposalId, com.codingagent.workspace.ApprovalPhrase.forProposal(result.proposalId))!!) is MutationApprovalResult.AwaitingSecond)
-        assertTrue(spine.approveProposal(result.proposalId, OwnerApprovalToken.typed(result.proposalId, com.codingagent.workspace.ApprovalPhrase.forProposal(result.proposalId))!!) is MutationApprovalResult.Applied)
+        assertTrue(spine.approveProposal(result.proposalId, OwnerApprovalToken.spoken(result.proposalId, testOwnerPhrase, testOwnerPhrase)!!) is MutationApprovalResult.AwaitingSecond)
+        assertTrue(spine.approveProposal(result.proposalId, OwnerApprovalToken.typed(result.proposalId, testOwnerPhrase, testOwnerPhrase)!!) is MutationApprovalResult.Applied)
         val written = root.resolve("src/Helper.kt").readText()
         assertTrue(written.contains("class Helper"))
         assertTrue(written.contains("fun run"))
@@ -240,9 +241,9 @@ class OperationalAgentTest {
     private fun testApprovalToken(coordinator: com.codingagent.workspace.MutationCoordinator, proposalId: String): OwnerApprovalToken {
         val proposal = coordinator.get(proposalId)
         return if (proposal?.approvalCount == 1) {
-            OwnerApprovalToken.typed(proposalId, com.codingagent.workspace.ApprovalPhrase.forProposal(proposalId))!!
+            OwnerApprovalToken.typed(proposalId, testOwnerPhrase, testOwnerPhrase)!!
         } else {
-            OwnerApprovalToken.spoken(proposalId, com.codingagent.workspace.ApprovalPhrase.forProposal(proposalId))!!
+            OwnerApprovalToken.spoken(proposalId, testOwnerPhrase, testOwnerPhrase)!!
         }
     }
 }
