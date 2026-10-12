@@ -92,7 +92,7 @@ class CommandRunner(private val directory: File) {
                 cancelled -> 130
                 else -> -1
             }
-            val note = if (cancelled && stderr.isEmpty()) "command cancelled" else ""
+            val note = if (cancelled) "command cancelled" else ""
             CommandResult(
                 command.joinToString(" "),
                 exit,
@@ -119,13 +119,19 @@ class CommandRunner(private val directory: File) {
     }
 
     private fun readLimited(input: java.io.InputStream, output: StringBuilder, onChunk: ((String) -> Unit)? = null) {
-        val buffer = ByteArray(8 * 1024)
-        while (true) {
-            val count = input.read(buffer)
-            if (count < 0) break
-            val chunk = String(buffer, 0, count, Charsets.UTF_8)
-            appendLimited(output, chunk)
-            onChunk?.invoke(chunk)
+        val buffer = CharArray(8 * 1024)
+        var delivered = 0
+        input.reader(Charsets.UTF_8).use { reader ->
+            while (true) {
+                val count = reader.read(buffer)
+                if (count < 0) break
+                val remaining = 256 * 1024 - delivered
+                if (remaining <= 0) continue
+                val chunk = String(buffer, 0, minOf(count, remaining))
+                appendLimited(output, chunk)
+                onChunk?.invoke(chunk)
+                delivered += chunk.length
+            }
         }
     }
 

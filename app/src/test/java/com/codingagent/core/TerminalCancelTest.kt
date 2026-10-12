@@ -15,6 +15,17 @@ import com.codingagent.workspace.TerminalEntry
 import com.codingagent.workspace.TerminalSession
 
 class TerminalCancelTest {
+
+    @Test
+    fun streamedOutputCallbackStopsAtTheCaptureLimit() {
+        val root = Files.createTempDirectory("terminal-output-cap").toFile()
+        val workspace = ProjectWorkspace(root)
+        val seen = StringBuilder()
+        val entry = workspace.terminal().execute("yes x | head -c 400000", onStdout = { seen.append(it) }, timeoutSeconds = 10)
+        assertTrue(entry.stdout.length <= 256 * 1024)
+        assertTrue(seen.length <= 256 * 1024)
+    }
+
     @Test
     fun cancelStopsLongRunningCommand() {
         val root = Files.createTempDirectory("term-cancel").toFile()
@@ -23,7 +34,7 @@ class TerminalCancelTest {
         val started = CountDownLatch(1)
         val thread = Thread {
             started.countDown()
-            resultRef.set(runner.run(listOf("sh", "-c", "sleep 30"), timeoutSeconds = 60))
+            resultRef.set(runner.run(listOf("sh", "-c", "echo early-error >&2; sleep 30"), timeoutSeconds = 60))
         }
         thread.start()
         assertTrue(started.await(2, TimeUnit.SECONDS))
@@ -33,7 +44,7 @@ class TerminalCancelTest {
         val result = resultRef.get()
         assertTrue(result != null)
         assertEquals(130, result.exitCode)
-        assertTrue(result.stderr.contains("cancelled") || result.exitCode == 130)
+        assertTrue(result.stderr.contains("cancelled"))
     }
 
     @Test

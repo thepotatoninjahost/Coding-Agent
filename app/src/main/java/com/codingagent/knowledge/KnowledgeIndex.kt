@@ -6,6 +6,7 @@ import java.io.File
 import java.util.Locale
 import com.codingagent.workspace.KnowledgeChunk
 import com.codingagent.workspace.KnowledgeHit
+import com.codingagent.workspace.AtomicFileWriter
 
 /**
  * ONE JOB: Index knowledge documents for fast local search.
@@ -95,13 +96,13 @@ class KnowledgeIndex(private val root: File) : KnowledgeProvider {
                 if (!keep) removed = true
                 keep
             }
-            indexFile.writeText(if (kept.isEmpty()) "" else kept.joinToString("\n", postfix = "\n"))
+            AtomicFileWriter.write(indexFile, if (kept.isEmpty()) "" else kept.joinToString("\n", postfix = "\n"))
         }
         if (documentsFile.exists()) {
             val keptDocs = documentsFile.readLines().filter { line ->
                 runCatching { JSONObject(line).optString("name") }.getOrNull() != document
             }
-            documentsFile.writeText(if (keptDocs.isEmpty()) "" else keptDocs.joinToString("\n", postfix = "\n"))
+            AtomicFileWriter.write(documentsFile, if (keptDocs.isEmpty()) "" else keptDocs.joinToString("\n", postfix = "\n"))
         }
         return removed
     }

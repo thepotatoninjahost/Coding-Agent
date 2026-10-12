@@ -66,7 +66,7 @@ list_files, read_file, search_project, search_knowledge, research_web, replace_t
         ),
         ModelToolDefinition(
             "search_project",
-            "Search the project source for a text or regex-like query. Returns matching lines with paths.",
+            "Search project source for a case-insensitive literal string (maximum 256 characters). Returns matching lines with paths.",
             """{"type":"object","properties":{"query":{"type":"string","description":"Search query"}},"required":["query"]}"""
         ),
         ModelToolDefinition(
@@ -77,7 +77,7 @@ list_files, read_file, search_project, search_knowledge, research_web, replace_t
         ModelToolDefinition(
             "research_web",
             "Research the web for technical information. Use for APIs, errors, and external facts not in the project.",
-            """{"type":"object","properties":{"query":{"type":"string","description":"Research query"},"mode":{"type":"string","description":"BROAD or DEEP"},"sources":{"type":"integer","description":"Max sources to gather"}},"required":["query"]}"""
+            """{"type":"object","properties":{"query":{"type":"string","description":"Research query"},"mode":{"type":"string","description":"BROAD, EXPERIMENTAL, THEORETICAL, EMPIRICAL"},"sources":{"type":"integer","description":"Max sources to gather"}},"required":["query"]}"""
         ),
         ModelToolDefinition(
             "replace_text",

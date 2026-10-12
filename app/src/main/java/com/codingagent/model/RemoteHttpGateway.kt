@@ -272,6 +272,9 @@ class RemoteHttpGateway(
 
     private fun responseFromChatMessage(message: JSONObject): ModelResponse {
         val calls = message.optJSONArray("tool_calls")
+        if (calls != null && calls.length() > 1) {
+            return ModelResponse.Failure("Model returned multiple tool calls; only one tool call is accepted per turn")
+        }
         if (calls != null && calls.length() > 0) {
             val first = calls.optJSONObject(0)
             val function = first?.optJSONObject("function") ?: first
@@ -316,8 +319,11 @@ class RemoteHttpGateway(
                         when (part) {
                             is String -> if (part.isNotBlank()) append(part)
                             is JSONObject -> {
-                                val text = part.optString("text").ifBlank { part.optString("content") }
-                                if (text.isNotBlank()) append(text)
+                                val type = part.optString("type").lowercase()
+                                if (!type.contains("reasoning") && type != "analysis") {
+                                    val text = part.optString("text").ifBlank { part.optString("content") }
+                                    if (text.isNotBlank()) append(text)
+                                }
                             }
                         }
                     }
@@ -325,11 +331,14 @@ class RemoteHttpGateway(
                 if (parts.isNotBlank()) return parts
             }
             is JSONObject -> {
-                val text = direct.optString("text").ifBlank { direct.optString("content") }
-                if (text.isNotBlank()) return text.trim()
+                val type = direct.optString("type").lowercase()
+                if (!type.contains("reasoning") && type != "analysis") {
+                    val text = direct.optString("text").ifBlank { direct.optString("content") }
+                    if (text.isNotBlank()) return text.trim()
+                }
             }
         }
-        for (key in listOf("reasoning_content", "reasoning", "refusal", "output_text")) {
+        for (key in listOf("refusal", "output_text")) {
             val v = message.optString(key)
             if (v.isNotBlank()) return v.trim()
         }

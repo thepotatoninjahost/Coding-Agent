@@ -9,6 +9,26 @@ import java.io.File
  * Prefer Path.relativize, then string prefix strip, never leak absolute device paths.
  */
 object ProjectPaths {
+    private val secretFileNames = setOf(
+        ".netrc", ".npmrc", ".pypirc", "credentials.json", "secrets.json",
+        "id_rsa", "id_dsa", "id_ecdsa", "id_ed25519", "authorized_keys"
+    )
+    private val secretExtensions = setOf("pem", "key", "p12", "pfx", "keystore", "jks")
+
+    /** Shared exclusion for credential stores and internal metadata. */
+    fun isSensitivePath(path: String): Boolean {
+        val parts = path.replace('\\', '/').split('/').filter { it.isNotBlank() && it != "." }
+        return parts.any { part ->
+            part.equals(".coding-agent", ignoreCase = true) ||
+                part.equals(".git", ignoreCase = true) ||
+                part.equals(".ssh", ignoreCase = true) ||
+                part.equals(".aws", ignoreCase = true) ||
+                part.startsWith(".env", ignoreCase = true) ||
+                part.lowercase() in secretFileNames ||
+                part.substringAfterLast('.', "").lowercase() in secretExtensions
+        }
+    }
+
     fun relative(root: File, file: File): String {
         val rootCanon = root.canonicalFile
         val fileCanon = file.canonicalFile

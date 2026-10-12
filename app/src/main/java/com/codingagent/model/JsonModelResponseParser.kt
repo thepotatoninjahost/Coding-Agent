@@ -22,8 +22,9 @@ class JsonModelResponseParser {
                     thought = json.optString("thought")
                 )
                 json.optString("content").isNotBlank() -> ModelResponse.Text(json.getString("content"))
-                json.optString("reasoning_content").isNotBlank() -> ModelResponse.Text(json.getString("reasoning_content"))
                 json.optString("text").isNotBlank() -> ModelResponse.Text(json.getString("text"))
+                json.has("reasoning_content") || json.has("reasoning") ->
+                    ModelResponse.Failure("Model returned internal reasoning without a user-facing answer")
                 else -> ModelResponse.Text(trimmed)
             }
         } catch (_: Exception) {

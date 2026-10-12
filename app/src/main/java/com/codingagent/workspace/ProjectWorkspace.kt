@@ -209,8 +209,8 @@ class ProjectWorkspace(private val root: File) {
         val canonicalFile = file.canonicalFile
         require(canonicalFile.toPath().startsWith(canonicalRoot)) { "Unsafe project path" }
         val relative = canonicalRoot.relativize(canonicalFile.toPath()).toString().replace('\\', '/')
-        require(!relative.substringBefore('/').equals(".coding-agent", ignoreCase = true)) {
-            "Coding Agent internal metadata is not a mutable project path"
+        require(!ProjectPaths.isSensitivePath(relative)) {
+            "Sensitive project paths are not mutable project paths"
         }
         return file
     }
