@@ -210,7 +210,7 @@ internal fun ApprovalCard(approvalCount: Int, reason: String, approvalPhrase: St
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("CODE CHANGE REVIEW", color = FluoroOrange, fontWeight = FontWeight.Bold)
             Text(reason, color = NeonGreen, fontSize = 13.sp)
-            Text("Speak the challenge phrase first, then type it exactly. Both steps must be completed for this proposal.", color = SoftGreen, fontSize = 12.sp)
+            Text("Create your own phrase, speak it, then type the exact same phrase. Both steps are required for this proposal.", color = SoftGreen, fontSize = 12.sp)
             Text(approvalPhrase, color = FluoroOrange, fontWeight = FontWeight.Bold, fontSize = 13.sp)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("${approvalCount}/2", color = SoftGreen, modifier = Modifier.weight(1f))
@@ -347,8 +347,8 @@ internal fun ReviewSurface(pending: Boolean, approvals: Int, reason: String, app
                     Text("Pending transactional proposal", color = FluoroOrange, fontWeight = FontWeight.Bold)
                     Text(reason, color = NeonGreen)
                     Text("Review changed files before confirming. Transactional writes remain checksum-guarded.", color = SoftGreen, fontSize = 12.sp)
-                    Text("Challenge phrase: $approvalPhrase", color = FluoroOrange, fontWeight = FontWeight.Bold)
-                    Text("First speak the phrase; then type the exact same phrase.", color = SoftGreen, fontSize = 12.sp)
+                    Text(if (approvalPhrase.isBlank()) "Create your own phrase when you confirm" else "Your phrase: $approvalPhrase", color = FluoroOrange, fontWeight = FontWeight.Bold)
+                    Text("Create your own phrase, speak it, then type the exact same phrase.", color = SoftGreen, fontSize = 12.sp)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(onClick = onReject, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4A2030))) { Text("Reject", color = NeonGreen) }
                         Button(onClick = onApprove, colors = ButtonDefaults.buttonColors(containerColor = FluoroOrange, contentColor = DarkPurple)) { Text("Confirm ${approvals + 1}/2") }
