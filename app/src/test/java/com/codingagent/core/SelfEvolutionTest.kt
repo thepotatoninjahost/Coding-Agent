@@ -231,7 +231,11 @@ class SelfEvolutionTest {
     @Test
     fun approvalChallengeIsBoundToProposalId() {
         assertEquals(ApprovalPhrase.forProposal("proposal-a"), ApprovalPhrase.forProposal("proposal-a"))
-        assertFalse(ApprovalPhrase.forProposal("proposal-a") == ApprovalPhrase.forProposal("proposal-b"))
+        val phraseA = ApprovalPhrase.forProposal("proposal-a")
+        val phraseB = ApprovalPhrase.forProposal("proposal-b")
+        assertTrue(phraseA.startsWith("APPROVE CHANGE "))
+        assertEquals(8, phraseA.split(" ").size)
+        assertFalse(phraseA == phraseB)
     }
 
 }
