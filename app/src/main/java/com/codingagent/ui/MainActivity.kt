@@ -351,6 +351,8 @@ private fun CodingAgentApp(privateDir: File) {
                         pendingProposal = null
                         approvalCount = 0
                         pendingApproval = false
+                        ownerCreatedApprovalPhrase = ""
+                        newOwnerPhraseText = ""
                         status = AgentStatus.READY
                         detail = "${fileList.size} files indexed"
                     }
@@ -405,6 +407,8 @@ private fun CodingAgentApp(privateDir: File) {
                             status = AgentStatus.APPROVAL
                         }
                         is MutationApprovalResult.RepairRequired -> {
+                            ownerCreatedApprovalPhrase = ""
+                            newOwnerPhraseText = ""
                             pendingProposal = result.proposal
                             pendingProposalId = result.proposal.id
                             pendingApproval = true
@@ -506,6 +510,8 @@ private fun CodingAgentApp(privateDir: File) {
         pendingProposal = null
         approvalCount = 0
         pendingApproval = false
+        ownerCreatedApprovalPhrase = ""
+        newOwnerPhraseText = ""
         status = AgentStatus.READY
         detail = detailText
     }
@@ -543,6 +549,8 @@ private fun CodingAgentApp(privateDir: File) {
         pendingProposal = null
         approvalCount = 0
         pendingApproval = false
+        ownerCreatedApprovalPhrase = ""
+        newOwnerPhraseText = ""
         status = AgentStatus.READY
         detail = "No project — New, Import, or say create project"
         store.recordChatMessage(
@@ -928,8 +936,8 @@ private fun CodingAgentApp(privateDir: File) {
                 confirmButton = {
                     TextButton(onClick = {
                         val phrase = newOwnerPhraseText
-                        if (phrase.trim().length < 8) {
-                            detail = "Choose a phrase with at least 8 non-whitespace characters."
+                        if (phrase != phrase.trim() || phrase.trim().length < 8) {
+                            detail = "Choose a phrase with at least 8 non-whitespace characters and no leading or trailing spaces."
                             return@TextButton
                         }
                         ownerCreatedApprovalPhrase = phrase
