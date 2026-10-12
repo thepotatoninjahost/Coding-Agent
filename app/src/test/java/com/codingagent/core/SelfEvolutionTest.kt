@@ -79,7 +79,74 @@ class SelfEvolutionTest {
         assertEquals(promoted.id, evolution.activeVersion())
         assertTrue(promoted.checksum.isNotBlank())
         assertEquals(staged.absolutePath, evolution.history().single().sourcePath)
+        assertEquals("Main.kt", evolution.history().single().targetPath)
         assertTrue(evolution.history().single().evaluationPassed)
         assertFalse(evolution.history().single().sourcePath == staged.name)
     }
+
+    @Test
+    fun restoresVerifiedSnapshotToItsOriginalTarget() {
+        val root = Files.createTempDirectory("evolution-restore").toFile()
+        val evolution = SelfEvolution(root)
+        val target = root.resolve("src/Main.kt")
+        target.parentFile.mkdirs()
+        target.writeText("approved source\n")
+        val staged = evolution.stageSource(target, "self-repair")
+        val promoted = evolution.promoteSource(
+            staged,
+            "self-repair",
+            VerificationReport(true, emptyList()),
+            approvedAction(),
+            approvalAt = System.currentTimeMillis()
+        ) as PromotionResult.Promoted
+        target.writeText("broken source\n")
+
+        val restored = evolution.restoreSnapshot(
+            promoted.version.id,
+            VerificationReport(true, emptyList()),
+            approvedAction(),
+            approvalAt = System.currentTimeMillis()
+        )
+
+        assertTrue(restored is SnapshotRestoreResult.Restored)
+        assertEquals("approved source\n", target.readText())
+        assertEquals(promoted.version.id, evolution.activeVersion())
+    }
+
+    @Test
+    fun refusesRestoreWhenEvaluationFailsOrSnapshotIsCorrupted() {
+        val root = Files.createTempDirectory("evolution-corrupt").toFile()
+        val evolution = SelfEvolution(root)
+        val target = root.resolve("Main.kt").apply { writeText("good\n") }
+        val staged = evolution.stageSource(target, "self-repair")
+        val promoted = evolution.promoteSource(
+            staged,
+            "self-repair",
+            VerificationReport(true, emptyList()),
+            approvedAction(),
+            approvalAt = System.currentTimeMillis()
+        ) as PromotionResult.Promoted
+        target.writeText("current\n")
+
+        val failedEvaluation = evolution.restoreSnapshot(
+            promoted.version.id,
+            VerificationReport(false, emptyList()),
+            approvedAction(),
+            approvalAt = System.currentTimeMillis()
+        )
+        assertTrue(failedEvaluation is SnapshotRestoreResult.Rejected)
+        assertEquals("current\n", target.readText())
+
+        staged.writeText("tampered\n")
+        val corrupted = evolution.restoreSnapshot(
+            promoted.version.id,
+            VerificationReport(true, emptyList()),
+            approvedAction(),
+            approvalAt = System.currentTimeMillis()
+        )
+        assertTrue(corrupted is SnapshotRestoreResult.Rejected)
+        assertTrue((corrupted as SnapshotRestoreResult.Rejected).reason.contains("checksum"))
+        assertEquals("current\n", target.readText())
+    }
+
 }
