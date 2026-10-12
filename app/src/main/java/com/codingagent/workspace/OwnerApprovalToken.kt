@@ -1,5 +1,6 @@
 package com.codingagent.workspace
 
+import java.security.MessageDigest
 import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
@@ -20,13 +21,8 @@ object ApprovalPhrase {
     )
 
     fun forProposal(proposalId: String): String {
-        val hash = proposalId.hashCode()
-        val indices = listOf(
-            hash and 63,
-            (hash ushr 6) and 63,
-            (hash ushr 12) and 63,
-            ((hash ushr 18) xor hash) and 63
-        )
+        val digest = MessageDigest.getInstance("SHA-256").digest(proposalId.toByteArray(Charsets.UTF_8))
+        val indices = (0 until 6).map { index -> digest[index].toInt() and 63 }
         return "APPROVE CHANGE " + indices.joinToString(" ") { words[it] }
     }
 
