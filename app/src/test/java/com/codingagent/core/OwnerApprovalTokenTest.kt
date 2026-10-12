@@ -16,8 +16,16 @@ class OwnerApprovalTokenTest {
     @Test
     fun phraseFingerprintChangesWhenOwnerPhraseChanges() {
         assertNotEquals(
-            ApprovalPhrase.fingerprint(ownerPhrase),
-            ApprovalPhrase.fingerprint("a different owner-created phrase")
+            ApprovalPhrase.fingerprint("proposal-1234", ownerPhrase),
+            ApprovalPhrase.fingerprint("proposal-1234", "a different owner-created phrase")
+        )
+    }
+
+    @Test
+    fun samePhraseHasDifferentVerifierForDifferentProposals() {
+        assertNotEquals(
+            ApprovalPhrase.fingerprint("proposal-1", ownerPhrase),
+            ApprovalPhrase.fingerprint("proposal-2", ownerPhrase)
         )
     }
 
