@@ -774,11 +774,10 @@ private fun CodingAgentApp(privateDir: File) {
                         pendingApproval = pendingApproval,
                         approvalCount = approvalCount,
                         reason = pendingReason,
-                        approvalPhrase = ownerCreatedApprovalPhrase,
                         onApprove = ::approvePendingProposal
                     )
                     SurfaceTab.FILES -> FilesSurface(fileList, projectQuery, { projectQuery = it }, editorPath, { editorPath = it }, editorContent, { editorContent = it }, editorDocument, tools, mutationCoordinator, onStatus = { status = it.first; detail = it.second })
-                    SurfaceTab.REVIEW -> ReviewSurface(pendingApproval, approvalCount, pendingReason, ownerCreatedApprovalPhrase, onApprove = ::approvePendingProposal, onReject = { pendingProposalId?.let { mutationCoordinator?.reject(it) }; pendingProposal = null; pendingApproval = false; pendingProposalId = null; approvalCount = 0; ownerCreatedApprovalPhrase = ""; newOwnerPhraseText = ""; status = AgentStatus.STOPPED; detail = "Proposed changes rejected" })
+                    SurfaceTab.REVIEW -> ReviewSurface(pendingApproval, approvalCount, pendingReason, onApprove = ::approvePendingProposal, onReject = { pendingProposalId?.let { mutationCoordinator?.reject(it) }; pendingProposal = null; pendingApproval = false; pendingProposalId = null; approvalCount = 0; ownerCreatedApprovalPhrase = ""; newOwnerPhraseText = ""; status = AgentStatus.STOPPED; detail = "Proposed changes rejected" })
                     SurfaceTab.TERMINAL -> TerminalSurface(
                         command = terminalCommand,
                         onCommand = { terminalCommand = it },
@@ -1005,7 +1004,6 @@ private fun CodingAgentApp(privateDir: File) {
                 text = {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text("This is the second approval channel. Type exactly the phrase you created and spoke.")
-                        Text(ownerCreatedApprovalPhrase, fontWeight = FontWeight.Bold)
                         OutlinedTextField(
                             value = typedApprovalText,
                             onValueChange = { typedApprovalText = it },
