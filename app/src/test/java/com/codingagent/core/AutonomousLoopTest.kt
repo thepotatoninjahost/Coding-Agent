@@ -240,7 +240,8 @@ class AutonomousLoopTest {
         val knowledge = object : AgentKnowledge {
             override fun search(query: String, limit: Int) = emptyList<KnowledgeHit>()
         }
-        val agent = AutonomousAgent(root, knowledge, gateway)
+        val agent = AutonomousAgent(root, knowledge, gateway = null)
+        agent.setGateway(gateway)
         agent.setSystemPrompt(
             AgentModelProtocol.DEFAULT_SYSTEM +
                 " OWNER-PROVIDED ADDITIONAL INSTRUCTIONS: Prefer concise Kotlin examples."
