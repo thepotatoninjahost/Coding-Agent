@@ -373,6 +373,8 @@ private fun CodingAgentApp(privateDir: File) {
         pendingApproval = false
         pendingProposal = null
         pendingProposalId = null
+        ownerCreatedApprovalPhrase = ""
+        newOwnerPhraseText = ""
         status = AgentStatus.READY
         detail = "APPLIED ${paths.size} file(s): ${paths.joinToString().take(100)}"
         store.recordChatMessage(
@@ -955,8 +957,8 @@ private fun CodingAgentApp(privateDir: File) {
                 title = { Text("Type the approval phrase exactly") },
                 text = {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("This is the second, independent approval channel. The phrase must match exactly.")
-                        Text(proposal?.approvalPhrase.orEmpty(), fontWeight = FontWeight.Bold)
+                        Text("This is the second approval channel. Type exactly the phrase you created and spoke.")
+                        Text(ownerCreatedApprovalPhrase, fontWeight = FontWeight.Bold)
                         OutlinedTextField(
                             value = typedApprovalText,
                             onValueChange = { typedApprovalText = it },
@@ -971,9 +973,8 @@ private fun CodingAgentApp(privateDir: File) {
                         val id = pendingProposalId
                         val coordinator = mutationCoordinator
                         val current = id?.let { coordinator?.get(it) }
-                        val phrase = current?.approvalPhrase
                         showTypedApprovalDialog = false
-                        if (id == null || coordinator == null || phrase == null) {
+                        if (id == null || coordinator == null || current == null || ownerCreatedApprovalPhrase.isBlank()) {
                             detail = "The proposal is no longer pending. No approval was recorded."
                             return@TextButton
                         }
