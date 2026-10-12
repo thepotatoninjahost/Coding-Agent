@@ -10,6 +10,7 @@ import com.codingagent.workspace.MutationApprovalResult
 import com.codingagent.workspace.MutationCoordinator
 import com.codingagent.workspace.MutationProposeResult
 import com.codingagent.workspace.OwnerApprovalToken
+import com.codingagent.workspace.ApprovalPhrase
 import com.codingagent.workspace.ProjectWorkspace
 
 class RepairLifecycleAcceptanceTest {
@@ -56,7 +57,7 @@ class RepairLifecycleAcceptanceTest {
 
         assertEquals("fun main() = 1\n", source.readText())
         assertTrue(
-            coordinator.approve(original.id, OwnerApprovalToken.authenticated(original.id))
+            coordinator.approve(original.id, testApprovalToken(coordinator, original.id))
                 is MutationApprovalResult.AwaitingSecond
         )
         assertEquals("fun main() = 1\n", source.readText())
@@ -73,7 +74,7 @@ class RepairLifecycleAcceptanceTest {
         assertEquals("fun main() = 2\n", repair.changeSet.changes.single().after)
 
         assertTrue(
-            coordinator.approve(repair.id, OwnerApprovalToken.authenticated(repair.id))
+            coordinator.approve(repair.id, testApprovalToken(coordinator, repair.id))
                 is MutationApprovalResult.AwaitingSecond
         )
         assertEquals("fun main() = 1\n", source.readText())
@@ -84,5 +85,13 @@ class RepairLifecycleAcceptanceTest {
         )
         assertTrue("Expected verified repair to apply: $repaired", repaired is MutationApprovalResult.Applied)
         assertEquals("fun main() = 2\n", source.readText())
+    }
+    private fun testApprovalToken(coordinator: MutationCoordinator, proposalId: String): OwnerApprovalToken {
+        val phrase = ApprovalPhrase.forProposal(proposalId)
+        return if (coordinator.get(proposalId)?.approvalCount == 1) {
+            OwnerApprovalToken.typed(proposalId, phrase)!!
+        } else {
+            OwnerApprovalToken.spoken(proposalId, phrase)!!
+        }
     }
 }
