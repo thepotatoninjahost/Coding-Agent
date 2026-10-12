@@ -259,7 +259,7 @@ private fun CodingAgentApp(privateDir: File) {
 
     val tools = remember(workspace) { workspace?.let(::AgentTools) }
     // Single spine: AutonomousAgent only. Model gateway is optional for local lanes and offline edits.
-    val agent = remember(workspace, modelGateway) {
+    val agent = remember(workspace) {
         workspace?.let { current ->
             val gateway = modelGateway
             AutonomousAgent(
@@ -274,6 +274,7 @@ private fun CodingAgentApp(privateDir: File) {
         }
     }
     SideEffect {
+        agent?.setGateway(modelGateway)
         agent?.setSystemPrompt(modelSettings.effectiveSystemPrompt())
     }
 
