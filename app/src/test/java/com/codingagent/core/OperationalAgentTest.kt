@@ -2,6 +2,7 @@ package com.codingagent.core
 
 import java.nio.file.Files
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import com.codingagent.agent.AgentKnowledge
@@ -54,6 +55,20 @@ class OperationalAgentTest {
         assertTrue(coordinator.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id)) is MutationApprovalResult.AwaitingSecond)
         assertTrue(coordinator.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id)) is MutationApprovalResult.Applied)
         assertEquals("fun main() = 2\n", files.read("src/Main.kt").content)
+    }
+
+    @Test
+    fun directReadVerifiesProjectButAgentMetaDoesNotClaimVerification() {
+        val root = Files.createTempDirectory("agent-direct-read-verification").toFile()
+        root.resolve("Main.kt").writeText("fun main() = 1\n")
+
+        val readEvent = agent(root).run("read Main.kt").last()
+        assertTrue(readEvent is AutonomousAgentEvent.Completed)
+        assertTrue((readEvent as AutonomousAgentEvent.Completed).task.verification.passed)
+
+        val metaEvent = agent(root).run("why did you stop?").last()
+        assertTrue(metaEvent is AutonomousAgentEvent.Completed)
+        assertFalse((metaEvent as AutonomousAgentEvent.Completed).task.verification.passed)
     }
 
     @Test
@@ -152,6 +167,7 @@ class OperationalAgentTest {
         assertTrue(result is AgentRuntimeResult.NeedsApproval)
         result as AgentRuntimeResult.NeedsApproval
         assertTrue(result.proposalId.isNotBlank())
+        assertEquals(spine.pendingProposals().single().verification.passed, result.task.verification.passed)
         assertEquals("fun main() = 1\n", root.resolve("src/Main.kt").readText())
 
         assertTrue(spine.approveProposal(result.proposalId, OwnerApprovalToken.authenticated(result.proposalId)) is MutationApprovalResult.AwaitingSecond)
@@ -220,6 +236,10 @@ class OperationalAgentTest {
 
         val result = ChatApproval.tryApprove(spine, "approve")
         assertTrue(result is AgentRuntimeResult.NeedsApproval)
+        assertEquals(
+            spine.pendingProposals().single().verification.passed,
+            (result as AgentRuntimeResult.NeedsApproval).task.verification.passed
+        )
         assertEquals(0, spine.pendingProposals().single().approvalCount)
         assertEquals("fun main() = 1\n", root.resolve("Main.kt").readText())
     }
