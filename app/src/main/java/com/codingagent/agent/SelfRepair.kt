@@ -13,13 +13,10 @@ import com.codingagent.workspace.VerificationReport
 /**
  * ONE JOB: Detect and stage self-repair requests — mutations to the agent's own source tree.
  *
- * "fix yourself" / "modify yourself" is not a toy file drop. When the imported project
- * already contains agent sources, this returns null so the normal model/tool repair
- * path can diagnose and edit the requested source. An empty project only bootstraps
- * src/SelfRepair.kt so dual-approval still has a concrete first change.
+ * Requests against an existing agent tree are delegated to the normal model/tool path;
+ * an empty project can bootstrap a repair entry point under dual-owner approval.
  */
 object SelfRepair {
-
     val PRIORITY_FILES = listOf(
         "ChatWorkspace.kt",
         "AutonomousAgent.kt",
@@ -30,11 +27,11 @@ object SelfRepair {
     )
 
     private val PHRASES = Regex(
-        "\\b(fix yourself|modify yourself|self[-\\s]?repair|repair yourself|update yourself|improve yourself)\\b",
+        "\\b(fix yourself|modify yourself|self[-\\s]?(repair|heal|healing|modification|modify)|repair yourself|heal yourself|update yourself|improve yourself|fix your own code|modify your own (code|source|files)|repair your own code|self[-\\s]?improvement)\\b",
         RegexOption.IGNORE_CASE
     )
 
-    /** Returns true when [text] is a self-repair request. */
+    /** Returns true when [text] is a self-repair or self-modification request. */
     fun isRequest(text: String): Boolean = PHRASES.containsMatchIn(text)
 
     /**
@@ -52,15 +49,12 @@ object SelfRepair {
         val hasAgentSources = workspace.summary().files.any { indexed ->
             PRIORITY_FILES.any { name -> indexed.path == name || indexed.path.endsWith("/$name") }
         }
-        if (hasAgentSources) {
-            return null
-        }
+        if (hasAgentSources) return null
 
-        val seed = seedSource()
         val op = TaskOperation(
             kind = OperationKind.CREATE_FILE,
             path = "src/SelfRepair.kt",
-            text = seed
+            text = seedSource()
         )
         return propose(
             taskId = taskId,
@@ -118,7 +112,7 @@ object SelfRepair {
         appendLine("object SelfRepair {")
         appendLine()
         appendLine("    private val PHRASES = Regex(")
-        appendLine("        \"\\b(fix yourself|modify yourself|self[-\\s]?repair|repair yourself|update yourself|improve yourself)\\b\",")
+        appendLine("        \"\\\\b(fix yourself|modify yourself|self[-\\\\s]?repair|repair yourself|update yourself|improve yourself)\\\\b\",")
         appendLine("        RegexOption.IGNORE_CASE")
         appendLine("    )")
         appendLine()
