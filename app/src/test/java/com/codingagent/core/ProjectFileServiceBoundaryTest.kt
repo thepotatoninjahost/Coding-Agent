@@ -20,13 +20,18 @@ class ProjectFileServiceBoundaryTest {
         root.resolve("Main.kt").writeText("fun main() = Unit\n")
         root.resolve(".coding-agent").apply { mkdirs() }
             .resolve("private-state.json").writeText("{\"private\":true}")
+        root.resolve(".git").apply { mkdirs() }.resolve("config")
+            .writeText("[remote \"origin\"]\\n url = https://user:secret@example.com/repo.git\\n")
 
         val service = ProjectFileService(ProjectWorkspace(root))
 
         assertTrue(service.list().any { it == "Main.kt" })
         assertFalse(service.list().any { it.equals(".coding-agent", ignoreCase = true) })
+        assertFalse(service.list().any { it.equals(".git", ignoreCase = true) })
         assertRejected { service.list(".coding-agent") }
+        assertRejected { service.list(".git") }
         assertRejected { service.read(".coding-agent/private-state.json") }
+        assertRejected { service.read(".git/config") }
         assertRejected { service.read("nested/../.coding-agent/private-state.json") }
         assertRejected { service.read(".CODING-AGENT/private-state.json") }
     }
@@ -47,6 +52,14 @@ class ProjectFileServiceBoundaryTest {
             )
         }
         assertEquals(before, jobFile.readText())
+        root.resolve(".git").mkdirs()
+        root.resolve(".git/config").writeText("[core]\\n repositoryformatversion = 0\\n")
+        assertRejected {
+            workspace.preview(
+                listOf(TaskOperation(OperationKind.CREATE_FILE, ".git/config", text = "malicious = true")),
+                "attempt to overwrite Git metadata"
+            )
+        }
     }
 
     @Test
