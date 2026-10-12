@@ -53,6 +53,17 @@ class AutonomousAgent(
      */
     @Volatile
     private var gateway: ModelGateway? = gateway
+    @Volatile
+    private var configuredSystemPrompt: String = AgentModelProtocol.DEFAULT_SYSTEM
+
+    fun setGateway(gateway: ModelGateway?) {
+        this.gateway = gateway
+    }
+
+    fun setSystemPrompt(prompt: String?) {
+        configuredSystemPrompt = prompt.orEmpty().trim().take(24_000)
+            .ifBlank { AgentModelProtocol.DEFAULT_SYSTEM }
+    }
     // FIX: derive workspace from the shared MutationCoordinator instance so both always
     // reference the same ProjectWorkspace. The previous `ProjectWorkspace(root)` here
     // created a second, divergent instance that could silently drift from mutations.workspace.
@@ -182,11 +193,14 @@ class AutonomousAgent(
         tools.setRequestContext(normalized)
         val intake = TaskIntakeParser(root).parse(normalized)
         val plan = AgentPlanner(workspace).plan(intake)
+        // Wired in: was previously dead code. Every call below is defensively wrapped
+        // (runCatching) — PlanningLoop can at worst no-op, never crash a live run, since
+        // this file can't be compiled/tested in this environment before shipping.
         val planningLoop = PlanningLoop(plan)
         val toolSelectionLoop = ToolSelectionLoop(ToolSelector().select(intake))
         // Intake and the initial repository view are real execution prerequisites, not
-        // observational plan entries. If the repository cannot be summarized, stop instead
-        // of allowing later gates to proceed without the evidence they require.
+        // observational plan entries. Complete them only after the same workspace instance
+        // used by mutations has produced its repository summary.
         val repositorySummary = runCatching { workspace.summary() }
         if (repositorySummary.isFailure) {
             val error = repositorySummary.exceptionOrNull()
@@ -234,7 +248,7 @@ class AutonomousAgent(
             val question = intake.clarificationQuestion ?: "Clarify the requested operation"
             val task = AgentTask(
                 taskId, focus, "needs-input", plan, emptyList(),
-                VerificationReport(true, emptyList()),
+                VerificationReport(false, emptyList()),
                 listOf("${java.time.Instant.now()}: needs input from user"),
                 question
             )
@@ -253,7 +267,7 @@ class AutonomousAgent(
                     "Open Model settings (base URL, model name, API key) for autonomous coding and research."
             val task = AgentTask(
                 taskId, focus, "needs-input", plan, emptyList(),
-                VerificationReport(true, emptyList()),
+                VerificationReport(false, emptyList()),
                 listOf("${Instant.now()}: model gateway missing — local lanes only"),
                 msg
             )
@@ -275,8 +289,8 @@ class AutonomousAgent(
                 }
             }.getOrNull()
             if (isCancelled()) return stopNow(taskId, normalized, plan, events) { emit(it) }
-            if (session != null && session.sources.isNotEmpty()) {
-                val brief = ResearchBriefBuilder.build(session)
+            val brief = session?.takeIf { it.sources.isNotEmpty() }?.let(ResearchBriefBuilder::build)
+            if (brief != null && brief.sourceCount > 0 && brief.evidence.isNotBlank()) {
                 researchEvidence = "\n\nResearch brief:\n${brief.evidence}"
                 emit(AutonomousAgentEvent.Phase("RESEARCH", "Learned ${brief.sourceCount} sources (${brief.wordCount} words)"))
             } else {
@@ -284,6 +298,16 @@ class AutonomousAgent(
                     "\n\nResearch ran but returned no usable sources. Do not invent external docs or APIs. " +
                         "Prefer local project evidence, or call research_web with a tighter technical query."
                 emit(AutonomousAgentEvent.Phase("RESEARCH", "No usable sources — model must not invent external facts"))
+                if (ResearchGate.requiresUsableEvidence(focus, intake)) {
+                    val message =
+                        "Research was required for this request, but no usable external sources were retrieved. " +
+                            "I will not present unsupported current documentation or web research as verified. " +
+                            "Retry with a narrower query or configure a working research provider."
+                    val task = failedTask(taskId, focus, plan, message, emptyList())
+                    recordTask(task)
+                    emit(AutonomousAgentEvent.Failed(task, message))
+                    return events
+                }
             }
         } else {
             emit(AutonomousAgentEvent.Phase("RESEARCH", "Skipped — local project is enough for this request"))
@@ -357,7 +381,7 @@ class AutonomousAgent(
                 gateway = activeGateway,
                 request = {
                     ModelRequest(
-                        AgentModelProtocol.SYSTEM,
+                        configuredSystemPrompt,
                         buildPrompt(normalized, intake, state.lastEvidence),
                         toolsThisTurn,
                         transcript.toList(),
@@ -626,7 +650,7 @@ class AutonomousAgent(
             gateway = model,
             request = {
                 ModelRequest(
-                    AgentModelProtocol.SYSTEM,
+                    configuredSystemPrompt,
                     "You are repairing a failed approved code change. $evidence\n" +
                         "Return exactly one replace_text or create_file tool call that fixes the diagnosed failure. " +
                         "Do not explain. Do not use any other tool. Never weaken tests or safety controls.",
