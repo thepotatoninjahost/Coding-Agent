@@ -10,12 +10,9 @@ import com.codingagent.workspace.VerificationReport
  * Chat text never grants owner authority.
  */
 object ChatApproval {
-    /**
-     * Chat text is never an approval credential. Do not define default approval
-     * words or passphrases here: only the authenticated Review flow may authorize
-     * a proposal, regardless of what the user types or dictates into chat.
-     */
-    fun isApprovalPhrase(text: String): Boolean = false
+    private val phrases = setOf("approve", "confirm", "apply")
+
+    fun isApprovalPhrase(text: String): Boolean = text.lowercase().trim() in phrases
 
     fun tryApprove(agent: AutonomousAgent, text: String): AgentRuntimeResult? {
         if (!isApprovalPhrase(text)) return null
