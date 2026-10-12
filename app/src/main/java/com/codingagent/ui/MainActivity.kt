@@ -2,13 +2,11 @@ package com.codingagent.ui
 
 import android.content.Context
 import android.content.Intent
+import android.speech.RecognizerIntent
 import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.fragment.app.FragmentActivity
-import androidx.biometric.BiometricManager
-import androidx.biometric.BiometricPrompt
-import androidx.core.content.ContextCompat
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -33,6 +31,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -109,9 +108,26 @@ import com.codingagent.model.ProbeResult
 class MainActivity : FragmentActivity() {
     companion object {
         private const val FOLDER_PICKER_REQUEST_CODE = 1001
+        private const val APPROVAL_SPEECH_REQUEST_CODE = 1002
     }
 
     private var folderPickerCallback: ((Uri?) -> Unit)? = null
+    private var approvalSpeechCallback: ((String?) -> Unit)? = null
+
+    fun launchApprovalSpeech(onResult: (String?) -> Unit) {
+        approvalSpeechCallback = onResult
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_PROMPT, "Speak the exact approval phrase shown in the review")
+            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
+        }
+        try {
+            startActivityForResult(intent, APPROVAL_SPEECH_REQUEST_CODE)
+        } catch (_: Exception) {
+            approvalSpeechCallback = null
+            onResult(null)
+        }
+    }
 
     fun launchFolderPicker(onResult: (Uri?) -> Unit) {
         folderPickerCallback = onResult
@@ -127,6 +143,15 @@ class MainActivity : FragmentActivity() {
     @Deprecated("Use Activity Result APIs for new integrations; retained here with a bounded legacy request code for this FragmentActivity.")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == APPROVAL_SPEECH_REQUEST_CODE) {
+            val callback = approvalSpeechCallback
+            approvalSpeechCallback = null
+            val transcript = if (resultCode == RESULT_OK) {
+                data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
+            } else null
+            callback?.invoke(transcript)
+            return
+        }
         if (requestCode != FOLDER_PICKER_REQUEST_CODE) return
         val callback = folderPickerCallback
         folderPickerCallback = null
@@ -173,6 +198,8 @@ private fun CodingAgentApp(privateDir: File) {
     var pendingProposalId by remember { mutableStateOf<String?>(null) }
     var pendingProposal by remember { mutableStateOf<PendingChangeProposal?>(null) }
     var approvalPromptOpen by remember { mutableStateOf(false) }
+    var showTypedApprovalDialog by remember { mutableStateOf(false) }
+    var typedApprovalText by remember { mutableStateOf("") }
     val mutationCoordinator = remember(workspace) { workspace?.let { MutationCoordinator(it) } }
     var messageQueue by remember { mutableStateOf(emptyList<String>()) }
     var modelSettings by remember { mutableStateOf(store.loadModelSettings()) }
@@ -356,11 +383,52 @@ private fun CodingAgentApp(privateDir: File) {
         chatMessages = store.recentChatMessages().asReversed()
     }
 
+    fun recordApprovalToken(id: String, coordinator: MutationCoordinator, token: OwnerApprovalToken) {
+        status = AgentStatus.WORKING
+        detail = "Recording approval off the UI thread…"
+        activeJob = scope.launch(Dispatchers.IO) {
+            val outcome = runCatching { coordinator.approve(id, token) }
+            withContext(Dispatchers.Main.immediate) {
+                outcome.onSuccess { result ->
+                    when (result) {
+                        is MutationApprovalResult.AwaitingSecond -> {
+                            approvalCount = result.proposal.approvalCount
+                            pendingProposal = result.proposal
+                            pendingProposalId = result.proposal.id
+                            pendingApproval = true
+                            detail = "Spoken approval recorded (1/2); type the exact phrase to complete approval"
+                            status = AgentStatus.APPROVAL
+                        }
+                        is MutationApprovalResult.RepairRequired -> {
+                            pendingProposal = result.proposal
+                            pendingProposalId = result.proposal.id
+                            pendingApproval = true
+                            approvalCount = result.proposal.approvalCount
+                            pendingReason = result.proposal.request
+                            status = AgentStatus.APPROVAL
+                            detail = "Original change was rolled back. Review the staged repair and repeat both approval steps."
+                        }
+                        is MutationApprovalResult.Applied -> onChangeApplied(result)
+                        is MutationApprovalResult.Rejected -> {
+                            status = AgentStatus.STOPPED
+                            detail = result.reason
+                        }
+                    }
+                }.onFailure {
+                    status = AgentStatus.FAILED
+                    detail = "Approval failed: " + (it.message.orEmpty().ifBlank { it.javaClass.simpleName })
+                }
+                activeJob = null
+            }
+        }
+    }
+
     fun approvePendingProposal() {
         val id = pendingProposalId ?: return
         val coordinator = mutationCoordinator ?: return
-        if (activeJob != null || approvalPromptOpen) return
-        if (coordinator.get(id) == null) {
+        if (activeJob != null || approvalPromptOpen || showTypedApprovalDialog) return
+        val proposal = coordinator.get(id)
+        if (proposal == null) {
             pendingApproval = false
             pendingProposal = null
             pendingProposalId = null
@@ -369,86 +437,34 @@ private fun CodingAgentApp(privateDir: File) {
             detail = "The proposal is no longer pending."
             return
         }
-
-        val authenticators = BiometricManager.Authenticators.BIOMETRIC_STRONG or
-            BiometricManager.Authenticators.DEVICE_CREDENTIAL
-        val biometricManager = BiometricManager.from(context)
-        if (biometricManager.canAuthenticate(authenticators) != BiometricManager.BIOMETRIC_SUCCESS) {
-            status = AgentStatus.STOPPED
-            detail = "Owner authentication is unavailable. Configure a strong biometric or device credential."
-            return
-        }
-
-        approvalPromptOpen = true
-        val activity = context as? FragmentActivity ?: run {
-            approvalPromptOpen = false
-            status = AgentStatus.FAILED
-            detail = "Owner authentication is unavailable in this UI context."
-            return
-        }
-        val executor = ContextCompat.getMainExecutor(activity)
-        val prompt = BiometricPrompt(
-            activity,
-            executor,
-            object : BiometricPrompt.AuthenticationCallback() {
-                override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
-                    super.onAuthenticationSucceeded(result)
-                    approvalPromptOpen = false
-                    status = AgentStatus.WORKING
-                    detail = "Owner authenticated; recording approval off the UI thread…"
-                    val token = OwnerApprovalToken.authenticated(id)
-                    activeJob = scope.launch(Dispatchers.IO) {
-                        val outcome = runCatching { coordinator.approve(id, token) }
-                        withContext(Dispatchers.Main.immediate) {
-                            outcome.onSuccess { result ->
-                                when (result) {
-                                    is MutationApprovalResult.AwaitingSecond -> {
-                                        approvalCount = result.proposal.approvalCount
-                                        pendingProposal = result.proposal
-                                        pendingProposalId = result.proposal.id
-                                        pendingApproval = true
-                                        detail = "Authenticated confirmation ${approvalCount}/2 recorded; transaction remains unapplied"
-                                        status = AgentStatus.APPROVAL
-                                    }
-                                    is MutationApprovalResult.RepairRequired -> {
-                                        pendingProposal = result.proposal
-                                        pendingProposalId = result.proposal.id
-                                        pendingApproval = true
-                                        approvalCount = result.proposal.approvalCount
-                                        pendingReason = result.proposal.request
-                                        status = AgentStatus.APPROVAL
-                                        detail = "Original change was rolled back. Review the staged repair and authenticate again."
-                                    }
-                                    is MutationApprovalResult.Applied -> onChangeApplied(result)
-                                    is MutationApprovalResult.Rejected -> {
-                                        status = AgentStatus.STOPPED
-                                        detail = result.reason
-                                    }
-                                }
-                            }.onFailure {
-                                status = AgentStatus.FAILED
-                                detail = "Approval failed: " + (it.message.orEmpty().ifBlank { it.javaClass.simpleName })
-                            }
-                            activeJob = null
-                        }
-                    }
-                }
-
-                override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
-                    super.onAuthenticationError(errorCode, errString)
-                    approvalPromptOpen = false
-                    status = AgentStatus.STOPPED
-                    detail = "Owner authentication cancelled or failed: $errString"
-                }
+        if (proposal.approvalCount == 0) {
+            val activity = context as? MainActivity
+            if (activity == null) {
+                status = AgentStatus.FAILED
+                detail = "Live speech recognition is unavailable in this UI context."
+                return
             }
-        )
-        val promptInfo = BiometricPrompt.PromptInfo.Builder()
-            .setTitle("Confirm code change")
-            .setSubtitle("Authenticate as the device owner to approve this proposal")
-            .setAllowedAuthenticators(authenticators)
-            .setConfirmationRequired(true)
-            .build()
-        prompt.authenticate(promptInfo)
+            approvalPromptOpen = true
+            detail = "Speak this exact phrase: ${proposal.approvalPhrase}"
+            activity.launchApprovalSpeech { transcript ->
+                approvalPromptOpen = false
+                if (transcript.isNullOrBlank()) {
+                    status = AgentStatus.STOPPED
+                    detail = "Spoken approval was cancelled or no phrase was recognized. No approval was recorded."
+                    return@launchApprovalSpeech
+                }
+                val token = OwnerApprovalToken.spoken(id, transcript)
+                if (token == null) {
+                    status = AgentStatus.STOPPED
+                    detail = "Spoken phrase did not match ${proposal.approvalPhrase}. No approval was recorded."
+                    return@launchApprovalSpeech
+                }
+                recordApprovalToken(id, coordinator, token)
+            }
+        } else {
+            typedApprovalText = ""
+            showTypedApprovalDialog = true
+        }
     }
 
     fun stopAgent() {
@@ -692,10 +708,11 @@ private fun CodingAgentApp(privateDir: File) {
                         pendingApproval = pendingApproval,
                         approvalCount = approvalCount,
                         reason = pendingReason,
+                        approvalPhrase = pendingProposal?.approvalPhrase.orEmpty(),
                         onApprove = ::approvePendingProposal
                     )
                     SurfaceTab.FILES -> FilesSurface(fileList, projectQuery, { projectQuery = it }, editorPath, { editorPath = it }, editorContent, { editorContent = it }, editorDocument, tools, mutationCoordinator, onStatus = { status = it.first; detail = it.second })
-                    SurfaceTab.REVIEW -> ReviewSurface(pendingApproval, approvalCount, pendingReason, onApprove = ::approvePendingProposal, onReject = { pendingProposalId?.let { mutationCoordinator?.reject(it) }; pendingProposal = null; pendingApproval = false; pendingProposalId = null; approvalCount = 0; status = AgentStatus.STOPPED; detail = "Proposed changes rejected" })
+                    SurfaceTab.REVIEW -> ReviewSurface(pendingApproval, approvalCount, pendingReason, pendingProposal?.approvalPhrase.orEmpty(), onApprove = ::approvePendingProposal, onReject = { pendingProposalId?.let { mutationCoordinator?.reject(it) }; pendingProposal = null; pendingApproval = false; pendingProposalId = null; approvalCount = 0; status = AgentStatus.STOPPED; detail = "Proposed changes rejected" })
                     SurfaceTab.TERMINAL -> TerminalSurface(
                         command = terminalCommand,
                         onCommand = { terminalCommand = it },
@@ -871,6 +888,50 @@ private fun CodingAgentApp(privateDir: File) {
                     }
                 }
             }
+
+        if (showTypedApprovalDialog) {
+            val proposal = pendingProposal
+            AlertDialog(
+                onDismissRequest = { showTypedApprovalDialog = false },
+                title = { Text("Type the approval phrase exactly") },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("This is the second, independent approval channel. The phrase must match exactly.")
+                        Text(proposal?.approvalPhrase.orEmpty(), fontWeight = FontWeight.Bold)
+                        OutlinedTextField(
+                            value = typedApprovalText,
+                            onValueChange = { typedApprovalText = it },
+                            label = { Text("Exact phrase") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        val id = pendingProposalId
+                        val coordinator = mutationCoordinator
+                        val current = id?.let { coordinator?.get(it) }
+                        val phrase = current?.approvalPhrase
+                        showTypedApprovalDialog = false
+                        if (id == null || coordinator == null || phrase == null) {
+                            detail = "The proposal is no longer pending. No approval was recorded."
+                            return@TextButton
+                        }
+                        val token = OwnerApprovalToken.typed(id, typedApprovalText)
+                        if (token == null) {
+                            status = AgentStatus.STOPPED
+                            detail = "Typed phrase must exactly match the displayed phrase. No approval was recorded."
+                            return@TextButton
+                        }
+                        recordApprovalToken(id, coordinator, token)
+                    }) { Text("Confirm typed phrase") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showTypedApprovalDialog = false }) { Text("Cancel") }
+                }
+            )
+        }
         }
     }
 }
