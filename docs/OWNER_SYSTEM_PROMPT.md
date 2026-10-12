@@ -1,15 +1,10 @@
-# Who writes instructions to your model
+# Owner-provided system instructions
 
-**Grok never talks to your app or your model.**
+The built-in Coding Agent instructions define its tools, evidence requirements, approval flow, and safety rules. The optional **Additional system instructions** field in Model settings lets you add guidance for how the agent should work without replacing those built-in rules.
 
-When you use Coding Agent on your phone, only this app runs. The only instructions the remote model gets are:
+To change this guidance, open **Model settings**, edit **Additional system instructions (optional)**, and Save.
 
-1. The **instruction sheet** (system prompt) from Model settings on this phone
-2. Your **message**
-3. Tool results from this app
-
-You own the instruction sheet. Open **Model settings**, scroll to **Instruction sheet (system prompt)**, edit it, Save.
-
-- Empty / reset uses the built-in default text in the app
-- Your saved text is stored only on this device
-- No external assistant is allowed to change it for you
+- Empty guidance uses the built-in instruction text unchanged.
+- Saved guidance is stored in the app's local model settings on this device.
+- Additional guidance is appended after the built-in instructions and is length-limited.
+- These instructions affect model requests for coding and repair work. They do not grant approval or bypass owner confirmation.
