@@ -382,7 +382,7 @@ class MutationCoordinator(
                     )
                 }
             }
-            recordEvolution(candidate, appliedChangeSet)
+            recordEvolution(candidate, appliedChangeSet, postApply)
             MutationApprovalResult.Applied(candidate, appliedChangeSet)
         } catch (error: Exception) {
             val completedChangeSet = applied
@@ -578,7 +578,7 @@ class MutationCoordinator(
         }
     }
 
-    private fun recordEvolution(proposal: PendingChangeProposal, changeSet: ChangeSet) {
+    private fun recordEvolution(proposal: PendingChangeProposal, changeSet: ChangeSet, evaluation: VerificationReport) {
         runCatching {
             val latestApproval = proposal.approvals.maxOfOrNull { it.approvedAt }
             val kind = if (SelfRepair.isRequest(proposal.request)) "self-repair" else "code-change"
@@ -594,7 +594,7 @@ class MutationCoordinator(
                     sandboxPassed = proposal.verification.passed,
                     clearPermission = true
                 )
-                evolution.promoteSource(staged, kind, proposal.verification, action, latestApproval)
+                evolution.promoteSource(staged, kind, evaluation, action, latestApproval)
             }
         }
     }
