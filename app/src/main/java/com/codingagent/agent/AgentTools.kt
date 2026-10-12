@@ -51,8 +51,7 @@ class AgentTools(private val workspace: ProjectWorkspace) {
         onStderr: ((String) -> Unit)? = null
     ): TerminalEntry {
         require(command.isNotEmpty()) { "Command cannot be empty" }
-        val joined = command.joinToString(" ")
-        return terminalSession.execute(joined, onStdout, onStderr)
+        return terminalSession.executeArgs(command, onStdout, onStderr, timeoutSeconds)
     }
 
     fun runTerminal(

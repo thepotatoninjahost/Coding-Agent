@@ -67,7 +67,14 @@ class LiveModuleRuntime(
                     verification = workspace.verify()
                 }
                 "verify" -> verification = workspace.verify()
-                "run" -> verification = workspace.runChecks(listOf(value.split(" ").filter { it.isNotBlank() }), step.argument.toLongOrNull() ?: 90)
+                "run" -> {
+                    val command = value.split(Regex("\\s+")).filter { it.isNotBlank() }
+                    require(command.isNotEmpty()) { "Live-module run step requires a command" }
+                    com.codingagent.agent.AgentCommandPolicy.rejectionReason(value, workspace.projectRoot())?.let {
+                        throw IllegalArgumentException("Live-module command blocked: $it")
+                    }
+                    verification = workspace.runChecks(listOf(command), step.argument.toLongOrNull() ?: 90)
+                }
                 "lesson" -> workspace.recordLesson(value, step.argument, "live module ${current.module.id}")
                 else -> error("Unknown live-module operation: ${step.operation}")
             }
