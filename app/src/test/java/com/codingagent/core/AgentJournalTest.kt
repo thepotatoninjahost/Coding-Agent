@@ -43,6 +43,38 @@ class AgentJournalTest {
     }
 
     @Test
+    fun redactsCommonCredentialsBeforePersistingEvents() {
+        val root = Files.createTempDirectory("agent-personal-log-redaction").toFile()
+        val journal = AgentJournal(root)
+        journal.recordEvent(
+            "task-secret",
+            AutonomousAgentEvent.ToolFinished(
+                "run_command",
+                "API_KEY=alpha-secret-123 Authorization: Bearer token-value-456 password='hunter2' sk-12345678901234567890",
+                true
+            )
+        )
+
+        val stored = journal.recentEvents(1).single()
+        assertFalse(stored.contains("alpha-secret-123"))
+        assertFalse(stored.contains("token-value-456"))
+        assertFalse(stored.contains("hunter2"))
+        assertFalse(stored.contains("sk-12345678901234567890"))
+        assertTrue(stored.contains("[REDACTED]"))
+    }
+
+    @Test
+    fun capsLargeEventPayloads() {
+        val root = Files.createTempDirectory("agent-personal-log-size").toFile()
+        val journal = AgentJournal(root)
+        journal.recordEvent("task-large", AutonomousAgentEvent.ToolFinished("read_file", "x".repeat(20_000), true))
+
+        val stored = JSONObject(journal.recentEvents(1).single()).getString("details")
+        assertTrue(stored.length < 8_100)
+        assertTrue(stored.endsWith("[truncated]"))
+    }
+
+    @Test
     fun doesNotPublishAnEventWhenPersonalLogWriteFails() {
         val root = Files.createTempDirectory("agent-personal-log-failure").toFile()
         val logDirectory = root.resolve(".coding-agent/personal-log.jsonl")
