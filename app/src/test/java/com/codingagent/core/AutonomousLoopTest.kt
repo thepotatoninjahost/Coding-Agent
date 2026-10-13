@@ -91,7 +91,7 @@ class AutonomousLoopTest {
     @Test
     fun refusesToCompleteWithoutReadingNamedFile() {
         val root = Files.createTempDirectory("agent-evidence").toFile()
-        root.resolve("SelfEvolution.kt").writeText("class SelfEvolution\\n")
+        root.resolve("SelfEvolution.kt").writeText("class SelfEvolution\n")
         val gateway = ScriptedGateway(
             listOf(
                 ModelResponse.Text("SelfEvolution is a great file about evolution and imports."),
