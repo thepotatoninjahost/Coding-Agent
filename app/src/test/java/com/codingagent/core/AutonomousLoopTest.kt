@@ -89,20 +89,29 @@ class AutonomousLoopTest {
     }
 
     @Test
-    fun localInspectReadsNamedFileWithoutModelGateway() {
+    fun refusesToCompleteWithoutReadingNamedFile() {
         val root = Files.createTempDirectory("agent-evidence").toFile()
         root.resolve("SelfEvolution.kt").writeText("class SelfEvolution\\n")
-        val gateway = ScriptedGateway(emptyList())
+        val gateway = ScriptedGateway(
+            listOf(
+                ModelResponse.Text("SelfEvolution is a great file about evolution and imports."),
+                ModelResponse.ToolCall("read_file", """{"path":"SelfEvolution.kt"}"""),
+                ModelResponse.Text("SelfEvolution stages sources under .coding-agent/evolution and promotes after checks.")
+            )
+        )
         val knowledge = object : AgentKnowledge {
             override fun search(query: String, limit: Int) = emptyList<KnowledgeHit>()
         }
         val agent = AutonomousAgent(
             root, knowledge, gateway, AutonomousAgentConfig(maxTurns = 8))
-        val events = agent.run("Inspect SelfEvolution.kt")
+        // Avoid the local single-file inspection shortcut: exercise the model-loop evidence gate.
+        val events = agent.run("Audit the project and explain how SelfEvolution.kt works")
+        assertTrue(
+            "expected an EVIDENCE phase before completion",
+            events.any { it is AutonomousAgentEvent.Phase && it.name == "EVIDENCE" }
+        )
+        assertTrue(events.any { it is AutonomousAgentEvent.ToolFinished && it.name == "read_file" && it.success })
         assertTrue(events.last() is AutonomousAgentEvent.Completed)
-        val summary = (events.last() as AutonomousAgentEvent.Completed).task.summary
-        assertTrue(summary.contains("SelfEvolution.kt"))
-        assertTrue(summary.contains("local evidence only"))
     }
 
     @Test
