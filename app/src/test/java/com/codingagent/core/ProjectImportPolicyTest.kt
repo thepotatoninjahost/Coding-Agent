@@ -8,11 +8,13 @@ import org.junit.Test
 
 class ProjectImportPolicyTest {
     @Test
-    fun reservesOnlyTheProjectRootAgentMetadataDirectory() {
+    fun reservesSensitiveProjectPathsAtAnyDepth() {
         assertTrue(isReservedProjectImportEntry("", ".coding-agent"))
-        assertFalse(isReservedProjectImportEntry("src", ".coding-agent"))
+        assertTrue(isReservedProjectImportEntry("src", ".coding-agent"))
         assertFalse(isReservedProjectImportEntry("", "src"))
-        assertFalse(isReservedProjectImportEntry("", ".git"))
+        assertTrue(isReservedProjectImportEntry("", ".git"))
+        assertTrue(isReservedProjectImportEntry("", ".env"))
+        assertTrue(isReservedProjectImportEntry("config", "signing.key"))
     }
 
     @Test

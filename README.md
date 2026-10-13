@@ -9,7 +9,7 @@ It is not a chatbot that answers coding questions in one shot. It works like a c
 3. **Plans** and revises the plan as new evidence appears  
 4. **Acts** with exactly one tool per turn (files, search, terminal, verification, staged mutations)  
 5. **Observes** the tool result; on failure, diagnoses and retries correctly  
-6. **Verifies** (static unfinished-work scan is always-on; never reports a fake pass)  
+6. **Verifies** with a bounded static unfinished-work scan; it does not automatically run imported project build/test scripts.  
 7. **Hands over** a clear, evidence-based answer or a dual-approval change proposal  
 
 It does not quit early out of convenience. It only stops early when a specific missing input from the user is required that tools cannot supply.
@@ -72,8 +72,8 @@ Execution path:
 5. `AgentKnowledge` supplies local evidence. `WebResearchProvider` / deep-research providers supply internet evidence when the request requires it. Empty research fails closed.
 6. `CodeSynthesisEngine` creates a proposal when the request does not contain an explicit operation.
 7. `ProjectWorkspace` + `MutationCoordinator` apply edits through typed transactions. Dual owner approval is required before a write hits disk.
-8. `VerificationReport` records static unfinished-work scans and command-check evidence. Verification never reports a fake pass.
-9. `CompilerTestRepairCycle` now participates in failed-change recovery: failed approved changes roll back, a model-synthesized repair is staged, and the repair must pass the same dual-approval flow before recheck.
+8. `VerificationReport` records bounded static checks. A static pass is not a compiler or test pass; imported project build/test scripts are not run automatically after approval.
+9. Failed approved changes roll back when static verification fails, and a model-synthesized repair is staged for separate dual owner approval. Static verification does not prove that the project compiles or its tests pass.
 10. `AgentJournal`, lessons, and `LocalStore` persist task evidence and chat for later work.
 
 Unit tests currently live under `app/src/test/java/com/codingagent/core/` even though production code is package-split as above.

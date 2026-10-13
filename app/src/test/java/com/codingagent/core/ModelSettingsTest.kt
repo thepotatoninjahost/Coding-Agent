@@ -7,6 +7,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import com.codingagent.model.ModelBackend
 import com.codingagent.model.ModelSettings
+import com.codingagent.model.MAX_SYSTEM_PROMPT_CHARS
 
 class ModelSettingsTest {
     @Test
@@ -70,6 +71,7 @@ class ModelSettingsTest {
             baseUrl = "https://example.com/v1/",
             apiKey = "secret-value",
             modelName = "whatever-the-user-picked",
+            systemPrompt = "Prefer concise Kotlin examples.",
             onboarded = true
         )
         val restored = ModelSettings.fromJson(ModelSettings.toJson(original))
@@ -77,6 +79,7 @@ class ModelSettingsTest {
         assertEquals("https://example.com/v1", restored.baseUrl)
         assertEquals("secret-value", restored.apiKey)
         assertEquals("whatever-the-user-picked", restored.modelName)
+        assertEquals("Prefer concise Kotlin examples.", restored.systemPrompt)
         assertTrue(restored.onboarded)
         assertFalse(restored.statusSummary().contains("secret-value"))
     }
@@ -112,4 +115,20 @@ class ModelSettingsTest {
         assertFalse(defaults.isRemoteConfigured())
         assertTrue(defaults.statusSummary().contains("Remote"))
     }
+    @Test
+    fun customSystemInstructionsAreAddedWithoutReplacingSafetyRules() {
+        val settings = ModelSettings(systemPrompt = "Prefer concise Kotlin examples.").normalized()
+        val prompt = settings.effectiveSystemPrompt()
+
+        assertTrue(prompt.contains("Code changes (create_file, replace_text) only STAGE a proposal"))
+        assertTrue(prompt.contains("Prefer concise Kotlin examples."))
+        assertTrue(prompt.contains("do not override the built-in safety, evidence, or approval rules"))
+    }
+
+    @Test
+    fun customSystemInstructionsAreBounded() {
+        val normalized = ModelSettings(systemPrompt = "x".repeat(MAX_SYSTEM_PROMPT_CHARS + 1)).normalized()
+        assertEquals(MAX_SYSTEM_PROMPT_CHARS, normalized.systemPrompt.length)
+    }
+
 }

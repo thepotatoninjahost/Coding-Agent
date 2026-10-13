@@ -47,6 +47,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -190,6 +191,7 @@ private fun CodingAgentApp(privateDir: File) {
     var draftModelName by remember { mutableStateOf(modelSettings.modelName) }
     var draftBaseUrl by remember { mutableStateOf(modelSettings.baseUrl) }
     var draftExtraHeaders by remember { mutableStateOf(modelSettings.extraHeaders) }
+    var draftSystemPrompt by remember { mutableStateOf(modelSettings.systemPrompt) }
     var probeMessage by remember { mutableStateOf<String?>(null) }
 
     val density = LocalDensity.current
@@ -203,6 +205,7 @@ private fun CodingAgentApp(privateDir: File) {
         draftModelName = normalized.modelName
         draftBaseUrl = normalized.baseUrl
         draftExtraHeaders = normalized.extraHeaders
+        draftSystemPrompt = normalized.systemPrompt
         val gateway = normalized.remoteGateway()
         if (gateway != null) {
             modelGateway = gateway
@@ -256,7 +259,7 @@ private fun CodingAgentApp(privateDir: File) {
 
     val tools = remember(workspace) { workspace?.let(::AgentTools) }
     // Single spine: AutonomousAgent only. Model gateway is optional for local lanes and offline edits.
-    val agent = remember(workspace, modelGateway) {
+    val agent = remember(workspace) {
         workspace?.let { current ->
             val gateway = modelGateway
             AutonomousAgent(
@@ -270,6 +273,11 @@ private fun CodingAgentApp(privateDir: File) {
             )
         }
     }
+    SideEffect {
+        agent?.setGateway(modelGateway)
+        agent?.setSystemPrompt(modelSettings.effectiveSystemPrompt())
+    }
+
     // Tie agent-owned blocking work to the activity composition lifecycle.
     // Coroutine cancellation alone cannot interrupt synchronous gateway/terminal calls.
     DisposableEffect(agent) {
@@ -336,6 +344,18 @@ private fun CodingAgentApp(privateDir: File) {
 
     fun onChangeApplied(result: MutationApprovalResult.Applied) {
         val paths = result.changeSet.changes.map { it.path }.distinct()
+        val verification = result.proposal.verification
+        val verificationSummary = buildString {
+            append(if (verification.passed) "Static verification passed." else "Static verification failed.")
+            if (verification.issues.isNotEmpty()) {
+                append("\nIssues:\n")
+                append(verification.issues.joinToString("\n") { "- ${it.path}:${it.line}: ${it.message}" })
+            }
+            if (verification.warnings.isNotEmpty()) {
+                append("\nWarnings:\n")
+                append(verification.warnings.joinToString("\n") { "- $it" })
+            }
+        }
         workspace?.let { ws ->
             fileList = ws.summary().files.map { it.path }.sorted()
         }
@@ -344,13 +364,13 @@ private fun CodingAgentApp(privateDir: File) {
         pendingProposal = null
         pendingProposalId = null
         status = AgentStatus.READY
-        detail = "APPLIED ${paths.size} file(s): ${paths.joinToString().take(100)}"
+        detail = "APPLIED ${paths.size} file(s): ${paths.joinToString().take(100)}\n$verificationSummary"
         store.recordChatMessage(
             ChatMessage(
                 role = ChatRole.SYSTEM,
                 content = "APPLIED to disk after dual approval.\nFiles:\n" +
                     paths.joinToString("\n") { "- $it" } +
-                    "\nRequest: ${result.proposal.request.take(200)}"
+                    "\nRequest: ${result.proposal.request.take(200)}\n$verificationSummary"
             )
         )
         chatMessages = store.recentChatMessages().asReversed()
@@ -660,6 +680,7 @@ private fun CodingAgentApp(privateDir: File) {
                         draftModelName = modelSettings.modelName
                         draftBaseUrl = modelSettings.baseUrl
                         draftExtraHeaders = modelSettings.extraHeaders
+                        draftSystemPrompt = modelSettings.systemPrompt
                         probeMessage = null
                         showModelSettings = true
                     },
@@ -807,6 +828,22 @@ private fun CodingAgentApp(privateDir: File) {
                         )
                         Spacer(Modifier.height(8.dp))
                         OutlinedTextField(
+                            value = draftSystemPrompt,
+                            onValueChange = { draftSystemPrompt = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            label = { Text("Additional system instructions (optional)", color = SoftGreen) },
+                            placeholder = { Text("Extra guidance for how the agent should work", color = SoftGreen.copy(alpha = 0.5f)) },
+                            minLines = 3,
+                            maxLines = 8,
+                            colors = fieldColors()
+                        )
+                        Text(
+                            "Added to the built-in instructions; safety, evidence, and approval rules remain in force.",
+                            color = SoftGreen,
+                            fontSize = 10.sp
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        OutlinedTextField(
                             value = draftExtraHeaders,
                             onValueChange = { draftExtraHeaders = it },
                             modifier = Modifier.fillMaxWidth(),
@@ -837,6 +874,7 @@ private fun CodingAgentApp(privateDir: File) {
                                         baseUrl = draftBaseUrl,
                                         apiKey = draftApiKey,
                                         modelName = draftModelName,
+                                        systemPrompt = draftSystemPrompt,
                                         extraHeaders = draftExtraHeaders,
                                         onboarded = true
                                     )
@@ -858,6 +896,7 @@ private fun CodingAgentApp(privateDir: File) {
                                         baseUrl = draftBaseUrl,
                                         apiKey = draftApiKey,
                                         modelName = draftModelName,
+                                        systemPrompt = draftSystemPrompt,
                                         extraHeaders = draftExtraHeaders,
                                         onboarded = true
                                     )

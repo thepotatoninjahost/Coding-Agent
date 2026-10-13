@@ -26,7 +26,8 @@ data class TaskIntake(
     val executionReady: Boolean,
     val clarificationQuestion: String?,
     val summary: String,
-    val contract: GoalContract
+    val contract: GoalContract,
+    val verificationNote: String? = null
 )
 
 class TaskIntakeParser(private val root: File) {
@@ -37,7 +38,7 @@ class TaskIntakeParser(private val root: File) {
         require(normalized.isNotEmpty()) { "A coding request is required" }
         val operation = parseOperation(normalized)
         val contract = interpreter.interpret(normalized, operation)
-        val verification = detectChecks()
+        val verification = detectChecks(normalized)
         val ready = contract.ready
         val question = if (ready) null else clarification(contract, operation)
         return TaskIntake(
@@ -45,12 +46,13 @@ class TaskIntakeParser(private val root: File) {
             goal = contract.goal,
             intent = contract.intent,
             operation = operation,
-            verificationCommands = verification,
+            verificationCommands = verification.commands,
             confidence = contract.confidence,
             executionReady = ready,
             clarificationQuestion = question,
             summary = "${contract.intent.name.lowercase()} task: ${contract.goal}",
-            contract = contract
+            contract = contract,
+            verificationNote = verification.note
         )
     }
 
@@ -74,19 +76,31 @@ class TaskIntakeParser(private val root: File) {
         }
         return TaskOperation()
     }
+    private data class VerificationPlan(
+        val commands: List<List<String>>,
+        val note: String? = null
+    )
 
-    private fun detectChecks(): List<List<String>> {
-        return when {
-            root.resolve("gradlew").isFile && root.resolve("app/build.gradle.kts").isFile -> listOf(
-                listOf("sh", "-c", "./gradlew :app:compileDebugKotlin :app:testDebugUnitTest --no-daemon --console=plain"),
-                listOf("sh", "-c", "./gradlew :app:lintDebug --no-daemon --console=plain"),
-                listOf("sh", "-c", "./gradlew :app:assembleDebug --no-daemon --console=plain")
-            )
-            root.resolve("gradlew").isFile -> listOf(listOf("sh", "-c", "./gradlew test --no-daemon"))
-            root.resolve("package.json").isFile -> listOf(listOf("sh", "-c", "npm test --if-present"))
-            root.resolve("pyproject.toml").isFile || root.resolve("pytest.ini").isFile -> listOf(listOf("python", "-m", "pytest"))
-            root.resolve("Makefile").isFile -> listOf(listOf("make", "test"))
-            else -> emptyList()
-        }
+    private fun detectChecks(request: String): VerificationPlan {
+        if (!explicitlyRequestsVerification(request)) return VerificationPlan(emptyList())
+
+        // Imported build/test configuration is executable project-controlled code.
+        // The autonomous path must not run wrappers, package scripts, pytest, or Makefiles.
+        // The owner can review those files and run checks explicitly in the owner-controlled terminal.
+        return VerificationPlan(
+            commands = emptyList(),
+            note = "Requested project build/test checks were not run automatically because imported wrappers, build files, package scripts, and test suites can execute arbitrary code. Review the project first, then run checks explicitly in the owner-controlled Terminal."
+        )
+    }
+
+    private fun explicitlyRequestsVerification(request: String): Boolean {
+        val normalized = request.lowercase()
+        val runVerb = Regex("""\b(run|execute|perform|rerun|re-run)\b""").containsMatchIn(normalized)
+        val checkTarget = Regex("""\b(tests?|build|compile|lint|checks?|pytest|gradlew?|npm|make)\b""")
+            .containsMatchIn(normalized)
+        val directVerificationVerb = Regex("""\b(test|verify|build|compile|lint|check)\b\s+(the|this|my|all|project|app|application|module|code|changes|it)\b""")
+            .containsMatchIn(normalized)
+        return (runVerb && checkTarget) || directVerificationVerb
     }
 }
+

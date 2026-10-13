@@ -58,10 +58,71 @@ class LiveUpdateTest {
         packageDir.resolve("weights.bin").writeBytes(byteArrayOf(1))
         packageDir.resolve("config.json").writeBytes(byteArrayOf(2))
         val store = LiveModelStore(root)
-        val action = AgentAction("install-package", AgentActionCategory.CODE_CHANGE, ownerVerified = true, approvalCount = 2)
+        val action = AgentAction("install-package", AgentActionCategory.MODEL_CHANGE, ownerVerified = true, approvalCount = 2)
         val result = store.installPackage(packageDir, "demo-model", "generic", action, VerificationReport(true, emptyList()))
         assertTrue(result is ModelInstallResult.Installed)
         assertEquals(2L, store.active()?.sizeBytes)
+    }
+
+    @Test
+    fun activeModuleRejectsSourceChangedAfterInstall() {
+        val root = Files.createTempDirectory("live-module-tamper").toFile()
+        val store = LiveModuleStore(root)
+        val action = AgentAction("install-module", AgentActionCategory.CODE_CHANGE, ownerVerified = true, approvalCount = 2)
+        val source = """{"kind":"coding","version":1,"steps":[{"op":"emit","value":"approved"}]}"""
+        assertTrue(store.install(source, "coding", 1, action, VerificationReport(true, emptyList())) is ModuleInstallResult.Installed)
+        val active = store.active()
+        assertTrue(active != null)
+
+        File(active!!.sourcePath).writeText("""{"kind":"coding","version":1,"steps":[{"op":"emit","value":"tampered"}]}""")
+
+        assertTrue("A module whose source no longer matches its recorded checksum must not load", store.active() == null)
+    }
+
+    @Test
+    fun readOnlyActionCannotInstallModuleOrModel() {
+        val root = Files.createTempDirectory("live-install-read-only").toFile()
+        val readOnly = AgentAction("read-only", AgentActionCategory.READ_ONLY)
+        val moduleStore = LiveModuleStore(root)
+        val moduleResult = moduleStore.install(
+            """{"kind":"coding","version":1,"steps":[{"op":"emit","value":"blocked"}]}""",
+            "coding", 1, readOnly, VerificationReport(true, emptyList())
+        )
+        assertTrue(moduleResult is ModuleInstallResult.Rejected)
+        assertTrue(moduleStore.active() == null)
+        assertTrue(moduleStore.history().isEmpty())
+
+        val modelStore = LiveModelStore(root)
+        val source = root.resolve("model.bin").apply { writeBytes(byteArrayOf(1, 2, 3)) }
+        val modelResult = modelStore.install(
+            source, "read-only-model", "raw", readOnly, VerificationReport(true, emptyList())
+        )
+        assertTrue(modelResult is ModelInstallResult.Rejected)
+        assertTrue(modelStore.active() == null)
+
+        val packageDir = root.resolve("package").apply { mkdirs() }
+        packageDir.resolve("model.manifest").writeText("""{"name":"blocked","files":[{"name":"weights.bin"}]}""")
+        packageDir.resolve("weights.bin").writeBytes(byteArrayOf(1))
+        val packageResult = modelStore.installPackage(
+            packageDir, "read-only-package", "generic", readOnly, VerificationReport(true, emptyList())
+        )
+        assertTrue(packageResult is ModelInstallResult.Rejected)
+        assertTrue(modelStore.active() == null)
+    }
+
+    @Test
+    fun activeModelRejectsPayloadChangedAfterInstall() {
+        val root = Files.createTempDirectory("live-model-tamper").toFile()
+        val source = root.resolve("model.bin").apply { writeBytes(byteArrayOf(1, 2, 3)) }
+        val store = LiveModelStore(root)
+        val action = AgentAction("install-model", AgentActionCategory.MODEL_CHANGE, ownerVerified = true, approvalCount = 2)
+        assertTrue(store.install(source, "tamper-test", "raw", action, VerificationReport(true, emptyList())) is ModelInstallResult.Installed)
+        val active = store.active()
+        assertTrue(active != null)
+
+        File(active!!.sourcePath).writeBytes(byteArrayOf(9, 8, 7))
+
+        assertTrue("A model whose payload no longer matches its recorded checksum must not load", store.active() == null)
     }
 
     @Test
@@ -69,7 +130,7 @@ class LiveUpdateTest {
         val root = Files.createTempDirectory("coding-agent-model").toFile()
         val source = File(root, "model.bin").apply { writeBytes(byteArrayOf(1, 2, 3)) }
         val store = LiveModelStore(root)
-        val action = AgentAction("install-model", AgentActionCategory.CODE_CHANGE, ownerVerified = true, approvalCount = 2)
+        val action = AgentAction("install-model", AgentActionCategory.MODEL_CHANGE, ownerVerified = true, approvalCount = 2)
         assertTrue(store.install(source, "test", "raw", action, VerificationReport(true, emptyList())) is ModelInstallResult.Installed)
         val router = LiveModelRouter(store)
         assertEquals(3, router.loadedBytes())

@@ -38,10 +38,10 @@ data class EvolutionVersion(
  * ONE JOB: Stage and promote versioned source snapshots for local self-improvement.
  */
 class SelfEvolution(private val root: File) {
-    private val evolutionRoot = root.resolve(".coding-agent/evolution")
-    private val versionsRoot = evolutionRoot.resolve("versions")
-    private val activeFile = evolutionRoot.resolve("active-version")
-    private val historyFile = evolutionRoot.resolve("history.tsv")
+    private val evolutionRoot = com.codingagent.workspace.ProjectMetadataBoundary.normalizePath(root.resolve(".coding-agent/evolution"))
+    private val versionsRoot = com.codingagent.workspace.ProjectMetadataBoundary.normalizePath(root.resolve(".coding-agent/evolution/versions"))
+    private val activeFile = com.codingagent.workspace.ProjectMetadataBoundary.normalizePath(root.resolve(".coding-agent/evolution/active-version"))
+    private val historyFile = com.codingagent.workspace.ProjectMetadataBoundary.normalizePath(root.resolve(".coding-agent/evolution/history.tsv"))
 
     init {
         versionsRoot.mkdirs()
@@ -67,7 +67,10 @@ class SelfEvolution(private val root: File) {
         if (!evaluation.passed) {
             return PromotionResult.Rejected("Evolution source cannot be promoted without a passing evaluation")
         }
-        val violations = AgentConstitution.check(action.copy(sandboxPassed = true), approvalAt = approvalAt)
+        if (action.category != AgentActionCategory.CODE_CHANGE) {
+            return PromotionResult.Rejected("Source promotion requires CODE_CHANGE authorization")
+        }
+        val violations = AgentConstitution.check(action.copy(evaluationPassed = true), approvalAt = approvalAt)
         if (violations.isNotEmpty()) return PromotionResult.Rejected(violations.joinToString("; ") { "${it.rule}: ${it.message}" })
         if (!staged.isFile) return PromotionResult.Rejected("Staged source does not exist")
         val parent = staged.parentFile ?: return PromotionResult.Rejected("Staged source directory is missing")
@@ -78,7 +81,10 @@ class SelfEvolution(private val root: File) {
         if (actualParent.parentFile != expectedParent) {
             return PromotionResult.Rejected("Only snapshots created under the evolution versions directory can be promoted")
         }
-        val targetPath = readStagedTargetPath(staged).orEmpty()
+        val targetPath = readStagedTargetPath(staged)
+            ?: return PromotionResult.Rejected(
+                "Evolution snapshot has no safe project-relative recovery target"
+            )
         val version = EvolutionVersion(
             id = parent.name,
             kind = kind,

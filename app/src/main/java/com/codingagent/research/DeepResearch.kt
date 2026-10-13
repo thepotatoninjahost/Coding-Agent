@@ -15,6 +15,7 @@ import com.codingagent.workspace.DeepResearchProgress
 import com.codingagent.workspace.ResearchHit
 import com.codingagent.workspace.ResearchSession
 import com.codingagent.workspace.ResearchSource
+import com.codingagent.workspace.AtomicFileWriter
 
 /**
  * ONE JOB: Multi-lane deep research with durable sessions and progress callbacks.
@@ -48,17 +49,20 @@ interface DeepResearchProvider {
  * Specialized modes keep multi-lane coding research.
  */
 class DurableDeepResearchProvider(
-    private val researchRoot: File,
+    researchRoot: File,
     private val pageTimeoutMillis: Int = 15_000,
     private val connectionFactory: (String) -> HttpURLConnection = { URL(it).openConnection() as HttpURLConnection },
     private val searchProvider: WebResearchProvider = CompositeWebResearchProvider(),
     private val maxSourceFetches: Int = 40
 ) : DeepResearchProvider {
 
+    private val safeResearchRoot = com.codingagent.workspace.ProjectMetadataBoundary.normalizePath(researchRoot)
     private val activeConnection = AtomicReference<HttpURLConnection?>(null)
     private val cancellationGeneration = AtomicLong(0L)
-    private val personalProvider = PersonalResearchProvider(researchRoot, pageTimeoutMillis, connectionFactory, searchProvider)
-    private val sessionsDir = File(researchRoot, "sessions").apply { mkdirs() }
+    private val personalProvider = PersonalResearchProvider(safeResearchRoot, pageTimeoutMillis, connectionFactory, searchProvider)
+    private val sessionsDir = com.codingagent.workspace.ProjectMetadataBoundary
+        .normalizePath(File(safeResearchRoot, "sessions"))
+        .apply { mkdirs() }
 
     override fun cancel() {
         cancellationGeneration.incrementAndGet()
@@ -240,7 +244,7 @@ class DurableDeepResearchProvider(
                     .put("error", s.error)
             )
         }
-        file.writeText(
+        AtomicFileWriter.write(file, 
             JSONObject()
                 .put("id", session.id)
                 .put("query", session.query)

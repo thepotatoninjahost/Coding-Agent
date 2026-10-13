@@ -8,6 +8,7 @@ import android.util.Base64
 import com.google.crypto.tink.Aead
 import com.google.crypto.tink.DeterministicAead
 import com.google.crypto.tink.KeyTemplates
+import com.google.crypto.tink.RegistryConfiguration
 import com.google.crypto.tink.aead.AeadConfig
 import com.google.crypto.tink.daead.DeterministicAeadConfig
 import com.google.crypto.tink.integration.android.AndroidKeysetManager
@@ -163,8 +164,8 @@ internal object LegacyEncryptedPreferencesMigration {
             .withSharedPref(context, VALUE_KEYSET_ALIAS, LEGACY_FILE)
             .withMasterKeyUri("android-keystore://$LEGACY_MASTER_KEY")
             .build().keysetHandle
-        val keyAead = keyHandle.getPrimitive(DeterministicAead::class.java)
-        val valueAead = valueHandle.getPrimitive(Aead::class.java)
+        val keyAead = keyHandle.getPrimitive(RegistryConfiguration.get(), DeterministicAead::class.java)
+        val valueAead = valueHandle.getPrimitive(RegistryConfiguration.get(), Aead::class.java)
 
         return entries.entries.associate { (encryptedKey, rawValue) ->
             val encryptedValue = rawValue as? String

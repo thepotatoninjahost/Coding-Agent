@@ -25,7 +25,7 @@ class AgentDirectLanes(
         if (AgentRequestKind.isAgentMeta(t)) {
             return AgentTask(
                 taskId, request, "completed", plan, emptyList(),
-                VerificationReport(true, emptyList()),
+                VerificationReport(false, emptyList()),
                 listOf("${Instant.now()}: agent-meta answer (no project verify)"),
                 AgentRequestKind.metaAnswer(t)
             )
@@ -40,7 +40,7 @@ class AgentDirectLanes(
             return status(taskId, request, intake, plan, workspace.verify())
         }
         AgentRequestKind.explicitReadPath(request)?.let { path ->
-            return readFile(taskId, request, plan, VerificationReport(true, emptyList()), path)
+            return readFile(taskId, request, plan, workspace.verify(), path)
         }
         if (!AgentRequestKind.isWholeProjectReview(request)) {
             AgentRequestKind.inspectTarget(request)?.let { target ->

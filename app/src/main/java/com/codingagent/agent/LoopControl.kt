@@ -3,10 +3,8 @@ package com.codingagent.agent
 import com.codingagent.intake.TaskIntent
 
 /**
- * ONE JOB: Govern the model loop's transition from evidence gathering to execution.
- *
- * The model remains responsible for choosing the concrete tool, but this gate controls
- * when the production path stops gathering and is required to act on sufficient evidence.
+ * ONE JOB: Keep gathering tools available until the model has enough evidence to choose a change.
+ * Only the end-of-budget guard can force the execution gate; a gather count alone cannot.
  */
 data class LoopDecision(
     val toolsOpen: Boolean,
@@ -38,27 +36,17 @@ object LoopControl {
             )
         }
 
-        val minimumEvidence = when (intent) {
-            TaskIntent.DEBUG, TaskIntent.REFACTOR -> 2
-            else -> 1
-        }
-        val evidenceReady = usefulGathers >= minimumEvidence
         val forcedByRefusal = writeRefusals >= 2
-        val lateTurn = turn >= (maxTurns - 2).coerceAtLeast(1)
-        val shouldWrite = evidenceReady || forcedByRefusal || lateTurn
-
-        if (wholeProjectReview && !forcedByRefusal && !lateTurn && usefulGathers < 3) {
-            return LoopDecision(
-                toolsOpen = true,
-                demandWrite = false,
-                synthesizeFromEvidence = false
-            )
-        }
+        val lateTurnReserve = if (wholeProjectReview) 1 else 2
+        val lateTurn = turn >= (maxTurns - lateTurnReserve).coerceAtLeast(1)
+        // Never force a code change from zero evidence. If the turn budget expires without
+        // useful evidence, the caller must fail truthfully instead of guessing.
+        val shouldDemandWrite = usefulGathers > 0 && (forcedByRefusal || lateTurn)
 
         return LoopDecision(
-            toolsOpen = !shouldWrite,
-            demandWrite = shouldWrite,
-            synthesizeFromEvidence = shouldWrite && evidenceReady
+            toolsOpen = !shouldDemandWrite,
+            demandWrite = shouldDemandWrite,
+            synthesizeFromEvidence = shouldDemandWrite && usefulGathers > 0
         )
     }
 }

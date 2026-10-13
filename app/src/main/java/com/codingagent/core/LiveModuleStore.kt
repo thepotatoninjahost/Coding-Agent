@@ -4,6 +4,7 @@ import java.io.File
 import java.security.MessageDigest
 import java.util.UUID
 import com.codingagent.agent.AgentAction
+import com.codingagent.agent.AgentActionCategory
 import com.codingagent.agent.AgentConstitution
 import com.codingagent.workspace.VerificationReport
 
@@ -34,13 +35,16 @@ data class ModuleStep(val operation: String, val value: String = "", val argumen
 data class ParsedModule(val kind: String, val version: Int, val steps: List<ModuleStep>)
 
 class LiveModuleStore(private val root: File) {
-    private val moduleRoot = root.resolve(".coding-agent/live-modules")
-    private val activeFile = moduleRoot.resolve("active-module")
-    private val historyFile = moduleRoot.resolve("history.tsv")
+    private val moduleRoot = com.codingagent.workspace.ProjectMetadataBoundary.normalizePath(root.resolve(".coding-agent/live-modules"))
+    private val activeFile = com.codingagent.workspace.ProjectMetadataBoundary.normalizePath(root.resolve(".coding-agent/live-modules/active-module"))
+    private val historyFile = com.codingagent.workspace.ProjectMetadataBoundary.normalizePath(root.resolve(".coding-agent/live-modules/history.tsv"))
 
     init { moduleRoot.mkdirs() }
 
     fun install(source: String, kind: String, version: Int = 1, action: AgentAction, evaluation: VerificationReport): ModuleInstallResult {
+        if (action.category != AgentActionCategory.CODE_CHANGE) {
+            return ModuleInstallResult.Rejected("Live-module installation requires CODE_CHANGE authorization")
+        }
         val safeKind = kind.trim()
         if (!safeKind.matches(SAFE_ID)) {
             return ModuleInstallResult.Rejected("Module kind contains unsafe path characters")
@@ -50,7 +54,7 @@ class LiveModuleStore(private val root: File) {
                 "Module evaluation failed: ${evaluation.issues.joinToString { "${it.path}:${it.line}: ${it.message}" }}"
             )
         }
-        val violations = AgentConstitution.check(action.copy(sandboxPassed = evaluation.passed))
+        val violations = AgentConstitution.check(action.copy(evaluationPassed = evaluation.passed))
         if (violations.isNotEmpty()) return ModuleInstallResult.Rejected(violations.joinToString("; ") { "${it.rule}: ${it.message}" })
         val parsed = runCatching { parse(source) }.getOrElse { return ModuleInstallResult.Rejected("Invalid module: ${it.message}") }
         if (parsed.kind != safeKind) return ModuleInstallResult.Rejected("Module kind does not match requested kind")
@@ -79,7 +83,9 @@ class LiveModuleStore(private val root: File) {
      */
     fun rollback(id: String): Boolean {
         if (!id.matches(SAFE_ID)) return false
-        val moduleDir = moduleRoot.resolve(id)
+        val moduleDir = runCatching {
+            com.codingagent.workspace.ProjectMetadataBoundary.resolve(root, ".coding-agent/live-modules/$id")
+        }.getOrNull() ?: return false
         if (!moduleDir.isDirectory) return false
         val moduleFile = moduleDir.resolve("module.json")
         if (!moduleFile.isFile) return false
@@ -90,10 +96,16 @@ class LiveModuleStore(private val root: File) {
     fun active(): LiveModule? {
         val id = activeFile.takeIf { it.isFile }?.readText()?.trim().orEmpty()
         if (!id.matches(SAFE_ID)) return null
-        val source = moduleRoot.resolve(id).resolve("module.json")
+        val source = runCatching {
+            com.codingagent.workspace.ProjectMetadataBoundary.resolve(root, ".coding-agent/live-modules/$id/module.json")
+        }.getOrNull() ?: return null
         if (!source.isFile) return null
-        val parsed = runCatching { parse(source.readText()) }.getOrNull() ?: return null
-        return LiveModule(id, parsed.kind, parsed.version, source.absolutePath, checksum(source.readText()), source.parentFile?.lastModified() ?: 0L)
+        val recorded = history().lastOrNull { it.id == id } ?: return null
+        val content = runCatching { source.readText() }.getOrNull() ?: return null
+        if (checksum(content) != recorded.checksum) return null
+        val parsed = runCatching { parse(content) }.getOrNull() ?: return null
+        if (parsed.kind != recorded.kind || parsed.version != recorded.version) return null
+        return LiveModule(id, parsed.kind, parsed.version, source.absolutePath, recorded.checksum, recorded.createdAt)
     }
 
     fun source(module: LiveModule): String = File(module.sourcePath).readText()

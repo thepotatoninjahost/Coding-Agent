@@ -15,7 +15,7 @@ permissions:
 jobs:
   build:
     name: Build and test Coding Agent
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Check out source
@@ -46,7 +46,7 @@ jobs:
             echo "ERROR: repository-stored private debug signing material is tracked."
             exit 1
           fi
-          if find . -type f -name "*.keystore" -o -type f -name "*.jks" -not -path "./.git/*" -not -path "./app/build/*" | grep -q .; then
+          if find . -type f \( -name "*.keystore" -o -name "*.jks" \) -not -path "./.git/*" -not -path "*/build/*" -print | grep -q .; then
             echo "ERROR: private signing material exists in the source tree."
             exit 1
           fi
@@ -69,7 +69,7 @@ jobs:
 
       - name: Upload unit test reports
         if: failure()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: unit-test-reports
           path: |
@@ -88,7 +88,7 @@ jobs:
         run: ./gradlew :app:assembleRelease --no-daemon --stacktrace
 
       - name: Upload debug APK
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: coding-agent-debug-apk
           path: app/build/outputs/apk/debug/*.apk

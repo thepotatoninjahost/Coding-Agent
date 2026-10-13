@@ -2,6 +2,7 @@ package com.codingagent.core
 
 import java.nio.file.Files
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import com.codingagent.agent.AgentKnowledge
@@ -15,6 +16,9 @@ import com.codingagent.workspace.KnowledgeHit
 import com.codingagent.model.ModelGateway
 import com.codingagent.model.ModelRequest
 import com.codingagent.model.ModelResponse
+import com.codingagent.research.DeepResearchProvider
+import com.codingagent.research.ResearchMode
+import com.codingagent.workspace.ResearchSession
 import com.codingagent.workspace.ChangeOperation
 import com.codingagent.workspace.MutationApprovalResult
 import com.codingagent.workspace.OwnerApprovalToken
@@ -57,19 +61,22 @@ class OperationalAgentTest {
     }
 
     @Test
-    fun loopControlTransitionsChangeWorkFromEvidenceToExecution() {
-        val gathering = LoopControl.decide(
-            turn = 0,
-            maxTurns = 8,
-            usefulGathers = 0,
-            writeRefusals = 0,
-            intent = TaskIntent.CHANGE,
-            wholeProjectReview = false
-        )
-        assertTrue(gathering.toolsOpen)
-        assertTrue(!gathering.demandWrite)
+    fun directReadVerifiesProjectButAgentMetaDoesNotClaimVerification() {
+        val root = Files.createTempDirectory("agent-direct-read-verification").toFile()
+        root.resolve("Main.kt").writeText("fun main() = 1\n")
 
-        val ready = LoopControl.decide(
+        val readEvent = agent(root).run("read Main.kt").last()
+        assertTrue(readEvent is AutonomousAgentEvent.Completed)
+        assertTrue((readEvent as AutonomousAgentEvent.Completed).task.verification.passed)
+
+        val metaEvent = agent(root).run("why did you stop?").last()
+        assertTrue(metaEvent is AutonomousAgentEvent.Completed)
+        assertFalse((metaEvent as AutonomousAgentEvent.Completed).task.verification.passed)
+    }
+
+    @Test
+    fun loopControlDoesNotForceWriteAfterSmallGatherCount() {
+        val oneGather = LoopControl.decide(
             turn = 2,
             maxTurns = 8,
             usefulGathers = 1,
@@ -77,11 +84,10 @@ class OperationalAgentTest {
             intent = TaskIntent.CHANGE,
             wholeProjectReview = false
         )
-        assertTrue(!ready.toolsOpen)
-        assertTrue(ready.demandWrite)
-        assertTrue(ready.synthesizeFromEvidence)
+        assertTrue(oneGather.toolsOpen)
+        assertTrue(!oneGather.demandWrite)
 
-        val debugReady = LoopControl.decide(
+        val twoGathers = LoopControl.decide(
             turn = 3,
             maxTurns = 8,
             usefulGathers = 2,
@@ -89,7 +95,41 @@ class OperationalAgentTest {
             intent = TaskIntent.DEBUG,
             wholeProjectReview = false
         )
-        assertTrue(debugReady.demandWrite)
+        assertTrue(twoGathers.toolsOpen)
+        assertTrue(!twoGathers.demandWrite)
+
+        val lateWithEvidence = LoopControl.decide(
+            turn = 6,
+            maxTurns = 8,
+            usefulGathers = 1,
+            writeRefusals = 0,
+            intent = TaskIntent.CHANGE,
+            wholeProjectReview = false
+        )
+        assertTrue(!lateWithEvidence.toolsOpen)
+        assertTrue(lateWithEvidence.demandWrite)
+
+        val lateWithoutEvidence = LoopControl.decide(
+            turn = 6,
+            maxTurns = 8,
+            usefulGathers = 0,
+            writeRefusals = 0,
+            intent = TaskIntent.CHANGE,
+            wholeProjectReview = false
+        )
+        assertTrue(lateWithoutEvidence.toolsOpen)
+        assertTrue(!lateWithoutEvidence.demandWrite)
+
+        val wholeProject = LoopControl.decide(
+            turn = 6,
+            maxTurns = 8,
+            usefulGathers = 1,
+            writeRefusals = 0,
+            intent = TaskIntent.REFACTOR,
+            wholeProjectReview = true
+        )
+        assertTrue(wholeProject.toolsOpen)
+        assertTrue(!wholeProject.demandWrite)
     }
 
     @Test
@@ -129,6 +169,41 @@ class OperationalAgentTest {
     }
 
     @Test
+    fun explicitResearchFailsWithoutCallingModelWhenNoUsableSourcesExist() {
+        val root = Files.createTempDirectory("agent-research-fail-closed").toFile()
+        var modelCalls = 0
+        val gateway = object : ModelGateway {
+            override fun complete(request: ModelRequest): ModelResponse {
+                modelCalls++
+                return ModelResponse.Text("Unsupported answer that must never be returned")
+            }
+        }
+        val emptyResearch = object : DeepResearchProvider {
+            override fun deepResearch(
+                query: String,
+                targetSources: Int,
+                mode: ResearchMode,
+                onProgress: (com.codingagent.workspace.DeepResearchProgress) -> Unit
+            ): ResearchSession = ResearchSession(
+                id = "empty-session",
+                query = query,
+                createdAt = System.currentTimeMillis(),
+                requestedSources = targetSources,
+                sources = emptyList(),
+                learnedChunks = 0,
+                errors = listOf("No results")
+            )
+        }
+        val spine = AutonomousAgent(root, emptyKnowledge, gateway, research = emptyResearch)
+
+        val events = spine.run("Research the web for the latest Kotlin coroutine cancellation API documentation")
+
+        assertTrue(events.last() is AutonomousAgentEvent.Failed)
+        assertTrue((events.last() as AutonomousAgentEvent.Failed).message.contains("no usable external sources"))
+        assertEquals(0, modelCalls)
+    }
+
+    @Test
     fun plainEnglishDebugWithoutModelNeedsInputOrFailsClosed() {
         val root = Files.createTempDirectory("agent-plain").toFile()
         root.resolve("Main.kt").writeText("fun main() = 1\n")
@@ -143,6 +218,17 @@ class OperationalAgentTest {
     }
 
     @Test
+    fun underspecifiedOfflineEditDoesNotClaimVerificationPassed() {
+        val root = Files.createTempDirectory("agent-offline-needs-input").toFile()
+        val event = agent(root).run("improve this project").last()
+
+        assertTrue(event is AutonomousAgentEvent.Completed)
+        val task = (event as AutonomousAgentEvent.Completed).task
+        assertEquals("needs-input", task.status)
+        assertFalse("No verification ran while asking for clarification", task.verification.passed)
+    }
+
+    @Test
     fun offlineExplicitReplaceStagesProposalWithoutModel() {
         val root = Files.createTempDirectory("agent-offline-replace").toFile()
         root.resolve("src").mkdirs()
@@ -152,6 +238,7 @@ class OperationalAgentTest {
         assertTrue(result is AgentRuntimeResult.NeedsApproval)
         result as AgentRuntimeResult.NeedsApproval
         assertTrue(result.proposalId.isNotBlank())
+        assertEquals(spine.pendingProposals().single().verification.passed, result.task.verification.passed)
         assertEquals("fun main() = 1\n", root.resolve("src/Main.kt").readText())
 
         assertTrue(spine.approveProposal(result.proposalId, OwnerApprovalToken.authenticated(result.proposalId)) is MutationApprovalResult.AwaitingSecond)
@@ -220,6 +307,10 @@ class OperationalAgentTest {
 
         val result = ChatApproval.tryApprove(spine, "approve")
         assertTrue(result is AgentRuntimeResult.NeedsApproval)
+        assertEquals(
+            spine.pendingProposals().single().verification.passed,
+            (result as AgentRuntimeResult.NeedsApproval).task.verification.passed
+        )
         assertEquals(0, spine.pendingProposals().single().approvalCount)
         assertEquals("fun main() = 1\n", root.resolve("Main.kt").readText())
     }

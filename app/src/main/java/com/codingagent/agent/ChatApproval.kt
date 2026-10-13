@@ -33,7 +33,8 @@ object ChatApproval {
                 request = text,
                 summary = "Owner authentication is required before a proposal can be approved. Use the Confirm button in Review.",
                 status = "waiting-owner-authentication",
-                proposalId = proposal.id
+                proposalId = proposal.id,
+                verification = proposal.verification
             ),
             "Approval must be completed through the authenticated Review confirmation. Chat text cannot grant owner authority.",
             proposal.id
@@ -44,14 +45,15 @@ object ChatApproval {
         request: String,
         summary: String,
         status: String,
-        proposalId: String
+        proposalId: String,
+        verification: VerificationReport = VerificationReport(false, emptyList())
     ): AgentTask = AgentTask(
         id = UUID.randomUUID().toString(),
         request = request,
         status = status,
         plan = AgentPlan(request, emptyList(), emptyList()),
         changes = emptyList(),
-        verification = VerificationReport(true, emptyList()),
+        verification = verification,
         events = listOf(proposalId),
         summary = summary
     )

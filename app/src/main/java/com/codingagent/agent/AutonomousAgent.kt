@@ -53,6 +53,17 @@ class AutonomousAgent(
      */
     @Volatile
     private var gateway: ModelGateway? = gateway
+    @Volatile
+    private var configuredSystemPrompt: String = AgentModelProtocol.DEFAULT_SYSTEM
+
+    fun setGateway(gateway: ModelGateway?) {
+        this.gateway = gateway
+    }
+
+    fun setSystemPrompt(prompt: String?) {
+        configuredSystemPrompt = prompt.orEmpty().trim().take(24_000)
+            .ifBlank { AgentModelProtocol.DEFAULT_SYSTEM }
+    }
     // FIX: derive workspace from the shared MutationCoordinator instance so both always
     // reference the same ProjectWorkspace. The previous `ProjectWorkspace(root)` here
     // created a second, divergent instance that could silently drift from mutations.workspace.
@@ -143,6 +154,7 @@ class AutonomousAgent(
     }
 
     fun pendingProposals(): List<PendingChangeProposal> = mutations.pending()
+    fun recentPersonalLogs(limit: Int = 100): List<String> = journal.recentEvents(limit)
     fun approveProposal(id: String, ownerApproval: OwnerApprovalToken): MutationApprovalResult = mutations.approve(id, ownerApproval)
     fun rejectProposal(id: String): Boolean = mutations.reject(id)
 
@@ -167,12 +179,29 @@ class AutonomousAgent(
         val normalized = request.trim()
         require(normalized.isNotEmpty()) { "A coding request is required" }
         val taskId = UUID.randomUUID().toString()
-        val events = mutableListOf<AutonomousAgentEvent>(AutonomousAgentEvent.Started(taskId, normalized))
+        val events = mutableListOf<AutonomousAgentEvent>()
+        var personalLogHealthy = true
         fun emit(event: AutonomousAgentEvent) {
+            if (!personalLogHealthy) return
+            val logFailure = runCatching { journal.recordEvent(taskId, event) }.exceptionOrNull()
+            if (logFailure != null) {
+                personalLogHealthy = false
+                val detail = logFailure.message ?: logFailure.javaClass.simpleName
+                val warning = AutonomousAgentEvent.Phase(
+                    "PERSONAL_LOG_ERROR",
+                    "Could not persist an audit event: $detail. The agent is stopping to preserve auditability."
+                )
+                events += warning
+                onEvent(warning)
+                cancel("Personal log write failed; stopped to preserve auditability")
+                return
+            }
             events += event
             onEvent(event)
         }
+        emit(AutonomousAgentEvent.Started(taskId, normalized))
         emit(AutonomousAgentEvent.Phase("INTAKE", "Inspecting the request and repository"))
+        if (!personalLogHealthy) return events
         // Keep the full packaged conversation for deterministic intake. GoalInterpreter
         // extracts the active job and prior owner instructions before the model sees them.
         // The current-turn focus remains the execution-facing request for direct lanes.
@@ -190,11 +219,19 @@ class AutonomousAgent(
         // Intake and the initial repository view are real execution prerequisites, not
         // observational plan entries. Complete them only after the same workspace instance
         // used by mutations has produced its repository summary.
-        runCatching { workspace.summary() }.onSuccess {
-            planningLoop.completePhase("intake", "request parsed")
-            planningLoop.completePhase("understand", "repository summary established")
-            toolSelectionLoop.completeKind(ToolKind.INDEX_REPOSITORY, "repository summary established")
+        val repositorySummary = runCatching { workspace.summary() }
+        if (repositorySummary.isFailure) {
+            val error = repositorySummary.exceptionOrNull()
+            val message = "Repository inspection failed before execution could begin: " +
+                (error?.message?.takeIf { it.isNotBlank() } ?: error?.javaClass?.simpleName ?: "unknown error")
+            val task = failedTask(taskId, normalized, plan, message, emptyList())
+            emit(AutonomousAgentEvent.Failed(task, message))
+            recordTask(task)
+            return events
         }
+        planningLoop.completePhase("intake", "request parsed")
+        planningLoop.completePhase("understand", "repository summary established")
+        toolSelectionLoop.completeKind(ToolKind.INDEX_REPOSITORY, "repository summary established")
         emit(AutonomousAgentEvent.Phase("PLAN", plan.steps.joinToString(" → ") { it.phase }))
 
         // Direct lanes: do not force the full tool loop for social / status / explicit read.
@@ -229,7 +266,7 @@ class AutonomousAgent(
             val question = intake.clarificationQuestion ?: "Clarify the requested operation"
             val task = AgentTask(
                 taskId, focus, "needs-input", plan, emptyList(),
-                VerificationReport(true, emptyList()),
+                VerificationReport(false, emptyList()),
                 listOf("${java.time.Instant.now()}: needs input from user"),
                 question
             )
@@ -248,7 +285,7 @@ class AutonomousAgent(
                     "Open Model settings (base URL, model name, API key) for autonomous coding and research."
             val task = AgentTask(
                 taskId, focus, "needs-input", plan, emptyList(),
-                VerificationReport(true, emptyList()),
+                VerificationReport(false, emptyList()),
                 listOf("${Instant.now()}: model gateway missing — local lanes only"),
                 msg
             )
@@ -270,8 +307,8 @@ class AutonomousAgent(
                 }
             }.getOrNull()
             if (isCancelled()) return stopNow(taskId, normalized, plan, events) { emit(it) }
-            if (session != null && session.sources.isNotEmpty()) {
-                val brief = ResearchBriefBuilder.build(session)
+            val brief = session?.takeIf { it.sources.isNotEmpty() }?.let(ResearchBriefBuilder::build)
+            if (brief != null && brief.sourceCount > 0 && brief.evidence.isNotBlank()) {
                 researchEvidence = "\n\nResearch brief:\n${brief.evidence}"
                 emit(AutonomousAgentEvent.Phase("RESEARCH", "Learned ${brief.sourceCount} sources (${brief.wordCount} words)"))
             } else {
@@ -279,6 +316,16 @@ class AutonomousAgent(
                     "\n\nResearch ran but returned no usable sources. Do not invent external docs or APIs. " +
                         "Prefer local project evidence, or call research_web with a tighter technical query."
                 emit(AutonomousAgentEvent.Phase("RESEARCH", "No usable sources — model must not invent external facts"))
+                if (ResearchGate.requiresUsableEvidence(focus, intake)) {
+                    val message =
+                        "Research was required for this request, but no usable external sources were retrieved. " +
+                            "I will not present unsupported current documentation or web research as verified. " +
+                            "Retry with a narrower query or configure a working research provider."
+                    val task = failedTask(taskId, focus, plan, message, emptyList())
+                    recordTask(task)
+                    emit(AutonomousAgentEvent.Failed(task, message))
+                    return events
+                }
             }
         } else {
             emit(AutonomousAgentEvent.Phase("RESEARCH", "Skipped — local project is enough for this request"))
@@ -352,7 +399,7 @@ class AutonomousAgent(
                 gateway = activeGateway,
                 request = {
                     ModelRequest(
-                        AgentModelProtocol.SYSTEM,
+                        configuredSystemPrompt,
                         buildPrompt(normalized, intake, state.lastEvidence),
                         toolsThisTurn,
                         transcript.toList(),
@@ -621,7 +668,7 @@ class AutonomousAgent(
             gateway = model,
             request = {
                 ModelRequest(
-                    AgentModelProtocol.SYSTEM,
+                    configuredSystemPrompt,
                     "You are repairing a failed approved code change. $evidence\n" +
                         "Return exactly one replace_text or create_file tool call that fixes the diagnosed failure. " +
                         "Do not explain. Do not use any other tool. Never weaken tests or safety controls.",
