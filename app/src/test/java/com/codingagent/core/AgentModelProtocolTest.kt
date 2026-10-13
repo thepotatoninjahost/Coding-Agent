@@ -36,7 +36,7 @@ class AgentModelProtocolTest {
         assertTrue(prompt.contains("accessible personal logs"))
         assertTrue(prompt.contains("static unfinished-work marker scan is not a substitute"))
         assertTrue(prompt.contains("the owner's decision"))
-        assertTrue(prompt.contains("Exactly one tool call per turn"))
+        assertTrue(prompt.contains("exactly one tool call per turn"))
         assertTrue(prompt.contains("purpose field"))
     }
 }
