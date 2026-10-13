@@ -10,6 +10,8 @@ Directories (tree objects): 34
 
 This is the complete recursive Git tree at the exact audited commit. FILE rows are tracked blobs; DIR rows are directory tree objects.
 
+Historical snapshot only: this is not the current main tree as of 2026-10-13. Current main is commit `74f1c18f2fbee310eb4a6e26b6d677544502ca99`, tree `117a1a659affc22e6813977d83233b7eb58617d0`, with 195 recursive entries (161 tracked files + 34 directories). See `PHASE_1_BASELINE_EVIDENCE.md` for the reconciliation.
+
 ```text
 FILE .gitattributes
 DIR  .github/
