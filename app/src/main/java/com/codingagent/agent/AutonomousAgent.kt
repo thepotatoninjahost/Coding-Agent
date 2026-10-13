@@ -154,6 +154,7 @@ class AutonomousAgent(
     }
 
     fun pendingProposals(): List<PendingChangeProposal> = mutations.pending()
+    fun recentPersonalLogs(limit: Int = 100): List<String> = journal.recentEvents(limit)
     fun approveProposal(id: String, ownerApproval: OwnerApprovalToken): MutationApprovalResult = mutations.approve(id, ownerApproval)
     fun rejectProposal(id: String): Boolean = mutations.reject(id)
 
@@ -178,12 +179,29 @@ class AutonomousAgent(
         val normalized = request.trim()
         require(normalized.isNotEmpty()) { "A coding request is required" }
         val taskId = UUID.randomUUID().toString()
-        val events = mutableListOf<AutonomousAgentEvent>(AutonomousAgentEvent.Started(taskId, normalized))
+        val events = mutableListOf<AutonomousAgentEvent>()
+        var personalLogHealthy = true
         fun emit(event: AutonomousAgentEvent) {
+            if (!personalLogHealthy) return
+            val logFailure = runCatching { journal.recordEvent(taskId, event) }.exceptionOrNull()
+            if (logFailure != null) {
+                personalLogHealthy = false
+                val detail = logFailure.message ?: logFailure.javaClass.simpleName
+                val warning = AutonomousAgentEvent.Phase(
+                    "PERSONAL_LOG_ERROR",
+                    "Could not persist an audit event: $detail. The agent is stopping to preserve auditability."
+                )
+                events += warning
+                onEvent(warning)
+                cancel("Personal log write failed; stopped to preserve auditability")
+                return
+            }
             events += event
             onEvent(event)
         }
+        emit(AutonomousAgentEvent.Started(taskId, normalized))
         emit(AutonomousAgentEvent.Phase("INTAKE", "Inspecting the request and repository"))
+        if (!personalLogHealthy) return events
         // Keep the full packaged conversation for deterministic intake. GoalInterpreter
         // extracts the active job and prior owner instructions before the model sees them.
         // The current-turn focus remains the execution-facing request for direct lanes.

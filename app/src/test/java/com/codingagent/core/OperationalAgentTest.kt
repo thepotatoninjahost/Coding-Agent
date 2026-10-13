@@ -75,19 +75,8 @@ class OperationalAgentTest {
     }
 
     @Test
-    fun loopControlTransitionsChangeWorkFromEvidenceToExecution() {
-        val gathering = LoopControl.decide(
-            turn = 0,
-            maxTurns = 8,
-            usefulGathers = 0,
-            writeRefusals = 0,
-            intent = TaskIntent.CHANGE,
-            wholeProjectReview = false
-        )
-        assertTrue(gathering.toolsOpen)
-        assertTrue(!gathering.demandWrite)
-
-        val ready = LoopControl.decide(
+    fun loopControlDoesNotForceWriteAfterSmallGatherCount() {
+        val oneGather = LoopControl.decide(
             turn = 2,
             maxTurns = 8,
             usefulGathers = 1,
@@ -95,11 +84,10 @@ class OperationalAgentTest {
             intent = TaskIntent.CHANGE,
             wholeProjectReview = false
         )
-        assertTrue(!ready.toolsOpen)
-        assertTrue(ready.demandWrite)
-        assertTrue(ready.synthesizeFromEvidence)
+        assertTrue(oneGather.toolsOpen)
+        assertTrue(!oneGather.demandWrite)
 
-        val debugReady = LoopControl.decide(
+        val twoGathers = LoopControl.decide(
             turn = 3,
             maxTurns = 8,
             usefulGathers = 2,
@@ -107,7 +95,41 @@ class OperationalAgentTest {
             intent = TaskIntent.DEBUG,
             wholeProjectReview = false
         )
-        assertTrue(debugReady.demandWrite)
+        assertTrue(twoGathers.toolsOpen)
+        assertTrue(!twoGathers.demandWrite)
+
+        val lateWithEvidence = LoopControl.decide(
+            turn = 6,
+            maxTurns = 8,
+            usefulGathers = 1,
+            writeRefusals = 0,
+            intent = TaskIntent.CHANGE,
+            wholeProjectReview = false
+        )
+        assertTrue(!lateWithEvidence.toolsOpen)
+        assertTrue(lateWithEvidence.demandWrite)
+
+        val lateWithoutEvidence = LoopControl.decide(
+            turn = 6,
+            maxTurns = 8,
+            usefulGathers = 0,
+            writeRefusals = 0,
+            intent = TaskIntent.CHANGE,
+            wholeProjectReview = false
+        )
+        assertTrue(lateWithoutEvidence.toolsOpen)
+        assertTrue(!lateWithoutEvidence.demandWrite)
+
+        val wholeProject = LoopControl.decide(
+            turn = 6,
+            maxTurns = 8,
+            usefulGathers = 1,
+            writeRefusals = 0,
+            intent = TaskIntent.REFACTOR,
+            wholeProjectReview = true
+        )
+        assertTrue(wholeProject.toolsOpen)
+        assertTrue(!wholeProject.demandWrite)
     }
 
     @Test

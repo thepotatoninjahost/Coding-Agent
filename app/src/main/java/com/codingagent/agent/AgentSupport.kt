@@ -1,6 +1,7 @@
 package com.codingagent.agent
 
 import java.io.File
+import org.json.JSONObject
 import com.codingagent.intake.GoalContract
 import com.codingagent.intake.OperationKind
 import com.codingagent.intake.TaskIntake
@@ -57,19 +58,67 @@ class AgentPlanner(private val workspace: ProjectWorkspace) {
 
 class AgentJournal(private val root: File) {
     private val file = com.codingagent.workspace.ProjectMetadataBoundary.normalizePath(root.resolve(".coding-agent/tasks.tsv"))
+    private val personalLog = com.codingagent.workspace.ProjectMetadataBoundary.normalizePath(root.resolve(".coding-agent/personal-log.jsonl"))
+    private val pendingModelText = mutableMapOf<String, StringBuilder>()
 
     @Synchronized
     fun record(task: AgentTask) {
+        flushModelText(task.id)
         file.parentFile?.mkdirs()
         val line = listOf(task.id, task.status, task.request, task.changes.size, task.verification.passed, task.summary, task.events.joinToString(" | "))
-            .joinToString("\t") { it.toString().replace('\t', ' ').replace('\n', ' ') }
+            .joinToString("\t") { sanitize(it.toString()).replace('\t', ' ').replace('\n', ' ') }
         file.appendText(line + "\n")
     }
 
-    fun recent(limit: Int = 20): List<String> {
-        if (!file.isFile || limit <= 0) return emptyList()
+    /** Persist observable events, redacting common credentials before writing them to disk. */
+    @Synchronized
+    fun recordEvent(taskId: String, event: AutonomousAgentEvent) {
+        if (event is AutonomousAgentEvent.ModelDelta) {
+            val buffer = pendingModelText.getOrPut(taskId) { StringBuilder() }
+            if (buffer.length < MAX_DETAIL_CHARS) {
+                buffer.append(event.text.take(MAX_DETAIL_CHARS - buffer.length))
+            }
+            return
+        }
+        flushModelText(taskId)
+        writeEvent(taskId, event.javaClass.simpleName, event.toString())
+    }
+
+    private fun flushModelText(taskId: String) {
+        val text = pendingModelText.remove(taskId)?.toString() ?: return
+        if (text.isNotEmpty()) writeEvent(taskId, "ModelStream", text)
+    }
+
+    private fun writeEvent(taskId: String, type: String, details: String) {
+        personalLog.parentFile?.mkdirs()
+        val entry = JSONObject()
+            .put("timestamp", System.currentTimeMillis())
+            .put("taskId", taskId)
+            .put("type", type)
+            .put("details", sanitize(details))
+        personalLog.appendText(entry.toString() + "\n")
+    }
+
+    private fun sanitize(value: String): String {
+        var safe = value
+        safe = PRIVATE_KEY.replace(safe, "[REDACTED PRIVATE KEY]")
+        safe = BEARER_TOKEN.replace(safe, "$1[REDACTED]")
+        safe = ASSIGNED_SECRET.replace(safe, "$1[REDACTED]")
+        safe = COMMON_TOKEN.replace(safe, "[REDACTED TOKEN]")
+        if (safe.length > MAX_DETAIL_CHARS) {
+            safe = safe.take(MAX_DETAIL_CHARS) + "…[truncated]"
+        }
+        return safe
+    }
+
+    fun recentEvents(limit: Int = 100): List<String> = recentLines(personalLog, limit)
+
+    fun recent(limit: Int = 20): List<String> = recentLines(file, limit)
+
+    private fun recentLines(source: File, limit: Int): List<String> {
+        if (!source.isFile || limit <= 0) return emptyList()
         val result = ArrayDeque<String>(limit)
-        java.io.RandomAccessFile(file, "r").use { raf ->
+        java.io.RandomAccessFile(source, "r").use { raf ->
             var position = raf.length() - 1
             val bytes = java.io.ByteArrayOutputStream()
             while (position >= 0 && result.size < limit) {
@@ -92,5 +141,13 @@ class AgentJournal(private val root: File) {
             }
         }
         return result.asReversed()
+    }
+
+    private companion object {
+        const val MAX_DETAIL_CHARS = 8_000
+        val PRIVATE_KEY = Regex("-----BEGIN [A-Z ]*PRIVATE KEY-----[\\s\\S]*?-----END [A-Z ]*PRIVATE KEY-----")
+        val BEARER_TOKEN = Regex("(?i)(\\bBearer\\s+)[A-Za-z0-9._~+/-]+=*")
+        val ASSIGNED_SECRET = Regex("(?i)(\\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|password|passwd|secret|authorization)\\b\\s*[:=]\\s*[\\\"']?)([^\\s,;\\\"']+)")
+        val COMMON_TOKEN = Regex("\\b(?:gh[pousr]_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9_-]{20,}|AKIA[0-9A-Z]{16})\\b")
     }
 }

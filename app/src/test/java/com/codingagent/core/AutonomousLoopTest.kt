@@ -91,8 +91,7 @@ class AutonomousLoopTest {
     @Test
     fun refusesToCompleteWithoutReadingNamedFile() {
         val root = Files.createTempDirectory("agent-evidence").toFile()
-        val file = root.resolve("SelfEvolution.kt")
-        file.writeText("class SelfEvolution\n")
+        root.resolve("SelfEvolution.kt").writeText("class SelfEvolution\n")
         val gateway = ScriptedGateway(
             listOf(
                 ModelResponse.Text("SelfEvolution is a great file about evolution and imports."),
@@ -100,13 +99,13 @@ class AutonomousLoopTest {
                 ModelResponse.Text("SelfEvolution stages sources under .coding-agent/evolution and promotes after checks.")
             )
         )
-        val workspace = ProjectWorkspace(root)
         val knowledge = object : AgentKnowledge {
             override fun search(query: String, limit: Int) = emptyList<KnowledgeHit>()
         }
         val agent = AutonomousAgent(
             root, knowledge, gateway, AutonomousAgentConfig(maxTurns = 8))
-        val events = agent.run("Analyze the file SelfEvolution.kt then write a report about the file")
+        // Avoid the local single-file inspection shortcut: exercise the model-loop evidence gate.
+        val events = agent.run("Audit the project and explain how SelfEvolution.kt works")
         assertTrue(
             "expected an EVIDENCE phase before completion",
             events.any { it is AutonomousAgentEvent.Phase && it.name == "EVIDENCE" }
