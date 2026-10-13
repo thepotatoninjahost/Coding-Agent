@@ -8,7 +8,7 @@
 - Audited commit: `83002089d1a0a7b356e3dbf81a70cfb35c40721a`
 - Commit: `Complete self-evolution snapshot recovery lifecycle (#73)`
 - Recursive Git tree SHA: `c108371fe02cdf9c07c472bcfd17ac1af18f0c17`
-- Current recursive tree: 189 entries = 155 tracked files + 34 directory entries; tree response was not truncated. The full path-by-path capture is in `docs/audit/PHASE_1_RECURSIVE_TREE.txt`.
+- Historical baseline recursive tree: 189 entries = 155 tracked files + 34 directory entries; tree response was not truncated. The full path-by-path capture is in `docs/audit/PHASE_1_RECURSIVE_TREE.txt`.
 - Previous inventory baseline: commit `5910ac4841c893de5a5dca25d95b5f9f3591bbce`, tree `81cf30532b85357715520eaa6d92326b1abf58b6`, 186 entries = 153 tracked files + 33 directory entries.
 - Reconciliation: the prior 153-file count was correct for the earlier commit. Comparing that commit to the current baseline shows four commits ahead and two added tracked files: `app/src/test/java/com/codingagent/core/SelfEvolutionTest.kt` and `docs/audit/FILE_BY_FILE_AUDIT_LEDGER.md`. Current count is therefore 155, not 153.
 - Uploaded source archive `Coding-Agent-main.zip` contains 154 files and does not include `app/src/test/java/com/codingagent/core/SelfEvolutionTest.kt`; it is not a complete mirror of the audited Git tree. Use the commit SHA above as the source of truth.
@@ -59,6 +59,8 @@ Therefore the two recorded approvals are not the owner's required two distinct m
 
 ## Verification evidence
 
+The sections in this part record evidence for the immutable `83002089...` baseline and historical follow-up PR runs. They are not a claim that those older commits represent today's main branch; current-main evidence is in the reconciliation section above.
+
 ### Merged baseline
 
 - GitHub Actions run #1271, ID `38208556052`, for the exact baseline commit completed with conclusion `success`: https://github.com/thepotatoninjahost/Coding-Agent/actions/runs/38208556052
@@ -98,7 +100,7 @@ The required dual approval is **two different modalities from the same owner**, 
 3. Both events must bind to the same pending proposal and be independently validated before any write is authorized.
 4. The agent must not be able to create, skip, replay, or substitute either event. A missing or mismatched spoken transcript or typed phrase must leave the project files unchanged.
 
-### Current implementation fails this acceptance criterion
+### Implementation at the audited baseline fails this acceptance criterion
 
 - `MainActivity.approvePendingProposal` currently requests Android biometric/device-credential authentication on each confirmation.
 - `OwnerApprovalToken.authenticated` represents only a generic authenticated event; it carries no speech transcript, typed phrase, or approval modality.
