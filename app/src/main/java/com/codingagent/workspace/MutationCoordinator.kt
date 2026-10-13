@@ -12,7 +12,6 @@ import com.codingagent.agent.SelfEvolution
 import com.codingagent.agent.SelfRepair
 import com.codingagent.agent.RepairCycleConfig
 import com.codingagent.intake.TaskOperation
-import com.codingagent.intake.TaskIntakeParser
 
 /**
  * ONE JOB: Dual-approval staging, constitution checks, and apply/reject of code changes.
@@ -47,7 +46,8 @@ class MutationCoordinator(
     internal val workspace: ProjectWorkspace,
     private val ledger: ApprovalLedger = ApprovalLedger(),
     private val now: () -> Long = { System.currentTimeMillis() },
-    private val repairConfig: RepairCycleConfig = RepairCycleConfig()
+    private val repairConfig: RepairCycleConfig = RepairCycleConfig(),
+    private val postApplyVerifier: (() -> VerificationReport)? = null
 ) {
     private val pending = linkedMapOf<String, PendingChangeProposal>()
     private var pendingReconciliationFailed = false
@@ -149,6 +149,47 @@ class MutationCoordinator(
         return MutationProposeResult.Proposed(proposal)
     }
 
+    /**
+     * Stage a historical source snapshot as a normal change proposal. Restoration is not
+     * written directly: the owner must still review and approve the resulting file diff.
+     */
+    @Synchronized
+    fun proposeEvolutionRestore(versionId: String): MutationProposeResult {
+        val candidate = when (val result = evolution.prepareRestoreCandidate(versionId)) {
+            is com.codingagent.agent.SnapshotCandidateResult.Ready -> result.candidate
+            is com.codingagent.agent.SnapshotCandidateResult.Rejected ->
+                return MutationProposeResult.Rejected(result.reason)
+        }
+        val targetPath = candidate.version.targetPath
+        val snapshotText = runCatching { candidate.snapshot.readText(Charsets.UTF_8) }.getOrElse {
+            return MutationProposeResult.Rejected("Could not read evolution snapshot: ${it.message.orEmpty()}")
+        }
+        val target = candidate.destination
+        val operation = if (!target.exists()) {
+            TaskOperation(kind = com.codingagent.intake.OperationKind.CREATE_FILE, path = targetPath, text = snapshotText)
+        } else {
+            if (!target.isFile) return MutationProposeResult.Rejected("Evolution restore target is not a regular file")
+            val current = runCatching { target.readText(Charsets.UTF_8) }.getOrElse {
+                return MutationProposeResult.Rejected("Could not read current restore target: ${it.message.orEmpty()}")
+            }
+            if (current == snapshotText) return MutationProposeResult.Rejected("Evolution snapshot already matches the current source")
+            if (current.isEmpty()) {
+                return MutationProposeResult.Rejected("Cannot stage a restore over an empty file with the current change operations")
+            }
+            TaskOperation(
+                kind = com.codingagent.intake.OperationKind.REPLACE,
+                path = targetPath,
+                oldText = current,
+                newText = snapshotText
+            )
+        }
+        return propose(
+            request = "Restore evolution version $versionId to $targetPath",
+            operations = listOf(operation),
+            reason = "Restore verified evolution snapshot $versionId"
+        )
+    }
+
     @Synchronized
     fun get(id: String): PendingChangeProposal? {
         clearExpired()
@@ -219,7 +260,7 @@ class MutationCoordinator(
             category = AgentActionCategory.CODE_CHANGE,
             ownerVerified = true,
             approvalCount = candidate.approvalCount,
-            sandboxPassed = proposal.verification.passed,
+            evaluationPassed = proposal.verification.passed,
             clearPermission = true
         )
         val violations = AgentConstitution.check(action, timestamp, proposal.createdAt)
@@ -254,12 +295,12 @@ class MutationCoordinator(
 
             val appliedChangeSet = workspace.applyApproved(proposal.changeSet)
             applied = appliedChangeSet
-            val intake = TaskIntakeParser(workspace.projectRoot()).parse(proposal.request)
-            val postApply = if (intake.verificationCommands.isEmpty()) {
-                workspace.verify()
-            } else {
-                workspace.runChecks(intake.verificationCommands, 180)
-            }
+            // Approval authorizes this exact file mutation, not execution of imported project scripts.
+            // Static verification is local and bounded. Build/test commands require explicit owner action.
+            val staticReport = postApplyVerifier?.invoke() ?: workspace.verify()
+            val postApply = staticReport.copy(
+                warnings = staticReport.warnings + "Static verification completed; project build/test commands were not executed automatically. Review scripts and run them explicitly in the owner-controlled terminal."
+            )
             if (!postApply.passed) {
                 val details = buildString {
                     append("Approved change failed post-apply checks")
@@ -382,8 +423,9 @@ class MutationCoordinator(
                     )
                 }
             }
-            recordEvolution(candidate, appliedChangeSet)
-            MutationApprovalResult.Applied(candidate, appliedChangeSet)
+            val completedProposal = candidate.copy(verification = postApply)
+            recordEvolution(completedProposal, appliedChangeSet, postApply)
+            MutationApprovalResult.Applied(completedProposal, appliedChangeSet)
         } catch (error: Exception) {
             val completedChangeSet = applied
             if (completedChangeSet != null) {
@@ -578,7 +620,7 @@ class MutationCoordinator(
         }
     }
 
-    private fun recordEvolution(proposal: PendingChangeProposal, changeSet: ChangeSet) {
+    private fun recordEvolution(proposal: PendingChangeProposal, changeSet: ChangeSet, evaluation: VerificationReport) {
         runCatching {
             val latestApproval = proposal.approvals.maxOfOrNull { it.approvedAt }
             val kind = if (SelfRepair.isRequest(proposal.request)) "self-repair" else "code-change"
@@ -591,10 +633,10 @@ class MutationCoordinator(
                     category = AgentActionCategory.CODE_CHANGE,
                     ownerVerified = true,
                     approvalCount = proposal.approvalCount,
-                    sandboxPassed = proposal.verification.passed,
+                    evaluationPassed = proposal.verification.passed,
                     clearPermission = true
                 )
-                evolution.promoteSource(staged, kind, proposal.verification, action, latestApproval)
+                evolution.promoteSource(staged, kind, evaluation, action, latestApproval)
             }
         }
     }

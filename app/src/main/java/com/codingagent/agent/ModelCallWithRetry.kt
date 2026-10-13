@@ -18,13 +18,14 @@ object ModelCallWithRetry {
         gateway: ModelGateway,
         request: () -> ModelRequest,
         isCancelled: () -> Boolean,
-        onPhase: (String) -> Unit
+        onPhase: (String) -> Unit,
+        onDelta: (String) -> Unit = {}
     ): ModelResponse? {
         if (isCancelled()) {
             gateway.cancel()
             return null
         }
-        var response = gateway.complete(request())
+        var response = gateway.stream(request(), onDelta)
         var attempt = 0
         while (
             response is ModelResponse.Failure &&
@@ -52,7 +53,7 @@ object ModelCallWithRetry {
                 gateway.cancel()
                 return null
             }
-            response = gateway.complete(request())
+            response = gateway.stream(request(), onDelta)
         }
         return response
     }

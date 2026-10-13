@@ -15,6 +15,17 @@ import com.codingagent.workspace.TerminalEntry
 import com.codingagent.workspace.TerminalSession
 
 class TerminalCancelTest {
+
+    @Test
+    fun streamedOutputCallbackStopsAtTheCaptureLimit() {
+        val root = Files.createTempDirectory("terminal-output-cap").toFile()
+        val workspace = ProjectWorkspace(root)
+        val seen = StringBuilder()
+        val entry = workspace.terminal().execute("yes x | head -c 400000", onStdout = { seen.append(it) }, timeoutSeconds = 10)
+        assertTrue(entry.stdout.length <= 256 * 1024)
+        assertTrue(seen.length <= 256 * 1024)
+    }
+
     @Test
     fun cancelStopsLongRunningCommand() {
         val root = Files.createTempDirectory("term-cancel").toFile()
@@ -23,7 +34,7 @@ class TerminalCancelTest {
         val started = CountDownLatch(1)
         val thread = Thread {
             started.countDown()
-            resultRef.set(runner.run(listOf("sh", "-c", "sleep 30"), timeoutSeconds = 60))
+            resultRef.set(runner.run(listOf("sh", "-c", "echo early-error >&2; sleep 30"), timeoutSeconds = 60))
         }
         thread.start()
         assertTrue(started.await(2, TimeUnit.SECONDS))
@@ -33,7 +44,7 @@ class TerminalCancelTest {
         val result = resultRef.get()
         assertTrue(result != null)
         assertEquals(130, result.exitCode)
-        assertTrue(result.stderr.contains("cancelled") || result.exitCode == 130)
+        assertTrue(result.stderr.contains("cancelled"))
     }
 
     @Test
@@ -75,6 +86,34 @@ class TerminalCancelTest {
         val entry = resultRef.get()
         assertTrue(entry != null)
         assertEquals(130, entry.exitCode)
+    }
+
+
+    @Test
+    fun agentToolsTerminalHonorsRequestedTimeout() {
+        val root = Files.createTempDirectory("term-tools-timeout").toFile()
+        val tools = AgentTools(ProjectWorkspace(root))
+
+        val entry = tools.terminal(listOf("yes"), timeoutSeconds = 1)
+
+        assertTrue("Requested timeout should stop the command", entry.timedOut)
+        assertTrue("Requested timeout should not wait for the full sleep", entry.durationMs < 4_000)
+    }
+
+    @Test
+    fun agentToolsArgumentListPreservesArgumentBoundariesAndDoesNotInterpretShellMetacharacters() {
+        val root = Files.createTempDirectory("term-args").toFile()
+        val tools = AgentTools(ProjectWorkspace(root))
+        val payload = "literal value; touch injected-file"
+
+        val entry = tools.terminal(
+            listOf("sh", "-c", "printf '%s' \"$1\"", "sh", payload),
+            timeoutSeconds = 5
+        )
+
+        assertEquals(0, entry.exitCode)
+        assertEquals(payload, entry.stdout)
+        assertTrue("Argument text must not be interpreted as shell syntax", !root.resolve("injected-file").exists())
     }
 
     @Test

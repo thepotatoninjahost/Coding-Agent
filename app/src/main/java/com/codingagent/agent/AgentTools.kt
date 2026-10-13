@@ -8,6 +8,7 @@ import com.codingagent.workspace.EditorDocument
 import com.codingagent.workspace.MutationCoordinator
 import com.codingagent.workspace.MutationProposeResult
 import com.codingagent.workspace.ProjectWorkspace
+import com.codingagent.workspace.ProjectPaths
 import com.codingagent.workspace.TerminalEntry
 
 /**
@@ -18,6 +19,7 @@ class AgentTools(private val workspace: ProjectWorkspace) {
 
     fun read(path: String): EditorDocument {
         val file = resolveExistingFile(path)
+        require(file.length() <= MAX_READ_BYTES) { "File exceeds the 2 MiB model-read limit" }
         val content = file.readText()
         val relative = file.relativeTo(workspace.projectRoot()).invariantSeparatorsPath
         return EditorDocument(relative, content, checksum(content), false)
@@ -49,8 +51,7 @@ class AgentTools(private val workspace: ProjectWorkspace) {
         onStderr: ((String) -> Unit)? = null
     ): TerminalEntry {
         require(command.isNotEmpty()) { "Command cannot be empty" }
-        val joined = command.joinToString(" ")
-        return terminalSession.execute(joined, onStdout, onStderr)
+        return terminalSession.executeArgs(command, onStdout, onStderr, timeoutSeconds)
     }
 
     fun runTerminal(
@@ -79,8 +80,8 @@ class AgentTools(private val workspace: ProjectWorkspace) {
         val root = workspace.projectRoot().canonicalFile
         val direct = root.resolve(path).canonicalFile
         require(direct.toPath().startsWith(root.toPath())) { "Unsafe project path" }
-        require(!isReservedAgentMetadataPath(root, direct)) {
-            "Coding Agent internal metadata is not accessible as project source"
+        require(!ProjectPaths.isSensitivePath(ProjectPaths.relative(root, direct))) {
+            "Sensitive project paths are not accessible as project source"
         }
         if (direct.isFile) return direct
 
@@ -88,16 +89,11 @@ class AgentTools(private val workspace: ProjectWorkspace) {
         val match = findCaseInsensitive(root, normalized)
             ?: throw IllegalArgumentException("File does not exist: $path")
         require(match.canonicalFile.toPath().startsWith(root.toPath())) { "Unsafe project path" }
-        require(!isReservedAgentMetadataPath(root, match)) {
-            "Coding Agent internal metadata is not accessible as project source"
+        require(!ProjectPaths.isSensitivePath(ProjectPaths.relative(root, match))) {
+            "Sensitive project paths are not accessible as project source"
         }
+        require(match.length() <= MAX_READ_BYTES) { "File exceeds the 2 MiB model-read limit" }
         return match
-    }
-
-    private fun isReservedAgentMetadataPath(root: File, candidate: File): Boolean {
-        val relative = root.toPath().relativize(candidate.canonicalFile.toPath())
-            .toString().replace('\\', '/')
-        return relative.substringBefore('/').equals(".coding-agent", ignoreCase = true)
     }
 
     private fun findCaseInsensitive(root: File, relative: String): File? {
@@ -114,6 +110,10 @@ class AgentTools(private val workspace: ProjectWorkspace) {
             current = hit
         }
         return null
+    }
+
+    companion object {
+        private const val MAX_READ_BYTES = 2L * 1024 * 1024
     }
 
     private fun checksum(content: String): String = MessageDigest.getInstance("SHA-256")

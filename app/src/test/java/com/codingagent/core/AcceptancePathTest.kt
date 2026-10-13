@@ -21,6 +21,8 @@ import com.codingagent.workspace.MutationProposeResult
 import com.codingagent.workspace.ProjectWorkspace
 import com.codingagent.workspace.PendingProposalStore
 import com.codingagent.workspace.OpenJobStore
+import com.codingagent.workspace.VerificationIssue
+import com.codingagent.workspace.VerificationReport
 
 /**
  * Path A acceptance: offline explicit create/replace → dual approve → disk changed.
@@ -129,14 +131,13 @@ class AcceptancePathTest {
     }
 
     @Test
-    fun rollbackStateFailureIsReportedAsCriticalInsteadOfSilentlyClearingNothing() {
+    fun approvedMutationNeverExecutesImportedBuildScripts() {
         val root = Files.createTempDirectory("accept-rollback-state-failure").toFile()
         root.resolve("Main.kt").writeText("fun main() = 1\n")
         root.resolve(".coding-agent").mkdirs()
+        val marker = root.resolve("build-script-ran.txt")
         val gradlew = root.resolve("gradlew")
-        gradlew.writeText(
-            "#!/bin/sh\nprintf 'not valid json' > .coding-agent/open-job.json\nexit 1\n"
-        )
+        gradlew.writeText("#!/bin/sh\nprintf ran > build-script-ran.txt\nexit 1\n")
         gradlew.setExecutable(true)
 
         val coordinator = MutationCoordinator(ProjectWorkspace(root))
@@ -150,10 +151,10 @@ class AcceptancePathTest {
         )
         val result = coordinator.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id))
 
-        assertTrue(result is MutationApprovalResult.Rejected)
-        assertTrue((result as MutationApprovalResult.Rejected).reason.contains("recovery-required"))
-        assertEquals("recovery-required", OpenJobStore.load(root)?.status)
-        assertEquals("fun main() = 1\n", root.resolve("Main.kt").readText())
+        assertTrue("Expected approved mutation, got $result", result is MutationApprovalResult.Applied)
+        assertEquals("applied", OpenJobStore.load(root)?.status)
+        assertEquals("fun main() = 2\n", root.resolve("Main.kt").readText())
+        assertFalse("Imported build script must not run during approval", marker.exists())
     }
 
     @Test
@@ -647,11 +648,14 @@ class AcceptancePathTest {
     @Test
     fun failedApprovedChangeStagesRepairAfterRollback() {
         val root = Files.createTempDirectory("accept-repair").toFile()
-        root.resolve("gradlew").writeText("#!/bin/sh\nexit 1\n")
-        root.resolve("gradlew").setExecutable(true)
+
         root.resolve("Main.kt").writeText("fun main() = 1\n")
         val workspace = ProjectWorkspace(root)
-        val coordinator = MutationCoordinator(workspace)
+        var verificationRuns = 0
+        val coordinator = MutationCoordinator(workspace, postApplyVerifier = {
+            verificationRuns++
+            if (verificationRuns == 1) VerificationReport(false, listOf(VerificationIssue("Main.kt", 1, "simulated post-apply failure"))) else workspace.verify()
+        })
         coordinator.setRepairProvider { _, _ ->
             workspace.preview(
                 listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 2\n")),
@@ -677,11 +681,12 @@ class AcceptancePathTest {
     @Test
     fun failedRepairStagesNextAttemptAndPreservesRootRequest() {
         val root = Files.createTempDirectory("accept-repair-retry").toFile()
-        root.resolve("gradlew").writeText("#!/bin/sh\nexit 1\n")
-        root.resolve("gradlew").setExecutable(true)
+
         root.resolve("Main.kt").writeText("fun main() = 1\n")
         val workspace = ProjectWorkspace(root)
-        val coordinator = MutationCoordinator(workspace)
+        val coordinator = MutationCoordinator(workspace, postApplyVerifier = {
+            VerificationReport(false, listOf(VerificationIssue("Main.kt", 1, "simulated post-apply failure")))
+        })
         coordinator.setRepairProvider { _, attempt ->
             workspace.preview(
                 listOf(
@@ -722,11 +727,10 @@ class AcceptancePathTest {
     @Test
     fun repairApprovalSurvivesCoordinatorRestart() {
         val root = Files.createTempDirectory("accept-repair-restart").toFile()
-        root.resolve("gradlew").writeText("#!/bin/sh\nexit 1\n")
-        root.resolve("gradlew").setExecutable(true)
+
         root.resolve("Main.kt").writeText("fun main() = 1\n")
         val workspace = ProjectWorkspace(root)
-        val first = MutationCoordinator(workspace)
+        val first = MutationCoordinator(workspace, postApplyVerifier = { VerificationReport(false, listOf(VerificationIssue("Main.kt", 1, "simulated post-apply failure"))) })
         first.setRepairProvider { _, attempt ->
             workspace.preview(
                 listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = ${attempt + 1}\n")),
@@ -743,7 +747,7 @@ class AcceptancePathTest {
             as MutationApprovalResult.RepairRequired).proposal
         assertEquals(1, repair.repairAttempt)
 
-        val restarted = MutationCoordinator(ProjectWorkspace(root))
+        val restarted = MutationCoordinator(ProjectWorkspace(root), postApplyVerifier = { VerificationReport(false, listOf(VerificationIssue("Main.kt", 1, "simulated post-apply failure"))) })
         restarted.setRepairProvider { _, attempt ->
             ProjectWorkspace(root).preview(
                 listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = ${attempt + 1}\n")),
@@ -765,11 +769,12 @@ class AcceptancePathTest {
     @Test
     fun repairAttemptsAreBoundedAndStopAfterConfiguredMaximum() {
         val root = Files.createTempDirectory("accept-repair-bound").toFile()
-        root.resolve("gradlew").writeText("#!/bin/sh\nexit 1\n")
-        root.resolve("gradlew").setExecutable(true)
+
         root.resolve("Main.kt").writeText("fun main() = 1\n")
         val workspace = ProjectWorkspace(root)
-        val coordinator = MutationCoordinator(workspace)
+        val coordinator = MutationCoordinator(workspace, postApplyVerifier = {
+            VerificationReport(false, listOf(VerificationIssue("Main.kt", 1, "simulated post-apply failure")))
+        })
         coordinator.setRepairProvider { _, attempt ->
             workspace.preview(
                 listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = ${attempt + 1}\n")),
@@ -853,4 +858,36 @@ class AcceptancePathTest {
             names
         )
     }
+    @Test
+    fun approvedMutationDoesNotExecuteImportedBuildScriptsAutomatically() {
+        val root = Files.createTempDirectory("accept-no-auto-build").toFile()
+        root.resolve("Main.kt").writeText("fun main() = 1\n")
+        val marker = root.resolve("build-script-ran.txt")
+        val wrapper = root.resolve("gradlew")
+        wrapper.writeText("#!/bin/sh\nprintf ran > build-script-ran.txt\nexit 1\n")
+        assertTrue("Test requires an executable imported wrapper", wrapper.setExecutable(true))
+        root.resolve("app").mkdirs()
+        root.resolve("app/build.gradle.kts").writeText("plugins {}\n")
+
+        val coordinator = MutationCoordinator(ProjectWorkspace(root))
+        val proposal = (coordinator.propose(
+            "change Main.kt",
+            listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 2\n"))
+        ) as MutationProposeResult.Proposed).proposal
+
+        val first = coordinator.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id))
+        assertTrue("First approval should await the second: $first", first is MutationApprovalResult.AwaitingSecond)
+        val result = coordinator.approve(proposal.id, OwnerApprovalToken.authenticated(proposal.id))
+        assertTrue("Mutation should be applied after both approvals: $result", result is MutationApprovalResult.Applied)
+        assertFalse("Imported build script must not execute as an approval side effect", marker.exists())
+        assertEquals("fun main() = 2\n", root.resolve("Main.kt").readText())
+
+        val verification = (result as MutationApprovalResult.Applied).proposal.verification
+        assertTrue("Static verification should pass", verification.passed)
+        assertTrue(
+            "Report must distinguish static verification from unrun project checks",
+            verification.warnings.any { it.contains("not executed automatically") }
+        )
+    }
+
 }

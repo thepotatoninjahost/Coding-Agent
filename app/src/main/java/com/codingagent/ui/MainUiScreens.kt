@@ -62,6 +62,7 @@ import com.codingagent.agent.ChatMessage
 import com.codingagent.agent.ChatRole
 import com.codingagent.workspace.DeepResearchProgress
 import com.codingagent.workspace.EditorDocument
+import com.codingagent.workspace.ProjectPaths
 import com.codingagent.model.ModelDownloadProgress
 import com.codingagent.workspace.MutationCoordinator
 import com.codingagent.workspace.MutationProposeResult
@@ -570,8 +571,10 @@ internal data class ProjectImportBudget(
     var bytes: Long = 0L
 )
 
-internal fun isReservedProjectImportEntry(relativePath: String, name: String): Boolean =
-    relativePath.isEmpty() && name == ".coding-agent"
+internal fun isReservedProjectImportEntry(relativePath: String, name: String): Boolean {
+    val candidate = if (relativePath.isEmpty()) name else relativePath + "/" + name
+    return ProjectPaths.isSensitivePath(candidate)
+}
 
 internal fun validateProjectImportEntryName(name: String) {
     require(name.isNotBlank() && name != "." && name != ".." &&
@@ -637,6 +640,8 @@ internal fun copyDocumentTree(
                     }
                 }
             } ?: error("Could not read ${child.uri}")
+            // SAF does not preserve Unix mode bits; restore the root wrapper for owner-run checks.
+            if (name == "gradlew" && relativePath.isEmpty()) target.setExecutable(true, false)
         }
     }
 }

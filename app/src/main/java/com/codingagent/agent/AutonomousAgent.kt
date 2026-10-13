@@ -53,6 +53,17 @@ class AutonomousAgent(
      */
     @Volatile
     private var gateway: ModelGateway? = gateway
+    @Volatile
+    private var configuredSystemPrompt: String = AgentModelProtocol.DEFAULT_SYSTEM
+
+    fun setGateway(gateway: ModelGateway?) {
+        this.gateway = gateway
+    }
+
+    fun setSystemPrompt(prompt: String?) {
+        configuredSystemPrompt = prompt.orEmpty().trim().take(24_000)
+            .ifBlank { AgentModelProtocol.DEFAULT_SYSTEM }
+    }
     // FIX: derive workspace from the shared MutationCoordinator instance so both always
     // reference the same ProjectWorkspace. The previous `ProjectWorkspace(root)` here
     // created a second, divergent instance that could silently drift from mutations.workspace.
@@ -66,8 +77,6 @@ class AutonomousAgent(
     private val experience = ExperienceRecorder(root)
     private val changeSets = mutableListOf<ChangeSet>()
     private var lastResearchProgress: String = "not started"
-    @Volatile private var lastTaskJournalError: String? = null
-    @Volatile private var lastExperienceError: String? = null
     private val lanes = AgentDirectLanes(workspace, files, mutations)
     private val tools = AgentToolDispatch(
         files = files,
@@ -121,9 +130,7 @@ class AutonomousAgent(
     }
 
     private fun recordTask(task: AgentTask) {
-        runCatching { journal.record(task) }.onFailure { error ->
-            lastTaskJournalError = error.message ?: error.javaClass.simpleName
-        }
+        journal.record(task)
         runCatching {
             experience.record(
                 task = task.request,
@@ -132,8 +139,6 @@ class AutonomousAgent(
                 evidence = task.changes.joinToString(", ") { it.path },
                 passed = task.verification.passed
             )
-        }.onFailure { error ->
-            lastExperienceError = error.message ?: error.javaClass.simpleName
         }
     }
 
@@ -163,8 +168,6 @@ class AutonomousAgent(
         try {
             changeSets.clear()
             lastResearchProgress = "not started"
-            lastTaskJournalError = null
-            lastExperienceError = null
             return runInternal(request, onEvent)
         } finally {
             activeRunGeneration = -1L
@@ -178,58 +181,19 @@ class AutonomousAgent(
         val taskId = UUID.randomUUID().toString()
         val events = mutableListOf<AutonomousAgentEvent>()
         var personalLogHealthy = true
-        fun failClosedOnLogFailure(error: Throwable) {
-            val detail = error.message ?: error.javaClass.simpleName
-            personalLogHealthy = false
-            val warning = AutonomousAgentEvent.Phase(
-                "PERSONAL_LOG_ERROR",
-                "Could not persist an audit event: $detail. The agent is stopping to preserve auditability."
-            )
-            events += warning
-            onEvent(warning)
-            cancel("Personal log write failed; stopped to preserve auditability")
-        }
         fun emit(event: AutonomousAgentEvent) {
             if (!personalLogHealthy) return
-
-            val taskJournalError = lastTaskJournalError
-            if (taskJournalError != null) {
-                lastTaskJournalError = null
-                val warning = AutonomousAgentEvent.Phase(
-                    "TASK_JOURNAL_ERROR",
-                    "Could not persist the task journal: $taskJournalError. The agent is stopping before further work."
-                )
-                val warningFailure = runCatching { journal.recordEvent(taskId, warning) }.exceptionOrNull()
-                if (warningFailure != null) {
-                    failClosedOnLogFailure(warningFailure)
-                    return
-                }
-                events += warning
-                onEvent(warning)
-                cancel("Task journal write failed; stopped before further work")
-                return
-            }
-
-            val experienceError = lastExperienceError
-            if (experienceError != null) {
-                lastExperienceError = null
-                val warning = AutonomousAgentEvent.Phase(
-                    "LEARNING_STORE_ERROR",
-                    "Could not persist the learning record: $experienceError"
-                )
-                val warningFailure = runCatching { journal.recordEvent(taskId, warning) }.exceptionOrNull()
-                if (warningFailure != null) {
-                    failClosedOnLogFailure(warningFailure)
-                    return
-                }
-                events += warning
-                onEvent(warning)
-            }
-
-            // Persist the observable event before publishing it to the UI or the returned event list.
             val logFailure = runCatching { journal.recordEvent(taskId, event) }.exceptionOrNull()
             if (logFailure != null) {
-                failClosedOnLogFailure(logFailure)
+                personalLogHealthy = false
+                val detail = logFailure.message ?: logFailure.javaClass.simpleName
+                val warning = AutonomousAgentEvent.Phase(
+                    "PERSONAL_LOG_ERROR",
+                    "Could not persist an audit event: $detail. The agent is stopping to preserve auditability."
+                )
+                events += warning
+                onEvent(warning)
+                cancel("Personal log write failed; stopped to preserve auditability")
                 return
             }
             events += event
@@ -237,7 +201,6 @@ class AutonomousAgent(
         }
         emit(AutonomousAgentEvent.Started(taskId, normalized))
         emit(AutonomousAgentEvent.Phase("INTAKE", "Inspecting the request and repository"))
-        if (isCancelled()) return stopNow(taskId, normalized, AgentPlanner(workspace).plan(normalized), events) { emit(it) }
         // Keep the full packaged conversation for deterministic intake. GoalInterpreter
         // extracts the active job and prior owner instructions before the model sees them.
         // The current-turn focus remains the execution-facing request for direct lanes.
@@ -255,11 +218,19 @@ class AutonomousAgent(
         // Intake and the initial repository view are real execution prerequisites, not
         // observational plan entries. Complete them only after the same workspace instance
         // used by mutations has produced its repository summary.
-        runCatching { workspace.summary() }.onSuccess {
-            planningLoop.completePhase("intake", "request parsed")
-            planningLoop.completePhase("understand", "repository summary established")
-            toolSelectionLoop.completeKind(ToolKind.INDEX_REPOSITORY, "repository summary established")
+        val repositorySummary = runCatching { workspace.summary() }
+        if (repositorySummary.isFailure) {
+            val error = repositorySummary.exceptionOrNull()
+            val message = "Repository inspection failed before execution could begin: " +
+                (error?.message?.takeIf { it.isNotBlank() } ?: error?.javaClass?.simpleName ?: "unknown error")
+            val task = failedTask(taskId, normalized, plan, message, emptyList())
+            emit(AutonomousAgentEvent.Failed(task, message))
+            recordTask(task)
+            return events
         }
+        planningLoop.completePhase("intake", "request parsed")
+        planningLoop.completePhase("understand", "repository summary established")
+        toolSelectionLoop.completeKind(ToolKind.INDEX_REPOSITORY, "repository summary established")
         emit(AutonomousAgentEvent.Phase("PLAN", plan.steps.joinToString(" → ") { it.phase }))
 
         // Direct lanes: do not force the full tool loop for social / status / explicit read.
@@ -294,7 +265,7 @@ class AutonomousAgent(
             val question = intake.clarificationQuestion ?: "Clarify the requested operation"
             val task = AgentTask(
                 taskId, focus, "needs-input", plan, emptyList(),
-                VerificationReport(true, emptyList()),
+                VerificationReport(false, emptyList()),
                 listOf("${java.time.Instant.now()}: needs input from user"),
                 question
             )
@@ -313,7 +284,7 @@ class AutonomousAgent(
                     "Open Model settings (base URL, model name, API key) for autonomous coding and research."
             val task = AgentTask(
                 taskId, focus, "needs-input", plan, emptyList(),
-                VerificationReport(true, emptyList()),
+                VerificationReport(false, emptyList()),
                 listOf("${Instant.now()}: model gateway missing — local lanes only"),
                 msg
             )
@@ -335,8 +306,8 @@ class AutonomousAgent(
                 }
             }.getOrNull()
             if (isCancelled()) return stopNow(taskId, normalized, plan, events) { emit(it) }
-            if (session != null && session.sources.isNotEmpty()) {
-                val brief = ResearchBriefBuilder.build(session)
+            val brief = session?.takeIf { it.sources.isNotEmpty() }?.let(ResearchBriefBuilder::build)
+            if (brief != null && brief.sourceCount > 0 && brief.evidence.isNotBlank()) {
                 researchEvidence = "\n\nResearch brief:\n${brief.evidence}"
                 emit(AutonomousAgentEvent.Phase("RESEARCH", "Learned ${brief.sourceCount} sources (${brief.wordCount} words)"))
             } else {
@@ -344,6 +315,16 @@ class AutonomousAgent(
                     "\n\nResearch ran but returned no usable sources. Do not invent external docs or APIs. " +
                         "Prefer local project evidence, or call research_web with a tighter technical query."
                 emit(AutonomousAgentEvent.Phase("RESEARCH", "No usable sources — model must not invent external facts"))
+                if (ResearchGate.requiresUsableEvidence(focus, intake)) {
+                    val message =
+                        "Research was required for this request, but no usable external sources were retrieved. " +
+                            "I will not present unsupported current documentation or web research as verified. " +
+                            "Retry with a narrower query or configure a working research provider."
+                    val task = failedTask(taskId, focus, plan, message, emptyList())
+                    recordTask(task)
+                    emit(AutonomousAgentEvent.Failed(task, message))
+                    return events
+                }
             }
         } else {
             emit(AutonomousAgentEvent.Phase("RESEARCH", "Skipped — local project is enough for this request"))
@@ -417,7 +398,7 @@ class AutonomousAgent(
                 gateway = activeGateway,
                 request = {
                     ModelRequest(
-                        AgentModelProtocol.SYSTEM,
+                        configuredSystemPrompt,
                         buildPrompt(normalized, intake, state.lastEvidence),
                         toolsThisTurn,
                         transcript.toList(),
@@ -468,12 +449,15 @@ class AutonomousAgent(
                         continue
                     }
                     emit(AutonomousAgentEvent.ModelMessage(response.content))
-                    // A change task must not be reported complete until its requested mutation is staged.
-                    // Prose may indicate the model needs more evidence, so do not force a write after one gather.
-                    if (changeWork && !state.mutationOccurred) {
+                    // A change/debug/create/refactor task is not complete merely because the
+                    // model produced prose. Once the loop has reached its write gate, a textual
+                    // response before any mutation is a refusal to act, not task completion.
+                    // Keep the execution spine alive long enough for the model to produce the
+                    // required staged mutation, then fail closed if it repeatedly refuses.
+                    if (writeNow && changeWork && !state.mutationOccurred) {
                         state.writeNowRefusals++
-                        if (writeNow && state.writeNowRefusals >= 3) {
-                            val msg = "The model repeatedly reached the change gate without staging the requested change. No code was written."
+                        if (state.writeNowRefusals >= 2) {
+                            val msg = "The model reached the execution gate twice without staging the requested change. No code was written."
                             val task = failedTask(taskId, normalized, plan, msg, changeSets.flatMap { it.changes })
                             emit(AutonomousAgentEvent.Failed(task, msg))
                             recordTask(task)
@@ -483,12 +467,11 @@ class AutonomousAgent(
                             "assistant",
                             response.content.take(1_200)
                         )
-                        val instruction = if (writeNow) {
-                            "SYSTEM: This is change work and no mutation has been staged. Stage the requested change if the evidence supports it. If a correct change still requires more evidence, use the relevant read, search, research, or verification tool instead of guessing."
-                        } else {
-                            "SYSTEM: This is change work and no mutation has been staged. Do not report completion. Continue with the next useful evidence-gathering tool call, or stage the change when the relevant evidence is sufficient. Keep one tool call per turn."
-                        }
-                        transcript += com.codingagent.model.ModelMessage("user", instruction)
+                        transcript += com.codingagent.model.ModelMessage(
+                            "user",
+                            "SYSTEM: This is a change task and no mutation has been staged yet. " +
+                                "Do not report completion. Call replace_text or create_file now using the evidence already gathered."
+                        )
                         continue
                     }
                     val missing = missingEvidenceMessage(intake, state.readPaths, state.searchedProject)
@@ -630,9 +613,8 @@ class AutonomousAgent(
             intake.intent == TaskIntent.EXPLAIN ||
             Regex("\\b(analy[sz]e|report|explain|summarize|review|inspect|what does|describe|error|bug|issue|fix)\\b", RegexOption.IGNORE_CASE)
                 .containsMatchIn(intake.originalRequest)
-        if (needsInspect && readPaths.isEmpty()) {
-            val nextStep = if (searchedProject) "read_file on a relevant source file" else "read_file or search_project"
-            return "Required repository evidence missing. Call $nextStep before finishing so the answer is based on real project content."
+        if (needsInspect && readPaths.isEmpty() && !searchedProject) {
+            return "Required repository evidence missing. Call read_file or search_project before finishing so the answer is based on real project content."
         }
         val wantsErrorHunt = Regex("\\b(error|bug|issue|broken|fail|fix|lint)\\b", RegexOption.IGNORE_CASE)
             .containsMatchIn(intake.originalRequest)
@@ -685,7 +667,7 @@ class AutonomousAgent(
             gateway = model,
             request = {
                 ModelRequest(
-                    AgentModelProtocol.SYSTEM,
+                    configuredSystemPrompt,
                     "You are repairing a failed approved code change. $evidence\n" +
                         "Return exactly one replace_text or create_file tool call that fixes the diagnosed failure. " +
                         "Do not explain. Do not use any other tool. Never weaken tests or safety controls.",

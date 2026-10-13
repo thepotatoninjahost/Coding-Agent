@@ -8,11 +8,33 @@ import java.nio.file.Files
 
 class AgentCommandPolicyTest {
     @Test
-    fun allowsProjectInspectionCommands() {
-        assertNull(AgentCommandPolicy.rejectionReason("git status --short"))
-        assertNull(AgentCommandPolicy.rejectionReason("find app -type f"))
+    fun enforcesSafeProjectInspectionCommands() {
+        assertNotNull(AgentCommandPolicy.rejectionReason("git status --short"))
+        assertNotNull(AgentCommandPolicy.rejectionReason("find app -type f"))
+        assertNotNull(AgentCommandPolicy.rejectionReason("find . -type f"))
+        assertNotNull(AgentCommandPolicy.rejectionReason("find nested -type f"))
         assertNull(AgentCommandPolicy.rejectionReason("rg UserMemory app/src"))
         assertNull(AgentCommandPolicy.rejectionReason("cat app/src/main/AndroidManifest.xml"))
+        assertNotNull(AgentCommandPolicy.rejectionReason("file README.md"))
+        assertNotNull(AgentCommandPolicy.rejectionReason("wc --files0-from=paths.nul"))
+        assertNotNull(AgentCommandPolicy.rejectionReason("wc --files0=paths.nul"))
+        assertNotNull(AgentCommandPolicy.rejectionReason("rg --files-from paths.txt"))
+        assertNotNull(AgentCommandPolicy.rejectionReason("rg --files-fr paths.txt"))
+        assertNotNull(AgentCommandPolicy.rejectionReason("rg --config-path .ripgreprc secret ."))
+        assertNotNull(AgentCommandPolicy.rejectionReason("rg --config-path=.ripgreprc secret ."))
+        assertNull(AgentCommandPolicy.rejectionReason("ls app/src"))
+        assertNotNull(AgentCommandPolicy.rejectionReason("ls -a"))
+        assertNotNull(AgentCommandPolicy.rejectionReason("ls -A"))
+        assertNotNull(AgentCommandPolicy.rejectionReason("ls -la"))
+        assertNotNull(AgentCommandPolicy.rejectionReason("ls -Ra"))
+        assertNotNull(AgentCommandPolicy.rejectionReason("ls -f"))
+        assertNotNull(AgentCommandPolicy.rejectionReason("ls \\-a"))
+        assertNotNull(AgentCommandPolicy.rejectionReason("ls --all"))
+        assertNotNull(AgentCommandPolicy.rejectionReason("ls --recursive"))
+        // GNU long options accept unique abbreviations; protect those too.
+        assertNotNull(AgentCommandPolicy.rejectionReason("ls --rec"))
+        assertNotNull(AgentCommandPolicy.rejectionReason("ls --dere"))
+        assertNotNull(AgentCommandPolicy.rejectionReason("ls --almost"))
     }
 
     @Test
@@ -89,15 +111,70 @@ class AgentCommandPolicyTest {
     }
 
     @Test
+    fun checksDashPrefixedFilenamesAfterOptionTerminatorForSymlinkEscape() {
+        val root = Files.createTempDirectory("command-policy-dash-path").toFile()
+        val outside = Files.createTempDirectory("command-policy-dash-outside").toFile()
+        outside.resolve("secret.txt").writeText("must not be read")
+        root.resolve("-local.txt").writeText("safe local file")
+        try {
+            Files.createSymbolicLink(root.toPath().resolve("-linked-secret"), outside.resolve("secret.txt").toPath())
+        } catch (_: Exception) {
+            assumeTrue("Symbolic links are required for this regression test", false)
+        }
+
+        assertNull(AgentCommandPolicy.rejectionReason("cat -- -local.txt", root))
+        assertNotNull(
+            "The option terminator must not bypass canonical-path checks",
+            AgentCommandPolicy.rejectionReason("cat -- -linked-secret", root)
+        )
+    }
+
+    @Test
     fun blocksDirectAccessToPrivateAgentMetadata() {
         val root = Files.createTempDirectory("command-policy-metadata").toFile()
         root.resolve(".coding-agent").mkdirs()
         root.resolve(".coding-agent/private-state.json").writeText("{\"secret\":true}")
 
+        root.resolve(".git").mkdirs()
+        root.resolve(".git/config").writeText("[core]\n repositoryformatversion = 0\n")
         assertNotNull(AgentCommandPolicy.rejectionReason("cat .coding-agent/private-state.json", root))
         assertNotNull(AgentCommandPolicy.rejectionReason("rg secret .coding-agent/private-state.json", root))
+        assertNotNull(AgentCommandPolicy.rejectionReason("cat .git/config", root))
+        root.resolve("nested/.git").mkdirs()
+        root.resolve("nested/.git/config").writeText("secret config")
+        assertNotNull(AgentCommandPolicy.rejectionReason("cat nested/.git/config", root))
+        assertNotNull(AgentCommandPolicy.rejectionReason("rg secret nested/.git/config", root))
+        root.resolve("nested/.coding-agent").mkdirs()
+        root.resolve("nested/.coding-agent/private-state.json").writeText("{\"secret\":true}")
+        assertNotNull(AgentCommandPolicy.rejectionReason("cat nested/.coding-agent/private-state.json", root))
+        assertNotNull(AgentCommandPolicy.rejectionReason("rg secret nested/.coding-agent/private-state.json", root))
         assertNotNull(AgentCommandPolicy.rejectionReason("find .coding-agent -type f", root))
         assertNull(AgentCommandPolicy.rejectionReason("cat README.md", root))
+    }
+
+    @Test
+    fun blocksProjectLocalExecutablesThatMasqueradeAsAllowlistedTools() {
+        val root = Files.createTempDirectory("command-policy-local-executable").toFile()
+        root.resolve("rg").writeText("#!/system/bin/sh\nprintf compromised\n")
+        root.resolve("cat").writeText("#!/system/bin/sh\nprintf compromised\n")
+
+        assertNotNull(AgentCommandPolicy.rejectionReason("./rg secret .", root))
+        assertNotNull(AgentCommandPolicy.rejectionReason("./cat README.md", root))
+    }
+
+    @Test
+    fun blocksGitCommandsRegardlessOfRepositoryConfig() {
+        val root = Files.createTempDirectory("command-policy-git-config").toFile()
+        root.resolve(".git").mkdirs()
+        root.resolve(".git/config").writeText("[core]\n fsmonitor = ./untrusted-helper.sh\n")
+
+        assertNotNull(AgentCommandPolicy.rejectionReason("git status", root))
+        assertNotNull(AgentCommandPolicy.rejectionReason("git diff", root))
+
+        root.resolve(".git/config").writeText(
+            "[core]\n repositoryformatversion = 0\n filemode = true\n bare = false\n logallrefupdates = true\n"
+        )
+        assertNotNull(AgentCommandPolicy.rejectionReason("git status", root))
     }
 
     @Test
@@ -107,6 +184,9 @@ class AgentCommandPolicyTest {
         root.resolve(".coding-agent/private-state.json").writeText("{\"secret\":true}")
 
         assertNotNull(AgentCommandPolicy.rejectionReason("grep -R secret .", root))
+        assertNotNull(AgentCommandPolicy.rejectionReason("grep -d recurse secret .", root))
+        assertNotNull(AgentCommandPolicy.rejectionReason("grep --directories=recurse secret .", root))
+        assertNotNull(AgentCommandPolicy.rejectionReason("grep \\-d recurse secret ."))
         assertNotNull(AgentCommandPolicy.rejectionReason("grep -r secret .", root))
         assertNotNull(AgentCommandPolicy.rejectionReason("grep -nR secret .", root))
         assertNotNull(AgentCommandPolicy.rejectionReason("rg --hidden secret .", root))
@@ -135,14 +215,14 @@ class AgentCommandPolicyTest {
     }
 
     @Test
-    fun blocksMutatingGitBranchOperations() {
+    fun blocksAllGitBranchCommands() {
         assertNotNull(AgentCommandPolicy.rejectionReason("git branch feature"))
         assertNotNull(AgentCommandPolicy.rejectionReason("git branch -D feature"))
         assertNotNull(AgentCommandPolicy.rejectionReason("git branch -m old new"))
         assertNotNull(AgentCommandPolicy.rejectionReason("git branch -f feature"))
-        assertNull(AgentCommandPolicy.rejectionReason("git branch"))
-        assertNull(AgentCommandPolicy.rejectionReason("git branch --list feature"))
-        assertNull(AgentCommandPolicy.rejectionReason("git branch --merged main"))
+        assertNotNull(AgentCommandPolicy.rejectionReason("git branch"))
+        assertNotNull(AgentCommandPolicy.rejectionReason("git branch --list feature"))
+        assertNotNull(AgentCommandPolicy.rejectionReason("git branch --merged main"))
     }
 
     @Test

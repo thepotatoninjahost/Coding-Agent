@@ -33,7 +33,7 @@ object AgentTaskBuilders {
         status = "failed",
         plan = plan,
         changes = changes,
-        verification = VerificationReport(true, emptyList()),
+        verification = VerificationReport(false, emptyList()),
         events = listOf("${Instant.now()}: $message"),
         summary = message
     )

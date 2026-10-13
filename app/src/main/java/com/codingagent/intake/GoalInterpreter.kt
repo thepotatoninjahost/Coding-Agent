@@ -68,7 +68,7 @@ class GoalInterpreter(private val root: File) {
             matches(request, "inspect|list files|search project|find file|analy[sz]e|analysis|review|audit|assess|evaluate|thoughts|look over|report on|summarize") -> TaskIntent.INSPECT
             matches(request, "research|learn|study|investigate|compare|explore") -> TaskIntent.EXPLAIN
             isGreetingOrChat(request) -> TaskIntent.UNKNOWN
-            else -> TaskIntent.CHANGE
+            else -> TaskIntent.UNKNOWN
         }
     }
 

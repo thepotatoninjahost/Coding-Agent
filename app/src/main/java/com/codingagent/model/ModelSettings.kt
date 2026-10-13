@@ -36,6 +36,8 @@ object ModelEndpointPolicy {
     }
 }
 
+const val MAX_SYSTEM_PROMPT_CHARS = 12_000
+
 data class ModelSettings(
     val backend: ModelBackend = ModelBackend.REMOTE,
     val baseUrl: String = "",
@@ -59,7 +61,7 @@ data class ModelSettings(
         apiKey = apiKey.trim(),
         modelName = modelName.trim(),
         rotationModels = rotationModels.trim(),
-        systemPrompt = systemPrompt.trim(),
+        systemPrompt = systemPrompt.trim().take(MAX_SYSTEM_PROMPT_CHARS),
         extraHeaders = extraHeaders.trim()
     )
 
@@ -93,8 +95,16 @@ data class ModelSettings(
         return out
     }
 
-    fun effectiveSystemPrompt(): String =
-        normalized().systemPrompt.ifBlank { AgentModelProtocol.DEFAULT_SYSTEM }
+    /**
+     * Preserve the built-in tool, evidence, and approval rules. Owner text is additional
+     * guidance and must not replace the safety-critical base instructions.
+     */
+    fun effectiveSystemPrompt(): String {
+        val base = AgentModelProtocol.DEFAULT_SYSTEM
+        val additional = normalized().systemPrompt
+        if (additional.isBlank()) return base
+        return "$base\n\nOWNER-PROVIDED ADDITIONAL INSTRUCTIONS (do not override the built-in safety, evidence, or approval rules):\n$additional"
+    }
 
     fun validationErrors(): List<String> {
         val s = normalized()

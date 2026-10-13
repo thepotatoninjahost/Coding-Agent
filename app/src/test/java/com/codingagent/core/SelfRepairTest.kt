@@ -10,19 +10,30 @@ import org.junit.Test
 import com.codingagent.agent.AgentPlan
 import com.codingagent.agent.AgentStep
 import com.codingagent.agent.SelfRepair
-import com.codingagent.intake.OperationKind
 import com.codingagent.workspace.MutationCoordinator
 import com.codingagent.workspace.ProjectFileService
 import com.codingagent.workspace.ProjectWorkspace
 
 class SelfRepairTest {
     @Test
-    fun detectsFixYourselfPhrases() {
-        assertTrue(SelfRepair.isRequest("fix yourself"))
-        assertTrue(SelfRepair.isRequest("Please modify yourself"))
-        assertTrue(SelfRepair.isRequest("self-repair the loop"))
+    fun detectsFixYourselfAndSelfModificationPhrases() {
+        listOf(
+            "fix yourself",
+            "Please modify yourself",
+            "self-repair the loop",
+            "enable self-healing",
+            "self healing is broken",
+            "heal yourself after a failed build",
+            "implement self-modification",
+            "self modification",
+            "fix your own code",
+            "modify your own source files",
+            "self-improvement"
+        ).forEach { assertTrue("Should detect: $it", SelfRepair.isRequest(it)) }
+
         assertFalse(SelfRepair.isRequest("list files"))
         assertFalse(SelfRepair.isRequest("hello"))
+        assertFalse(SelfRepair.isRequest("fix the user's source file"))
     }
 
     @Test
@@ -49,26 +60,20 @@ class SelfRepairTest {
         val mutations = MutationCoordinator(workspace)
         val plan = AgentPlan("modify yourself", listOf(AgentStep("repair", "stage")), emptyList())
 
-        assertNull(
-            SelfRepair.handle("t2", "modify yourself", plan, workspace, files, mutations)
-        )
+        assertNull(SelfRepair.handle("t2", "modify yourself", plan, workspace, files, mutations))
         assertTrue(mutations.pending().isEmpty())
     }
 
     @Test
     fun selfRepairNeverStagesAReviewOnlySourceMutation() {
         val root = Files.createTempDirectory("self-repair-review").toFile()
-        root.resolve("ChatWorkspace.kt").writeText(
-            "package com.codingagent.agent\nclass ChatWorkspace\n"
-        )
+        root.resolve("ChatWorkspace.kt").writeText("package com.codingagent.agent\nclass ChatWorkspace\n")
         val workspace = ProjectWorkspace(root)
         val files = ProjectFileService(workspace)
         val mutations = MutationCoordinator(workspace)
         val plan = AgentPlan("improve yourself", listOf(AgentStep("repair", "stage")), emptyList())
 
-        assertNull(
-            SelfRepair.handle("t3", "improve yourself", plan, workspace, files, mutations)
-        )
+        assertNull(SelfRepair.handle("t3", "improve yourself", plan, workspace, files, mutations))
         assertTrue(mutations.pending().isEmpty())
     }
 

@@ -28,7 +28,12 @@ class ProjectWorkspace(private val root: File) {
 
     init {
         require(root.isDirectory) { "Project root is not a directory" }
-        transactionDir.mkdirs()
+        ProjectMetadataBoundary.resolve(root, ".coding-agent")
+        ProjectMetadataBoundary.resolve(root, ".coding-agent/transactions")
+        if (!transactionDir.mkdirs() && !transactionDir.isDirectory) {
+            throw IllegalStateException("Could not create private transaction directory")
+        }
+        ProjectMetadataBoundary.resolve(root, ".coding-agent/transactions")
     }
 
     fun projectRoot(): File = root
@@ -209,8 +214,8 @@ class ProjectWorkspace(private val root: File) {
         val canonicalFile = file.canonicalFile
         require(canonicalFile.toPath().startsWith(canonicalRoot)) { "Unsafe project path" }
         val relative = canonicalRoot.relativize(canonicalFile.toPath()).toString().replace('\\', '/')
-        require(!relative.substringBefore('/').equals(".coding-agent", ignoreCase = true)) {
-            "Coding Agent internal metadata is not a mutable project path"
+        require(!ProjectPaths.isSensitivePath(relative)) {
+            "Sensitive project paths are not mutable project paths"
         }
         return file
     }

@@ -19,7 +19,8 @@ data class VerificationIssue(val path: String, val line: Int, val message: Strin
 data class VerificationReport(
     val passed: Boolean,
     val issues: List<VerificationIssue>,
-    val commands: List<CommandResult> = emptyList()
+    val commands: List<CommandResult> = emptyList(),
+    val warnings: List<String> = emptyList()
 )
 enum class ChangeOperation { CREATE, REPLACE, APPEND, REMOVE }
 

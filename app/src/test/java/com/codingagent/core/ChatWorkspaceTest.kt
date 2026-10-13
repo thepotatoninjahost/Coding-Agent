@@ -248,7 +248,9 @@ class ChatWorkspaceTest {
         val turn = workspace.send("fix it")
 
         assertTrue(turn.result is com.codingagent.agent.AgentRuntimeResult.NeedsInput)
-        assertEquals("needs-input", (turn.result as com.codingagent.agent.AgentRuntimeResult.NeedsInput).task.status)
+        val task = (turn.result as com.codingagent.agent.AgentRuntimeResult.NeedsInput).task
+        assertEquals("needs-input", task.status)
+        assertFalse("A clarification request must not claim verification passed", task.verification.passed)
         assertTrue(turn.response.content.isNotBlank())
     }
 

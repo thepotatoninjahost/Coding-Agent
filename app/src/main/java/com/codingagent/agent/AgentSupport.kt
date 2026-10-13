@@ -10,7 +10,9 @@ import com.codingagent.workspace.KnowledgeHit
 import com.codingagent.workspace.ProjectWorkspace
 import com.codingagent.workspace.AgentTask
 
-/** ONE JOB: Shared support types — knowledge search, planning, journaling. */
+/**
+ * ONE JOB: Shared support types — knowledge search, planning, journaling.
+ */
 interface AgentKnowledge {
     fun search(query: String, limit: Int = 8): List<KnowledgeHit>
 }
@@ -38,7 +40,16 @@ class AgentPlanner(private val workspace: ProjectWorkspace) {
             if (intake.operation.kind != OperationKind.NONE) add(AgentStep("change", contract.goal))
             else add(AgentStep("inspect", contract.goal))
             add(AgentStep("acceptance", contract.acceptanceCriteria.joinToString("; ")))
-            add(AgentStep("verify", if (intake.verificationCommands.isEmpty()) "Run static verification" else "Run static verification and detected project checks"))
+            add(
+                AgentStep(
+                    "verify",
+                    if (intake.verificationCommands.isNotEmpty()) {
+                        "Run static verification and approved project checks"
+                    } else {
+                        intake.verificationNote ?: "Run static verification"
+                    }
+                )
+            )
             add(AgentStep("learn", "Persist the interpreted contract, outcome, and evidence for later tasks"))
         }
         return AgentPlan(intake.originalRequest, steps, intake.verificationCommands, contract)
@@ -46,8 +57,8 @@ class AgentPlanner(private val workspace: ProjectWorkspace) {
 }
 
 class AgentJournal(private val root: File) {
-    private val file = root.resolve(".coding-agent/tasks.tsv")
-    private val personalLog = root.resolve(".coding-agent/personal-log.jsonl")
+    private val file = com.codingagent.workspace.ProjectMetadataBoundary.normalizePath(root.resolve(".coding-agent/tasks.tsv"))
+    private val personalLog = com.codingagent.workspace.ProjectMetadataBoundary.normalizePath(root.resolve(".coding-agent/personal-log.jsonl"))
     private val pendingModelText = mutableMapOf<String, StringBuilder>()
 
     @Synchronized
@@ -116,4 +127,5 @@ class AgentJournal(private val root: File) {
         }
         return result.asReversed()
     }
+}
 }

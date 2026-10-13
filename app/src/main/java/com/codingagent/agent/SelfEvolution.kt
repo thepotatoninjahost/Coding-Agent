@@ -1,6 +1,9 @@
 package com.codingagent.agent
 
 import java.io.File
+import java.nio.file.AtomicMoveNotSupportedException
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
 import java.util.UUID
 import com.codingagent.workspace.VerificationReport
@@ -10,23 +13,35 @@ sealed class PromotionResult {
     data class Rejected(val reason: String) : PromotionResult()
 }
 
+sealed class SnapshotCandidateResult {
+    data class Ready(val candidate: EvolutionRestoreCandidate) : SnapshotCandidateResult()
+    data class Rejected(val reason: String) : SnapshotCandidateResult()
+}
+
+data class EvolutionRestoreCandidate(
+    val version: EvolutionVersion,
+    val snapshot: File,
+    val destination: File
+)
+
 data class EvolutionVersion(
     val id: String,
     val kind: String,
     val sourcePath: String,
     val checksum: String,
     val evaluationPassed: Boolean,
-    val createdAt: Long
+    val createdAt: Long,
+    val targetPath: String = ""
 )
 
 /**
  * ONE JOB: Stage and promote versioned source snapshots for local self-improvement.
  */
 class SelfEvolution(private val root: File) {
-    private val evolutionRoot = root.resolve(".coding-agent/evolution")
-    private val versionsRoot = evolutionRoot.resolve("versions")
-    private val activeFile = evolutionRoot.resolve("active-version")
-    private val historyFile = evolutionRoot.resolve("history.tsv")
+    private val evolutionRoot = com.codingagent.workspace.ProjectMetadataBoundary.normalizePath(root.resolve(".coding-agent/evolution"))
+    private val versionsRoot = com.codingagent.workspace.ProjectMetadataBoundary.normalizePath(root.resolve(".coding-agent/evolution/versions"))
+    private val activeFile = com.codingagent.workspace.ProjectMetadataBoundary.normalizePath(root.resolve(".coding-agent/evolution/active-version"))
+    private val historyFile = com.codingagent.workspace.ProjectMetadataBoundary.normalizePath(root.resolve(".coding-agent/evolution/history.tsv"))
 
     init {
         versionsRoot.mkdirs()
@@ -38,6 +53,7 @@ class SelfEvolution(private val root: File) {
         val id = UUID.randomUUID().toString()
         val destination = versionsRoot.resolve(id).apply { mkdirs() }.resolve(source.name)
         source.copyTo(destination)
+        destination.parentFile.resolve(".target-path").writeText(inferTargetPath(source).orEmpty())
         return destination
     }
 
@@ -48,31 +64,74 @@ class SelfEvolution(private val root: File) {
         action: AgentAction,
         approvalAt: Long? = null
     ): PromotionResult {
-        val violations = AgentConstitution.check(action.copy(sandboxPassed = evaluation.passed), approvalAt = approvalAt)
+        if (!evaluation.passed) {
+            return PromotionResult.Rejected("Evolution source cannot be promoted without a passing evaluation")
+        }
+        if (action.category != AgentActionCategory.CODE_CHANGE) {
+            return PromotionResult.Rejected("Source promotion requires CODE_CHANGE authorization")
+        }
+        val violations = AgentConstitution.check(action.copy(evaluationPassed = true), approvalAt = approvalAt)
         if (violations.isNotEmpty()) return PromotionResult.Rejected(violations.joinToString("; ") { "${it.rule}: ${it.message}" })
         if (!staged.isFile) return PromotionResult.Rejected("Staged source does not exist")
         val parent = staged.parentFile ?: return PromotionResult.Rejected("Staged source directory is missing")
+        val expectedParent = runCatching { versionsRoot.canonicalFile }.getOrNull()
+            ?: return PromotionResult.Rejected("Evolution versions directory is unavailable")
+        val actualParent = runCatching { parent.canonicalFile }.getOrNull()
+            ?: return PromotionResult.Rejected("Staged source directory is unavailable")
+        if (actualParent.parentFile != expectedParent) {
+            return PromotionResult.Rejected("Only snapshots created under the evolution versions directory can be promoted")
+        }
+        val targetPath = readStagedTargetPath(staged)
+            ?: return PromotionResult.Rejected(
+                "Evolution snapshot has no safe project-relative recovery target"
+            )
         val version = EvolutionVersion(
             id = parent.name,
             kind = kind,
             sourcePath = staged.absolutePath,
             checksum = checksum(staged),
-            evaluationPassed = evaluation.passed,
-            createdAt = System.currentTimeMillis()
+            evaluationPassed = true,
+            createdAt = System.currentTimeMillis(),
+            targetPath = targetPath
         )
-        activeFile.parentFile?.mkdirs()
-        activeFile.writeText(version.id)
-        historyFile.appendText(
-            listOf(
-                version.id,
-                kind,
-                version.checksum,
-                version.evaluationPassed,
-                version.createdAt,
-                staged.name
-            ).joinToString("\t") + "\n"
-        )
-        return PromotionResult.Promoted(version)
+        return runCatching {
+            activeFile.parentFile?.mkdirs()
+            historyFile.appendText(
+                listOf(
+                    version.id,
+                    kind,
+                    version.checksum,
+                    version.evaluationPassed,
+                    version.createdAt,
+                    staged.absolutePath,
+                    version.targetPath
+                ).joinToString("\t") + "\n"
+            )
+            writeTextAtomically(activeFile, version.id)
+            PromotionResult.Promoted(version)
+        }.getOrElse { error ->
+            PromotionResult.Rejected("Could not durably record the promoted version: ${error.message.orEmpty()}")
+        }
+    }
+
+    /**
+     * Resolve and integrity-check a historical snapshot without mutating project files.
+     * Callers can use this to stage a restore through the ordinary approval workflow.
+     */
+    fun prepareRestoreCandidate(versionId: String): SnapshotCandidateResult {
+        val version = history().lastOrNull { it.id == versionId }
+            ?: return SnapshotCandidateResult.Rejected("Evolution version was not found in history")
+        if (!version.evaluationPassed) {
+            return SnapshotCandidateResult.Rejected("Evolution version has no passing source evaluation")
+        }
+        val snapshot = managedSnapshot(File(version.sourcePath))
+            ?: return SnapshotCandidateResult.Rejected("Evolution snapshot is missing or outside the managed versions directory")
+        if (runCatching { checksum(snapshot) != version.checksum }.getOrDefault(true)) {
+            return SnapshotCandidateResult.Rejected("Evolution snapshot checksum does not match its recorded history")
+        }
+        val destination = safeTarget(version.targetPath)
+            ?: return SnapshotCandidateResult.Rejected("Evolution version has no safe project-relative recovery target")
+        return SnapshotCandidateResult.Ready(EvolutionRestoreCandidate(version, snapshot, destination))
     }
 
     fun activeVersion(): String? = activeFile.takeIf { it.isFile }?.readText()?.trim()?.ifBlank { null }
@@ -88,8 +147,66 @@ class SelfEvolution(private val root: File) {
                 sourcePath = fields.getOrNull(5).orEmpty(),
                 checksum = fields[2],
                 evaluationPassed = fields[3].toBoolean(),
-                createdAt = fields[4].toLongOrNull() ?: 0
+                createdAt = fields[4].toLongOrNull() ?: 0,
+                targetPath = fields.getOrNull(6).orEmpty()
             )
+        }
+    }
+
+    private fun managedSnapshot(file: File): File? {
+        val snapshot = runCatching { file.canonicalFile }.getOrNull() ?: return null
+        val versions = runCatching { versionsRoot.canonicalFile }.getOrNull() ?: return null
+        val versionDirectory = snapshot.parentFile ?: return null
+        if (!snapshot.isFile || versionDirectory.parentFile != versions) return null
+        return snapshot
+    }
+
+    private fun readStagedTargetPath(staged: File): String? {
+        val managed = managedSnapshot(staged) ?: return null
+        val metadata = managed.parentFile.resolve(".target-path")
+        if (!metadata.isFile) return null
+        return metadata.readText().trim().takeIf { isSafeRelativePath(it) }
+    }
+
+    private fun inferTargetPath(source: File): String? {
+        val canonicalRoot = runCatching { root.canonicalFile }.getOrNull() ?: return null
+        val canonicalSource = runCatching { source.canonicalFile }.getOrNull() ?: return null
+        if (!canonicalSource.toPath().startsWith(canonicalRoot.toPath())) return null
+        val relative = canonicalRoot.toPath().relativize(canonicalSource.toPath()).toString().replace(File.separatorChar, '/')
+        return relative.takeIf { isSafeRelativePath(it) }
+    }
+
+    private fun safeTarget(relativePath: String): File? {
+        if (!isSafeRelativePath(relativePath)) return null
+        val canonicalRoot = runCatching { root.canonicalFile }.getOrNull() ?: return null
+        val destination = runCatching { canonicalRoot.resolve(relativePath).canonicalFile }.getOrNull() ?: return null
+        if (!destination.toPath().startsWith(canonicalRoot.toPath())) return null
+        return destination
+    }
+
+    private fun isSafeRelativePath(path: String): Boolean {
+        if (path.isBlank() || path.startsWith('/') || path.contains('\\') ||
+            path.split('/').any { it == "." || it == ".." || it.isBlank() || it.contains('\t') || it.contains('\n') || it.contains('\r') }
+        ) return false
+        return !path.substringBefore('/').equals(".coding-agent", ignoreCase = true)
+    }
+
+    private fun moveReplacing(source: File, destination: File) {
+        try {
+            Files.move(source.toPath(), destination.toPath(), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
+        } catch (_: AtomicMoveNotSupportedException) {
+            Files.move(source.toPath(), destination.toPath(), StandardCopyOption.REPLACE_EXISTING)
+        }
+    }
+
+    private fun writeTextAtomically(destination: File, text: String) {
+        destination.parentFile?.mkdirs()
+        val temporary = Files.createTempFile(destination.parentFile.toPath(), ".evolution-state-", ".tmp").toFile()
+        try {
+            temporary.writeText(text)
+            moveReplacing(temporary, destination)
+        } finally {
+            temporary.delete()
         }
     }
 

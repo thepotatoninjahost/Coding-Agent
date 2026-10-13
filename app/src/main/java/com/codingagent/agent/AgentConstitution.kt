@@ -1,14 +1,14 @@
 package com.codingagent.agent
 
 /**
- * ONE JOB: Enforce the twelve safety rules (owner lock, dual confirmation, sandbox-first, expiration).
+ * ONE JOB: Enforce the twelve safety rules (owner lock, dual confirmation, evaluation-first, expiration).
  */
 enum class ConstitutionRule {
     OWNER_LOCK,
     DEFAULT_NO,
     CLEAR_PERMISSION,
     DOUBLE_CONFIRMATION,
-    SANDBOX_FIRST,
+    EVALUATION_REQUIRED,
     TRANSPARENCY_LOG,
     IMMEDIATE_STOP,
     PERMISSION_EXPIRATION,
@@ -33,7 +33,7 @@ data class AgentAction(
     val silent: Boolean = false,
     val ownerVerified: Boolean = false,
     val approvalCount: Int = 0,
-    val sandboxPassed: Boolean = false,
+    val evaluationPassed: Boolean = false,
     val explicitShareApproval: Boolean = false,
     val voiceInitiated: Boolean = false,
     val clearPermission: Boolean = true,
@@ -66,11 +66,11 @@ object AgentConstitution {
         if (!action.ownerVerified) violations += ConstitutionViolation(ConstitutionRule.OWNER_LOCK, "Owner verification is required", true)
         if (action.approvalCount == 0) violations += ConstitutionViolation(ConstitutionRule.DEFAULT_NO, "No explicit approval was recorded", true)
         if (!action.clearPermission) violations += ConstitutionViolation(ConstitutionRule.CLEAR_PERMISSION, "The requested permission is not explicit", true)
-        if (action.category == AgentActionCategory.CODE_CHANGE && !action.sandboxPassed) {
-            violations += ConstitutionViolation(ConstitutionRule.SANDBOX_FIRST, "Code changes require a passing evaluation", true)
+        if (action.category == AgentActionCategory.CODE_CHANGE && !action.evaluationPassed) {
+            violations += ConstitutionViolation(ConstitutionRule.EVALUATION_REQUIRED, "Code changes require a passing evaluation", true)
         }
-        if (action.category == AgentActionCategory.MODEL_CHANGE && !action.sandboxPassed) {
-            violations += ConstitutionViolation(ConstitutionRule.SANDBOX_FIRST, "Model changes require a passing evaluation", true)
+        if (action.category == AgentActionCategory.MODEL_CHANGE && !action.evaluationPassed) {
+            violations += ConstitutionViolation(ConstitutionRule.EVALUATION_REQUIRED, "Model changes require a passing evaluation", true)
         }
         if (action.silent) violations += ConstitutionViolation(ConstitutionRule.NO_SILENT_BACKGROUND_POWER, "The action must be visible in the activity log", true)
         if (action.category == AgentActionCategory.DATA_SHARE && !action.explicitShareApproval) {

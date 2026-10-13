@@ -7,12 +7,40 @@ import org.junit.Test
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import com.codingagent.model.ModelRequest
+import com.codingagent.model.JsonModelResponseParser
 import com.codingagent.model.ModelResponse
 import com.codingagent.model.ModelToolDefinition
 import com.codingagent.model.RemoteHttpGateway
 import com.codingagent.model.RotatingModelGateway
 
 class ModelGatewayTest {
+
+    @Test
+    fun reasoningOnlyJsonIsNotReturnedAsUserFacingText() {
+        val result = JsonModelResponseParser().parse("""{"reasoning_content":"private reasoning"}""")
+        assertTrue(result is ModelResponse.Failure)
+    }
+
+
+    @Test
+    fun reasoningPartsInContentArraysAreNotShownAsTheAnswer() {
+        val gateway = RemoteHttpGateway("http://127.0.0.1:8080/v1", "", "local", connectionFactory = { _ ->
+            fakeConnection("""{"choices":[{"message":{"content":[{"type":"analysis","text":"private reasoning"},{"type":"text","text":"user-facing answer"}]}}]}""")
+        })
+        val result = gateway.complete(ModelRequest("system", "question", emptyList()))
+        assertTrue(result is ModelResponse.Text)
+        assertEquals("user-facing answer", (result as ModelResponse.Text).content)
+    }
+
+    @Test
+    fun multipleToolCallsAreRejectedRatherThanSilentlyDroppingCalls() {
+        val gateway = RemoteHttpGateway("http://127.0.0.1:8080/v1", "", "local", connectionFactory = { _ ->
+            fakeConnection("""{"choices":[{"message":{"tool_calls":[{"function":{"name":"read_file","arguments":"{}"}},{"function":{"name":"search_project","arguments":"{}"}}]}}]}""")
+        })
+        val result = gateway.complete(ModelRequest("system", "inspect", listOf(ModelToolDefinition("read_file", "read", "{}"))))
+        assertTrue(result is ModelResponse.Failure)
+    }
+
     @Test
     fun `cancellation prevents model rotation`() {
         var firstCalls = 0
