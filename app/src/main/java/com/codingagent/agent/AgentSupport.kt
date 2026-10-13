@@ -66,15 +66,18 @@ class AgentJournal(private val root: File) {
         flushModelText(task.id)
         file.parentFile?.mkdirs()
         val line = listOf(task.id, task.status, task.request, task.changes.size, task.verification.passed, task.summary, task.events.joinToString(" | "))
-            .joinToString("\t") { it.toString().replace('\t', ' ').replace('\n', ' ') }
+            .joinToString("\t") { sanitize(it.toString()).replace('\t', ' ').replace('\n', ' ') }
         file.appendText(line + "\n")
     }
 
-    /** Persist each observable event for later owner inspection. */
+    /** Persist observable events, redacting common credentials before writing them to disk. */
     @Synchronized
     fun recordEvent(taskId: String, event: AutonomousAgentEvent) {
         if (event is AutonomousAgentEvent.ModelDelta) {
-            pendingModelText.getOrPut(taskId) { StringBuilder() }.append(event.text)
+            val buffer = pendingModelText.getOrPut(taskId) { StringBuilder() }
+            if (buffer.length < MAX_DETAIL_CHARS) {
+                buffer.append(event.text.take(MAX_DETAIL_CHARS - buffer.length))
+            }
             return
         }
         flushModelText(taskId)
@@ -92,8 +95,20 @@ class AgentJournal(private val root: File) {
             .put("timestamp", System.currentTimeMillis())
             .put("taskId", taskId)
             .put("type", type)
-            .put("details", details)
+            .put("details", sanitize(details))
         personalLog.appendText(entry.toString() + "\n")
+    }
+
+    private fun sanitize(value: String): String {
+        var safe = value
+        safe = PRIVATE_KEY.replace(safe, "[REDACTED PRIVATE KEY]")
+        safe = BEARER_TOKEN.replace(safe, "$1[REDACTED]")
+        safe = ASSIGNED_SECRET.replace(safe, "$1[REDACTED]")
+        safe = COMMON_TOKEN.replace(safe, "[REDACTED TOKEN]")
+        if (safe.length > MAX_DETAIL_CHARS) {
+            safe = safe.take(MAX_DETAIL_CHARS) + "…[truncated]"
+        }
+        return safe
     }
 
     fun recentEvents(limit: Int = 100): List<String> = recentLines(personalLog, limit)
@@ -126,5 +141,13 @@ class AgentJournal(private val root: File) {
             }
         }
         return result.asReversed()
+    }
+
+    private companion object {
+        const val MAX_DETAIL_CHARS = 8_000
+        val PRIVATE_KEY = Regex("-----BEGIN [A-Z ]*PRIVATE KEY-----[\\s\\S]*?-----END [A-Z ]*PRIVATE KEY-----")
+        val BEARER_TOKEN = Regex("(?i)(\\bBearer\\s+)[A-Za-z0-9._~+/-]+=*")
+        val ASSIGNED_SECRET = Regex("(?i)(\\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|password|passwd|secret|authorization)\\b\\s*[:=]\\s*[\\\"']?)([^\\s,;\\\"']+)")
+        val COMMON_TOKEN = Regex("\\b(?:gh[pousr]_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9_-]{20,}|AKIA[0-9A-Z]{16})\\b")
     }
 }
