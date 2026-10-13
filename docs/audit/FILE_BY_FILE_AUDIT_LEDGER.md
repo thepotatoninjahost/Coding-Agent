@@ -1,6 +1,8 @@
 # File-by-file audit ledger
 
 - Repository: `thepotatoninjahost/Coding-Agent`
+- Snapshot type: historical baseline inventory, not current `main`.
+- Last reconciled against current `main`: 2026-10-13; see `docs/audit/PHASE_1_BASELINE_EVIDENCE.md` for current commit/tree/count, CI evidence, and PR status reconciliation.
 - Baseline ref: `main`
 - Baseline commit: `83002089d1a0a7b356e3dbf81a70cfb35c40721a`
 - Inventory tree SHA: `c108371fe02cdf9c07c472bcfd17ac1af18f0c17`
