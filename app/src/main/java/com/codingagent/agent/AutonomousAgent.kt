@@ -201,6 +201,7 @@ class AutonomousAgent(
         }
         emit(AutonomousAgentEvent.Started(taskId, normalized))
         emit(AutonomousAgentEvent.Phase("INTAKE", "Inspecting the request and repository"))
+        if (!personalLogHealthy) return events
         // Keep the full packaged conversation for deterministic intake. GoalInterpreter
         // extracts the active job and prior owner instructions before the model sees them.
         // The current-turn focus remains the execution-facing request for direct lanes.
