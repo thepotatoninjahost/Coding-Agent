@@ -78,7 +78,7 @@ The sections in this part record evidence for the immutable `83002089...` baseli
 
 - A review found that `promoteSource` on the baseline used an empty-string fallback when recovery-target metadata was absent. That could mark a snapshot active even though no safe recovery target could be restored.
 - Fix and regression tests were merged through PR #74: https://github.com/thepotatoninjahost/Coding-Agent/pull/74 (merge commit `4ab3e4117e17fda89325f92a246a411131f05b14`).
-- PR head: `2ae101043ed8de05d6a04b8db95da8f4d8e63202`
+- CI-tested PR head for run #1272: `2ae101043ed8de05d6a04b8db95da8f4d8e63202`. The PR's final merged head was `977cd023b1eecbf2f1d91943de1deaa4c27ad2c8`; the merge commit is recorded above.
 - Added checks reject missing/unsafe project-relative recovery targets and unknown version IDs; restore tests assert the file is unchanged before the second approval.
 - PR CI run #1272, ID `38210516271`: https://github.com/thepotatoninjahost/Coding-Agent/actions/runs/38210516271
 - Run conclusion: `success`. Test compilation, full unit tests, explicit acceptance-path tests, Android lint, debug APK assembly, release APK assembly, and debug APK upload all passed.
@@ -86,7 +86,7 @@ The sections in this part record evidence for the immutable `83002089...` baseli
 ### End-to-end repair lifecycle — PR #76, merged
 
 - PR: https://github.com/thepotatoninjahost/Coding-Agent/pull/76 (merge commit `8b0fa217811ccdecbf827a28beb251f7a7a08b88`).
-- Head: `10a231863b57d9743fd0cba8280536a4ac67b8c4`
+- CI-tested PR head for run #1274: `10a231863b57d9743fd0cba8280536a4ac67b8c4`. The PR's final merged head was `ae8cf6f970a630ca026ac27c2dbff69476c389ad`; the merge commit is recorded above.
 - Added `RepairLifecycleAcceptanceTest.kt` exercises this sequence: a broken replacement fails verification; approval one leaves disk unchanged; approval two permits application; failed verification rolls the change back; a repair proposal is staged; the first repair approval leaves the file unchanged; the second approval applies the repair; post-apply verification passes and the result is `Applied`.
 - CI run #1274, ID `38211267466`: https://github.com/thepotatoninjahost/Coding-Agent/actions/runs/38211267466
 - Verified terminal conclusion: `success`. Security baseline audit, test-source compilation, full unit tests (including the new lifecycle test), explicit acceptance-path tests, Android lint, debug APK assembly, release APK assembly, and debug APK upload all passed.
