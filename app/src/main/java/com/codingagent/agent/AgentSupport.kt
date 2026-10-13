@@ -128,4 +128,3 @@ class AgentJournal(private val root: File) {
         return result.asReversed()
     }
 }
-}
