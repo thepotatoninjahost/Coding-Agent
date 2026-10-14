@@ -21,9 +21,9 @@ class KnowledgeIndexTest {
 
         assertEquals(2, index.documentCount())
         assertEquals("replacement-source", index.listDocuments().first { it.name == "Guide" }.source)
-        assertTrue(index.search("giraffe").any { it.document == "Guide" })
-        assertFalse(index.search("zebra").any { it.document == "Guide" })
-        assertTrue(index.search("orchid").any { it.document == "Other" })
+        assertTrue(index.search("giraffe", 10).any { it.document == "Guide" })
+        assertFalse(index.search("zebra", 10).any { it.document == "Guide" })
+        assertTrue(index.search("orchid", 10).any { it.document == "Other" })
     }
 
     @Test
@@ -53,9 +53,9 @@ class KnowledgeIndexTest {
         val recovered = KnowledgeIndex(root)
 
         assertEquals(2, recovered.documentCount())
-        assertTrue(recovered.search("zebra").any { it.document == "Guide" })
-        assertTrue(recovered.search("orchid").any { it.document == "Other" })
-        assertFalse(recovered.search("giraffe").any())
+        assertTrue(recovered.search("zebra", 10).any { it.document == "Guide" })
+        assertTrue(recovered.search("orchid", 10).any { it.document == "Other" })
+        assertFalse(recovered.search("giraffe", 10).any())
         assertFalse(transaction.exists())
         assertFalse(previousChunks.exists())
         assertFalse(previousDocuments.exists())
@@ -91,8 +91,8 @@ class KnowledgeIndexTest {
         assertTrue(index.removeDocument("Guide"))
 
         assertEquals(1, index.documentCount())
-        assertFalse(index.search("zebra").any { it.document == "Guide" })
-        assertTrue(index.search("orchid").any { it.document == "Other" })
+        assertFalse(index.search("zebra", 10).any { it.document == "Guide" })
+        assertTrue(index.search("orchid", 10).any { it.document == "Other" })
         assertFalse(index.removeDocument("Missing"))
     }
 }
