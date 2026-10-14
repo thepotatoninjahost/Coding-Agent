@@ -405,8 +405,9 @@ private fun CodingAgentApp(privateDir: File) {
         ownerSpokenPhrase = ""
         ownerSpeechVerified = false
         ownerApprovalError = null
-        speechRecognizer?.cancel()
+        val activeRecognizer = speechRecognizer
         speechRecognizer = null
+        activeRecognizer?.cancel()
     }
 
     fun beginOnDeviceSpeechRecognition() {
@@ -417,20 +418,26 @@ private fun CodingAgentApp(privateDir: File) {
             return
         }
         runCatching {
-            speechRecognizer?.cancel()
+            val previousRecognizer = speechRecognizer
+            speechRecognizer = null
+            previousRecognizer?.cancel()
+            previousRecognizer?.destroy()
             val recognizer = SpeechRecognizer.createOnDeviceSpeechRecognizer(context)
             speechRecognizer = recognizer
             recognizer.setRecognitionListener(object : RecognitionListener {
                 override fun onReadyForSpeech(params: Bundle?) {
-                    ownerSpeechStatus = "Listening. Speak the complete passphrase."
+                    if (speechRecognizer !== recognizer) return
+                    ownerSpeechStatus = "Listening. Speak the passphrase, then the challenge words."
                 }
                 override fun onBeginningOfSpeech() {}
                 override fun onRmsChanged(rmsdB: Float) {}
                 override fun onBufferReceived(buffer: ByteArray?) {}
                 override fun onEndOfSpeech() {
+                    if (speechRecognizer !== recognizer) return
                     ownerSpeechStatus = "Checking spoken passphrase…"
                 }
                 override fun onError(error: Int) {
+                    if (speechRecognizer !== recognizer) return
                     ownerSpeechVerified = false
                     ownerSpeechStatus = "Speech recognition failed. Try again."
                     ownerApprovalError = "Spoken passphrase was not verified; approval remains blocked."
@@ -438,6 +445,7 @@ private fun CodingAgentApp(privateDir: File) {
                     speechRecognizer = null
                 }
                 override fun onResults(results: Bundle?) {
+                    if (speechRecognizer !== recognizer) return
                     val recognized = results
                         ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                         ?.firstOrNull()
@@ -491,10 +499,7 @@ private fun CodingAgentApp(privateDir: File) {
 
     DisposableEffect(speechRecognizer) {
         val activeRecognizer = speechRecognizer
-        onDispose {
-            activeRecognizer?.cancel()
-            activeRecognizer?.destroy()
-        }
+        onDispose { activeRecognizer?.destroy() }
     }
 
     fun requestSpeechCapture(purpose: String) {
@@ -696,7 +701,7 @@ private fun CodingAgentApp(privateDir: File) {
         ownerSpeechStatus = if (ownerApprovalSetupMode) {
             "Create a spoken passphrase yourself, then speak it followed by the one-time word."
         } else {
-            "Speak your enrolled spoken passphrase followed by the one-time word."
+            "Speak your enrolled spoken passphrase followed by the one-time challenge words."
         }
         ownerApprovalError = null
         showOwnerApprovalDialog = true
