@@ -23,6 +23,8 @@ You investigate the real project, then work toward completing the owner's object
 - Evidence first. If the owner names a file, read it before analyzing or changing it.
 - Exactly one tool call per turn; inspect the complete result before the next call.
 - Include a short, evidence-based purpose in each tool call's optional purpose field so the decision can be reconstructed from personal logs.
+- Before staging any code change, explain the proposed change to the owner in plain everyday English. The owner must be able to understand it without technical knowledge. Do not use unexplained jargon; explain unavoidable technical terms in ordinary words.
+- Every code-change proposal's reason must contain these exact headings, in this order, with complete plain-English sentences under each: "What I want to do:", "Why:", "What will change:", "Possible effects:", "Risks:", and "What your approval means:". State when something is unknown instead of guessing. Name every file that will change. Explain the practical effect and realistic risks, not just the technical steps. Say that nothing is written until the owner completes both required approvals.
 - Code changes (create_file, replace_text) only STAGE a proposal. The model cannot approve its own proposal. The owner must approve twice through the authenticated Review flow. Never claim a change was applied until an owner-controlled action returns APPLIED.
 - Owner constraints and the twelve constitution rules are binding. Do not invent additional rules from personal preferences or risk judgments. Offer candid advice, explain evidence and trade-offs, then follow the owner's decision unless it conflicts with one of the twelve rules or is technically impossible. If blocked, identify the exact rule or limitation.
 - Preserve the goal across follow-up turns. Do not silently drop parts of a plan or substitute a different task.
@@ -84,13 +86,13 @@ list_files, read_file, search_project, search_knowledge, research_web, replace_t
         ),
         ModelToolDefinition(
             "replace_text",
-            "Stage an exact text replacement. Dual owner approval is required before it is applied.",
-            """{"type":"object","properties":{"path":{"type":"string"},"oldText":{"type":"string"},"newText":{"type":"string"},"reason":{"type":"string"},"purpose":{"type":"string","description":"Short evidence-based reason for this tool call."}},"required":["path","oldText","newText"]}"""
+            "Stage an exact text replacement. Before staging, write the complete plain-English proposal explanation in the required six-part format. Dual owner approval is required before it is applied.",
+            """{"type":"object","properties":{"path":{"type":"string","description":"The project file to change."},"oldText":{"type":"string","description":"The exact existing text to replace."},"newText":{"type":"string","description":"The replacement text."},"reason":{"type":"string","description":"Required plain-English explanation with these exact headings in order: What I want to do:, Why:, What will change:, Possible effects:, Risks:, What your approval means:. Use everyday words, name files, explain jargon, and state unknowns honestly."},"purpose":{"type":"string","description":"Short evidence-based reason for this tool call."}},"required":["path","oldText","newText","reason"]}"""
         ),
         ModelToolDefinition(
             "create_file",
-            "Stage a new file. Dual owner approval is required before it is written.",
-            """{"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"},"reason":{"type":"string"},"purpose":{"type":"string","description":"Short evidence-based reason for this tool call."}},"required":["path","content"]}"""
+            "Stage a new file. Before staging, write the complete plain-English proposal explanation in the required six-part format. Dual owner approval is required before it is written.",
+            """{"type":"object","properties":{"path":{"type":"string","description":"The new project file path."},"content":{"type":"string","description":"The complete proposed file contents."},"reason":{"type":"string","description":"Required plain-English explanation with these exact headings in order: What I want to do:, Why:, What will change:, Possible effects:, Risks:, What your approval means:. Use everyday words, name files, explain jargon, and state unknowns honestly."},"purpose":{"type":"string","description":"Short evidence-based reason for this tool call."}},"required":["path","content","reason"]}"""
         ),
         ModelToolDefinition(
             "run_command",
