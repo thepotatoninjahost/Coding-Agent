@@ -185,7 +185,12 @@ object ChangeDiff {
                 ChangeOperation.REMOVE -> "Remove text from file"
             }
             appendLine("=== $operationLabel: ${record.path} ===")
-            appendLine("Reason: see the complete plain-English explanation above.")
+            if (record.reason != proposal.changeSet.reason) {
+                appendLine("Additional file-specific reason (complete):")
+                appendCompleteContent(record.reason)
+            } else {
+                appendLine("Reason: see the complete plain-English explanation above.")
+            }
             appendLine("Before-file safety check (helps detect unexpected edits): ${record.beforeChecksum.ifBlank { "<none>" }}")
             appendLine("Proposed-file safety check (helps detect unexpected edits): ${record.afterChecksum.ifBlank { "<none>" }}")
             record.before?.let { before ->
