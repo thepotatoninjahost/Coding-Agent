@@ -15,8 +15,9 @@ internal class OwnerApprovalPhraseStore(
     private val readSecret: (String) -> String?,
     private val writeSecret: (String, String?) -> Unit
 ) {
-    fun isConfigured(): Boolean =
+    fun isConfigured(): Boolean = runCatching {
         readSecret(TYPED_KEY) != null && readSecret(SPOKEN_KEY) != null
+    }.getOrDefault(false)
 
     @Synchronized
     fun enroll(typedPhrase: String, spokenPhrase: String) {
@@ -40,10 +41,10 @@ internal class OwnerApprovalPhraseStore(
 
     private fun verify(key: String, candidate: String): Boolean {
         if (candidate.isEmpty()) return false
-        val stored = readSecret(key) ?: return false
-        val parts = stored.split(':', limit = 2)
-        if (parts.size != 2) return false
         return runCatching {
+            val stored = readSecret(key) ?: return false
+            val parts = stored.split(':', limit = 2)
+            if (parts.size != 2) return false
             val salt = Base64.getDecoder().decode(parts[0])
             val expected = Base64.getDecoder().decode(parts[1])
             MessageDigest.isEqual(expected, derive(candidate, salt))
