@@ -44,7 +44,7 @@ class OwnerApprovalTokenTest {
     @Test
     fun malformedSignatureCannotAuthorizeApproval() {
         val forged = OwnerApprovalToken.fromTestSignature(
-            "proposal-1", 1, 1_000L, "nonce", byteArrayOf(1, 2, 3)
+            "proposal-1", 1, 1_000L, "nonce", "a".repeat(64), byteArrayOf(1, 2, 3)
         )
         assertFalse(forged.consume("proposal-1", 1, 1_001L))
     }
