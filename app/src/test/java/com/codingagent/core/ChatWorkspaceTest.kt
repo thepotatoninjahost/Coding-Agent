@@ -38,11 +38,14 @@ class ChatWorkspaceTest {
 
     @Test
     fun ordinaryLongSummaryHasExplicitTruncationWarning() {
-        val output = "x".repeat(MAX_CHAT_SUMMARY_CHARS + 25)
+        val output = (0..400).joinToString("\n") { index ->
+            "ordinary output segment $index: distinct content for truncation verification."
+        }
+        assertTrue(output.length > MAX_CHAT_SUMMARY_CHARS)
 
         val sanitized = sanitizeTaskSummary(output)
 
-        assertTrue(sanitized.startsWith("x".repeat(MAX_CHAT_SUMMARY_CHARS)))
+        assertTrue(sanitized.startsWith(output.take(MAX_CHAT_SUMMARY_CHARS)))
         assertTrue(sanitized.contains("OUTPUT TRUNCATED"))
         assertTrue(sanitized.contains("of ${output.length} characters"))
     }
