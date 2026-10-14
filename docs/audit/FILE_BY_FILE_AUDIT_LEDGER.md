@@ -207,3 +207,223 @@ Do not change a row to `reviewed` until the file's contents have been inspected 
 ### Reconciliation exit state
 
 The register distinguishes open findings, partial fixes, resolved historical findings, and unconfirmed claims. It does not complete the whole repository audit: the existing ledger still has unreviewed rows, and the current-main inventory is 163 tracked files. No application behavior was changed by this documentation reconciliation.
+
+
+---
+
+# Current-main project-wide audit — 2026-10-14
+
+## Audit snapshot and completion rule
+
+- **Audited source snapshot:** `2f9ad127f755f5e54cbc3b0097e33ab67df86c59`
+- **Git tree:** `28bd43129c23006f090895c7dd6d9ce2c0c36b07`
+- **Recursive tree:** 197 entries, 163 tracked blobs, 34 directory objects; GitHub returned `truncated=false`.
+- **Coverage:** every tracked blob was inventoried. All 162 text files received a content-based static pass; security-sensitive execution, approval, persistence, network, import, packaging, and workflow paths received deeper review. The wrapper JAR was hashed and compared with Gradle's published checksum list. This is a static/source audit; it does not replace device-level testing or prove runtime behavior on every device.
+- **Scope discipline:** no application/security behavior was changed during this audit. Two demonstrably stale documentation claims were corrected in separate documentation-only commits: multi-tool queue behavior and the status of web research. Security remediation remains tracked below and is not silently bundled into the audit.
+- **CI at audit snapshot:** the workflow for `2f9ad127f755f5e54cbc3b0097e33ab67df86c59` was still running when this record was prepared. Do not treat it as green until a terminal result is checked. The preceding main commit `119ac501fc1c71616076e3f8408d470274ccbb91` passed workflow run [#38497475234](https://github.com/thepotatoninjahost/Coding-Agent/actions/runs/38497475234).
+
+## Findings register
+
+| ID | Severity | Finding and evidence | Status |
+|---|---|---|---|
+| AUD-001 | Critical | The approval flow performs two generic Android biometric/device-credential confirmations. It does **not** require the owner-created spoken phrase followed by an exact typed phrase. `MainActivity.approvePendingProposal`, `OwnerApprovalToken`, and acceptance tests confirm this. | **Open — owner security requirement not met** |
+| AUD-002 | High | `app/src/main/assets/knowledge/coding-for-dummies.txt` contains a full commercial book's copyright notice and restrictive reproduction language. `scripts/package-source.sh` includes the asset in source packages. No license/permission evidence is recorded in the repository. | **Open — distribution rights must be confirmed; do not remove/replace without owner direction** |
+| AUD-003 | High | Research URL validation resolves and rejects private/local addresses before connecting, but the HTTP connection performs a separate hostname resolution. Without pinning the validated address, DNS rebinding remains possible. Redirects are disabled, which reduces but does not close the gap. | **Open — network boundary hardening** |
+| AUD-004 | High | The Gradle distribution URL is HTTPS but `gradle-wrapper.properties` has no `distributionSha256Sum`. The wrapper JAR SHA-256 is `cb0da6751c2b753a16ac168bb354870ebb1e162e9083f116729cec9c781156b8`, matching Gradle's published Gradle 8.7 wrapper checksum; the configured distribution is Gradle 8.9, so the JAR is authentic but older. Workflow actions are referenced by version tags rather than full commit SHAs, and the workflow does not use Gradle's built-in wrapper-JAR validation. | **Open — supply-chain hardening** |
+| AUD-005 | Medium | Pending proposal deserialization uses a permissive default for a missing verification flag (`optBoolean("verificationPassed", true)`). The proposal MAC limits tampering, so this is recorded as defensive-deserialization hardening, not as a demonstrated unauthenticated bypass. Missing/unknown required fields should fail closed. | **Open — hardening** |
+| AUD-006 | Medium | The response model represents one tool call. Non-streaming parsing rejects multiple calls, while streaming parsing retains only the first indexed call; additional streamed calls can be silently omitted. | **Open — functional gap; tests should cover multi-call streaming** |
+| AUD-007 | Medium | Knowledge replacement removes the old document's chunks/metadata, then appends replacement chunks and metadata in separate writes. A crash or write error between operations can leave missing or partial index state. | **Open — transactional persistence** |
+| AUD-008 | Medium | Corrupt encrypted user-memory JSON is caught and treated as an empty memory list. A subsequent write can overwrite recoverable user memories without surfacing the corruption. | **Open — data-loss hardening** |
+| AUD-009 | Medium | The model connection probe reports `ModelResponse.Text` as success even when the body is blank (`empty body`). It proves a response path was reached, not that a usable answer was received. | **Open — probe correctness** |
+| AUD-010 | High | Owner review text is truncated by a hard character cap after generating the diff, without a visible truncation warning or an explicit “review incomplete” state. The owner may not see every proposed change before confirming. | **Open — approval-review integrity** |
+| AUD-011 | Medium | `scripts/sync_to_github.sh` defines a remote-verification helper path but does not execute that helper itself; when authenticated, it updates files one at a time, so a multi-file sync can partially apply. | **Open — maintenance-tool reliability; avoid using as an atomic sync** |
+| AUD-012 | Low | Deep-research persistence caps stored extracted text while retaining word-count metadata derived from the uncapped source, so displayed counts can disagree with the persisted text. | **Open — metadata consistency** |
+| AUD-013 | Medium | CI proves JVM tests, lint, and APK assembly for the checked commit, but there are no Android instrumentation/UI tests in the tracked tree. Biometric prompt interaction, actual import UI, and device lifecycle behavior are not proven by the JVM suite. | **Open — test coverage limitation** |
+| AUD-014 | Medium | Chat/task/lesson/document logs are written as JSONL in app-private storage rather than encrypted by `KeystoreSecretStore`. Android backup/transfer exclusions are configured, and app sandboxing reduces exposure; still, logs can contain user code or secrets if the app/device is compromised. | **Risk noted — confirm intended at-rest protection** |
+| AUD-015 | Low | Credential redaction in personal logs is pattern-based and tests cover only representative API-key, bearer-token, password, and token formats. It cannot guarantee that every provider-specific secret format is removed. | **Risk noted — do not treat redaction as a security boundary** |
+| AUD-016 | Low | `docs/TOOL_QUEUE.md` incorrectly claimed multiple model tool calls are queued. It was corrected in commit `b405b8f7a8bdda0db433e1d6cabdff7ecceef6ad` to document the actual single-call behavior. | **Fixed — documentation only** |
+| AUD-017 | Low | `README.md` incorrectly said internet research remained future work despite current web/deep-research providers. It was corrected in commit `2f9ad127f755f5e54cbc3b0097e33ab67df86c59`. | **Fixed — documentation only** |
+| AUD-018 | Low | Earlier audit sections use historical tree snapshots and leave many file rows marked in progress. This current-main section is the authoritative coverage register for the snapshot above; historical evidence remains historical. | **Reconciled by this register** |
+
+### Official supply-chain references checked
+
+- Gradle security best practices: https://docs.gradle.org/current/userguide/best_practices_security.html
+- Gradle Wrapper verification: https://docs.gradle.org/current/userguide/gradle_wrapper.html
+- Gradle published wrapper/distribution checksums: https://gradle.org/release-checksums/
+- GitHub Actions secure-use guidance: https://docs.github.com/en/actions/reference/security/secure-use
+
+These official documents recommend verifying the Gradle distribution checksum, validating the wrapper JAR, and pinning GitHub Actions to full commit SHAs where immutability is required. No supply-chain configuration change was made without approval.
+
+## Per-file audit tracker
+
+Status means the file was included in the current snapshot's static review; “Deep review” identifies files whose security-sensitive logic was additionally examined in detail. Finding IDs link the file to the register above. A dash means no finding was assigned to that file during this pass; it is not a guarantee that the file can never contain a defect.
+
+| Tracked file | Audit status | Finding |
+|---|---|---|
+| `.gitattributes` | Static scan complete | — |
+| `.github/workflows/android-build.yml` | Deep review + static scan complete | AUD-004,AUD-013 |
+| `.gitignore` | Static scan complete | — |
+| `README.md` | Static scan complete | AUD-017 |
+| `app/build.gradle.kts` | Deep review + static scan complete | — |
+| `app/src/main/AndroidManifest.xml` | Deep review + static scan complete | AUD-001 |
+| `app/src/main/assets/knowledge/coding-for-dummies.txt` | Deep review + static scan complete | AUD-002 |
+| `app/src/main/java/com/codingagent/agent/AgentCommandPolicy.kt` | Deep review + static scan complete | — |
+| `app/src/main/java/com/codingagent/agent/AgentConstitution.kt` | Static scan complete | — |
+| `app/src/main/java/com/codingagent/agent/AgentDirectLanes.kt` | Static scan complete | — |
+| `app/src/main/java/com/codingagent/agent/AgentOfflineMutation.kt` | Static scan complete | — |
+| `app/src/main/java/com/codingagent/agent/AgentPrompt.kt` | Static scan complete | — |
+| `app/src/main/java/com/codingagent/agent/AgentRequestFocus.kt` | Static scan complete | — |
+| `app/src/main/java/com/codingagent/agent/AgentRequestKind.kt` | Static scan complete | — |
+| `app/src/main/java/com/codingagent/agent/AgentRuntime.kt` | Static scan complete | — |
+| `app/src/main/java/com/codingagent/agent/AgentSupport.kt` | Static scan complete | AUD-014 |
+| `app/src/main/java/com/codingagent/agent/AgentTaskBuilders.kt` | Static scan complete | — |
+| `app/src/main/java/com/codingagent/agent/AgentToolDispatch.kt` | Deep review + static scan complete | — |
+| `app/src/main/java/com/codingagent/agent/AgentTools.kt` | Static scan complete | — |
+| `app/src/main/java/com/codingagent/agent/AutonomousAgent.kt` | Deep review + static scan complete | — |
+| `app/src/main/java/com/codingagent/agent/AutonomousAgentConfig.kt` | Static scan complete | — |
+| `app/src/main/java/com/codingagent/agent/AutonomousAgentEvent.kt` | Static scan complete | — |
+| `app/src/main/java/com/codingagent/agent/ChatApproval.kt` | Deep review + static scan complete | — |
+| `app/src/main/java/com/codingagent/agent/ChatWorkspace.kt` | Deep review + static scan complete | — |
+| `app/src/main/java/com/codingagent/agent/DegenerateOutput.kt` | Static scan complete | — |
+| `app/src/main/java/com/codingagent/agent/ExperienceRecorder.kt` | Static scan complete | — |
+| `app/src/main/java/com/codingagent/agent/LessonContext.kt` | Static scan complete | — |
+| `app/src/main/java/com/codingagent/agent/LessonSynthesizer.kt` | Static scan complete | — |
+| `app/src/main/java/com/codingagent/agent/LocalFileEvidence.kt` | Static scan complete | — |
+| `app/src/main/java/com/codingagent/agent/LogicReasoning.kt` | Static scan complete | — |
+| `app/src/main/java/com/codingagent/agent/LoopControl.kt` | Static scan complete | — |
+| `app/src/main/java/com/codingagent/agent/ModelCallWithRetry.kt` | Static scan complete | — |
+| `app/src/main/java/com/codingagent/agent/ModelFailure.kt` | Static scan complete | — |
+| `app/src/main/java/com/codingagent/agent/PendingWorkResume.kt` | Static scan complete | — |
+| `app/src/main/java/com/codingagent/agent/PlanningLoop.kt` | Static scan complete | — |
+| `app/src/main/java/com/codingagent/agent/RepairCycle.kt` | Static scan complete | — |
+| `app/src/main/java/com/codingagent/agent/ResearchGate.kt` | Static scan complete | — |
+| `app/src/main/java/com/codingagent/agent/ResponseQualityRules.kt` | Static scan complete | — |
+| `app/src/main/java/com/codingagent/agent/SelfEvolution.kt` | Static scan complete | — |
+| `app/src/main/java/com/codingagent/agent/SelfRepair.kt` | Static scan complete | — |
+| `app/src/main/java/com/codingagent/agent/StructureScan.kt` | Static scan complete | — |
+| `app/src/main/java/com/codingagent/agent/ToolCallOutcomeHandler.kt` | Static scan complete | — |
+| `app/src/main/java/com/codingagent/agent/ToolPurpose.kt` | Static scan complete | — |
+| `app/src/main/java/com/codingagent/agent/ToolSelection.kt` | Static scan complete | — |
+| `app/src/main/java/com/codingagent/agent/UserMemory.kt` | Static scan complete | — |
+| `app/src/main/java/com/codingagent/core/BuiltInModules.kt` | Static scan complete | — |
+| `app/src/main/java/com/codingagent/core/DeviceUserMemoryStore.kt` | Deep review + static scan complete | AUD-008 |
+| `app/src/main/java/com/codingagent/core/KeystoreSecretStore.kt` | Deep review + static scan complete | — |
+| `app/src/main/java/com/codingagent/core/LiveModuleRuntime.kt` | Static scan complete | — |
+| `app/src/main/java/com/codingagent/core/LiveModuleStore.kt` | Static scan complete | — |
+| `app/src/main/java/com/codingagent/core/LocalStore.kt` | Deep review + static scan complete | AUD-014 |
+| `app/src/main/java/com/codingagent/intake/CodeSynthesis.kt` | Static scan complete | — |
+| `app/src/main/java/com/codingagent/intake/GoalInterpreter.kt` | Static scan complete | — |
+| `app/src/main/java/com/codingagent/intake/TaskIntake.kt` | Static scan complete | — |
+| `app/src/main/java/com/codingagent/knowledge/DocumentIngester.kt` | Static scan complete | — |
+| `app/src/main/java/com/codingagent/knowledge/KnowledgeBase.kt` | Static scan complete | — |
+| `app/src/main/java/com/codingagent/knowledge/KnowledgeIndex.kt` | Deep review + static scan complete | AUD-007 |
+| `app/src/main/java/com/codingagent/knowledge/KnowledgeProvider.kt` | Static scan complete | — |
+| `app/src/main/java/com/codingagent/model/AgentModelProtocol.kt` | Deep review + static scan complete | — |
+| `app/src/main/java/com/codingagent/model/JsonModelResponseParser.kt` | Deep review + static scan complete | AUD-006 |
+| `app/src/main/java/com/codingagent/model/LiveModelRouter.kt` | Static scan complete | — |
+| `app/src/main/java/com/codingagent/model/LiveModelStore.kt` | Static scan complete | — |
+| `app/src/main/java/com/codingagent/model/ModelDownloadProgress.kt` | Static scan complete | — |
+| `app/src/main/java/com/codingagent/model/ModelGateway.kt` | Static scan complete | — |
+| `app/src/main/java/com/codingagent/model/ModelSettings.kt` | Deep review + static scan complete | AUD-009 |
+| `app/src/main/java/com/codingagent/model/ModelTypes.kt` | Deep review + static scan complete | AUD-006 |
+| `app/src/main/java/com/codingagent/model/RemoteHttpGateway.kt` | Deep review + static scan complete | AUD-006 |
+| `app/src/main/java/com/codingagent/model/RotatingModelGateway.kt` | Static scan complete | — |
+| `app/src/main/java/com/codingagent/model/UnconfiguredModelGateway.kt` | Static scan complete | — |
+| `app/src/main/java/com/codingagent/research/ArticleExtractor.kt` | Deep review + static scan complete | AUD-003 |
+| `app/src/main/java/com/codingagent/research/DeepResearch.kt` | Deep review + static scan complete | AUD-003,AUD-012 |
+| `app/src/main/java/com/codingagent/research/PersonalResearchProvider.kt` | Deep review + static scan complete | AUD-003,AUD-012 |
+| `app/src/main/java/com/codingagent/research/QueryLanes.kt` | Static scan complete | — |
+| `app/src/main/java/com/codingagent/research/ResearchBrief.kt` | Static scan complete | — |
+| `app/src/main/java/com/codingagent/research/SourceQuality.kt` | Static scan complete | — |
+| `app/src/main/java/com/codingagent/research/WebResearch.kt` | Static scan complete | — |
+| `app/src/main/java/com/codingagent/ui/MainActivity.kt` | Deep review + static scan complete | AUD-001 |
+| `app/src/main/java/com/codingagent/ui/MainUiScreens.kt` | Deep review + static scan complete | AUD-001,AUD-010 |
+| `app/src/main/java/com/codingagent/ui/ReviewBinder.kt` | Static scan complete | — |
+| `app/src/main/java/com/codingagent/ui/UiTheme.kt` | Static scan complete | — |
+| `app/src/main/java/com/codingagent/workspace/AgentPlan.kt` | Static scan complete | — |
+| `app/src/main/java/com/codingagent/workspace/AgentStep.kt` | Static scan complete | — |
+| `app/src/main/java/com/codingagent/workspace/AtomicFileWriter.kt` | Deep review + static scan complete | — |
+| `app/src/main/java/com/codingagent/workspace/ChangeDiff.kt` | Deep review + static scan complete | AUD-010 |
+| `app/src/main/java/com/codingagent/workspace/CommandRunner.kt` | Deep review + static scan complete | — |
+| `app/src/main/java/com/codingagent/workspace/FileIntegrity.kt` | Deep review + static scan complete | — |
+| `app/src/main/java/com/codingagent/workspace/MutationCoordinator.kt` | Deep review + static scan complete | AUD-001,AUD-005 |
+| `app/src/main/java/com/codingagent/workspace/OpenJobStore.kt` | Deep review + static scan complete | — |
+| `app/src/main/java/com/codingagent/workspace/OwnerApprovalToken.kt` | Deep review + static scan complete | AUD-001 |
+| `app/src/main/java/com/codingagent/workspace/PendingProposalStore.kt` | Deep review + static scan complete | AUD-005 |
+| `app/src/main/java/com/codingagent/workspace/ProjectFileService.kt` | Static scan complete | — |
+| `app/src/main/java/com/codingagent/workspace/ProjectIndexer.kt` | Static scan complete | — |
+| `app/src/main/java/com/codingagent/workspace/ProjectMetadataBoundary.kt` | Deep review + static scan complete | — |
+| `app/src/main/java/com/codingagent/workspace/ProjectModels.kt` | Static scan complete | — |
+| `app/src/main/java/com/codingagent/workspace/ProjectPaths.kt` | Deep review + static scan complete | — |
+| `app/src/main/java/com/codingagent/workspace/ProjectWorkspace.kt` | Deep review + static scan complete | — |
+| `app/src/main/java/com/codingagent/workspace/ProposalIntegrity.kt` | Deep review + static scan complete | AUD-005 |
+| `app/src/main/java/com/codingagent/workspace/StorageGuard.kt` | Static scan complete | — |
+| `app/src/main/java/com/codingagent/workspace/TerminalSession.kt` | Deep review + static scan complete | — |
+| `app/src/main/res/drawable/ic_launcher.xml` | Static scan complete | — |
+| `app/src/main/res/values/styles.xml` | Static scan complete | — |
+| `app/src/main/res/xml/data_extraction_rules.xml` | Static scan complete | — |
+| `app/src/test/java/com/codingagent/agent/AgentCommandPolicyTest.kt` | Deep review + static scan complete | — |
+| `app/src/test/java/com/codingagent/agent/AgentTaskBuildersTest.kt` | Static scan complete | — |
+| `app/src/test/java/com/codingagent/agent/ResearchGateTest.kt` | Static scan complete | — |
+| `app/src/test/java/com/codingagent/agent/ToolCallOutcomeHandlerTest.kt` | Static scan complete | — |
+| `app/src/test/java/com/codingagent/core/AcceptancePathTest.kt` | Deep review + static scan complete | — |
+| `app/src/test/java/com/codingagent/core/AgentContextContinuityTest.kt` | Static scan complete | — |
+| `app/src/test/java/com/codingagent/core/AgentJournalTest.kt` | Deep review + static scan complete | — |
+| `app/src/test/java/com/codingagent/core/AgentModelProtocolTest.kt` | Static scan complete | — |
+| `app/src/test/java/com/codingagent/core/AgentPromptTest.kt` | Static scan complete | — |
+| `app/src/test/java/com/codingagent/core/AgentTaskBuildersVerificationTest.kt` | Static scan complete | — |
+| `app/src/test/java/com/codingagent/core/AtomicFileWriterTest.kt` | Static scan complete | — |
+| `app/src/test/java/com/codingagent/core/AutonomousLoopTest.kt` | Static scan complete | — |
+| `app/src/test/java/com/codingagent/core/ChangeDiffTest.kt` | Static scan complete | — |
+| `app/src/test/java/com/codingagent/core/ChatWorkspaceTest.kt` | Static scan complete | — |
+| `app/src/test/java/com/codingagent/core/CodeSynthesisTest.kt` | Static scan complete | — |
+| `app/src/test/java/com/codingagent/core/DeepResearchTest.kt` | Deep review + static scan complete | — |
+| `app/src/test/java/com/codingagent/core/DocumentIngesterTest.kt` | Static scan complete | — |
+| `app/src/test/java/com/codingagent/core/ExperienceRecorderTest.kt` | Static scan complete | — |
+| `app/src/test/java/com/codingagent/core/FileIntegrityTest.kt` | Static scan complete | — |
+| `app/src/test/java/com/codingagent/core/GoalInterpreterTest.kt` | Static scan complete | — |
+| `app/src/test/java/com/codingagent/core/LessonSynthesizerTest.kt` | Static scan complete | — |
+| `app/src/test/java/com/codingagent/core/LiveUpdateTest.kt` | Deep review + static scan complete | — |
+| `app/src/test/java/com/codingagent/core/LogicReasoningTest.kt` | Static scan complete | — |
+| `app/src/test/java/com/codingagent/core/ModelFailureTest.kt` | Static scan complete | — |
+| `app/src/test/java/com/codingagent/core/ModelGatewayTest.kt` | Deep review + static scan complete | — |
+| `app/src/test/java/com/codingagent/core/ModelSettingsTest.kt` | Deep review + static scan complete | — |
+| `app/src/test/java/com/codingagent/core/OpenJobStoreTest.kt` | Deep review + static scan complete | — |
+| `app/src/test/java/com/codingagent/core/OperationalAgentTest.kt` | Deep review + static scan complete | — |
+| `app/src/test/java/com/codingagent/core/OwnerApprovalTokenTest.kt` | Deep review + static scan complete | — |
+| `app/src/test/java/com/codingagent/core/PlanningLoopTest.kt` | Static scan complete | — |
+| `app/src/test/java/com/codingagent/core/ProjectFileServiceBoundaryTest.kt` | Deep review + static scan complete | — |
+| `app/src/test/java/com/codingagent/core/ProjectImportPolicyTest.kt` | Deep review + static scan complete | — |
+| `app/src/test/java/com/codingagent/core/ProjectWorkspaceTest.kt` | Static scan complete | — |
+| `app/src/test/java/com/codingagent/core/RepairCycleTest.kt` | Static scan complete | — |
+| `app/src/test/java/com/codingagent/core/RepairLifecycleAcceptanceTest.kt` | Deep review + static scan complete | — |
+| `app/src/test/java/com/codingagent/core/ResearchModeTest.kt` | Static scan complete | — |
+| `app/src/test/java/com/codingagent/core/ReviewBinderTest.kt` | Static scan complete | — |
+| `app/src/test/java/com/codingagent/core/SelfEvolutionTest.kt` | Deep review + static scan complete | — |
+| `app/src/test/java/com/codingagent/core/SelfRepairTest.kt` | Static scan complete | — |
+| `app/src/test/java/com/codingagent/core/StorageGuardTest.kt` | Static scan complete | — |
+| `app/src/test/java/com/codingagent/core/TaskIntakeTest.kt` | Static scan complete | — |
+| `app/src/test/java/com/codingagent/core/TerminalCancelTest.kt` | Deep review + static scan complete | — |
+| `app/src/test/java/com/codingagent/core/ToolPurposeTest.kt` | Static scan complete | — |
+| `app/src/test/java/com/codingagent/core/ToolSelectionTest.kt` | Static scan complete | — |
+| `app/src/test/java/com/codingagent/core/UserMemoryTest.kt` | Static scan complete | — |
+| `build.gradle.kts` | Static scan complete | — |
+| `docs/ANTI_YES_MAN.md` | Static scan complete | — |
+| `docs/OWNER_SYSTEM_PROMPT.md` | Static scan complete | — |
+| `docs/TOOL_QUEUE.md` | Static scan complete | AUD-016 |
+| `docs/audit/FILE_BY_FILE_AUDIT_LEDGER.md` | Static scan complete | AUD-018 |
+| `docs/audit/PHASE_1_BASELINE_EVIDENCE.md` | Static scan complete | AUD-018 |
+| `docs/audit/PHASE_1_RECURSIVE_TREE.txt` | Static scan complete | AUD-018 |
+| `docs/plans/2026-07-28-deep-research-design.md` | Static scan complete | — |
+| `gradle.properties` | Static scan complete | — |
+| `gradle/wrapper/gradle-wrapper.jar` | Hash verified against official Gradle 8.7 wrapper checksum | AUD-004 |
+| `gradle/wrapper/gradle-wrapper.properties` | Static scan complete | AUD-004 |
+| `gradlew` | Static scan complete | — |
+| `proguard-rules.pro` | Static scan complete | — |
+| `scripts/package-source.sh` | Static scan complete | — |
+| `scripts/sync_to_github.sh` | Static scan complete | AUD-011 |
+| `settings.gradle.kts` | Static scan complete | — |
+
+## Audit conclusion
+
+The project-wide static audit is complete for this snapshot, with all 163 tracked files accounted for. The audit is **not a claim that every finding is fixed**: AUD-001 through AUD-015 remain open or noted as specified above. In particular, the spoken-plus-typed owner approval safeguard is not implemented, and the bundled copyrighted reference asset needs rights confirmation before redistribution. Do not mark these as resolved merely because CI passes.
