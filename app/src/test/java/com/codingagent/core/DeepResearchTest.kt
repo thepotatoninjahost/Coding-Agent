@@ -51,39 +51,30 @@ class DeepResearchTest {
 
     @Test fun researchConnectionTimeDnsLookupRejectsReboundPrivateAddress() {
         var lookups = 0
-        val factory = ResearchUrlSafety.connectionFactory {
+        val client = ResearchUrlSafety.newClient {
             lookups++
             listOf(InetAddress.getByName("127.0.0.1"))
         }
-        val connection = factory("http://example.com/admin")
-        connection.connectTimeout = 1000
-        connection.readTimeout = 1000
+        val call = client.newCall(okhttp3.Request.Builder().url("http://example.com/admin").build())
         try {
-            assertTrue("private connection-time DNS answer must be rejected", runCatching {
-                connection.responseCode
-            }.isFailure)
+            assertTrue("private connection-time DNS answer must be rejected", runCatching { call.execute() }.isFailure)
             assertEquals("DNS policy must be applied by the actual HTTP client", 1, lookups)
         } finally {
-            connection.disconnect()
+            call.cancel()
         }
     }
 
     @Test fun researchConnectionTimeDnsLookupRejectsMixedPublicAndPrivateAnswers() {
-        val factory = ResearchUrlSafety.connectionFactory {
+        val client = ResearchUrlSafety.newClient {
             listOf(InetAddress.getByName("93.184.216.34"), InetAddress.getByName("10.0.0.7"))
         }
-        val connection = factory("http://example.com/")
-        connection.connectTimeout = 1000
-        connection.readTimeout = 1000
+        val call = client.newCall(okhttp3.Request.Builder().url("http://example.com/").build())
         try {
-            assertTrue("one unsafe DNS answer must reject the whole destination", runCatching {
-                connection.responseCode
-            }.isFailure)
+            assertTrue("one unsafe DNS answer must reject the whole destination", runCatching { call.execute() }.isFailure)
         } finally {
-            connection.disconnect()
+            call.cancel()
         }
     }
-
     @Test fun researchUrlSafetyRejectsReservedAddressRanges() {
         listOf("100.64.0.1", "198.18.0.1", "192.0.2.1", "2001:db8::1", "fc00::1", "::ffff:127.0.0.1").forEach { literal ->
             assertTrue("$literal must be rejected", ResearchUrlSafety.isPrivateOrLocal(InetAddress.getByName(literal)))
