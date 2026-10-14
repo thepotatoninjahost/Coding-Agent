@@ -19,17 +19,17 @@ jobs:
 
     steps:
       - name: Check out source
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:
           distribution: temurin
           java-version: '17'
           cache: gradle
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v4
+        uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
 
       - name: Install Android SDK packages
         run: |
@@ -55,6 +55,20 @@ jobs:
             exit 1
           fi
 
+      - name: Verify Gradle Wrapper JAR checksum
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected='cb0da6751c2b753a16ac168bb354870ebb1e162e9083f116729cec9c781156b8'
+          actual="$(sha256sum gradle/wrapper/gradle-wrapper.jar | cut -d ' ' -f 1)"
+          if [[ "$actual" != "$expected" ]]; then
+            echo "ERROR: Gradle Wrapper JAR checksum mismatch."
+            echo "Expected official Gradle 8.7 Wrapper JAR SHA-256: $expected"
+            echo "Actual: $actual"
+            exit 1
+          fi
+          echo "Gradle Wrapper JAR checksum matches the official Gradle 8.7 checksum."
+
       - name: Make Gradle executable
         run: chmod +x ./gradlew
 
@@ -69,7 +83,7 @@ jobs:
 
       - name: Upload unit test reports
         if: failure()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: unit-test-reports
           path: |
