@@ -31,7 +31,7 @@ class KnowledgeIndex(private val root: File) : KnowledgeProvider {
     fun indexText(document: String, source: String, text: String, importedAt: Long = System.currentTimeMillis()): IngestResult {
         val request = DocumentIngester.normalize(document, source, text)
         val chunks = chunk(request.text, request.documentName)
-        require(chunks.isNotEmpty()) { "No indexable chunks produced from \${request.documentName}" }
+        require(chunks.isNotEmpty()) { "No indexable chunks produced from " + request.documentName }
         synchronized(this) {
             recoverTransactionLocked()
             val existingChunks = readLines(indexFile).filterNot { line ->
@@ -193,7 +193,7 @@ class KnowledgeIndex(private val root: File) : KnowledgeProvider {
             return
         }
         val previous = AtomicFileWriter.readTextIfExists(backup)
-            ?: throw IOException("Knowledge index recovery is missing its previous file: \${backup.name}")
+            ?: throw IOException("Knowledge index recovery is missing its previous file: " + backup.name)
         AtomicFileWriter.write(target, previous)
     }
 
@@ -204,7 +204,7 @@ class KnowledgeIndex(private val root: File) : KnowledgeProvider {
 
     private fun readExistingFile(file: File): String? {
         if (!file.exists()) return null
-        if (!file.isFile) throw IOException("Knowledge index path is not a regular file: \${file.name}")
+        if (!file.isFile) throw IOException("Knowledge index path is not a regular file: " + file.name)
         return AtomicFileWriter.readTextIfExists(file)
     }
 
@@ -228,7 +228,7 @@ class KnowledgeIndex(private val root: File) : KnowledgeProvider {
                 if (value.length < 40) null
                 else KnowledgeChunk(
                     document,
-                    "page \${pageIndex + 1}, section \${chunkIndex + 1}",
+                    "page " + (pageIndex + 1) + ", section " + (chunkIndex + 1),
                     value,
                     tokenize(value).toSet()
                 )
