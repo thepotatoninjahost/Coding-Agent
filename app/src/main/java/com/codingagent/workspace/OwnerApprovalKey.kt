@@ -16,7 +16,7 @@ import java.util.UUID
  * proposal ID, approval ordinal, issue time, and random nonce.
  */
 internal object OwnerApprovalKey {
-    private const val KEY_ALIAS = "coding-agent-owner-approval-signing-v2"
+    private const val KEY_ALIAS = "coding-agent-owner-approval-signing-v3"
     private const val KEYSTORE = "AndroidKeyStore"
     private const val DOMAIN = "coding-agent-owner-approval-v1"
     private val isJvmTestRuntime: Boolean
@@ -96,7 +96,7 @@ internal object OwnerApprovalKey {
         check(store.getCertificate(KEY_ALIAS) == null) {
             "Owner approval signing key is incomplete; refusing to replace it automatically"
         }
-        val authenticators = KeyProperties.AUTH_BIOMETRIC_STRONG
+        val authenticators = KeyProperties.AUTH_BIOMETRIC_STRONG or KeyProperties.AUTH_DEVICE_CREDENTIAL
         val generator = KeyPairGenerator.getInstance(KeyProperties.KEY_ALGORITHM_EC, KEYSTORE)
         generator.initialize(
             KeyGenParameterSpec.Builder(
