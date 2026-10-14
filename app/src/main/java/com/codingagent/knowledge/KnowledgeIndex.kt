@@ -78,9 +78,9 @@ class KnowledgeIndex(private val root: File) : KnowledgeProvider {
                     val haystack = tokenize(text)
                     val score = terms.fold(0) { total, term ->
                         when {
-                            haystack.contains(term) -> total + 3
-                            haystack.any { it.startsWith(term) } -> total + 1
-                            else -> total
+                            haystack.contains(term) -> 3
+                            haystack.any { it.startsWith(term) } -> 1
+                            else -> 0
                         }
                     }
                     KnowledgeHit(item.optString("document"), item.optString("section"), score, excerpt(text, terms))
