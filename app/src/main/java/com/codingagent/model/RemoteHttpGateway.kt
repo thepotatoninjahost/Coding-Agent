@@ -75,6 +75,7 @@ class RemoteHttpGateway(
         var toolCallName: String? = null
         val toolCallArguments = StringBuilder()
         var sawToolCall = false
+        var sawMultipleToolCalls = false
 
         input.bufferedReader(StandardCharsets.UTF_8).useLines { lines ->
             for (rawLine in lines) {
@@ -97,7 +98,12 @@ class RemoteHttpGateway(
                 if (calls != null) {
                     for (i in 0 until calls.length()) {
                         val call = calls.optJSONObject(i) ?: continue
-                        if (call.optInt("index", 0) != 0) continue // this app acts on one tool call at a time
+                        if (call.optInt("index", 0) != 0) {
+                            // This protocol executes exactly one tool per turn. Never silently
+                            // discard additional calls: reject the whole streamed response.
+                            sawMultipleToolCalls = true
+                            continue
+                        }
                         sawToolCall = true
                         call.optString("id").takeIf { it.isNotBlank() }?.let { toolCallId = it }
                         val function = call.optJSONObject("function")
@@ -109,6 +115,9 @@ class RemoteHttpGateway(
         }
 
         if (isCancelled(generation)) return ModelResponse.Failure("Cancelled")
+        if (sawMultipleToolCalls) {
+            return ModelResponse.Failure("Model returned multiple tool calls; only one tool call is accepted per turn")
+        }
 
         val merged = JSONObject().put("role", "assistant")
         if (mergedContent.isNotEmpty()) merged.put("content", mergedContent.toString())
