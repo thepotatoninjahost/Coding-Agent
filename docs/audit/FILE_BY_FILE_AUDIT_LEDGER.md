@@ -171,3 +171,39 @@
 ## Completion rule
 
 Do not change a row to `reviewed` until the file's contents have been inspected and the purpose, dependencies, findings, and action have been documented. Do not change it to `verified` until the verification evidence is recorded. A blank or pending field is an outstanding audit task, not a clean result.
+
+## Phase 2 finding reconciliation against current main (2026-10-14)
+
+- Current source commit: 7f425a89eca1a4b870c6b0188146b1867c34b23d; recursive tree: 32ff9b1fe718610cb2ea583e82ee8c53cdfeef1e; 163 tracked blobs and 34 directories; response not truncated.
+- The original Phase 2 ledger used baseline 5910ac4841c893de5a5dca25d95b5f9f3591bbce and recorded 153 tracked files; its branch head was 372c46f. Current main is 113 commits beyond that baseline, so its findings cannot be treated as current without revalidation.
+- Current main CI: [Android build run 38495535414](https://github.com/thepotatoninjahost/Coding-Agent/actions/runs/38495535414) succeeded for the exact source commit above. This is GitHub Actions evidence, not a local build.
+- This section reconciles the Phase 2 finding register; it does not claim the repository-wide file-by-file audit is complete. Unreviewed rows remain outstanding.
+
+| Finding | Current-main disposition and evidence |
+|---|---|
+| F2-001 — multiple tool calls | **Open limitation.** ModelResponse represents one ToolCall; non-streaming parsing rejects multiple calls, while streaming only processes index 0 and ignores other indexed calls. Add regression coverage and define expected handling. |
+| F2-002 / F2-019 — failed task verification | **Resolved.** AgentTaskBuilders.failed creates VerificationReport(false, ...); AgentTaskBuildersVerificationTest and AgentTaskBuildersTest cover this. Do not list as a current defect. |
+| F2-003 — missing verificationPassed defaults true | **Open.** PendingProposalStore uses optBoolean("verificationPassed", true). Missing persisted verification evidence therefore fails open. |
+| F2-004 / F2-023 — model package validation | **Partially resolved.** LiveModelStore.active checks installed content against recorded checksums. installPackage checks manifest presence and non-empty payload files but does not validate manifest semantics against payload contents. |
+| F2-005 — public workspace mutation APIs | **Defense-in-depth concern, not a demonstrated exploit.** Public write APIs exist, but the inspected autonomous tool path stages changes through MutationCoordinator and owner approval. Complete caller tracing before describing an approval bypass. |
+| F2-006 — package-source forbidden list | **Not confirmed.** scripts/package-source.sh initializes an empty forbidden list and skips configured local/generated paths. Intent is ambiguous; the unreachable error path is misleading, but no security bypass is established without defining expected exclusion semantics. |
+| F2-007 — repair rollback | **Resolved in current main.** RepairCycle accumulates existing change sets and each applied repair change set before rollback; RepairLifecycleAcceptanceTest and RepairCycleTest exist. |
+| F2-008 — terminal timeout ignored | **Resolved.** AgentTools.terminal passes timeoutSeconds to TerminalSession.executeArgs. |
+| F2-009 — research DNS rebinding | **Open security hardening.** ResearchUrlSafety validates DNS results before ArticleExtractor.fetch separately opens the URL; the validated address is not pinned. Redirects are disabled but do not remove the resolution gap. |
+| F2-010 — owner review truncation | **Open.** ChangeDiff.ownerReviewText truncates the complete review text at 12,000 characters without a whole-body truncation notice. |
+| F2-011 — reserved metadata case sensitivity | **Original claim not confirmed.** ProjectIndexer has a case-sensitive ignored-name set, but ProjectPaths.isSensitivePath checks .coding-agent and .git case-insensitively. |
+| F2-012 — persisted research word count | **Open consistency issue.** DeepResearch and PersonalResearchProvider persist content capped at 12,000 characters while retaining the original content's word count. |
+| F2-013 — model probe accepts any text | **Open.** ModelConnectionProbe treats any ModelResponse.Text, including blank text, as success. |
+| F2-014 — knowledge index replacement | **Open reliability issue.** KnowledgeIndex.indexText removes the old document before appending replacement chunks and metadata; a write failure can leave a partial/missing index. |
+| F2-015 — project-controlled verification commands | **Partially resolved / caller trace required.** MutationCoordinator's post-approval path avoids automatic build/test commands, but RepairCycle.execute can call workspace.runChecks(plan.checks, ...). Trace all entry points and plan provenance before closing the broader finding. |
+| F2-016 — research cancellation | **Cancellation chain exists.** AutonomousAgent.cancel calls research.cancel; DeepResearch.cancel calls personalProvider.cancel. Verify UI call sites and active-request tests before claiming every manual cancellation path is covered. |
+| F2-017 — editable system prompt unused | **Resolved.** MainActivity sets the agent prompt using ModelSettings.effectiveSystemPrompt(). |
+| F2-018 — wrapper checksum / mutable action tags | **Open supply-chain hardening.** gradle-wrapper.properties has no distributionSha256Sum; CI uses major-version action tags rather than immutable commit SHAs. Do not guess checksum values. |
+| F2-020 — Git pathspec exposure | **Resolved for the inspected autonomous path.** AgentCommandPolicy rejects Git commands; reopen only if another reachable path invokes Git on model-controlled input. |
+| F2-021 — corrupt user-memory JSON | **Open data-preservation issue.** DeviceUserMemoryStore.load returns an empty list on parse failure, so a later write can overwrite the unreadable value. |
+| F2-022 — import permission preservation | **Unverified.** This pass did not establish whether import/export preserves executable bits on target Android storage providers. |
+| F2-024 — ambiguous local file resolution | **Original claim not reproduced.** AgentTools resolves explicit project-relative paths and performs case-insensitive segment matching, not recursive arbitrary-basename selection. Reopen only with a concrete reproducer. |
+
+### Reconciliation exit state
+
+The register distinguishes open findings, partial fixes, resolved historical findings, and unconfirmed claims. It does not complete the whole repository audit: the existing ledger still has unreviewed rows, and the current-main inventory is 163 tracked files. No application behavior was changed by this documentation reconciliation.
