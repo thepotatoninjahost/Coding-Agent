@@ -409,26 +409,20 @@ class ChatWorkspace(
 }
 
 /**
- * Owner change reviews are authorization evidence, not ordinary chat summaries.
- * Never truncate them: the owner must be able to inspect every proposed byte before approval.
- * Other long chat output remains bounded, but the visible marker must make truncation explicit.
+ * Preserve complete summaries. In particular, owner change reviews are authorization
+ * evidence and must never be clipped before approval. UI rendering must provide access
+ * to the complete text rather than silently substituting a shortened version.
  */
 internal fun sanitizeTaskSummary(text: String): String {
     if (text.isBlank()) return "(empty)"
-    val head = text.trimStart()
-    if (head.startsWith("PROPOSED CHANGES")) return text
     if (text.contains("<tool_call", ignoreCase = true) || text.contains("<function=", ignoreCase = true)) {
         return "The model printed a raw tool call instead of a review. That is not an answer."
     }
     if (DegenerateOutput.isDegenerate(text)) {
         return DegenerateOutput.sanitize(text)
     }
-    if (text.length <= MAX_CHAT_SUMMARY_CHARS) return text
-    val notice = "\n\n[OUTPUT TRUNCATED: showing $MAX_CHAT_SUMMARY_CHARS of ${text.length} characters. The complete output is not shown.]"
-    return text.take(MAX_CHAT_SUMMARY_CHARS) + notice
+    return text
 }
-
-internal const val MAX_CHAT_SUMMARY_CHARS = 12_000
 
 data class ChatTurn(
     val response: ChatMessage,
