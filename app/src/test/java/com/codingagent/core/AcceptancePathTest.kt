@@ -500,7 +500,7 @@ class AcceptancePathTest {
     @Test
     fun missingOrMalformedPersistedVerificationFailsClosed() {
         val root = Files.createTempDirectory("accept-missing-verification").toFile()
-        root.resolve("Main.kt").writeText("fun main() = 1\\n")
+        root.resolve("Main.kt").writeText("fun main() = 1\n")
         val coordinator = MutationCoordinator(ProjectWorkspace(root))
         val proposed = coordinator.propose(
             "require persisted verification",
