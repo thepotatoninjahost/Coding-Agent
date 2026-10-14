@@ -1,6 +1,7 @@
 package com.codingagent.core
 
 import com.codingagent.agent.AgentPrompt
+import com.codingagent.model.AgentModelProtocol
 import com.codingagent.intake.TaskIntakeParser
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -32,6 +33,29 @@ class AgentPromptTest {
         assertTrue(prompt.contains("Owner constraints — binding requirements:"))
         assertTrue(prompt.contains("Exactly one tool call this turn"))
         assertTrue(prompt.contains("purpose field"))
+    }
+
+
+    @Test fun proposalInstructionsRequirePlainEnglishAndCompleteRiskDisclosure() {
+        val system = AgentModelProtocol.DEFAULT_SYSTEM
+        val headings = listOf(
+            "What I want to do:",
+            "Why:",
+            "What will change:",
+            "Possible effects:",
+            "Risks:",
+            "What your approval means:"
+        )
+        headings.forEach { assertTrue("Missing proposal heading: $it", system.contains(it)) }
+        assertTrue(system.contains("Do not use unexplained jargon"))
+        assertTrue(system.contains("State when something is unknown instead of guessing"))
+
+        val replaceTool = AgentModelProtocol.tools().single { it.name == "replace_text" }
+        val createTool = AgentModelProtocol.tools().single { it.name == "create_file" }
+        assertTrue(replaceTool.inputSchema.contains("\"reason\""))
+        assertTrue(createTool.inputSchema.contains("\"reason\""))
+        assertTrue(replaceTool.inputSchema.contains("\"required\":[\"path\",\"oldText\",\"newText\",\"reason\"]"))
+        assertTrue(createTool.inputSchema.contains("\"required\":[\"path\",\"content\",\"reason\"]"))
     }
 
     @Test fun promptAllowsAmbitiousWorkAndRequiresMilestoneVerification() {
