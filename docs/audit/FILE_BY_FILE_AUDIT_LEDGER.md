@@ -175,7 +175,7 @@ Do not change a row to `reviewed` until the file's contents have been inspected 
 ## Phase 2 finding reconciliation against current main (2026-10-14)
 
 - Current source commit: 7f425a89eca1a4b870c6b0188146b1867c34b23d; recursive tree: 32ff9b1fe718610cb2ea583e82ee8c53cdfeef1e; 163 tracked blobs and 34 directories; response not truncated.
-- The original Phase 2 branch was based on 372c46f (153 tracked files) and is 113 commits behind current main. Its findings cannot be treated as current without revalidation.
+- The original Phase 2 ledger used baseline 5910ac4841c893de5a5dca25d95b5f9f3591bbce and recorded 153 tracked files; its branch head was 372c46f. Current main is 113 commits beyond that baseline, so its findings cannot be treated as current without revalidation.
 - Current main CI: [Android build run 38495535414](https://github.com/thepotatoninjahost/Coding-Agent/actions/runs/38495535414) succeeded for the exact source commit above. This is GitHub Actions evidence, not a local build.
 - This section reconciles the Phase 2 finding register; it does not claim the repository-wide file-by-file audit is complete. Unreviewed rows remain outstanding.
 
