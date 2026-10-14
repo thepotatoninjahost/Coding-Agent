@@ -2,7 +2,7 @@ package com.codingagent.research
 
 import okhttp3.Dns
 import okhttp3.OkHttpClient
-import okhttp3.OkUrlFactory
+import okhttp3.Request
 import java.io.ByteArrayOutputStream
 import java.net.HttpURLConnection
 import java.net.InetAddress
@@ -14,11 +14,6 @@ import java.util.concurrent.TimeUnit
  * ONE JOB: URL/HTML → clean text and code blocks for research.
  */
 object ResearchUrlSafety {
-    /**
-     * Validates the submitted URL before any request is created. The connection client below
-     * independently enforces the same address policy during its own DNS lookup and connects
-     * using that exact validated result, closing the validation/connect DNS rebinding gap.
-     */
     fun validatePublicHttpUrl(raw: String): String? {
         val uri = runCatching { java.net.URI(raw.trim()) }.getOrNull()
             ?: return "Invalid research URL"
@@ -28,36 +23,36 @@ object ResearchUrlSafety {
         val host = uri.host?.trim()?.trim('[', ']')?.lowercase()
             ?: return "Research URL has no hostname"
         if (host.isBlank() || host == "localhost" || host.endsWith(".localhost") ||
-            host == "metadata.google.internal" || !host.contains('.') && !host.contains(':')) {
+            host == "metadata.google.internal" || (!host.contains('.') && !host.contains(':'))) {
             return "Research URL targets a local or invalid hostname"
         }
-        val addresses = runCatching { resolvePublicAddresses(host) }
+        runCatching { resolvePublicAddresses(host) }
             .getOrElse { return "Research hostname could not be resolved safely" }
-        if (addresses.isEmpty()) return "Research hostname has no resolved address"
         return null
     }
 
     /**
-     * The resolver is used by OkHttp at connection time. Returning the checked addresses to
-     * OkHttp means the socket connects to these addresses rather than resolving the hostname
-     * again after validation. All A/AAAA answers must be public; mixed public/private answers
-     * fail closed.
+     * This resolver is invoked by OkHttp during connection establishment. Only the returned,
+     * checked addresses are used as socket destinations, closing the DNS check/connect gap.
      */
-    internal fun connectionFactory(
+    internal fun newClient(
         dnsLookup: (String) -> List<InetAddress> = { InetAddress.getAllByName(it).toList() }
-    ): (String) -> HttpURLConnection {
-        val client = OkHttpClient.Builder()
-            .dns(Dns { hostname -> resolvePublicAddresses(hostname, dnsLookup) })
-            .followRedirects(false)
-            .followSslRedirects(false)
-            .retryOnConnectionFailure(false)
-            .callTimeout(20, TimeUnit.SECONDS)
-            .build()
-        val factory = OkUrlFactory(client)
-        return { raw -> factory.open(URL(raw)) }
-    }
+    ): OkHttpClient = OkHttpClient.Builder()
+        .dns(Dns { hostname -> resolvePublicAddresses(hostname, dnsLookup) })
+        .followRedirects(false)
+        .followSslRedirects(false)
+        .retryOnConnectionFailure(false)
+        .callTimeout(20, TimeUnit.SECONDS)
+        .build()
 
-    fun openConnection(raw: String): HttpURLConnection = connectionFactory()(raw)
+    private val sharedClient: OkHttpClient by lazy { newClient() }
+
+    internal fun clientForTimeout(timeoutMillis: Int): OkHttpClient =
+        sharedClient.newBuilder()
+            .connectTimeout(timeoutMillis.toLong(), TimeUnit.MILLISECONDS)
+            .readTimeout(timeoutMillis.toLong(), TimeUnit.MILLISECONDS)
+            .callTimeout(timeoutMillis.toLong(), TimeUnit.MILLISECONDS)
+            .build()
 
     private fun resolvePublicAddresses(
         host: String,
@@ -73,7 +68,6 @@ object ResearchUrlSafety {
 
     internal fun isPrivateOrLocal(address: InetAddress): Boolean {
         val bytes = address.address
-        // Treat IPv4-mapped IPv6 addresses according to their embedded IPv4 destination.
         if (bytes.size == 16 && bytes.take(10).all { it == 0.toByte() } &&
             bytes[10] == 0xff.toByte() && bytes[11] == 0xff.toByte()) {
             return isPrivateOrLocal(InetAddress.getByAddress(bytes.copyOfRange(12, 16)))
@@ -91,7 +85,6 @@ object ResearchUrlSafety {
             )
             return denied.any { (network, prefix) -> inCidr(bytes, network, prefix) }
         }
-
         if (bytes.size == 16) {
             val denied = listOf(
                 "fc00::" to 7, "fe80::" to 10, "ff00::" to 8,
@@ -127,13 +120,61 @@ object ArticleExtractor {
 
     fun fetch(
         url: String,
-        connectionFactory: (String) -> HttpURLConnection = ResearchUrlSafety::openConnection,
+        connectionFactory: ((String) -> HttpURLConnection)? = null,
         timeoutMillis: Int = 15_000,
         urlValidator: (String) -> String? = ResearchUrlSafety::validatePublicHttpUrl,
         isCancelled: () -> Boolean = { false },
-        onConnection: (HttpURLConnection) -> Unit = {}
+        onConnection: (HttpURLConnection) -> Unit = {},
+        onCall: (okhttp3.Call) -> Unit = {}
     ): Extracted? {
         if (urlValidator(url) != null) return null
+        return if (connectionFactory == null) {
+            fetchWithOkHttp(url, timeoutMillis, isCancelled, onCall)
+        } else {
+            fetchWithUrlConnection(url, connectionFactory, timeoutMillis, isCancelled, onConnection)
+        }
+    }
+
+    private fun fetchWithOkHttp(
+        url: String,
+        timeoutMillis: Int,
+        isCancelled: () -> Boolean,
+        onCall: (okhttp3.Call) -> Unit
+    ): Extracted? {
+        val call = ResearchUrlSafety.clientForTimeout(timeoutMillis).newCall(
+            Request.Builder()
+                .url(url)
+                .header("User-Agent", "Coding-Agent/1.0 (Android; https://github.com/thepotatoninjahost/Coding-Agent)")
+                .header("Accept", "text/html,application/xhtml+xml")
+                .get()
+                .build()
+        )
+        return try {
+            onCall(call)
+            if (isCancelled()) {
+                call.cancel()
+                return null
+            }
+            call.execute().use { response ->
+                if (response.code !in 200..299 || isCancelled()) return null
+                val body = response.body ?: return null
+                val html = body.byteStream().use { readBounded(it, isCancelled) } ?: return null
+                parse(html, url)
+            }
+        } catch (_: Exception) {
+            null
+        } finally {
+            if (isCancelled()) call.cancel()
+        }
+    }
+
+    private fun fetchWithUrlConnection(
+        url: String,
+        connectionFactory: (String) -> HttpURLConnection,
+        timeoutMillis: Int,
+        isCancelled: () -> Boolean,
+        onConnection: (HttpURLConnection) -> Unit
+    ): Extracted? {
         val connection = connectionFactory(url).apply {
             connectTimeout = timeoutMillis
             readTimeout = timeoutMillis
@@ -146,26 +187,28 @@ object ArticleExtractor {
             onConnection(connection)
             if (isCancelled()) return null
             if (connection.responseCode !in 200..299) return null
-            val html = connection.inputStream.use { input ->
-                val bytes = ByteArrayOutputStream()
-                val buffer = ByteArray(8 * 1024)
-                var total = 0
-                while (true) {
-                    if (isCancelled()) return null
-                    val count = input.read(buffer)
-                    if (count < 0) break
-                    total += count
-                    if (total > MAX_RESPONSE_BYTES) return null
-                    bytes.write(buffer, 0, count)
-                }
-                bytes.toString(Charsets.UTF_8.name())
-            }
+            val html = connection.inputStream.use { readBounded(it, isCancelled) } ?: return null
             parse(html, url)
         } catch (_: Exception) {
             null
         } finally {
             connection.disconnect()
         }
+    }
+
+    private fun readBounded(input: java.io.InputStream, isCancelled: () -> Boolean): String? {
+        val bytes = ByteArrayOutputStream()
+        val buffer = ByteArray(8 * 1024)
+        var total = 0
+        while (true) {
+            if (isCancelled()) return null
+            val count = input.read(buffer)
+            if (count < 0) break
+            total += count
+            if (total > MAX_RESPONSE_BYTES) return null
+            bytes.write(buffer, 0, count)
+        }
+        return bytes.toString(Charsets.UTF_8.name())
     }
 
     private fun parse(html: String, url: String): Extracted {
