@@ -545,7 +545,10 @@ private fun CodingAgentApp(privateDir: File) {
         }
 
         val challenge = runCatching {
-            OwnerApprovalKey.prepare(proposal.id, proposal.approvalCount + 1, System.currentTimeMillis())
+            OwnerApprovalKey.prepare(
+                proposal.id, proposal.approvalCount + 1, System.currentTimeMillis(),
+                OwnerApprovalKey.fingerprint(proposal.id, proposal.changeSet.changes)
+            )
         }.getOrElse { error ->
             ownerApprovalError = "Could not prepare a protected approval challenge: ${error.message.orEmpty()}"
             status = AgentStatus.FAILED

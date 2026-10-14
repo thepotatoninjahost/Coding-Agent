@@ -11,22 +11,24 @@ class OwnerApprovalToken private constructor(
     val proposalId: String,
     val approvalNumber: Int,
     val issuedAt: Long,
+    val proposalFingerprint: String,
     private val nonce: String,
     private val signature: ByteArray,
     private val testOnly: Boolean
 ) {
     private val consumed = AtomicBoolean(false)
 
-    internal fun consume(expectedProposalId: String, expectedApprovalNumber: Int, now: Long): Boolean {
+    internal fun consume(expectedProposalId: String, expectedApprovalNumber: Int, expectedFingerprint: String, now: Long): Boolean {
         if (proposalId != expectedProposalId) return false
-        // The wildcard ordinal is permitted only for legacy JVM acceptance tests.
         if (!(testOnly && approvalNumber == 0) && approvalNumber != expectedApprovalNumber) return false
+        if (!(testOnly && proposalFingerprint.isBlank()) && proposalFingerprint != expectedFingerprint) return false
         if (now < issuedAt || now - issuedAt > MAX_AGE_MS) return false
-        if (!OwnerApprovalKey.verify(
-                proposalId, approvalNumber, issuedAt, nonce, signature, testOnly
-            )) return false
+        if (!OwnerApprovalKey.verify(proposalId, approvalNumber, issuedAt, nonce, proposalFingerprint, signature, testOnly)) return false
         return consumed.compareAndSet(false, true)
     }
+
+    internal fun consume(expectedProposalId: String, expectedApprovalNumber: Int, now: Long): Boolean =
+        consume(expectedProposalId, expectedApprovalNumber, proposalFingerprint, now)
 
     companion object {
         private const val MAX_AGE_MS = 60_000L
@@ -36,10 +38,12 @@ class OwnerApprovalToken private constructor(
             approvalNumber: Int,
             issuedAt: Long,
             nonce: String,
+            proposalFingerprint: String,
             signature: ByteArray
         ): OwnerApprovalToken {
             require(proposalId.isNotBlank() && approvalNumber in 1..2 && nonce.isNotBlank())
-            return OwnerApprovalToken(proposalId, approvalNumber, issuedAt, nonce, signature.copyOf(), false)
+            require(proposalFingerprint.matches(Regex("[a-f0-9]{64}")))
+            return OwnerApprovalToken(proposalId, approvalNumber, issuedAt, proposalFingerprint, nonce, signature.copyOf(), false)
         }
 
         internal fun fromTestSignature(
@@ -47,18 +51,20 @@ class OwnerApprovalToken private constructor(
             approvalNumber: Int,
             issuedAt: Long,
             nonce: String,
+            proposalFingerprint: String,
             signature: ByteArray
         ): OwnerApprovalToken =
-            OwnerApprovalToken(proposalId, approvalNumber, issuedAt, nonce, signature.copyOf(), true)
+            OwnerApprovalToken(proposalId, approvalNumber, issuedAt, proposalFingerprint, nonce, signature.copyOf(), true)
 
         /** JVM-only compatibility factory for tests; throws on Android. */
         internal fun authenticated(
             proposalId: String,
             now: Long = System.currentTimeMillis(),
-            approvalNumber: Int = 0
+            approvalNumber: Int = 0,
+            fingerprint: String = ""
         ): OwnerApprovalToken {
             require(proposalId.isNotBlank()) { "Proposal id is required" }
-            return OwnerApprovalKey.testToken(proposalId, approvalNumber, now)
+            return OwnerApprovalKey.testToken(proposalId, approvalNumber, now, fingerprint)
         }
     }
 }

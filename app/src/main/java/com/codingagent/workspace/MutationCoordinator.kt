@@ -246,7 +246,8 @@ class MutationCoordinator(
                 "Change proposal approval window expired. Open Review, reject, and the agent will restage the same files."
             )
         }
-        if (!ownerApproval.consume(proposal.id, proposal.approvalCount + 1, timestamp)) {
+        val proposalFingerprint = OwnerApprovalKey.fingerprint(proposal.id, proposal.changeSet.changes)
+        if (!ownerApproval.consume(proposal.id, proposal.approvalCount + 1, proposalFingerprint, timestamp)) {
             return MutationApprovalResult.Rejected("A fresh authenticated owner approval is required for this proposal")
         }
         if (proposal.approvalCount >= 2) {

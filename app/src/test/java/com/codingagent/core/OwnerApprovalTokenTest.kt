@@ -7,6 +7,12 @@ import org.junit.Test
 
 class OwnerApprovalTokenTest {
     @Test
+    fun signedApprovalIsBoundToTheExactProposalFingerprint() {
+        val token = OwnerApprovalToken.authenticated("proposal-bound", now = 1_000L, approvalNumber = 1, fingerprint = "a".repeat(64))
+        assertFalse(token.consume("proposal-bound", 1, "b".repeat(64), 1_001L))
+    }
+
+    @Test
     fun tokenIsBoundToOneProposalAndConsumedOnce() {
         val token = OwnerApprovalToken.authenticated("proposal-1", now = 1_000L)
 

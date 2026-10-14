@@ -3,12 +3,14 @@ package com.codingagent.workspace
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import java.nio.charset.StandardCharsets.UTF_8
+import java.security.MessageDigest
 import java.security.KeyPair
 import java.security.KeyPairGenerator
 import java.security.KeyStore
 import java.security.Signature
 import java.security.spec.ECGenParameterSpec
 import java.util.UUID
+import com.codingagent.workspace.ChangeRecord
 
 /**
  * Signs an approval challenge with an Android Keystore key that requires fresh
@@ -30,18 +32,31 @@ internal object OwnerApprovalKey {
         val approvalNumber: Int,
         val issuedAt: Long,
         val nonce: String,
+        val proposalFingerprint: String,
         val signature: Signature
     ) {
-        internal fun payload(): ByteArray = canonical(proposalId, approvalNumber, issuedAt, nonce)
+        internal fun payload(): ByteArray =
+            canonical(proposalId, approvalNumber, issuedAt, nonce, proposalFingerprint)
     }
 
-    fun prepare(proposalId: String, approvalNumber: Int, now: Long): Challenge {
-        require(proposalId.isNotBlank())
-        require(approvalNumber in 1..2)
+    fun fingerprint(proposalId: String, changes: List<ChangeRecord>): String {
+        require(proposalId.isNotBlank() && changes.isNotEmpty())
+        val canonicalChanges = changes.joinToString("\n") { change ->
+            listOf(change.path, change.operation.name, change.beforeChecksum, change.afterChecksum)
+                .joinToString("\u0000")
+        }
+        return MessageDigest.getInstance("SHA-256")
+            .digest("$DOMAIN\n$proposalId\n$canonicalChanges".toByteArray(UTF_8))
+            .joinToString("") { "%02x".format(it) }
+    }
+
+    fun prepare(proposalId: String, approvalNumber: Int, now: Long, proposalFingerprint: String): Challenge {
+        require(proposalId.isNotBlank() && approvalNumber in 1..2)
+        require(proposalFingerprint.matches(Regex("[a-f0-9]{64}")))
         val nonce = UUID.randomUUID().toString()
         val signature = Signature.getInstance("SHA256withECDSA")
         signature.initSign(privateKey())
-        return Challenge(proposalId, approvalNumber, now, nonce, signature)
+        return Challenge(proposalId, approvalNumber, now, nonce, proposalFingerprint, signature)
     }
 
     fun complete(challenge: Challenge, authenticatedSignature: Signature): OwnerApprovalToken {
@@ -52,6 +67,7 @@ internal object OwnerApprovalKey {
             challenge.approvalNumber,
             challenge.issuedAt,
             challenge.nonce,
+            challenge.proposalFingerprint,
             signature
         )
     }
@@ -61,6 +77,7 @@ internal object OwnerApprovalKey {
         approvalNumber: Int,
         issuedAt: Long,
         nonce: String,
+        proposalFingerprint: String,
         signatureBytes: ByteArray,
         testOnly: Boolean
     ): Boolean = runCatching {
@@ -72,19 +89,19 @@ internal object OwnerApprovalKey {
         }
         val verifier = Signature.getInstance("SHA256withECDSA")
         verifier.initVerify(publicKey)
-        verifier.update(canonical(proposalId, approvalNumber, issuedAt, nonce))
+        verifier.update(canonical(proposalId, approvalNumber, issuedAt, nonce, proposalFingerprint))
         verifier.verify(signatureBytes)
     }.getOrDefault(false)
 
     /** JVM-only test capability; production Android code cannot call this successfully. */
-    fun testToken(proposalId: String, approvalNumber: Int, now: Long): OwnerApprovalToken {
+    fun testToken(proposalId: String, approvalNumber: Int, now: Long, proposalFingerprint: String = ""): OwnerApprovalToken {
         check(isJvmTestRuntime) { "Synthetic approval tokens are disabled on Android" }
         val nonce = UUID.randomUUID().toString()
         val signature = Signature.getInstance("SHA256withECDSA")
         signature.initSign(testPair().private)
-        signature.update(canonical(proposalId, approvalNumber, now, nonce))
+        signature.update(canonical(proposalId, approvalNumber, now, nonce, proposalFingerprint))
         return OwnerApprovalToken.fromTestSignature(
-            proposalId, approvalNumber, now, nonce, signature.sign()
+            proposalId, approvalNumber, now, nonce, proposalFingerprint, signature.sign()
         )
     }
 
@@ -121,6 +138,6 @@ internal object OwnerApprovalKey {
         }.also { testKeyPair = it }
     }
 
-    private fun canonical(proposalId: String, approvalNumber: Int, issuedAt: Long, nonce: String): ByteArray =
-        "$DOMAIN\n$proposalId\n$approvalNumber\n$issuedAt\n$nonce".toByteArray(UTF_8)
+    private fun canonical(proposalId: String, approvalNumber: Int, issuedAt: Long, nonce: String, proposalFingerprint: String): ByteArray =
+        "$DOMAIN\n$proposalId\n$approvalNumber\n$issuedAt\n$nonce\n$proposalFingerprint".toByteArray(UTF_8)
 }
