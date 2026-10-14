@@ -421,7 +421,6 @@ private fun CodingAgentApp(privateDir: File) {
             val previousRecognizer = speechRecognizer
             speechRecognizer = null
             previousRecognizer?.cancel()
-            previousRecognizer?.destroy()
             val recognizer = SpeechRecognizer.createOnDeviceSpeechRecognizer(context)
             speechRecognizer = recognizer
             recognizer.setRecognitionListener(object : RecognitionListener {
