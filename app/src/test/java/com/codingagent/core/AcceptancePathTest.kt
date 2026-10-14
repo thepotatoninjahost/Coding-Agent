@@ -498,6 +498,39 @@ class AcceptancePathTest {
     }
 
     @Test
+    fun missingOrMalformedPersistedVerificationFailsClosed() {
+        val root = Files.createTempDirectory("accept-missing-verification").toFile()
+        root.resolve("Main.kt").writeText("fun main() = 1\\n")
+        val coordinator = MutationCoordinator(ProjectWorkspace(root))
+        val proposed = coordinator.propose(
+            "require persisted verification",
+            listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\\n", "fun main() = 2\\n"))
+        ) as MutationProposeResult.Proposed
+
+        PendingProposalStore.save(root, listOf(proposed.proposal))
+        val envelope = JSONObject(PendingProposalStore.file(root).readText())
+        val payload = org.json.JSONArray(envelope.getString("payload"))
+        val proposalJson = payload.getJSONObject(0)
+        proposalJson.remove("verificationPassed")
+        val missingFieldPayload = payload.toString()
+        envelope.put("payload", missingFieldPayload)
+        envelope.put("mac", com.codingagent.workspace.ProposalIntegrity.mac(missingFieldPayload))
+        PendingProposalStore.file(root).writeText(envelope.toString())
+
+        val missingField = PendingProposalStore.load(root).single()
+        assertFalse("Missing verification evidence must fail closed", missingField.verification.passed)
+
+        proposalJson.put("verificationPassed", "not-a-boolean")
+        val malformedFieldPayload = payload.toString()
+        envelope.put("payload", malformedFieldPayload)
+        envelope.put("mac", com.codingagent.workspace.ProposalIntegrity.mac(malformedFieldPayload))
+        PendingProposalStore.file(root).writeText(envelope.toString())
+
+        val malformedField = PendingProposalStore.load(root).single()
+        assertFalse("Malformed verification evidence must fail closed", malformedField.verification.passed)
+    }
+
+    @Test
     fun tamperedPendingProposalIsRejected() {
         val root = Files.createTempDirectory("accept-pending-tamper").toFile()
         root.resolve("Main.kt").writeText("fun main() = 1\n")
