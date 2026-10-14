@@ -124,15 +124,8 @@ object ChangeDiff {
                 OperationKind.NONE -> "No specific file operation was supplied."
             }
         }.ifBlank { "The exact file changes are listed below." }
-        val why = if (reason.isBlank() || reason.equals(request, ignoreCase = true) ||
-            reason.contains("offline explicit", ignoreCase = true) ||
-            reason.contains("autonomous model proposal", ignoreCase = true) ||
-            reason.equals("editor save", ignoreCase = true)
-        ) {
-            "To carry out the request you gave the agent. A more specific reason was not provided."
-        } else {
-            reason
-        }
+        val why =
+            "To carry out the request you gave the agent. This proposal did not include a separate, clear explanation of the reason." 
         return buildString {
             appendLine("What I want to do:")
             appendLine("Make the requested change to the project.")
