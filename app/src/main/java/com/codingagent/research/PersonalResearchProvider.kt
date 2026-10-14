@@ -21,11 +21,12 @@ import com.codingagent.workspace.AtomicFileWriter
 class PersonalResearchProvider(
     researchRoot: File,
     private val pageTimeoutMillis: Int = 15_000,
-    private val connectionFactory: (String) -> HttpURLConnection = ResearchUrlSafety.openConnection(it),
+    private val connectionFactory: ((String) -> HttpURLConnection)? = null,
     private val searchProvider: WebResearchProvider = CompositeWebResearchProvider()
 ) : DeepResearchProvider {
 
     private val activeConnection = AtomicReference<HttpURLConnection?>(null)
+    private val activeCall = AtomicReference<okhttp3.Call?>(null)
     private val cancellationGeneration = AtomicLong(0L)
     private val safeResearchRoot = com.codingagent.workspace.ProjectMetadataBoundary.normalizePath(researchRoot)
     private val sessionsDir = com.codingagent.workspace.ProjectMetadataBoundary
@@ -35,6 +36,7 @@ class PersonalResearchProvider(
     override fun cancel() {
         cancellationGeneration.incrementAndGet()
         activeConnection.getAndSet(null)?.disconnect()
+        activeCall.getAndSet(null)?.cancel()
     }
 
     override fun deepResearch(
@@ -97,12 +99,12 @@ class PersonalResearchProvider(
                     connectionFactory = connectionFactory,
                     timeoutMillis = pageTimeoutMillis,
                     isCancelled = { isCancelled(runGeneration) },
-                    onConnection = { connection ->
-                    activeConnection.set(connection)
-                }
+                    onConnection = { connection -> activeConnection.set(connection) },
+                    onCall = { call -> activeCall.set(call) }
                 )
             }.getOrNull()
             activeConnection.set(null)
+            activeCall.set(null)
             if (fetched == null) {
                 failed++
                 onProgress(DeepResearchProgress("fetching", index + 1, ranked.size, sources.size, failed))
