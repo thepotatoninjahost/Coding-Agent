@@ -111,9 +111,9 @@ The intended ingestion workflow is:
 3. A knowledge module creates searchable chunks with source provenance.
 4. The agent retrieves relevant material during planning and synthesis.
 5. Lessons and verification evidence are stored locally for later tasks.
-6. Internet research will be added as another provider behind the same knowledge boundary.
+6. Web search and durable deep research are implemented as providers behind the same knowledge boundary; deep research retains source provenance and searchable chunks.
 
-The current implementation has the local knowledge example and the provider interfaces. General multi-file ingestion and internet-backed retrieval remain implementation work.
+The current implementation includes the local knowledge example, document-ingestion/indexing components, web search, and durable deep-research providers. The exact end-user ingestion workflow remains limited by the UI and supported input paths; this section is not a claim that every document format or ingestion path is supported.
 
 ## Transaction and rollback behavior
 
