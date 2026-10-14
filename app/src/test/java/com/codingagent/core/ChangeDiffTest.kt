@@ -72,7 +72,7 @@ class ChangeDiffTest {
     @Test
     fun ownerReviewIncludesEntireLargeChangeAndLongRequestWithoutSilentTruncation() {
         val request = "request-" + "r".repeat(700)
-        val content = "start\\n" + "x".repeat(15_000) + "\\nEND-OF-FILE-SENTINEL"
+        val content = "start\n" + "x".repeat(15_000) + "\nEND-OF-FILE-SENTINEL"
         val proposal = PendingChangeProposal(
             id = "prop-large-review",
             request = request,
@@ -104,13 +104,13 @@ class ChangeDiffTest {
         assertTrue(review.contains(content))
         assertTrue(review.contains("END-OF-FILE-SENTINEL"))
         assertTrue(review.contains("reason-" + "r".repeat(500)))
-        assertTrue(review.endsWith("Files tab only lists files already on disk.\\n"))
+        assertTrue(review.endsWith("Files tab only lists files already on disk.\n"))
     }
 
     @Test
     fun ownerReviewIncludesCompleteBeforeAndAfterContentForReplacement() {
-        val before = "BEFORE-BEGIN\\n" + "b".repeat(13_000) + "\\nBEFORE-END"
-        val after = "AFTER-BEGIN\\n" + "a".repeat(13_000) + "\\nAFTER-END"
+        val before = "BEFORE-BEGIN\n" + "b".repeat(13_000) + "\nBEFORE-END"
+        val after = "AFTER-BEGIN\n" + "a".repeat(13_000) + "\nAFTER-END"
         val proposal = PendingChangeProposal(
             id = "prop-replace-review",
             request = "replace full file",
