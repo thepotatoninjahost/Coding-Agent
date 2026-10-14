@@ -577,3 +577,13 @@ The project-wide static audit was complete for the prior 163-file snapshot. The 
 - **Post-merge main CI:** [run #1482 — success](https://github.com/thepotatoninjahost/Coding-Agent/actions/runs/38644684180), on merge commit `8297c13f929921c563b091a4993f4e01ee490f71`.
 - **Behavioral change:** empty or whitespace-only `ModelResponse.Text` now returns a failed probe result instead of success. Tests cover empty text, whitespace-only text, and a valid nonblank response.
 - **Official reference:** Kotlin `isBlank()` is true for empty or whitespace-only character sequences: https://kotlinlang.org/api/core/kotlin-stdlib/kotlin.text/is-blank.html.
+
+
+## Plain-English owner proposal review — 2026-10-14
+
+- **PR:** [#93 — preserve complete owner reviews and require plain-English explanations](https://github.com/thepotatoninjahost/Coding-Agent/pull/93), open and not merged.
+- **Requirement:** every proposal shown to the owner must explain, in everyday English, what the agent wants to do, why, what will change, possible effects, risks, and what approval authorizes. Unexplained technical jargon is not acceptable.
+- **Implementation:** the agent's system instructions and code-change tool descriptions require six named sections in order; the reason field is mandatory for model-generated file changes; the dispatcher refuses to stage a model proposal whose explanation omits a section; the Review text labels the explanation and complete file contents and warns if a stored explanation is incomplete.
+- **Non-model proposals:** proposals created by offline/editor/internal paths receive a plain-English explanation that names the affected files and clearly states when a specific risk assessment was not supplied, rather than inventing one.
+- **Regression coverage added:** tests check the six required sections and order, mandatory tool schema fields, the plain-English fallback, and a model-generated change using the required format.
+- **Verification:** exact-head CI has not yet been checked after these changes. Do not close the finding or merge until the latest commit's tests, lint, and debug/release builds pass.
