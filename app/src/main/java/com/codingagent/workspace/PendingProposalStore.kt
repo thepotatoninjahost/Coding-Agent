@@ -143,7 +143,7 @@ object PendingProposalStore {
                 createdAt = o.optLong("changeSetCreatedAt", o.getLong("createdAt")),
                 reason = o.optString("changeSetReason", o.getString("request"))
             ),
-            verification = VerificationReport(o.optBoolean("verificationPassed", true), issues),
+            verification = VerificationReport(o.optBoolean("verificationPassed", false), issues),
             createdAt = o.getLong("createdAt"),
             expiresAt = o.getLong("expiresAt"),
             approvals = approvals,
