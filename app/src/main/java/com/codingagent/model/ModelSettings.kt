@@ -188,12 +188,15 @@ data class ModelSettings(
 }
 
 object ModelConnectionProbe {
-    fun probe(settings: ModelSettings): ProbeResult {
+    fun probe(
+        settings: ModelSettings,
+        gatewayFactory: (ModelSettings) -> ModelGateway? = { it.remoteGateway() }
+    ): ProbeResult {
         val errors = settings.validationErrors()
         if (errors.isNotEmpty()) return ProbeResult.Failed(errors.joinToString("; "))
         // Probe only the primary model so a bad fallback does not hide a working primary.
         val primaryOnly = settings.normalized().copy(rotationModels = "")
-        val gateway = primaryOnly.remoteGateway()
+        val gateway = gatewayFactory(primaryOnly)
             ?: return ProbeResult.Failed("Remote gateway is not available")
         return try {
             val response = gateway.complete(
@@ -204,7 +207,14 @@ object ModelConnectionProbe {
                 )
             )
             when (response) {
-                is ModelResponse.Text -> ProbeResult.Ok("Reached model (${response.content.take(80).ifBlank { "empty body" }})")
+                is ModelResponse.Text -> {
+                    val content = response.content.trim()
+                    if (content.isEmpty()) {
+                        ProbeResult.Failed("Model returned no usable message content")
+                    } else {
+                        ProbeResult.Ok("Reached model (${content.take(80)})")
+                    }
+                }
                 is ModelResponse.ToolCall -> ProbeResult.Ok("Reached model (tool call path)")
                 is ModelResponse.Failure -> ProbeResult.Failed(explainProviderError(settings.modelName, response.message))
             }
