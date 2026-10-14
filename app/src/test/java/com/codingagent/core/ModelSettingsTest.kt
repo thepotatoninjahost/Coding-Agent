@@ -6,7 +6,12 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import com.codingagent.model.ModelBackend
+import com.codingagent.model.ModelConnectionProbe
+import com.codingagent.model.ModelGateway
+import com.codingagent.model.ModelRequest
+import com.codingagent.model.ModelResponse
 import com.codingagent.model.ModelSettings
+import com.codingagent.model.ProbeResult
 import com.codingagent.model.MAX_SYSTEM_PROMPT_CHARS
 
 class ModelSettingsTest {
@@ -130,5 +135,44 @@ class ModelSettingsTest {
         val normalized = ModelSettings(systemPrompt = "x".repeat(MAX_SYSTEM_PROMPT_CHARS + 1)).normalized()
         assertEquals(MAX_SYSTEM_PROMPT_CHARS, normalized.systemPrompt.length)
     }
+
+
+    @Test
+    fun modelConnectionProbeRejectsEmptyTextResponse() {
+        assertEquals(
+            ProbeResult.Failed("Model returned no usable message content"),
+            probeResponse(ModelResponse.Text(""))
+        )
+    }
+
+    @Test
+    fun modelConnectionProbeRejectsWhitespaceOnlyTextResponse() {
+        assertEquals(
+            ProbeResult.Failed("Model returned no usable message content"),
+            probeResponse(ModelResponse.Text(" \t\n "))
+        )
+    }
+
+    @Test
+    fun modelConnectionProbeAcceptsNonBlankTextResponse() {
+        assertEquals(
+            ProbeResult.Ok("Reached model (pong)"),
+            probeResponse(ModelResponse.Text("  pong  "))
+        )
+    }
+
+    private fun probeResponse(response: ModelResponse): ProbeResult =
+        ModelConnectionProbe.probe(
+            ModelSettings(
+                baseUrl = "https://example.com/v1",
+                apiKey = "test-key",
+                modelName = "test-model"
+            ),
+            gatewayFactory = {
+                object : ModelGateway {
+                    override fun complete(request: ModelRequest): ModelResponse = response
+                }
+            }
+        )
 
 }
