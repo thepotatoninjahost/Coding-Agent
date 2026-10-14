@@ -41,7 +41,6 @@ data class ProposalDiffView(
 object ChangeDiff {
     private const val MAX_UNIFIED_LINES = 400
     private const val MAX_LINE_CHARS = 240
-    private const val MAX_OWNER_REVIEW_CHARS = 12_000
 
     fun summarize(proposal: PendingChangeProposal): ProposalDiffView =
         ProposalDiffView(
@@ -82,18 +81,36 @@ object ChangeDiff {
     fun ownerReviewText(proposal: PendingChangeProposal): String = buildString {
         appendLine("PROPOSED CHANGES — not written to disk until you confirm twice.")
         appendLine("Proposal ${shortId(proposal.id)} · ${proposal.changeSet.changes.size} file(s) · ${expiryLabel(proposal.expiresAt)}")
-        appendLine("Request: ${proposal.request.take(400)}")
+        appendLine("Request (complete):")
+        appendCompleteContent(proposal.request)
         if (proposal.changeSet.changes.isEmpty()) {
             appendLine("No file records in this proposal.")
         }
         proposal.changeSet.changes.forEach { record ->
             appendLine()
             appendLine("=== ${record.operation} ${record.path} ===")
-            unified(record).forEach { line -> appendLine(line.text) }
+            appendLine("Reason (complete):")
+            appendCompleteContent(record.reason)
+            appendLine("Before checksum: ${record.beforeChecksum.ifBlank { "<none>" }}")
+            appendLine("After checksum: ${record.afterChecksum.ifBlank { "<none>" }}")
+            record.before?.let { before ->
+                appendLine("--- BEFORE CONTENT (complete; ${before.length} characters) ---")
+                appendCompleteContent(before)
+            }
+            record.after?.let { after ->
+                appendLine("--- AFTER CONTENT (complete; ${after.length} characters) ---")
+                appendCompleteContent(after)
+            }
         }
         appendLine()
+        appendLine("END OF COMPLETE PROPOSAL REVIEW.")
         appendLine("Open the Review tab to confirm or reject. Files tab only lists files already on disk.")
-    }.take(MAX_OWNER_REVIEW_CHARS)
+    }
+
+    private fun StringBuilder.appendCompleteContent(content: String) {
+        append(content)
+        if (!content.endsWith("\\n")) appendLine()
+    }
 
     fun unified(record: ChangeRecord, maxLines: Int = MAX_UNIFIED_LINES): List<DiffLine> {
         val before = record.before?.lines().orEmpty()
