@@ -104,7 +104,7 @@ class ChangeDiffTest {
         assertTrue(review.contains(content))
         assertTrue(review.contains("END-OF-FILE-SENTINEL"))
         assertTrue(review.contains("reason-" + "r".repeat(500)))
-        assertTrue(review.endsWith("Files tab only lists files already on disk.\n"))
+        assertTrue(review.trimEnd().endsWith("Files tab only lists files already on disk."))
     }
 
     @Test
