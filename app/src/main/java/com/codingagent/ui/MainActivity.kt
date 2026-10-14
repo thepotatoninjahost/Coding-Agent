@@ -1098,7 +1098,7 @@ private fun CodingAgentApp(privateDir: File) {
                             )
                         }
                         Text(
-                            "One-time word to speak after the passphrase: ${ownerSpeechChallenge.uppercase()}",
+                            "One-time challenge words to speak after the passphrase: ${ownerSpeechChallenge.uppercase()}",
                             color = FluoroOrange,
                             fontWeight = FontWeight.Bold,
                             fontSize = 12.sp
@@ -1281,7 +1281,12 @@ private val ownerSpeechChallengeWords = listOf(
 private fun newOwnerSpeechChallenge(previous: String? = null): String {
     var candidate: String
     do {
-        candidate = ownerSpeechChallengeWords[ownerSpeechChallengeRandom.nextInt(ownerSpeechChallengeWords.size)]
+        val available = ownerSpeechChallengeWords.toMutableList()
+        val selected = mutableListOf<String>()
+        repeat(4) {
+            selected += available.removeAt(ownerSpeechChallengeRandom.nextInt(available.size))
+        }
+        candidate = selected.joinToString(" ")
     } while (candidate == previous)
     return candidate
 }
