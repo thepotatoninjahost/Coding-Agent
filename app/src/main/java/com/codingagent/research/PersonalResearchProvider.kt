@@ -21,7 +21,7 @@ import com.codingagent.workspace.AtomicFileWriter
 class PersonalResearchProvider(
     researchRoot: File,
     private val pageTimeoutMillis: Int = 15_000,
-    private val connectionFactory: (String) -> HttpURLConnection = { URL(it).openConnection() as HttpURLConnection },
+    private val connectionFactory: (String) -> HttpURLConnection = ResearchUrlSafety.openConnection(it),
     private val searchProvider: WebResearchProvider = CompositeWebResearchProvider()
 ) : DeepResearchProvider {
 
