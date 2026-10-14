@@ -226,8 +226,8 @@ The register distinguishes open findings, partial fixes, resolved historical fin
 
 | ID | Severity | Finding and evidence | Status |
 |---|---|---|---|
-| AUD-001 | Critical | The former approval path accepted two generic device-authentication callbacks and a software-minted internal token. The current path requires owner-created typed and spoken passphrases, a fresh four-word spoken challenge, and an auth-per-use Android Keystore signature bound to the exact proposal and approval ordinal. | **Implemented in `90d6943dac2d3ff7cb37df3bfe503178dddf707c`; exact-head CI run #38501501736 passed; device-level testing still required** |
-| AUD-002 | High | `app/src/main/assets/knowledge/coding-for-dummies.txt` contains a full commercial book's copyright notice and restrictive reproduction language. `scripts/package-source.sh` includes the asset in source packages. No license/permission evidence is recorded in the repository. | **Open — distribution rights must be confirmed; do not remove/replace without owner direction** |
+| AUD-001 | Critical | The former approval path accepted two generic device-authentication callbacks and a software-minted internal token. The current production UI path requires owner-created typed and spoken passphrases, a fresh four-word spoken challenge, and an auth-per-use Android Keystore signature bound to the exact proposal and approval ordinal. `MutationCoordinator.approve()` validates the signed capability but does not independently attest that the phrase checks ran; that defense-in-depth boundary is tracked under AUD-020. | **Implemented on the reachable production UI path at `90d6943`; current-main CI run #38516802952 passed; device-level testing still required** |
+| AUD-002 | High | Historical snapshot contained `app/src/main/assets/knowledge/coding-for-dummies.txt`, a commercial book with restrictive reproduction language and no recorded license. That path is absent from the current `main` tree, so the current tracked-source package no longer includes the asset. | **Closed for current main: asset is not tracked at `f9f63d9`; retain this as a historical finding** |
 | AUD-003 | High | Research URL validation resolves and rejects private/local addresses before connecting, but the HTTP connection performs a separate hostname resolution. Without pinning the validated address, DNS rebinding remains possible. Redirects are disabled, which reduces but does not close the gap. | **Open — network boundary hardening** |
 | AUD-004 | High | The Gradle distribution URL is HTTPS but `gradle-wrapper.properties` has no `distributionSha256Sum`. The wrapper JAR SHA-256 is `cb0da6751c2b753a16ac168bb354870ebb1e162e9083f116729cec9c781156b8`, matching Gradle's published Gradle 8.7 wrapper checksum; the configured distribution is Gradle 8.9, so the JAR is authentic but older. Workflow actions are referenced by version tags rather than full commit SHAs, and the workflow does not use Gradle's built-in wrapper-JAR validation. | **Open — supply-chain hardening** |
 | AUD-005 | Medium | Pending proposal deserialization uses a permissive default for a missing verification flag (`optBoolean("verificationPassed", true)`). The proposal MAC limits tampering, so this is recorded as defensive-deserialization hardening, not as a demonstrated unauthenticated bypass. Missing/unknown required fields should fail closed. | **Open — hardening** |
@@ -246,7 +246,7 @@ The register distinguishes open findings, partial fixes, resolved historical fin
 | AUD-018 | Low | Earlier audit sections use historical tree snapshots and leave many file rows marked in progress. This current-main section is the authoritative coverage register for the snapshot above; historical evidence remains historical. | **Reconciled by this register** |
 
 | AUD-019 | Medium | Live model package validation checks for a manifest and non-empty payload files, then checks installed bytes against a recorded checksum; it does not validate manifest semantics against the payload or model format. | **Open — package validation depth** |
-| AUD-020 | Medium | Public workspace mutation APIs exist outside the authenticated UI flow. The inspected autonomous tool path stages through `MutationCoordinator`, and no approval bypass was demonstrated, but the public API surface remains a defense-in-depth concern. | **Open concern — caller trace before any bypass claim** |
+| AUD-020 | Medium | Public `ProjectWorkspace` write APIs (`transaction`, `replace`, `create`, `append`, `remove`, `applyApproved`) can mutate project files without the coordinator. Current code search found no production callsite from the autonomous tool path; that path stages changes through `MutationCoordinator`. In addition, `MutationCoordinator.approve()` accepts a signed token but does not independently prove the typed/spoken phrase checks occurred; the current production UI performs those checks before creating the token. No reachable production bypass was demonstrated, but these are defense-in-depth trust-boundary concerns. | **Open concern — keep direct-write APIs test-only/internal where possible; preserve the current production caller trace** |
 | AUD-021 | Low | `scripts/package-source.sh` declares a `forbidden` accumulator but never populates it; configured generated/local paths are skipped instead. The dead error path is misleading, but no package-exclusion bypass was demonstrated. | **Unconfirmed — clarify expected behavior before changing** |
 | AUD-022 | Low | `CompilerTestRepairCycle.run` can execute `plan.checks`, but repository code search found no production caller of `.run`; the current production path uses `prepareRepair` and the mutation coordinator's static verifier. | **Resolved for current reachable production path; re-audit if wired into runtime** |
 | AUD-023 | Low | Cancellation is wired from the UI through `ChatWorkspace.cancel()` to `AutonomousAgent.cancel()`, which cancels the terminal, research provider, and model gateway. Existing tests cover terminal and research cancellation paths. | **Resolved for inspected cancellation chain** |
@@ -303,7 +303,6 @@ Status means the file was included in the current snapshot's static review; “D
 | `README.md` | Static scan complete | AUD-017 |
 | `app/build.gradle.kts` | Deep review + static scan complete | — |
 | `app/src/main/AndroidManifest.xml` | Deep review + static scan complete | AUD-001 |
-| `app/src/main/assets/knowledge/coding-for-dummies.txt` | Deep review + static scan complete | AUD-002 |
 | `app/src/main/java/com/codingagent/agent/AgentCommandPolicy.kt` | Deep review + static scan complete | — |
 | `app/src/main/java/com/codingagent/agent/AgentConstitution.kt` | Static scan complete | — |
 | `app/src/main/java/com/codingagent/agent/AgentDirectLanes.kt` | Static scan complete | — |
@@ -348,6 +347,7 @@ Status means the file was included in the current snapshot's static review; “D
 | `app/src/main/java/com/codingagent/core/LiveModuleRuntime.kt` | Static scan complete | — |
 | `app/src/main/java/com/codingagent/core/LiveModuleStore.kt` | Static scan complete | — |
 | `app/src/main/java/com/codingagent/core/LocalStore.kt` | Deep review + static scan complete | AUD-014 |
+| `app/src/main/java/com/codingagent/core/OwnerApprovalPhraseStore.kt` | Deep review + static scan complete | AUD-001,AUD-025 |
 | `app/src/main/java/com/codingagent/intake/CodeSynthesis.kt` | Static scan complete | — |
 | `app/src/main/java/com/codingagent/intake/GoalInterpreter.kt` | Static scan complete | — |
 | `app/src/main/java/com/codingagent/intake/TaskIntake.kt` | Static scan complete | — |
@@ -385,7 +385,9 @@ Status means the file was included in the current snapshot's static review; “D
 | `app/src/main/java/com/codingagent/workspace/FileIntegrity.kt` | Deep review + static scan complete | — |
 | `app/src/main/java/com/codingagent/workspace/MutationCoordinator.kt` | Deep review + static scan complete | AUD-001,AUD-005 |
 | `app/src/main/java/com/codingagent/workspace/OpenJobStore.kt` | Deep review + static scan complete | — |
+| `app/src/main/java/com/codingagent/workspace/OwnerApprovalKey.kt` | Deep review + static scan complete | AUD-001 |
 | `app/src/main/java/com/codingagent/workspace/OwnerApprovalToken.kt` | Deep review + static scan complete | AUD-001 |
+
 | `app/src/main/java/com/codingagent/workspace/PendingProposalStore.kt` | Deep review + static scan complete | AUD-005 |
 | `app/src/main/java/com/codingagent/workspace/ProjectFileService.kt` | Static scan complete | — |
 | `app/src/main/java/com/codingagent/workspace/ProjectIndexer.kt` | Static scan complete | — |
@@ -427,7 +429,8 @@ Status means the file was included in the current snapshot's static review; “D
 | `app/src/test/java/com/codingagent/core/ModelSettingsTest.kt` | Deep review + static scan complete | — |
 | `app/src/test/java/com/codingagent/core/OpenJobStoreTest.kt` | Deep review + static scan complete | — |
 | `app/src/test/java/com/codingagent/core/OperationalAgentTest.kt` | Deep review + static scan complete | — |
-| `app/src/test/java/com/codingagent/core/OwnerApprovalTokenTest.kt` | Deep review + static scan complete | — |
+| `app/src/test/java/com/codingagent/core/OwnerApprovalPhraseStoreTest.kt` | Deep review + static scan complete | AUD-001,AUD-025 |
+| `app/src/test/java/com/codingagent/core/OwnerApprovalTokenTest.kt` | Deep review + static scan complete | AUD-001 |
 | `app/src/test/java/com/codingagent/core/PlanningLoopTest.kt` | Static scan complete | — |
 | `app/src/test/java/com/codingagent/core/ProjectFileServiceBoundaryTest.kt` | Deep review + static scan complete | — |
 | `app/src/test/java/com/codingagent/core/ProjectImportPolicyTest.kt` | Deep review + static scan complete | — |
@@ -463,7 +466,7 @@ Status means the file was included in the current snapshot's static review; “D
 
 ## Audit conclusion
 
-The project-wide static audit is complete for this snapshot, with all 163 tracked files accounted for. The audit is **not a claim that every finding is fixed**: AUD-001 through AUD-015 and AUD-019 through AUD-024 remain open, partially resolved, or noted as specified above. In particular, the spoken-plus-typed owner approval safeguard is not implemented, and the bundled copyrighted reference asset needs rights confirmation before redistribution. Do not mark these as resolved merely because CI passes.
+The project-wide static audit was complete for the prior 163-file snapshot. The current-main reconciliation below supersedes that count and accounts for all 165 tracked files at the current commit. The audit is **not a claim that every finding is fixed**: AUD-001 through AUD-015 and AUD-019 through AUD-024 remain open, partially resolved, or noted as specified above. In particular, the spoken-plus-typed owner approval safeguard is not implemented, and the bundled copyrighted reference asset needs rights confirmation before redistribution. Do not mark these as resolved merely because CI passes.
 
 
 ---
@@ -499,3 +502,14 @@ The project-wide static audit is complete for this snapshot, with all 163 tracke
 - Speech recognizer availability, on-device factory, and required lifecycle cleanup: https://developer.android.com/reference/android/speech/SpeechRecognizer
 - Auth-per-use keys and `BiometricPrompt.CryptoObject`: https://developer.android.com/identity/sign-in/biometric-auth
 - Keystore authentication parameters and authentication-type flags: https://developer.android.com/reference/android/security/keystore/KeyGenParameterSpec.Builder
+
+
+## Current-main reconciliation — 2026-10-14
+
+- **Current main commit:** `f9f63d9a9bb90108cf9c37ffa38cdc9b3211a1e8` — [commit](https://github.com/thepotatoninjahost/Coding-Agent/commit/f9f63d9a9bb90108cf9c37ffa38cdc9b3211a1e8)
+- **Current tree:** `d7cc65b2bb10b5fe3c78eaf62a1f23c3aad349b5`; recursive Git tree API returned 197 entries = 165 tracked files + 32 directories, not truncated.
+- **Exact-head CI:** [Android build run #38516802952 — success](https://github.com/thepotatoninjahost/Coding-Agent/actions/runs/38516802952). Unit tests, explicit acceptance-path tests, security baseline audit, lint, debug APK assembly, and release APK assembly passed.
+- **Reconciliation against prior 163-file audit register:** one previously inventoried asset path is no longer tracked (`app/src/main/assets/knowledge/coding-for-dummies.txt)); three approval-security files were missing from the register and are now added (`OwnerApprovalPhraseStore.kt`, `OwnerApprovalKey.kt`, and `OwnerApprovalPhraseStoreTest.kt`). Net current coverage is 165 tracked files. Existing approval-path changes in `MainActivity.kt`, `MutationCoordinator.kt`, and `OwnerApprovalToken.kt` were re-reviewed against current main.
+- **Approval path verified from source:** owner creates both passphrases; typed phrase and on-device speech transcript are checked in the UI; speech must include a fresh challenge; Android Keystore signs a token bound to proposal ID, approval ordinal, issue time, nonce, and the exact proposal fingerprint; the coordinator consumes that token once and rejects mismatches. This is not speaker identification. JVM tests use synthetic test-only tokens and do not prove real microphone, biometric, or Keystore behavior on device.
+- **Open findings remain open:** AUD-003 through AUD-015 where not already marked resolved, AUD-019 through AUD-021, AUD-024, and AUD-025 remain as described in the register. AUD-002 is closed for the current snapshot because the referenced asset is absent. Do not interpret a green build as closure of those findings.
+- **Official source references rechecked for this reconciliation:** Android biometric/auth-per-use key guidance (https://developer.android.com/identity/sign-in/biometric-auth), Android Keystore (https://developer.android.com/privacy-and-security/keystore), AndroidX BiometricPrompt authenticator compatibility (https://developer.android.com/reference/androidx/biometric/BiometricPrompt.PromptInfo.Builder), GitHub Git Trees API (https://docs.github.com/en/rest/git/trees), Gradle wrapper verification (https://docs.gradle.org/current/userguide/gradle_wrapper.html), and GitHub Actions secure-use guidance (https://docs.github.com/en/actions/reference/security/secure-use).
