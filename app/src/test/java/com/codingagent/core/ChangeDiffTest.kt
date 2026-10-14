@@ -11,6 +11,8 @@ import com.codingagent.workspace.ChangeSet
 import com.codingagent.workspace.DiffLineKind
 import com.codingagent.workspace.PendingChangeProposal
 import com.codingagent.workspace.VerificationReport
+import com.codingagent.intake.OperationKind
+import com.codingagent.intake.TaskOperation
 
 class ChangeDiffTest {
     @Test
@@ -142,6 +144,50 @@ class ChangeDiffTest {
         assertTrue(review.contains("BEFORE-END"))
         assertTrue(review.contains("AFTER-END"))
         assertTrue(review.contains("END OF COMPLETE PROPOSAL REVIEW."))
+    }
+
+
+    @Test
+    fun plainEnglishProposalExplanationRequiresAllSixHeadingsInOrder() {
+        val complete = """
+            What I want to do:
+            Change the main file so the app starts correctly.
+
+            Why:
+            The current version stops before showing the main screen.
+
+            What will change:
+            I will update Main.kt. The complete old and new contents are shown below.
+
+            Possible effects:
+            The app should reach the main screen after this change.
+
+            Risks:
+            The change could introduce a bug. The project checks have not yet been run.
+
+            What your approval means:
+            Nothing is written until you complete both owner approvals.
+        """.trimIndent()
+
+        assertTrue(ChangeDiff.hasCompletePlainEnglishExplanation(complete))
+        assertTrue(!ChangeDiff.hasCompletePlainEnglishExplanation("Autonomous model proposal"))
+        assertTrue(!ChangeDiff.hasCompletePlainEnglishExplanation(
+            "Why: reason\nWhat I want to do: change\nWhat will change: file\nPossible effects: behavior\nRisks: bugs\nWhat your approval means: confirm twice"
+        ))
+    }
+
+    @Test
+    fun internalProposalWithoutModelExplanationGetsHonestPlainEnglishFallback() {
+        val explanation = ChangeDiff.ensurePlainEnglishExplanation(
+            request = "create a helper file",
+            reason = "Editor save",
+            operations = listOf(TaskOperation(OperationKind.CREATE_FILE, "src/Helper.kt", text = "class Helper"))
+        )
+
+        assertTrue(ChangeDiff.hasCompletePlainEnglishExplanation(explanation))
+        assertTrue(explanation.contains("Create the file src/Helper.kt"))
+        assertTrue(explanation.contains("No more specific risk assessment was provided"))
+        assertTrue(explanation.contains("both required owner approvals"))
     }
 
     @Test
