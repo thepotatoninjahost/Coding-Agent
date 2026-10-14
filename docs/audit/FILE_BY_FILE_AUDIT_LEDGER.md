@@ -245,6 +245,13 @@ The register distinguishes open findings, partial fixes, resolved historical fin
 | AUD-017 | Low | `README.md` incorrectly said internet research remained future work despite current web/deep-research providers. It was corrected in commit `2f9ad127f755f5e54cbc3b0097e33ab67df86c59`. | **Fixed — documentation only** |
 | AUD-018 | Low | Earlier audit sections use historical tree snapshots and leave many file rows marked in progress. This current-main section is the authoritative coverage register for the snapshot above; historical evidence remains historical. | **Reconciled by this register** |
 
+| AUD-019 | Medium | Live model package validation checks for a manifest and non-empty payload files, then checks installed bytes against a recorded checksum; it does not validate manifest semantics against the payload or model format. | **Open — package validation depth** |
+| AUD-020 | Medium | Public workspace mutation APIs exist outside the authenticated UI flow. The inspected autonomous tool path stages through `MutationCoordinator`, and no approval bypass was demonstrated, but the public API surface remains a defense-in-depth concern. | **Open concern — caller trace before any bypass claim** |
+| AUD-021 | Low | `scripts/package-source.sh` declares a `forbidden` accumulator but never populates it; configured generated/local paths are skipped instead. The dead error path is misleading, but no package-exclusion bypass was demonstrated. | **Unconfirmed — clarify expected behavior before changing** |
+| AUD-022 | Low | `CompilerTestRepairCycle.run` can execute `plan.checks`, but repository code search found no production caller of `.run`; the current production path uses `prepareRepair` and the mutation coordinator's static verifier. | **Resolved for current reachable production path; re-audit if wired into runtime** |
+| AUD-023 | Low | Cancellation is wired from the UI through `ChatWorkspace.cancel()` to `AutonomousAgent.cancel()`, which cancels the terminal, research provider, and model gateway. Existing tests cover terminal and research cancellation paths. | **Resolved for inspected cancellation chain** |
+| AUD-024 | Medium | SAF import restores executable permission for a root-level `gradlew`, but no end-to-end Android import test verifies mode preservation across document providers. | **Partially addressed — integration verification missing** |
+
 ### Official supply-chain references checked
 
 - Gradle security best practices: https://docs.gradle.org/current/userguide/best_practices_security.html
@@ -253,6 +260,35 @@ The register distinguishes open findings, partial fixes, resolved historical fin
 - GitHub Actions secure-use guidance: https://docs.github.com/en/actions/reference/security/secure-use
 
 These official documents recommend verifying the Gradle distribution checksum, validating the wrapper JAR, and pinning GitHub Actions to full commit SHAs where immutability is required. No supply-chain configuration change was made without approval.
+
+## Phase 2 finding disposition crosswalk
+
+This crosswalk prevents historical findings from disappearing when the current-main tracker is updated.
+
+| Historical finding | Current disposition |
+|---|---|
+| F2-001 — multiple tool calls | Open; see AUD-006. |
+| F2-002 / F2-019 — failed task verification | Resolved; failure/stopped task builders return verification false and tests cover both. |
+| F2-003 — missing `verificationPassed` default | Open hardening; see AUD-005. |
+| F2-004 / F2-023 — model package validation | Partially resolved; installed checksum verification exists, manifest semantics remain open; see AUD-019. |
+| F2-005 — public workspace mutation APIs | Defense-in-depth concern; no bypass demonstrated; see AUD-020. |
+| F2-006 — package-source forbidden list | Not confirmed as a security defect; dead error path remains; see AUD-021. |
+| F2-007 — repair rollback | Resolved; repair lifecycle tests cover rollback and recovery. |
+| F2-008 — terminal timeout | Resolved; timeout is passed to the terminal runner and tested. |
+| F2-009 — research DNS rebinding | Open; see AUD-003. |
+| F2-010 — owner review truncation | Open; see AUD-010. |
+| F2-011 — reserved metadata case sensitivity | Original claim not reproduced; case-insensitive checks exist in `ProjectPaths.isSensitivePath`. |
+| F2-012 — persisted research word count | Open consistency issue; see AUD-012. |
+| F2-013 — model probe accepts any text | Open; see AUD-009. |
+| F2-014 — knowledge index replacement | Open; see AUD-007. |
+| F2-015 — project-controlled verification commands | Resolved for the current reachable production path: `CompilerTestRepairCycle.run` has no production caller; the production mutation path uses static verification. Reopen if `.run` becomes reachable; see AUD-022. |
+| F2-016 — research cancellation | Resolved for the inspected UI-to-agent cancellation chain; see AUD-023. |
+| F2-017 — editable system prompt unused | Resolved; `MainActivity` uses `ModelSettings.effectiveSystemPrompt()`. |
+| F2-018 — wrapper checksum / mutable action tags | Open; see AUD-004. |
+| F2-020 — Git pathspec exposure | Resolved for the autonomous command path; `AgentCommandPolicy` rejects Git commands. |
+| F2-021 — corrupt user-memory JSON | Open data-preservation issue; see AUD-008. |
+| F2-022 — import permission preservation | Partially addressed by setting executable permission on root `gradlew`; end-to-end SAF verification is missing; see AUD-024. |
+| F2-024 — ambiguous local file resolution | Original claim not reproduced; explicit project-relative paths and case-insensitive segment matching are used. |
 
 ## Per-file audit tracker
 
@@ -283,7 +319,7 @@ Status means the file was included in the current snapshot's static review; “D
 | `app/src/main/java/com/codingagent/agent/AutonomousAgentConfig.kt` | Static scan complete | — |
 | `app/src/main/java/com/codingagent/agent/AutonomousAgentEvent.kt` | Static scan complete | — |
 | `app/src/main/java/com/codingagent/agent/ChatApproval.kt` | Deep review + static scan complete | — |
-| `app/src/main/java/com/codingagent/agent/ChatWorkspace.kt` | Deep review + static scan complete | — |
+| `app/src/main/java/com/codingagent/agent/ChatWorkspace.kt` | Deep review + static scan complete | AUD-023 |
 | `app/src/main/java/com/codingagent/agent/DegenerateOutput.kt` | Static scan complete | — |
 | `app/src/main/java/com/codingagent/agent/ExperienceRecorder.kt` | Static scan complete | — |
 | `app/src/main/java/com/codingagent/agent/LessonContext.kt` | Static scan complete | — |
@@ -295,7 +331,7 @@ Status means the file was included in the current snapshot's static review; “D
 | `app/src/main/java/com/codingagent/agent/ModelFailure.kt` | Static scan complete | — |
 | `app/src/main/java/com/codingagent/agent/PendingWorkResume.kt` | Static scan complete | — |
 | `app/src/main/java/com/codingagent/agent/PlanningLoop.kt` | Static scan complete | — |
-| `app/src/main/java/com/codingagent/agent/RepairCycle.kt` | Static scan complete | — |
+| `app/src/main/java/com/codingagent/agent/RepairCycle.kt` | Deep review + static scan complete | AUD-022 |
 | `app/src/main/java/com/codingagent/agent/ResearchGate.kt` | Static scan complete | — |
 | `app/src/main/java/com/codingagent/agent/ResponseQualityRules.kt` | Static scan complete | — |
 | `app/src/main/java/com/codingagent/agent/SelfEvolution.kt` | Static scan complete | — |
@@ -321,7 +357,7 @@ Status means the file was included in the current snapshot's static review; “D
 | `app/src/main/java/com/codingagent/model/AgentModelProtocol.kt` | Deep review + static scan complete | — |
 | `app/src/main/java/com/codingagent/model/JsonModelResponseParser.kt` | Deep review + static scan complete | AUD-006 |
 | `app/src/main/java/com/codingagent/model/LiveModelRouter.kt` | Static scan complete | — |
-| `app/src/main/java/com/codingagent/model/LiveModelStore.kt` | Static scan complete | — |
+| `app/src/main/java/com/codingagent/model/LiveModelStore.kt` | Deep review + static scan complete | AUD-019 |
 | `app/src/main/java/com/codingagent/model/ModelDownloadProgress.kt` | Static scan complete | — |
 | `app/src/main/java/com/codingagent/model/ModelGateway.kt` | Static scan complete | — |
 | `app/src/main/java/com/codingagent/model/ModelSettings.kt` | Deep review + static scan complete | AUD-009 |
@@ -337,7 +373,7 @@ Status means the file was included in the current snapshot's static review; “D
 | `app/src/main/java/com/codingagent/research/SourceQuality.kt` | Static scan complete | — |
 | `app/src/main/java/com/codingagent/research/WebResearch.kt` | Static scan complete | — |
 | `app/src/main/java/com/codingagent/ui/MainActivity.kt` | Deep review + static scan complete | AUD-001 |
-| `app/src/main/java/com/codingagent/ui/MainUiScreens.kt` | Deep review + static scan complete | AUD-001,AUD-010 |
+| `app/src/main/java/com/codingagent/ui/MainUiScreens.kt` | Deep review + static scan complete | AUD-001,AUD-010,AUD-024 |
 | `app/src/main/java/com/codingagent/ui/ReviewBinder.kt` | Static scan complete | — |
 | `app/src/main/java/com/codingagent/ui/UiTheme.kt` | Static scan complete | — |
 | `app/src/main/java/com/codingagent/workspace/AgentPlan.kt` | Static scan complete | — |
@@ -354,8 +390,8 @@ Status means the file was included in the current snapshot's static review; “D
 | `app/src/main/java/com/codingagent/workspace/ProjectIndexer.kt` | Static scan complete | — |
 | `app/src/main/java/com/codingagent/workspace/ProjectMetadataBoundary.kt` | Deep review + static scan complete | — |
 | `app/src/main/java/com/codingagent/workspace/ProjectModels.kt` | Static scan complete | — |
-| `app/src/main/java/com/codingagent/workspace/ProjectPaths.kt` | Deep review + static scan complete | — |
-| `app/src/main/java/com/codingagent/workspace/ProjectWorkspace.kt` | Deep review + static scan complete | — |
+| `app/src/main/java/com/codingagent/workspace/ProjectPaths.kt` | Deep review + static scan complete | AUD-020 |
+| `app/src/main/java/com/codingagent/workspace/ProjectWorkspace.kt` | Deep review + static scan complete | AUD-020 |
 | `app/src/main/java/com/codingagent/workspace/ProposalIntegrity.kt` | Deep review + static scan complete | AUD-005 |
 | `app/src/main/java/com/codingagent/workspace/StorageGuard.kt` | Static scan complete | — |
 | `app/src/main/java/com/codingagent/workspace/TerminalSession.kt` | Deep review + static scan complete | — |
@@ -420,10 +456,10 @@ Status means the file was included in the current snapshot's static review; “D
 | `gradle/wrapper/gradle-wrapper.properties` | Static scan complete | AUD-004 |
 | `gradlew` | Static scan complete | — |
 | `proguard-rules.pro` | Static scan complete | — |
-| `scripts/package-source.sh` | Static scan complete | — |
+| `scripts/package-source.sh` | Deep review + static scan complete | AUD-002,AUD-021 |
 | `scripts/sync_to_github.sh` | Static scan complete | AUD-011 |
 | `settings.gradle.kts` | Static scan complete | — |
 
 ## Audit conclusion
 
-The project-wide static audit is complete for this snapshot, with all 163 tracked files accounted for. The audit is **not a claim that every finding is fixed**: AUD-001 through AUD-015 remain open or noted as specified above. In particular, the spoken-plus-typed owner approval safeguard is not implemented, and the bundled copyrighted reference asset needs rights confirmation before redistribution. Do not mark these as resolved merely because CI passes.
+The project-wide static audit is complete for this snapshot, with all 163 tracked files accounted for. The audit is **not a claim that every finding is fixed**: AUD-001 through AUD-015 and AUD-019 through AUD-024 remain open, partially resolved, or noted as specified above. In particular, the spoken-plus-typed owner approval safeguard is not implemented, and the bundled copyrighted reference asset needs rights confirmation before redistribution. Do not mark these as resolved merely because CI passes.
