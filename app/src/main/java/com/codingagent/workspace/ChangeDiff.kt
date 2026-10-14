@@ -178,11 +178,16 @@ object ChangeDiff {
         }
         proposal.changeSet.changes.forEach { record ->
             appendLine()
-            appendLine("=== ${record.operation} ${record.path} ===")
-            appendLine("Reason (complete):")
-            appendCompleteContent(record.reason)
-            appendLine("Before checksum: ${record.beforeChecksum.ifBlank { "<none>" }}")
-            appendLine("After checksum: ${record.afterChecksum.ifBlank { "<none>" }}")
+            val operationLabel = when (record.operation) {
+                ChangeOperation.CREATE -> "Create file"
+                ChangeOperation.REPLACE -> "Change file"
+                ChangeOperation.APPEND -> "Add text to file"
+                ChangeOperation.REMOVE -> "Remove text from file"
+            }
+            appendLine("=== $operationLabel: ${record.path} ===")
+            appendLine("Reason: see the complete plain-English explanation above.")
+            appendLine("Before-file safety check (helps detect unexpected edits): ${record.beforeChecksum.ifBlank { "<none>" }}")
+            appendLine("Proposed-file safety check (helps detect unexpected edits): ${record.afterChecksum.ifBlank { "<none>" }}")
             record.before?.let { before ->
                 appendLine("--- BEFORE CONTENT (complete; ${before.length} characters) ---")
                 appendCompleteContent(before)
