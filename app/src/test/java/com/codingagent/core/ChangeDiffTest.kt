@@ -106,6 +106,10 @@ class ChangeDiffTest {
         assertTrue(review.contains(content))
         assertTrue(review.contains("END-OF-FILE-SENTINEL"))
         assertTrue(review.contains("reason-" + "r".repeat(500)))
+        assertTrue(review.contains("THE AGENT'S PLAIN-ENGLISH EXPLANATION (complete):"))
+        assertTrue(review.contains("WARNING: This proposal does not contain all six required explanation sections."))
+        assertTrue(review.contains("Create file: large.txt"))
+        assertTrue(review.contains("Before-file safety check"))
         assertTrue(review.trimEnd().endsWith("Files tab only lists files already on disk."))
     }
 
