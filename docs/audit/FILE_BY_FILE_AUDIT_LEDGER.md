@@ -2,7 +2,7 @@
 
 - Repository: `thepotatoninjahost/Coding-Agent`
 - Snapshot type: historical baseline inventory, not current `main`.
-- Last reconciled against current `main`: 2026-10-13; see `docs/audit/PHASE_1_BASELINE_EVIDENCE.md` for current commit/tree/count, CI evidence, and PR status reconciliation.
+- Current code audit reconciled against the 2026-10-14 code snapshot recorded in the final section below. The Phase 1 evidence file retains historical snapshots and is not the current inventory.
 - Baseline ref: `main`
 - Baseline commit: `83002089d1a0a7b356e3dbf81a70cfb35c40721a`
 - Inventory tree SHA: `c108371fe02cdf9c07c472bcfd17ac1af18f0c17`
@@ -507,7 +507,7 @@ The project-wide static audit was complete for the prior 163-file snapshot. The 
 ## Current-main reconciliation — 2026-10-14
 
 - **Code snapshot audited:** `f9f63d9a9bb90108cf9c37ffa38cdc9b3211a1e8` — [commit](https://github.com/thepotatoninjahost/Coding-Agent/commit/f9f63d9a9bb90108cf9c37ffa38cdc9b3211a1e8). The subsequent change that reconciles this ledger is documentation-only; application code is unchanged.
-- **Current tree:** `d7cc65b2bb10b5fe3c78eaf62a1f23c3aad349b5`; recursive Git tree API returned 197 entries = 165 tracked files + 32 directories, not truncated.
+- **Audited code tree:** `d7cc65b2bb10b5fe3c78eaf62a1f23c3aad349b5`; recursive Git tree API returned 197 entries = 165 tracked files + 32 directories, not truncated.
 - **Exact-head CI:** [Android build run #38516802952 — success](https://github.com/thepotatoninjahost/Coding-Agent/actions/runs/38516802952). Unit tests, explicit acceptance-path tests, security baseline audit, lint, debug APK assembly, and release APK assembly passed.
 - **Reconciliation against prior 163-file audit register:** one previously inventoried asset path is no longer tracked (`app/src/main/assets/knowledge/coding-for-dummies.txt)); three approval-security files were missing from the register and are now added (`OwnerApprovalPhraseStore.kt`, `OwnerApprovalKey.kt`, and `OwnerApprovalPhraseStoreTest.kt`). Net current coverage is 165 tracked files. Existing approval-path changes in `MainActivity.kt`, `MutationCoordinator.kt`, and `OwnerApprovalToken.kt` were re-reviewed against current main.
 - **Approval path verified from source:** owner creates both passphrases; typed phrase and on-device speech transcript are checked in the UI; speech must include a fresh challenge; Android Keystore signs a token bound to proposal ID, approval ordinal, issue time, nonce, and the exact proposal fingerprint; the coordinator consumes that token once and rejects mismatches. This is not speaker identification. JVM tests use synthetic test-only tokens and do not prove real microphone, biometric, or Keystore behavior on device.
