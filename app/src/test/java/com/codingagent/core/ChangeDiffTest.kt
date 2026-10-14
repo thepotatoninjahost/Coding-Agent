@@ -70,6 +70,81 @@ class ChangeDiffTest {
     }
 
     @Test
+    fun ownerReviewIncludesEntireLargeChangeAndLongRequestWithoutSilentTruncation() {
+        val request = "request-" + "r".repeat(700)
+        val content = "start\n" + "x".repeat(15_000) + "\nEND-OF-FILE-SENTINEL"
+        val proposal = PendingChangeProposal(
+            id = "prop-large-review",
+            request = request,
+            changeSet = ChangeSet(
+                id = "cs-large",
+                changes = listOf(
+                    ChangeRecord(
+                        path = "large.txt",
+                        operation = ChangeOperation.CREATE,
+                        before = null,
+                        after = content,
+                        reason = "reason-" + "r".repeat(500),
+                        beforeChecksum = "",
+                        afterChecksum = "after-checksum"
+                    )
+                ),
+                createdAt = 1_000L,
+                reason = "large review"
+            ),
+            verification = VerificationReport(true, emptyList()),
+            createdAt = 1_000L,
+            expiresAt = 1_000L + AgentConstitution.APPROVAL_EXPIRATION_MS
+        )
+
+        val review = ChangeDiff.ownerReviewText(proposal)
+
+        assertTrue(review.length > 12_000)
+        assertTrue(review.contains(request))
+        assertTrue(review.contains(content))
+        assertTrue(review.contains("END-OF-FILE-SENTINEL"))
+        assertTrue(review.contains("reason-" + "r".repeat(500)))
+        assertTrue(review.trimEnd().endsWith("Files tab only lists files already on disk."))
+    }
+
+    @Test
+    fun ownerReviewIncludesCompleteBeforeAndAfterContentForReplacement() {
+        val before = "BEFORE-BEGIN\n" + "b".repeat(13_000) + "\nBEFORE-END"
+        val after = "AFTER-BEGIN\n" + "a".repeat(13_000) + "\nAFTER-END"
+        val proposal = PendingChangeProposal(
+            id = "prop-replace-review",
+            request = "replace full file",
+            changeSet = ChangeSet(
+                id = "cs-replace",
+                changes = listOf(
+                    ChangeRecord(
+                        path = "replace.txt",
+                        operation = ChangeOperation.REPLACE,
+                        before = before,
+                        after = after,
+                        reason = "replace complete contents",
+                        beforeChecksum = "before-checksum",
+                        afterChecksum = "after-checksum"
+                    )
+                ),
+                createdAt = 1_000L,
+                reason = "replacement review"
+            ),
+            verification = VerificationReport(true, emptyList()),
+            createdAt = 1_000L,
+            expiresAt = 1_000L + AgentConstitution.APPROVAL_EXPIRATION_MS
+        )
+
+        val review = ChangeDiff.ownerReviewText(proposal)
+
+        assertTrue(review.contains(before))
+        assertTrue(review.contains(after))
+        assertTrue(review.contains("BEFORE-END"))
+        assertTrue(review.contains("AFTER-END"))
+        assertTrue(review.contains("END OF COMPLETE PROPOSAL REVIEW."))
+    }
+
+    @Test
     fun expiryLabelReflectsRemainingWindow() {
         val expires = 100_000L
         assertEquals("Expired", ChangeDiff.expiryLabel(expires, now = 100_001L))
