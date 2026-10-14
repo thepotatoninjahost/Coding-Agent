@@ -51,7 +51,7 @@ interface DeepResearchProvider {
 class DurableDeepResearchProvider(
     researchRoot: File,
     private val pageTimeoutMillis: Int = 15_000,
-    private val connectionFactory: (String) -> HttpURLConnection = { URL(it).openConnection() as HttpURLConnection },
+    private val connectionFactory: (String) -> HttpURLConnection = ResearchUrlSafety.openConnection(it),
     private val searchProvider: WebResearchProvider = CompositeWebResearchProvider(),
     private val maxSourceFetches: Int = 40
 ) : DeepResearchProvider {
