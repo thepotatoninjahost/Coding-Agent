@@ -26,9 +26,9 @@ import com.codingagent.workspace.OpenJobStore
 class ChatWorkspaceTest {
     @Test
     fun ownerReviewSummaryIsNeverTruncatedAtChatCharacterLimit() {
-        val review = "PROPOSED CHANGES — complete review\\n" +
+        val review = "PROPOSED CHANGES — complete review\n" +
             "x".repeat(MAX_CHAT_SUMMARY_CHARS + 4_000) +
-            "\\nEND OF COMPLETE PROPOSAL REVIEW."
+            "\nEND OF COMPLETE PROPOSAL REVIEW."
 
         val sanitized = sanitizeTaskSummary(review)
 
