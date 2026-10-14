@@ -4,6 +4,7 @@ import com.codingagent.agent.UserMemory
 import com.codingagent.agent.UserMemoryExtractor
 import com.codingagent.agent.UserMemoryIndex
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -94,5 +95,33 @@ class UserMemoryTest {
         val remaining = index.forget(memories, "concise explanations")
         assertEquals(1, remaining.size)
         assertTrue(remaining.single().text.contains("Kotlin"))
+    }
+
+    @Test
+    fun corruptMemoryJsonFailsInsteadOfBecomingAnEmptyList() {
+        val error = org.junit.Assert.assertThrows(IllegalStateException::class.java) {
+            UserMemoryJsonCodec.decode("[{not valid json]")
+        }
+        assertTrue(error.message!!.contains("refusing to overwrite"))
+    }
+
+    @Test
+    fun partiallyCorruptMemoryListFailsInsteadOfReturningValidPrefix() {
+        val raw = """[
+            {"id":"saved","text":"I prefer concise answers","kind":"WORKFLOW","importance":80,"createdAt":1,"updatedAt":2},
+            {"id":"broken","text":"missing required fields"}
+        ]"""
+        assertThrows(IllegalStateException::class.java) {
+            UserMemoryJsonCodec.decode(raw)
+        }
+    }
+
+    @Test
+    fun validMemoryJsonStillLoadsEveryEntry() {
+        val raw = """[{"id":"saved","text":"I prefer concise answers","kind":"WORKFLOW","importance":80,"createdAt":1,"updatedAt":2}]"""
+        val memories = UserMemoryJsonCodec.decode(raw)
+        assertEquals(1, memories.size)
+        assertEquals("saved", memories.single().id)
+        assertEquals("I prefer concise answers", memories.single().text)
     }
 }
