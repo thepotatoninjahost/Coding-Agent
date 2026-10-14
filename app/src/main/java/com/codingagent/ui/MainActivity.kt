@@ -459,7 +459,7 @@ private fun CodingAgentApp(privateDir: File) {
                     }
                     ownerSpeechVerified = valid
                     ownerSpeechStatus = if (valid) {
-                        if (speechPurpose == "setup") "Spoken phrase confirmed." else "Spoken passphrase verified."
+                        if (speechPurpose == "setup") "Spoken phrase and challenge confirmed." else "Spoken phrase and challenge matched."
                     } else {
                         "Spoken passphrase did not match. Try again."
                     }
@@ -1038,9 +1038,9 @@ private fun CodingAgentApp(privateDir: File) {
                         Spacer(Modifier.height(8.dp))
                         Text(
                             if (ownerApprovalSetupMode)
-                                "You create both passphrases. They must be different. The app stores salted verifiers, not the phrases. Speech recognition runs on-device only."
+                                "You create both passphrases. They must be different. The app stores salted verifiers, not the phrases. Speech recognition runs on-device only; the displayed challenge words are temporary, not stored credentials."
                             else
-                                "Enter your typed passphrase and speak your separate spoken passphrase followed by the one-time word. A fresh device-authenticated signature is also required for this exact proposal.",
+                                "Enter your typed passphrase and speak your separate spoken passphrase followed by the one-time challenge words. A fresh device-authenticated signature is also required for this exact proposal.",
                             color = SoftGreen,
                             fontSize = 11.sp
                         )
@@ -1090,14 +1090,13 @@ private fun CodingAgentApp(privateDir: File) {
                                     ownerSpokenPhrase = it
                                     if (ownerSpeechVerified) ownerSpeechChallenge = newOwnerSpeechChallenge(ownerSpeechChallenge)
                                     ownerSpeechVerified = false
-                                    ownerSpeechStatus = "Speak the spoken phrase followed by the one-time word."
+                                    ownerSpeechStatus = "Speak the spoken phrase followed by the one-time challenge words."
                                     ownerApprovalError = null
                                 },
                                 modifier = Modifier.fillMaxWidth(),
                                 label = { Text("Spoken passphrase (you choose it)", color = SoftGreen) },
                                 singleLine = true,
-                                visualTransformation = PasswordVisualTransformation(),
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                                                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
                                 colors = fieldColors()
                             )
                         }
@@ -1115,7 +1114,7 @@ private fun CodingAgentApp(privateDir: File) {
                         ) {
                             Text(
                                 if (ownerApprovalSetupMode) "Speak and verify spoken passphrase"
-                                else "Speak spoken passphrase",
+                                else "Speak passphrase + challenge",
                                 color = NeonGreen
                             )
                         }
