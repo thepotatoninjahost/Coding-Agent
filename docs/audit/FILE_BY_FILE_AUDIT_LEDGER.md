@@ -229,7 +229,7 @@ The register distinguishes open findings, partial fixes, resolved historical fin
 | AUD-001 | Critical | The former approval path accepted two generic device-authentication callbacks and a software-minted internal token. The current production UI path requires owner-created typed and spoken passphrases, a fresh four-word spoken challenge, and an auth-per-use Android Keystore signature bound to the exact proposal and approval ordinal. `MutationCoordinator.approve()` validates the signed capability but does not independently attest that the phrase checks ran; that defense-in-depth boundary is tracked under AUD-020. | **Implemented on the reachable production UI path at `90d6943`; current-main CI run #38516802952 passed; device-level testing still required** |
 | AUD-002 | High | Historical snapshot contained `app/src/main/assets/knowledge/coding-for-dummies.txt`, a commercial book with restrictive reproduction language and no recorded license. That path is absent from the current `main` tree, so the current tracked-source package no longer includes the asset. | **Closed for current main: asset is not tracked at `f9f63d9`; retain this as a historical finding** |
 | AUD-003 | High | Research URL validation alone previously had a DNS time-of-check/time-of-use gap. The current implementation applies a connection-time OkHttp DNS policy, rejects any private/reserved A/AAAA answer, and passes only those validated addresses to the connection. Redirects, automatic retries, and system proxies are disabled. Regression tests cover connection-time private answers, mixed public/private answers, and reserved IPv4/IPv6 ranges. | **Resolved on current main; full CI run #38536858203 passed** |
-| AUD-004 | High | The Gradle distribution URL is HTTPS but `gradle-wrapper.properties` has no `distributionSha256Sum`. The wrapper JAR SHA-256 is `cb0da6751c2b753a16ac168bb354870ebb1e162e9083f116729cec9c781156b8`, matching Gradle's published Gradle 8.7 wrapper checksum; the configured distribution is Gradle 8.9, so the JAR is authentic but older. Workflow actions are referenced by version tags rather than full commit SHAs, and the workflow does not use Gradle's built-in wrapper-JAR validation. | **Open — supply-chain hardening** |
+| AUD-004 | High | The Gradle 8.9 distribution is now pinned by its official SHA-256; the Gradle 8.7 wrapper JAR is checked against Gradle's published SHA-256 in CI; Android build workflow actions are pinned to full commit SHAs. | **Resolved — PR #88 merged as `09059fc4bdb705dfc146ea242ea15964ec058e1f`; PR CI run [#1467](https://github.com/thepotatoninjahost/Coding-Agent/actions/runs/38621327186) and post-merge `main` CI run [#1468](https://github.com/thepotatoninjahost/Coding-Agent/actions/runs/38623506348) succeeded on the respective exact commits.** |
 | AUD-005 | Medium | Pending proposal deserialization previously defaulted a missing verification flag to true. The parser now defaults missing or malformed `verificationPassed` to false; regression coverage confirms an unverified persisted proposal is rejected before file mutation. This was defensive-deserialization hardening, not a demonstrated unauthenticated bypass because the proposal MAC limits tampering. | **Resolved in code; CI verified** — commit `2461d6abd81b50d3357511969166c5ebaa7d7500`, run [#38533405506](https://github.com/thepotatoninjahost/Coding-Agent/actions/runs/38533405506). |
 | AUD-006 | Medium | The response model represents one tool call. Non-streaming parsing rejects multiple calls, while streaming parsing retains only the first indexed call; additional streamed calls can be silently omitted. | **Open — functional gap; tests should cover multi-call streaming** |
 | AUD-007 | Medium | Knowledge replacement removes the old document's chunks/metadata, then appends replacement chunks and metadata in separate writes. A crash or write error between operations can leave missing or partial index state. | **Open — transactional persistence** |
@@ -260,7 +260,7 @@ The register distinguishes open findings, partial fixes, resolved historical fin
 - Gradle published wrapper/distribution checksums: https://gradle.org/release-checksums/
 - GitHub Actions secure-use guidance: https://docs.github.com/en/actions/reference/security/secure-use
 
-These official documents recommend verifying the Gradle distribution checksum, validating the wrapper JAR, and pinning GitHub Actions to full commit SHAs where immutability is required. No supply-chain configuration change was made without approval.
+These official documents recommend verifying the Gradle distribution checksum, validating the wrapper JAR, and pinning GitHub Actions to full commit SHAs where immutability is required. The remediation and exact-head CI evidence are recorded below.
 
 ## Phase 2 finding disposition crosswalk
 
@@ -285,7 +285,7 @@ This crosswalk prevents historical findings from disappearing when the current-m
 | F2-015 — project-controlled verification commands | Resolved for the current reachable production path: `CompilerTestRepairCycle.run` has no production caller; the production mutation path uses static verification. Reopen if `.run` becomes reachable; see AUD-022. |
 | F2-016 — research cancellation | Resolved for the inspected UI-to-agent cancellation chain; see AUD-023. |
 | F2-017 — editable system prompt unused | Resolved; `MainActivity` uses `ModelSettings.effectiveSystemPrompt()`. |
-| F2-018 — wrapper checksum / mutable action tags | Open; see AUD-004. |
+| F2-018 — wrapper checksum / mutable action tags | Resolved; see AUD-004 remediation verification below. |
 | F2-020 — Git pathspec exposure | Resolved for the autonomous command path; `AgentCommandPolicy` rejects Git commands. |
 | F2-021 — corrupt user-memory JSON | Open data-preservation issue; see AUD-008. |
 | F2-022 — import permission preservation | Partially addressed by setting executable permission on root `gradlew`; end-to-end SAF verification is missing; see AUD-024. |
@@ -546,3 +546,14 @@ The project-wide static audit was complete for the prior 163-file snapshot. The 
 - **Exact-head CI:** [run #38533405506 — success](https://github.com/thepotatoninjahost/Coding-Agent/actions/runs/38533405506). Security baseline audit, unit-test compilation, unit tests, explicit acceptance-path tests, Android lint, debug APK assembly, and release APK assembly all passed.
 - **Behavioral change:** missing or non-coercible `verificationPassed` values deserialize as false. The acceptance test removes the field from a correctly authenticated test payload, recomputes the test MAC, reloads the proposal, and confirms the coordinator rejects approval without modifying the target file. It also checks a malformed value.
 - **Official API reference checked:** Android `JSONObject.optBoolean(name, fallback)` returns the supplied fallback when the value is absent or cannot be coerced to a boolean: https://developer.android.com/reference/org/json/JSONObject.html.
+
+
+## AUD-004 remediation verification — 2026-10-14
+
+- **PR:** [#88 — Fix AUD-004: harden build supply-chain verification](https://github.com/thepotatoninjahost/Coding-Agent/pull/88), merged.
+- **Merged commit:** `09059fc4bdb705dfc146ea242ea15964ec058e1f`.
+- **PR exact-head CI:** [run #1467 — success](https://github.com/thepotatoninjahost/Coding-Agent/actions/runs/38621327186), on head `1fbf537901d2a5c1a15865ab90c1acbac8d0e36e`.
+- **Post-merge main CI:** [run #1468 — success](https://github.com/thepotatoninjahost/Coding-Agent/actions/runs/38623506348), on merged `main` commit `09059fc4bdb705dfc146ea242ea15964ec058e1f`. The workflow completed successfully, including the wrapper JAR checksum step, tests, Android lint, and debug/release APK assembly.
+- **Changes verified:** configured the official Gradle 8.9 binary distribution SHA-256; pinned checkout, setup-java, setup-android, and upload-artifact actions to full commit SHAs; added CI verification of the tracked Gradle Wrapper JAR against Gradle's published checksum.
+- **Official references:** https://docs.gradle.org/current/userguide/gradle_wrapper.html ; https://gradle.org/release-checksums/ ; https://docs.github.com/en/actions/reference/security/secure-use
+- **Disposition:** AUD-004 and crosswalk finding F2-018 resolved for the audited build workflow. This does not imply that other open audit findings are resolved.
