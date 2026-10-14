@@ -14,7 +14,6 @@ import com.codingagent.agent.ChatMessage
 import com.codingagent.agent.ChatMessageStore
 import com.codingagent.agent.ChatRole
 import com.codingagent.agent.ChatWorkspace
-import com.codingagent.agent.MAX_CHAT_SUMMARY_CHARS
 import com.codingagent.agent.sanitizeTaskSummary
 import com.codingagent.agent.AgentRuntimeResult
 import com.codingagent.agent.UserMemory
@@ -25,9 +24,9 @@ import com.codingagent.workspace.OpenJobStore
 
 class ChatWorkspaceTest {
     @Test
-    fun ownerReviewSummaryIsNeverTruncatedAtChatCharacterLimit() {
+    fun ownerReviewSummaryIsNeverTruncated() {
         val review = "PROPOSED CHANGES — complete review\n" +
-            "x".repeat(MAX_CHAT_SUMMARY_CHARS + 4_000) +
+            "x".repeat(16_000) +
             "\nEND OF COMPLETE PROPOSAL REVIEW."
 
         val sanitized = sanitizeTaskSummary(review)
@@ -37,17 +36,16 @@ class ChatWorkspaceTest {
     }
 
     @Test
-    fun ordinaryLongSummaryHasExplicitTruncationWarning() {
+    fun ordinaryLongSummaryIsPreservedInFull() {
         val output = (0..400).joinToString("\n") { index ->
-            "ordinary output segment $index: distinct content for truncation verification."
+            "ordinary output segment $index: distinct content for full-output verification."
         }
-        assertTrue(output.length > MAX_CHAT_SUMMARY_CHARS)
 
         val sanitized = sanitizeTaskSummary(output)
 
-        assertTrue(sanitized.startsWith(output.take(MAX_CHAT_SUMMARY_CHARS)))
-        assertTrue(sanitized.contains("OUTPUT TRUNCATED"))
-        assertTrue(sanitized.contains("of ${output.length} characters"))
+        assertEquals(output.length, sanitized.length)
+        assertEquals(output, sanitized)
+        assertTrue(sanitized.endsWith("ordinary output segment 400: distinct content for full-output verification."))
     }
 
     private val emptyKnowledge = object : AgentKnowledge {
