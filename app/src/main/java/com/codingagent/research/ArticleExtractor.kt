@@ -7,6 +7,7 @@ import java.io.ByteArrayOutputStream
 import java.net.HttpURLConnection
 import java.net.InetAddress
 import java.net.UnknownHostException
+import java.net.Proxy
 import java.net.URL
 import java.util.concurrent.TimeUnit
 
@@ -38,6 +39,7 @@ object ResearchUrlSafety {
     internal fun newClient(
         dnsLookup: (String) -> List<InetAddress> = { InetAddress.getAllByName(it).toList() }
     ): OkHttpClient = OkHttpClient.Builder()
+        .proxy(Proxy.NO_PROXY)
         .dns(Dns { hostname -> resolvePublicAddresses(hostname, dnsLookup) })
         .followRedirects(false)
         .followSslRedirects(false)
