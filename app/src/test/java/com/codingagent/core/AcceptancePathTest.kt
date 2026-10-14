@@ -520,6 +520,14 @@ class AcceptancePathTest {
         val missingField = PendingProposalStore.load(root).single()
         assertFalse("Missing verification evidence must fail closed", missingField.verification.passed)
 
+        val restartedCoordinator = MutationCoordinator(ProjectWorkspace(root))
+        val approvalResult = restartedCoordinator.approve(
+            missingField.id,
+            OwnerApprovalToken.authenticated(missingField.id)
+        )
+        assertTrue("Unverified persisted proposals must not be applied", approvalResult is MutationApprovalResult.Rejected)
+        assertEquals("fun main() = 1\n", root.resolve("Main.kt").readText())
+
         proposalJson.put("verificationPassed", "not-a-boolean")
         val malformedFieldPayload = payload.toString()
         envelope.put("payload", malformedFieldPayload)
