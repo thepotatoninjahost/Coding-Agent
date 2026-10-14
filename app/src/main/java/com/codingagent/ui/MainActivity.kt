@@ -534,11 +534,10 @@ private fun CodingAgentApp(privateDir: File) {
             detail = "The proposal is no longer pending."
             return
         }
-        val authenticators = BiometricManager.Authenticators.BIOMETRIC_STRONG or
-            BiometricManager.Authenticators.DEVICE_CREDENTIAL
+        val authenticators = BiometricManager.Authenticators.BIOMETRIC_STRONG
         val biometricManager = BiometricManager.from(context)
         if (biometricManager.canAuthenticate(authenticators) != BiometricManager.BIOMETRIC_SUCCESS) {
-            ownerApprovalError = "Owner device authentication is unavailable. Approval is blocked."
+            ownerApprovalError = "Strong biometric authentication is unavailable. Approval is blocked."
             status = AgentStatus.STOPPED
             detail = ownerApprovalError.orEmpty()
             return
@@ -626,7 +625,7 @@ private fun CodingAgentApp(privateDir: File) {
         )
         val promptInfo = BiometricPrompt.PromptInfo.Builder()
             .setTitle("Confirm code change")
-            .setSubtitle("Sign this exact proposal as the device owner")
+            .setSubtitle("Use strong biometrics to sign this exact proposal")
             .setAllowedAuthenticators(authenticators)
             .setConfirmationRequired(true)
             .build()
@@ -1040,7 +1039,7 @@ private fun CodingAgentApp(privateDir: File) {
                             if (ownerApprovalSetupMode)
                                 "You create both passphrases. They must be different. The app stores salted verifiers, not the phrases. Speech recognition runs on-device only; the displayed challenge words are temporary, not stored credentials."
                             else
-                                "Enter your typed passphrase and speak your separate spoken passphrase followed by the one-time challenge words. A fresh device-authenticated signature is also required for this exact proposal.",
+                                "Enter your typed passphrase and speak your separate spoken passphrase followed by the one-time challenge words. A fresh strong-biometric-authenticated signature is also required for this exact proposal.",
                             color = SoftGreen,
                             fontSize = 11.sp
                         )
