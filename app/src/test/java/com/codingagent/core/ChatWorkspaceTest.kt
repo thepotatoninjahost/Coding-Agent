@@ -14,6 +14,8 @@ import com.codingagent.agent.ChatMessage
 import com.codingagent.agent.ChatMessageStore
 import com.codingagent.agent.ChatRole
 import com.codingagent.agent.ChatWorkspace
+import com.codingagent.agent.MAX_CHAT_SUMMARY_CHARS
+import com.codingagent.agent.sanitizeTaskSummary
 import com.codingagent.agent.AgentRuntimeResult
 import com.codingagent.agent.UserMemory
 import com.codingagent.agent.UserMemoryStore
@@ -22,6 +24,29 @@ import com.codingagent.workspace.KnowledgeHit
 import com.codingagent.workspace.OpenJobStore
 
 class ChatWorkspaceTest {
+    @Test
+    fun ownerReviewSummaryIsNeverTruncatedAtChatCharacterLimit() {
+        val review = "PROPOSED CHANGES — complete review\\n" +
+            "x".repeat(MAX_CHAT_SUMMARY_CHARS + 4_000) +
+            "\\nEND OF COMPLETE PROPOSAL REVIEW."
+
+        val sanitized = sanitizeTaskSummary(review)
+
+        assertEquals(review, sanitized)
+        assertTrue(sanitized.contains("END OF COMPLETE PROPOSAL REVIEW."))
+    }
+
+    @Test
+    fun ordinaryLongSummaryHasExplicitTruncationWarning() {
+        val output = "x".repeat(MAX_CHAT_SUMMARY_CHARS + 25)
+
+        val sanitized = sanitizeTaskSummary(output)
+
+        assertTrue(sanitized.startsWith("x".repeat(MAX_CHAT_SUMMARY_CHARS)))
+        assertTrue(sanitized.contains("OUTPUT TRUNCATED"))
+        assertTrue(sanitized.contains("of ${output.length} characters"))
+    }
+
     private val emptyKnowledge = object : AgentKnowledge {
         override fun search(query: String, limit: Int): List<KnowledgeHit> = emptyList()
     }
