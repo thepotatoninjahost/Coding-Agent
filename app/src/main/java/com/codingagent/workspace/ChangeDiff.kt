@@ -1,5 +1,8 @@
 package com.codingagent.workspace
 
+import com.codingagent.intake.OperationKind
+import com.codingagent.intake.TaskOperation
+
 /**
  * ONE JOB: Format pending transactional changes for Review UI and tests.
  */
@@ -74,15 +77,102 @@ object ChangeDiff {
         )
     }
 
+    private val explanationHeadings = listOf(
+        "What I want to do:",
+        "Why:",
+        "What will change:",
+        "Possible effects:",
+        "Risks:",
+        "What your approval means:"
+    )
+
+    /**
+     * True only when the agent supplied all six required sections in the required order.
+     */
+    fun hasCompletePlainEnglishExplanation(reason: String): Boolean {
+        var previous = -1
+        for (heading in explanationHeadings) {
+            val found = reason.indexOf(heading, startIndex = previous + 1, ignoreCase = false)
+            if (found <= previous) return false
+            val bodyStart = found + heading.length
+            val nextHeading = explanationHeadings
+                .mapNotNull { next -> reason.indexOf(next, startIndex = bodyStart).takeIf { it >= 0 } }
+                .minOrNull() ?: reason.length
+            if (reason.substring(bodyStart, nextHeading).isBlank()) return false
+            previous = found
+        }
+        return true
+    }
+
+    /**
+     * Internal and offline changes may not come from the model. Give those proposals
+     * a truthful, readable explanation instead of presenting a technical label as enough.
+     */
+    fun ensurePlainEnglishExplanation(
+        request: String,
+        reason: String,
+        operations: List<TaskOperation>
+    ): String {
+        if (hasCompletePlainEnglishExplanation(reason)) return reason
+        val changes = operations.joinToString("\n") { operation ->
+            val path = operation.path ?: "(file path not supplied)"
+            when (operation.kind) {
+                OperationKind.CREATE_FILE -> "Create the file $path with the proposed contents shown below."
+                OperationKind.REPLACE -> "Change $path by replacing the selected existing text with the proposed text shown below."
+                OperationKind.APPEND -> "Add the proposed text to the end of $path."
+                OperationKind.REMOVE -> "Remove the selected text from $path."
+                OperationKind.NONE -> "No specific file operation was supplied."
+            }
+        }.ifBlank { "The exact file changes are listed below." }
+        val why = if (reason.isBlank() || reason.equals(request, ignoreCase = true) ||
+            reason.contains("offline explicit", ignoreCase = true) ||
+            reason.contains("autonomous model proposal", ignoreCase = true) ||
+            reason.equals("editor save", ignoreCase = true)
+        ) {
+            "To carry out the request you gave the agent. A more specific reason was not provided."
+        } else {
+            reason
+        }
+        return buildString {
+            appendLine("What I want to do:")
+            appendLine("Make the requested change to the project.")
+            appendLine()
+            appendLine("Why:")
+            appendLine(why)
+            appendLine()
+            appendLine("What will change:")
+            appendLine(changes)
+            appendLine()
+            appendLine("Possible effects:")
+            appendLine("The listed files may behave differently after the changes are applied.")
+            appendLine()
+            appendLine("Risks:")
+            appendLine("The changes could introduce errors or break existing behavior. No more specific risk assessment was provided in plain English. Review all current and proposed file contents below.")
+            appendLine()
+            appendLine("What your approval means:")
+            appendLine("Nothing is written until you complete both required owner approvals. After both approvals, these exact listed changes can be applied.")
+        }
+    }
+
     /**
      * Human-readable review body. Proposed files are not on disk until dual approval,
      * so this text is the only way the owner can see what they are confirming.
      */
     fun ownerReviewText(proposal: PendingChangeProposal): String = buildString {
-        appendLine("PROPOSED CHANGES — not written to disk until you confirm twice.")
+        appendLine("PROPOSED CHANGES — nothing is written until you confirm twice.")
+        appendLine("Read the plain-English explanation before deciding. If it does not clearly explain the change or its risks, reject it and ask the agent to explain.")
         appendLine("Proposal ${shortId(proposal.id)} · ${proposal.changeSet.changes.size} file(s) · ${expiryLabel(proposal.expiresAt)}")
-        appendLine("Request (complete):")
+        appendLine()
+        appendLine("WHAT YOU ASKED FOR (complete):")
         appendCompleteContent(proposal.request)
+        appendLine()
+        appendLine("THE AGENT'S PLAIN-ENGLISH EXPLANATION (complete):")
+        appendCompleteContent(proposal.changeSet.reason)
+        if (!hasCompletePlainEnglishExplanation(proposal.changeSet.reason)) {
+            appendLine("WARNING: This proposal does not contain all six required explanation sections. Do not approve it until the agent provides a complete explanation.")
+        }
+        appendLine()
+        appendLine("EXACT FILE CHANGES (complete contents follow):")
         if (proposal.changeSet.changes.isEmpty()) {
             appendLine("No file records in this proposal.")
         }
