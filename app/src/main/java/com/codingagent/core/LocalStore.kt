@@ -27,6 +27,10 @@ class LocalStore(context: Context) : ChatMessageStore {
     private val securePrefs = KeystoreSecretStore(context).also {
         LegacyEncryptedPreferencesMigration.migrateIfNeeded(context, it)
     }
+    private val ownerApprovalPhrases = OwnerApprovalPhraseStore(
+        readSecret = { key -> securePrefs.getString(key) },
+        writeSecret = { key, value -> securePrefs.putString(key, value) }
+    )
 
     fun saveProjectPath(path: String?) {
         securePrefs.putString(KeystoreSecretStore.PROJECT_PATH, path)
@@ -45,6 +49,19 @@ class LocalStore(context: Context) : ChatMessageStore {
     }
 
     fun loadModelSettings(): ModelSettings = ModelSettings.fromJson(securePrefs.getString(KeystoreSecretStore.MODEL_SETTINGS))
+
+    /** True only when both owner-created approval phrases have been enrolled. */
+    internal fun ownerApprovalPhrasesConfigured(): Boolean = ownerApprovalPhrases.isConfigured()
+
+    /** Stores only salted verifiers; the supplied phrases are never persisted in plaintext. */
+    internal fun enrollOwnerApprovalPhrases(typedPhrase: String, spokenPhrase: String) =
+        ownerApprovalPhrases.enroll(typedPhrase, spokenPhrase)
+
+    internal fun verifyOwnerTypedPhrase(phrase: String): Boolean =
+        ownerApprovalPhrases.verifyTyped(phrase)
+
+    internal fun verifyOwnerSpokenPhrase(recognizedPhrase: String): Boolean =
+        ownerApprovalPhrases.verifySpoken(recognizedPhrase)
 
     companion object {
         private const val KEY_PROJECT_PATH = "project_path"

@@ -246,7 +246,7 @@ class MutationCoordinator(
                 "Change proposal approval window expired. Open Review, reject, and the agent will restage the same files."
             )
         }
-        if (!ownerApproval.consume(proposal.id, timestamp)) {
+        if (!ownerApproval.consume(proposal.id, proposal.approvalCount + 1, timestamp)) {
             return MutationApprovalResult.Rejected("A fresh authenticated owner approval is required for this proposal")
         }
         if (proposal.approvalCount >= 2) {

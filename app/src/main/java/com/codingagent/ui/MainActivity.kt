@@ -1,15 +1,22 @@
 package com.codingagent.ui
 
+import android.Manifest
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Bundle
+import android.speech.RecognitionListener
+import android.speech.RecognizerIntent
+import android.speech.SpeechRecognizer
 import androidx.activity.ComponentActivity
 import androidx.fragment.app.FragmentActivity
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
 import androidx.core.content.ContextCompat
 import androidx.activity.compose.setContent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -68,6 +75,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.documentfile.provider.DocumentFile
@@ -82,6 +90,7 @@ import com.codingagent.research.DurableDeepResearchProvider
 import com.codingagent.workspace.EditorDocument
 import com.codingagent.knowledge.KnowledgeBase
 import com.codingagent.core.LocalStore
+import com.codingagent.workspace.OwnerApprovalKey
 import com.codingagent.model.ModelBackend
 import com.codingagent.model.ModelDownloadProgress
 import com.codingagent.model.ModelGateway
@@ -174,6 +183,16 @@ private fun CodingAgentApp(privateDir: File) {
     var pendingProposalId by remember { mutableStateOf<String?>(null) }
     var pendingProposal by remember { mutableStateOf<PendingChangeProposal?>(null) }
     var approvalPromptOpen by remember { mutableStateOf(false) }
+    var showOwnerApprovalDialog by remember { mutableStateOf(false) }
+    var ownerApprovalSetupMode by remember { mutableStateOf(false) }
+    var ownerTypedPhrase by remember { mutableStateOf("") }
+    var ownerTypedPhraseConfirm by remember { mutableStateOf("") }
+    var ownerSpokenPhrase by remember { mutableStateOf("") }
+    var ownerSpeechVerified by remember { mutableStateOf(false) }
+    var ownerSpeechStatus by remember { mutableStateOf("Speak the owner-created spoken passphrase.") }
+    var ownerApprovalError by remember { mutableStateOf<String?>(null) }
+    var speechPurpose by remember { mutableStateOf("approval") }
+    var speechRecognizer by remember { mutableStateOf<SpeechRecognizer?>(null) }
     val mutationCoordinator = remember(workspace) { workspace?.let { MutationCoordinator(it) } }
     var messageQueue by remember { mutableStateOf(emptyList<String>()) }
     var modelSettings by remember { mutableStateOf(store.loadModelSettings()) }
@@ -376,11 +395,122 @@ private fun CodingAgentApp(privateDir: File) {
         chatMessages = store.recentChatMessages().asReversed()
     }
 
-    fun approvePendingProposal() {
-        val id = pendingProposalId ?: return
+    fun clearOwnerApprovalDialog() {
+        showOwnerApprovalDialog = false
+        ownerTypedPhrase = ""
+        ownerTypedPhraseConfirm = ""
+        ownerSpokenPhrase = ""
+        ownerSpeechVerified = false
+        ownerApprovalError = null
+        speechRecognizer?.cancel()
+        speechRecognizer?.destroy()
+        speechRecognizer = null
+    }
+
+    fun beginOnDeviceSpeechRecognition() {
+        if (!SpeechRecognizer.isOnDeviceRecognitionAvailable(context)) {
+            ownerSpeechVerified = false
+            ownerSpeechStatus = "On-device speech recognition is unavailable. Approval is blocked."
+            ownerApprovalError = ownerSpeechStatus
+            return
+        }
+        runCatching {
+            speechRecognizer?.cancel()
+            speechRecognizer?.destroy()
+            val recognizer = SpeechRecognizer.createOnDeviceSpeechRecognizer(context)
+            speechRecognizer = recognizer
+            recognizer.setRecognitionListener(object : RecognitionListener {
+                override fun onReadyForSpeech(params: Bundle?) {
+                    ownerSpeechStatus = "Listening. Speak the complete passphrase."
+                }
+                override fun onBeginningOfSpeech() {}
+                override fun onRmsChanged(rmsdB: Float) {}
+                override fun onBufferReceived(buffer: ByteArray?) {}
+                override fun onEndOfSpeech() {
+                    ownerSpeechStatus = "Checking spoken passphrase…"
+                }
+                override fun onError(error: Int) {
+                    ownerSpeechVerified = false
+                    ownerSpeechStatus = "Speech recognition failed. Try again."
+                    ownerApprovalError = "Spoken passphrase was not verified; approval remains blocked."
+                    speechRecognizer?.destroy()
+                    speechRecognizer = null
+                }
+                override fun onResults(results: Bundle?) {
+                    val recognized = results
+                        ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                        ?.firstOrNull()
+                        .orEmpty()
+                    val normalized = recognized.trim().lowercase().replace(Regex("\\s+"), " ")
+                    val valid = if (speechPurpose == "setup") {
+                        normalized.isNotBlank() &&
+                            normalized == ownerSpokenPhrase.trim().lowercase().replace(Regex("\\s+"), " ")
+                    } else {
+                        store.verifyOwnerSpokenPhrase(recognized)
+                    }
+                    ownerSpeechVerified = valid
+                    ownerSpeechStatus = if (valid) {
+                        if (speechPurpose == "setup") "Spoken phrase confirmed." else "Spoken passphrase verified."
+                    } else {
+                        "Spoken passphrase did not match. Try again."
+                    }
+                    ownerApprovalError = if (valid) null else "Spoken passphrase was not verified; approval remains blocked."
+                    speechRecognizer?.destroy()
+                    speechRecognizer = null
+                }
+                override fun onPartialResults(partialResults: Bundle?) {}
+                override fun onEvent(eventType: Int, params: Bundle?) {}
+            })
+            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
+                putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
+            }
+            recognizer.startListening(intent)
+        }.onFailure { error ->
+            ownerSpeechVerified = false
+            ownerSpeechStatus = "On-device speech recognition could not start."
+            ownerApprovalError = "Speech recognition failed closed: ${error.message.orEmpty()}"
+            speechRecognizer?.destroy()
+            speechRecognizer = null
+        }
+    }
+
+    val microphonePermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) beginOnDeviceSpeechRecognition()
+        else {
+            ownerSpeechVerified = false
+            ownerSpeechStatus = "Microphone permission denied."
+            ownerApprovalError = "Spoken passphrase is required; approval was not authorized."
+        }
+    }
+
+    fun requestSpeechCapture(purpose: String) {
+        speechPurpose = purpose
+        ownerSpeechVerified = false
+        ownerApprovalError = null
+        ownerSpeechStatus = "Preparing on-device speech recognition…"
+        if (!SpeechRecognizer.isOnDeviceRecognitionAvailable(context)) {
+            ownerSpeechStatus = "On-device speech recognition is unavailable. Approval is blocked."
+            ownerApprovalError = ownerSpeechStatus
+            return
+        }
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            beginOnDeviceSpeechRecognition()
+        } else {
+            microphonePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+        }
+    }
+
+    fun performAuthenticatedApproval(id: String) {
         val coordinator = mutationCoordinator ?: return
         if (activeJob != null || approvalPromptOpen) return
-        if (coordinator.get(id) == null) {
+        val proposal = coordinator.get(id) ?: run {
+            clearOwnerApprovalDialog()
             pendingApproval = false
             pendingProposal = null
             pendingProposalId = null
@@ -389,21 +519,30 @@ private fun CodingAgentApp(privateDir: File) {
             detail = "The proposal is no longer pending."
             return
         }
-
         val authenticators = BiometricManager.Authenticators.BIOMETRIC_STRONG or
             BiometricManager.Authenticators.DEVICE_CREDENTIAL
         val biometricManager = BiometricManager.from(context)
         if (biometricManager.canAuthenticate(authenticators) != BiometricManager.BIOMETRIC_SUCCESS) {
+            ownerApprovalError = "Owner device authentication is unavailable. Approval is blocked."
             status = AgentStatus.STOPPED
-            detail = "Owner authentication is unavailable. Configure a strong biometric or device credential."
+            detail = ownerApprovalError.orEmpty()
             return
         }
 
+        val challenge = runCatching {
+            OwnerApprovalKey.prepare(proposal.id, proposal.approvalCount + 1, System.currentTimeMillis())
+        }.getOrElse { error ->
+            ownerApprovalError = "Could not prepare a protected approval challenge: ${error.message.orEmpty()}"
+            status = AgentStatus.FAILED
+            detail = ownerApprovalError.orEmpty()
+            return
+        }
         approvalPromptOpen = true
         val activity = context as? FragmentActivity ?: run {
             approvalPromptOpen = false
+            ownerApprovalError = "Owner authentication is unavailable in this UI context."
             status = AgentStatus.FAILED
-            detail = "Owner authentication is unavailable in this UI context."
+            detail = ownerApprovalError.orEmpty()
             return
         }
         val executor = ContextCompat.getMainExecutor(activity)
@@ -414,9 +553,17 @@ private fun CodingAgentApp(privateDir: File) {
                 override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
                     super.onAuthenticationSucceeded(result)
                     approvalPromptOpen = false
+                    val token = runCatching {
+                        val authenticatedSignature = result.cryptoObject?.signature
+                            ?: error("Android did not return the authenticated signing operation")
+                        OwnerApprovalKey.complete(challenge, authenticatedSignature)
+                    }.getOrElse { error ->
+                        status = AgentStatus.FAILED
+                        detail = "Cryptographic owner approval failed closed: ${error.message.orEmpty()}"
+                        return
+                    }
                     status = AgentStatus.WORKING
-                    detail = "Owner authenticated; recording approval off the UI thread…"
-                    val token = OwnerApprovalToken.authenticated(id)
+                    detail = "Cryptographically verified owner approval; recording it off the UI thread…"
                     activeJob = scope.launch(Dispatchers.IO) {
                         val outcome = runCatching { coordinator.approve(id, token) }
                         withContext(Dispatchers.Main.immediate) {
@@ -427,7 +574,7 @@ private fun CodingAgentApp(privateDir: File) {
                                         pendingProposal = result.proposal
                                         pendingProposalId = result.proposal.id
                                         pendingApproval = true
-                                        detail = "Authenticated confirmation ${approvalCount}/2 recorded; transaction remains unapplied"
+                                        detail = "Authenticated approval ${approvalCount}/2 recorded; transaction remains unapplied"
                                         status = AgentStatus.APPROVAL
                                     }
                                     is MutationApprovalResult.RepairRequired -> {
@@ -464,11 +611,83 @@ private fun CodingAgentApp(privateDir: File) {
         )
         val promptInfo = BiometricPrompt.PromptInfo.Builder()
             .setTitle("Confirm code change")
-            .setSubtitle("Authenticate as the device owner to approve this proposal")
+            .setSubtitle("Sign this exact proposal as the device owner")
             .setAllowedAuthenticators(authenticators)
             .setConfirmationRequired(true)
             .build()
-        prompt.authenticate(promptInfo)
+        runCatching {
+            prompt.authenticate(promptInfo, BiometricPrompt.CryptoObject(challenge.signature))
+        }.onFailure { error ->
+            approvalPromptOpen = false
+            ownerApprovalError = "Protected owner authentication failed closed: ${error.message.orEmpty()}"
+            status = AgentStatus.FAILED
+            detail = ownerApprovalError.orEmpty()
+        }
+    }
+
+    fun submitOwnerApprovalDialog() {
+        val id = pendingProposalId ?: run {
+            ownerApprovalError = "No pending proposal is available."
+            return
+        }
+        if (ownerApprovalSetupMode) {
+            if (ownerTypedPhrase.isBlank() || ownerTypedPhrase != ownerTypedPhraseConfirm) {
+                ownerApprovalError = "Typed passphrases must be non-empty and match exactly."
+                return
+            }
+            if (ownerSpokenPhrase.isBlank() || !ownerSpeechVerified) {
+                ownerApprovalError = "Create the spoken passphrase and verify it by speaking it on-device."
+                return
+            }
+            runCatching {
+                store.enrollOwnerApprovalPhrases(ownerTypedPhrase, ownerSpokenPhrase)
+            }.onFailure { error ->
+                ownerApprovalError = error.message.orEmpty().ifBlank { "Owner passphrases could not be saved." }
+                return
+            }
+            clearOwnerApprovalDialog()
+            detail = "Owner passphrases saved as salted verifiers. Tap Approve again to authorize the pending proposal."
+            status = AgentStatus.APPROVAL
+            return
+        }
+
+        if (!store.verifyOwnerTypedPhrase(ownerTypedPhrase)) {
+            ownerApprovalError = "Typed owner passphrase did not match. Approval is blocked."
+            return
+        }
+        if (!ownerSpeechVerified) {
+            ownerApprovalError = "The spoken owner passphrase has not been verified. Approval is blocked."
+            return
+        }
+        clearOwnerApprovalDialog()
+        performAuthenticatedApproval(id)
+    }
+
+    fun approvePendingProposal() {
+        val id = pendingProposalId ?: return
+        val coordinator = mutationCoordinator ?: return
+        if (activeJob != null || approvalPromptOpen || showOwnerApprovalDialog) return
+        if (coordinator.get(id) == null) {
+            pendingApproval = false
+            pendingProposal = null
+            pendingProposalId = null
+            approvalCount = 0
+            status = AgentStatus.STOPPED
+            detail = "The proposal is no longer pending."
+            return
+        }
+        ownerApprovalSetupMode = !store.ownerApprovalPhrasesConfigured()
+        ownerTypedPhrase = ""
+        ownerTypedPhraseConfirm = ""
+        ownerSpokenPhrase = ""
+        ownerSpeechVerified = false
+        ownerSpeechStatus = if (ownerApprovalSetupMode) {
+            "Create a spoken passphrase yourself, then speak it to verify enrollment."
+        } else {
+            "Speak your enrolled spoken passphrase."
+        }
+        ownerApprovalError = null
+        showOwnerApprovalDialog = true
     }
 
     fun stopAgent() {
@@ -778,6 +997,114 @@ private fun CodingAgentApp(privateDir: File) {
                             activeJob = null
                         }
                     })
+                }
+            }
+        }
+
+        if (showOwnerApprovalDialog) {
+            androidx.compose.ui.window.Dialog(onDismissRequest = { clearOwnerApprovalDialog() }) {
+                Surface(
+                    color = Panel,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .border(1.dp, NeonGreen.copy(alpha = 0.4f), RoundedCornerShape(12.dp))
+                        .padding(4.dp)
+                ) {
+                    Column(Modifier.padding(16.dp)) {
+                        Text(
+                            if (ownerApprovalSetupMode) "Create owner approval passphrases"
+                            else "Verify owner approval",
+                            color = NeonGreen,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 16.sp
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            if (ownerApprovalSetupMode)
+                                "You create both passphrases. They must be different. The app stores salted verifiers, not the phrases. Speech recognition runs on-device only."
+                            else
+                                "Enter your typed passphrase and speak your separate spoken passphrase. A fresh device-authenticated signature is also required for this exact proposal.",
+                            color = SoftGreen,
+                            fontSize = 11.sp
+                        )
+                        Spacer(Modifier.height(12.dp))
+                        OutlinedTextField(
+                            value = ownerTypedPhrase,
+                            onValueChange = {
+                                ownerTypedPhrase = it
+                                ownerApprovalError = null
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            label = { Text("Typed owner passphrase", color = SoftGreen) },
+                            singleLine = true,
+                            visualTransformation = PasswordVisualTransformation(),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                            colors = fieldColors()
+                        )
+                        if (ownerApprovalSetupMode) {
+                            Spacer(Modifier.height(8.dp))
+                            OutlinedTextField(
+                                value = ownerTypedPhraseConfirm,
+                                onValueChange = {
+                                    ownerTypedPhraseConfirm = it
+                                    ownerApprovalError = null
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                label = { Text("Confirm typed passphrase", color = SoftGreen) },
+                                singleLine = true,
+                                visualTransformation = PasswordVisualTransformation(),
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                                colors = fieldColors()
+                            )
+                            Spacer(Modifier.height(8.dp))
+                            OutlinedTextField(
+                                value = ownerSpokenPhrase,
+                                onValueChange = {
+                                    ownerSpokenPhrase = it
+                                    ownerSpeechVerified = false
+                                    ownerSpeechStatus = "Speak the spoken phrase to verify it."
+                                    ownerApprovalError = null
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                label = { Text("Spoken passphrase (you choose it)", color = SoftGreen) },
+                                singleLine = true,
+                                visualTransformation = PasswordVisualTransformation(),
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                                colors = fieldColors()
+                            )
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        Button(
+                            onClick = { requestSpeechCapture(if (ownerApprovalSetupMode) "setup" else "approval") },
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.buttonColors(containerColor = Panel)
+                        ) {
+                            Text(
+                                if (ownerApprovalSetupMode) "Speak and verify spoken passphrase"
+                                else "Speak spoken passphrase",
+                                color = NeonGreen
+                            )
+                        }
+                        Text(ownerSpeechStatus, color = if (ownerSpeechVerified) NeonGreen else SoftGreen, fontSize = 11.sp)
+                        if (ownerApprovalError != null) {
+                            Spacer(Modifier.height(6.dp))
+                            Text(ownerApprovalError.orEmpty(), color = FluoroOrange, fontSize = 11.sp)
+                        }
+                        Spacer(Modifier.height(12.dp))
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                            TextButton(onClick = { clearOwnerApprovalDialog() }) {
+                                Text("Cancel", color = SoftGreen)
+                            }
+                            TextButton(onClick = { submitOwnerApprovalDialog() }) {
+                                Text(
+                                    if (ownerApprovalSetupMode) "Save passphrases" else "Verify and continue",
+                                    color = NeonGreen,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
