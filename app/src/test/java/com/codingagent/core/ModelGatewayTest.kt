@@ -148,6 +148,23 @@ data: [DONE]
     }
 
     @Test
+    fun `streamed multiple tool calls are rejected rather than silently dropping calls`() {
+        val gateway = RemoteHttpGateway("http://127.0.0.1:8080/v1", "", "local", connectionFactory = { _ ->
+            fakeConnection("""data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"read_file","arguments":"{}"}}]}}]}
+data: {"choices":[{"delta":{"tool_calls":[{"index":1,"id":"call_2","function":{"name":"search_project","arguments":"{}"}}]}}]}
+data: [DONE]
+""".trimIndent())
+        })
+
+        val result = gateway.stream(ModelRequest("system", "inspect", emptyList())) {}
+
+        assertEquals(
+            ModelResponse.Failure("Model returned multiple tool calls; only one tool call is accepted per turn"),
+            result
+        )
+    }
+
+    @Test
     fun `streamed tool call arguments are accumulated instead of treated as text`() {
         val gateway = RemoteHttpGateway("http://127.0.0.1:8080/v1", "", "local", connectionFactory = { _ ->
             fakeConnection("""data: {"choices":[{"delta":{"tool_calls":[{"id":"call_1","index":0,"function":{"name":"read_file","arguments":"{\"path\":\"src/"}}]}}]}
