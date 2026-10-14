@@ -109,7 +109,7 @@ object ChangeDiff {
 
     private fun StringBuilder.appendCompleteContent(content: String) {
         append(content)
-        if (!content.endsWith("\\n")) appendLine()
+        if (!content.endsWith("\n")) appendLine()
     }
 
     fun unified(record: ChangeRecord, maxLines: Int = MAX_UNIFIED_LINES): List<DiffLine> {
