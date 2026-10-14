@@ -504,7 +504,7 @@ class AcceptancePathTest {
         val coordinator = MutationCoordinator(ProjectWorkspace(root))
         val proposed = coordinator.propose(
             "require persisted verification",
-            listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\\n", "fun main() = 2\\n"))
+            listOf(TaskOperation(OperationKind.REPLACE, "Main.kt", "fun main() = 1\n", "fun main() = 2\n"))
         ) as MutationProposeResult.Proposed
 
         PendingProposalStore.save(root, listOf(proposed.proposal))
