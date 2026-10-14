@@ -226,7 +226,7 @@ The register distinguishes open findings, partial fixes, resolved historical fin
 
 | ID | Severity | Finding and evidence | Status |
 |---|---|---|---|
-| AUD-001 | Critical | The approval flow performs two generic Android biometric/device-credential confirmations. It does **not** require the owner-created spoken phrase followed by an exact typed phrase. `MainActivity.approvePendingProposal`, `OwnerApprovalToken`, and acceptance tests confirm this. | **Open — owner security requirement not met** |
+| AUD-001 | Critical | The former approval path accepted two generic device-authentication callbacks and a software-minted internal token. The current path requires owner-created typed and spoken passphrases, a fresh four-word spoken challenge, and an auth-per-use Android Keystore signature bound to the exact proposal and approval ordinal. | **Implemented in `90d6943dac2d3ff7cb37df3bfe503178dddf707c`; exact-head CI run #38501501736 passed; device-level testing still required** |
 | AUD-002 | High | `app/src/main/assets/knowledge/coding-for-dummies.txt` contains a full commercial book's copyright notice and restrictive reproduction language. `scripts/package-source.sh` includes the asset in source packages. No license/permission evidence is recorded in the repository. | **Open — distribution rights must be confirmed; do not remove/replace without owner direction** |
 | AUD-003 | High | Research URL validation resolves and rejects private/local addresses before connecting, but the HTTP connection performs a separate hostname resolution. Without pinning the validated address, DNS rebinding remains possible. Redirects are disabled, which reduces but does not close the gap. | **Open — network boundary hardening** |
 | AUD-004 | High | The Gradle distribution URL is HTTPS but `gradle-wrapper.properties` has no `distributionSha256Sum`. The wrapper JAR SHA-256 is `cb0da6751c2b753a16ac168bb354870ebb1e162e9083f116729cec9c781156b8`, matching Gradle's published Gradle 8.7 wrapper checksum; the configured distribution is Gradle 8.9, so the JAR is authentic but older. Workflow actions are referenced by version tags rather than full commit SHAs, and the workflow does not use Gradle's built-in wrapper-JAR validation. | **Open — supply-chain hardening** |
@@ -251,6 +251,7 @@ The register distinguishes open findings, partial fixes, resolved historical fin
 | AUD-022 | Low | `CompilerTestRepairCycle.run` can execute `plan.checks`, but repository code search found no production caller of `.run`; the current production path uses `prepareRepair` and the mutation coordinator's static verifier. | **Resolved for current reachable production path; re-audit if wired into runtime** |
 | AUD-023 | Low | Cancellation is wired from the UI through `ChatWorkspace.cancel()` to `AutonomousAgent.cancel()`, which cancels the terminal, research provider, and model gateway. Existing tests cover terminal and research cancellation paths. | **Resolved for inspected cancellation chain** |
 | AUD-024 | Medium | SAF import restores executable permission for a root-level `gradlew`, but no end-to-end Android import test verifies mode preservation across document providers. | **Partially addressed — integration verification missing** |
+| AUD-025 | Medium | On-device speech recognition checks the recognized transcript, not speaker identity. A fresh four-word challenge reduces straightforward replay, but synthesized or spliced audio could still match it; typed passphrase and a fresh device-authenticated signature remain mandatory. | **Residual limitation — not voice biometrics; device-level testing pending** |
 
 ### Official supply-chain references checked
 
@@ -463,3 +464,38 @@ Status means the file was included in the current snapshot's static review; “D
 ## Audit conclusion
 
 The project-wide static audit is complete for this snapshot, with all 163 tracked files accounted for. The audit is **not a claim that every finding is fixed**: AUD-001 through AUD-015 and AUD-019 through AUD-024 remain open, partially resolved, or noted as specified above. In particular, the spoken-plus-typed owner approval safeguard is not implemented, and the bundled copyrighted reference asset needs rights confirmation before redistribution. Do not mark these as resolved merely because CI passes.
+
+
+---
+
+## Approval security remediation tracker — 2026-10-14
+
+- **Code snapshot:** `90d6943dac2d3ff7cb37df3bfe503178dddf707c`
+- **Exact-head CI:** [run #38501501736 — success](https://github.com/thepotatoninjahost/Coding-Agent/actions/runs/38501501736). Unit tests, acceptance-path tests, Android lint, debug APK assembly, and release APK assembly all passed.
+- **Scope:** owner passphrase enrollment/verification, fresh spoken challenge, auth-per-use Keystore signature, and exact proposal/approval-step binding.
+- **Owner-created credentials:** the user supplies both distinct passphrases; no passphrase is generated or stored in plaintext. Verifiers use per-phrase salts and PBKDF2-HMAC-SHA256, persisted through the encrypted local settings store. No arbitrary minimum passphrase length is enforced.
+- **Replay control:** each speech attempt requires a fresh four-word challenge; prior full recordings normally fail against the new challenge. The challenge is ephemeral and is not a credential.
+- **Token control:** Android production cannot use the synthetic-token factory. The coordinator checks a Keystore signature bound to proposal ID, approval ordinal, issue time, and nonce; each signature requires fresh owner authentication. The key accepts strong biometrics or device credential, matching Android's documented auth-per-use flow.
+- **Key material:** Android Keystore creates a non-exportable signing key on first owner approval; it is not a user passphrase and is never exported. The user remains the sole creator of both passphrases.
+- **Fail-closed behavior:** no on-device speech recognizer, denied microphone permission, phrase mismatch, malformed signature, expired token, wrong proposal, or wrong approval ordinal means no approval.
+- **Residual limitation (AUD-025):** speech-to-text is not speaker identification. A sophisticated attacker could synthesize or splice audio that matches the current challenge; that still does not authorize a mutation without the typed phrase and fresh device-authenticated signature. The workflow does not run device/emulator instrumentation tests, so actual microphone, biometric, and Keystore integration remains unverified.
+
+### Files re-reviewed for this remediation
+
+| File | Review record |
+|---|---|
+| `app/src/main/java/com/codingagent/ui/MainActivity.kt` | Setup and approval UX, on-device-only speech path, four-word challenge freshness, recognizer lifecycle, biometric CryptoObject flow; no transcript logging |
+| `app/src/main/java/com/codingagent/core/LocalStore.kt` | Secure-store integration; no phrase plaintext API |
+| `app/src/main/java/com/codingagent/core/OwnerApprovalPhraseStore.kt` | Salted phrase verifiers, typed case sensitivity, transcript/challenge matching, fail-closed storage errors |
+| `app/src/main/java/com/codingagent/workspace/OwnerApprovalKey.kt` | Auth-per-use Keystore signing and exact challenge binding |
+| `app/src/main/java/com/codingagent/workspace/OwnerApprovalToken.kt` | Signature validation, one-time consumption, expiry, proposal and step binding; synthetic tokens test-only |
+| `app/src/main/java/com/codingagent/workspace/MutationCoordinator.kt` | Coordinator checks the expected approval ordinal before accepting the capability |
+| `app/src/main/AndroidManifest.xml` | Runtime microphone permission and speech-recognition service visibility query |
+| `app/src/test/java/com/codingagent/core/OwnerApprovalPhraseStoreTest.kt` | Salted-storage, wrong phrase, typed case sensitivity, challenge suffix, and distinct phrase tests |
+| `app/src/test/java/com/codingagent/core/OwnerApprovalTokenTest.kt` | One-time, expiry, proposal binding, approval-step replay, and malformed-signature tests |
+
+### Official Android references checked
+
+- Speech recognizer availability, on-device factory, and required lifecycle cleanup: https://developer.android.com/reference/android/speech/SpeechRecognizer
+- Auth-per-use keys and `BiometricPrompt.CryptoObject`: https://developer.android.com/identity/sign-in/biometric-auth
+- Keystore authentication parameters and authentication-type flags: https://developer.android.com/reference/android/security/keystore/KeyGenParameterSpec.Builder

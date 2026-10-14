@@ -1038,9 +1038,9 @@ private fun CodingAgentApp(privateDir: File) {
                         Spacer(Modifier.height(8.dp))
                         Text(
                             if (ownerApprovalSetupMode)
-                                "You create both passphrases. They must be different. The app stores salted verifiers, not the phrases. Speech recognition runs on-device only; the displayed challenge words are temporary, not stored credentials."
+                                "You create both passphrases. They must be different. The app stores salted verifiers, not the phrases. Speech recognition runs on-device and checks words, not speaker identity; challenge words are temporary, not stored credentials."
                             else
-                                "Enter your typed passphrase and speak your separate spoken passphrase followed by the one-time challenge words. A fresh device-authenticated signature is also required for this exact proposal.",
+                                "Enter your typed passphrase and speak your separate spoken passphrase followed by the one-time challenge words. Speech recognition checks words, not speaker identity. A fresh device-authenticated signature is also required for this exact proposal.",
                             color = SoftGreen,
                             fontSize = 11.sp
                         )
