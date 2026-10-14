@@ -80,4 +80,19 @@ class KnowledgeIndexTest {
         assertFalse(File(root, "chunks.jsonl").exists())
         assertFalse(File(root, "documents.jsonl").exists())
     }
+
+    @Test
+    fun removingDocumentPreservesOtherIndexedDocuments() {
+        val root = Files.createTempDirectory("knowledge-remove").toFile()
+        val index = KnowledgeIndex(root)
+        index.indexText("Guide", "source", "The zebra guide contains enough searchable text to create a complete index chunk.")
+        index.indexText("Other", "source", "The orchid reference contains enough searchable text to create a complete index chunk.")
+
+        assertTrue(index.removeDocument("Guide"))
+
+        assertEquals(1, index.documentCount())
+        assertFalse(index.search("zebra").any { it.document == "Guide" })
+        assertTrue(index.search("orchid").any { it.document == "Other" })
+        assertFalse(index.removeDocument("Missing"))
+    }
 }
