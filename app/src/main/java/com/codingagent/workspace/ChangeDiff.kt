@@ -125,10 +125,11 @@ object ChangeDiff {
             }
         }.ifBlank { "The exact file changes are listed below." }
         val why =
-            "To carry out the request you gave the agent. This proposal did not include a separate, clear explanation of the reason." 
+            "To carry out the request you gave the agent. This proposal did not include a separate, clear explanation of the reason."
+        val requestedOutcome = request.trim().ifBlank { "the requested change" }
         return buildString {
             appendLine("What I want to do:")
-            appendLine("Make the requested change to the project.")
+            appendLine("Carry out this request: $requestedOutcome")
             appendLine()
             appendLine("Why:")
             appendLine(why)
