@@ -506,7 +506,7 @@ The project-wide static audit was complete for the prior 163-file snapshot. The 
 
 ## Current-main reconciliation — 2026-10-14
 
-- **Current main commit:** `f9f63d9a9bb90108cf9c37ffa38cdc9b3211a1e8` — [commit](https://github.com/thepotatoninjahost/Coding-Agent/commit/f9f63d9a9bb90108cf9c37ffa38cdc9b3211a1e8)
+- **Code snapshot audited:** `f9f63d9a9bb90108cf9c37ffa38cdc9b3211a1e8` — [commit](https://github.com/thepotatoninjahost/Coding-Agent/commit/f9f63d9a9bb90108cf9c37ffa38cdc9b3211a1e8). The subsequent change that reconciles this ledger is documentation-only; application code is unchanged.
 - **Current tree:** `d7cc65b2bb10b5fe3c78eaf62a1f23c3aad349b5`; recursive Git tree API returned 197 entries = 165 tracked files + 32 directories, not truncated.
 - **Exact-head CI:** [Android build run #38516802952 — success](https://github.com/thepotatoninjahost/Coding-Agent/actions/runs/38516802952). Unit tests, explicit acceptance-path tests, security baseline audit, lint, debug APK assembly, and release APK assembly passed.
 - **Reconciliation against prior 163-file audit register:** one previously inventoried asset path is no longer tracked (`app/src/main/assets/knowledge/coding-for-dummies.txt)); three approval-security files were missing from the register and are now added (`OwnerApprovalPhraseStore.kt`, `OwnerApprovalKey.kt`, and `OwnerApprovalPhraseStoreTest.kt`). Net current coverage is 165 tracked files. Existing approval-path changes in `MainActivity.kt`, `MutationCoordinator.kt`, and `OwnerApprovalToken.kt` were re-reviewed against current main.
