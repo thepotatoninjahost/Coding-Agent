@@ -7,6 +7,7 @@ import com.codingagent.research.DeepResearchProvider
 import com.codingagent.research.ResearchBriefBuilder
 import com.codingagent.research.ResearchMode
 import com.codingagent.research.ResearchModeDetector
+import com.codingagent.workspace.ChangeDiff
 import com.codingagent.workspace.MutationCoordinator
 import com.codingagent.workspace.MutationProposeResult
 import com.codingagent.workspace.ProjectFileService
@@ -117,6 +118,10 @@ class AgentToolDispatch(
 
     private fun replaceText(arguments: JSONObject): String {
         val path = arguments.getString("path")
+        val reason = arguments.optString("reason").trim()
+        if (!ChangeDiff.hasCompletePlainEnglishExplanation(reason)) {
+            return "ERROR: I cannot stage this change yet. Explain it in plain English under all six headings: What I want to do, Why, What will change, Possible effects, Risks, and What your approval means."
+        }
         return when (val result = mutations.propose(
             request = requestContext.ifBlank { "replace_text $path" },
             operations = listOf(
@@ -127,7 +132,7 @@ class AgentToolDispatch(
                     arguments.getString("newText")
                 )
             ),
-            reason = arguments.optString("reason", "Autonomous model proposal")
+            reason = reason
         )) {
             is MutationProposeResult.Proposed ->
                 "PROPOSAL_READY id=${result.proposal.id} path=$path " +
@@ -140,6 +145,10 @@ class AgentToolDispatch(
 
     private fun createFile(arguments: JSONObject): String {
         val path = arguments.getString("path")
+        val reason = arguments.optString("reason").trim()
+        if (!ChangeDiff.hasCompletePlainEnglishExplanation(reason)) {
+            return "ERROR: I cannot stage this change yet. Explain it in plain English under all six headings: What I want to do, Why, What will change, Possible effects, Risks, and What your approval means."
+        }
         return when (val result = mutations.propose(
             request = requestContext.ifBlank { "create_file $path" },
             operations = listOf(
@@ -149,7 +158,7 @@ class AgentToolDispatch(
                     text = arguments.getString("content")
                 )
             ),
-            reason = arguments.optString("reason", "Autonomous model proposal")
+            reason = reason
         )) {
             is MutationProposeResult.Proposed ->
                 "PROPOSAL_READY id=${result.proposal.id} path=$path " +
