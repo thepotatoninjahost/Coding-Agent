@@ -1,24 +1,18 @@
-# Tool queue (how multiple tools are handled)
+# Tool-call handling (current implementation)
 
-When the AI asks for several tools in one reply (for example: list files, read a file, search):
+The current model response type supports one tool call per model response. The agent executes that call, inspects the result, and then asks the model for the next step.
 
-1. **Run the first tool**
-2. **Put the rest in a line (queue)**
-3. **Run the next one after the first finishes**
-4. **Repeat until the line is empty**
-5. **Then ask the AI again** with all the results
+## Multiple tool calls in one response
 
-Nothing is skipped. Nothing runs at the same time. The app does **not** fail just because the AI asked for more than one tool.
+Multiple tool calls are **not currently queued**. The non-streaming response parser rejects responses containing multiple tool calls. The streaming parser currently assembles only the first indexed tool call. Do not rely on a provider returning several calls in one response.
 
-You will see phase messages like:
-- `QUEUE: Model asked for 3 tools. Running list_files first; 2 waiting in line: read_file, search_project`
-- `QUEUE: Running queued tool read_file (1 still waiting in line)`
+This behavior is covered by `ModelGatewayTest.multipleToolCallsAreRejectedRatherThanSilentlyDroppingCalls`. Support for multi-call queuing would require a deliberate implementation change in the model response types, streaming and non-streaming parsers, and agent execution loop, plus tests for ordering, partial failures, cancellation, and authorization.
 
-## Code
+## Source of truth
 
-This behavior is implemented in:
-- `ModelGateway.kt` — keeps every tool call; first now, rest in `queued`
-- `AutonomousAgent.kt` — `toolQueue` runs them one by one
-- `AgentRuntime.kt` — same queue
+- `app/src/main/java/com/codingagent/model/ModelTypes.kt` defines a single `ModelResponse.ToolCall`.
+- `app/src/main/java/com/codingagent/model/JsonModelResponseParser.kt` parses one tool call and rejects multiple calls.
+- `app/src/main/java/com/codingagent/model/RemoteHttpGateway.kt` parses streamed tool-call deltas.
+- `app/src/test/java/com/codingagent/core/ModelGatewayTest.kt` covers rejection of multiple non-streaming calls.
 
-Rebuild the app from the `Coding-Agent-queue-tools.zip` package (or the matching source) so this runs on your phone.
+This document describes the current source behavior; it does not promise functionality that has not been implemented and tested.
