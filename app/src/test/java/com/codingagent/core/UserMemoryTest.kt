@@ -4,6 +4,7 @@ import com.codingagent.agent.UserMemory
 import com.codingagent.agent.UserMemoryExtractor
 import com.codingagent.agent.UserMemoryIndex
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
