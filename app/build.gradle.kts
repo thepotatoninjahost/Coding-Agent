@@ -62,7 +62,7 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
     // Tink is retained only to decode the legacy EncryptedSharedPreferences format during migration.
     implementation("com.google.crypto.tink:tink-android:1.23.0")
-    implementation("com.squareup.okhttp3:okhttp-urlconnection:5.3.0")
+    implementation("com.squareup.okhttp3:okhttp:5.3.0")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")
     debugImplementation("androidx.compose.ui:ui-tooling")
