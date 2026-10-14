@@ -11,6 +11,15 @@ import javax.crypto.spec.PBEKeySpec
  * Only salted PBKDF2 verifiers are persisted; speech normalization is separate
  * so typed passphrases remain case-sensitive.
  */
+internal fun normalizeOwnerSpokenPhrase(value: String): String {
+    val cleaned = buildString {
+        value.trim().lowercase().forEach { character ->
+            append(if (character.isLetterOrDigit() || character.isWhitespace()) character else ' ')
+        }
+    }
+    return cleaned.trim().replace(Regex("\\s+"), " ")
+}
+
 internal class OwnerApprovalPhraseStore(
     private val readSecret: (String) -> String?,
     private val writeSecret: (String, String?) -> Unit
@@ -36,8 +45,15 @@ internal class OwnerApprovalPhraseStore(
 
     fun verifyTyped(input: String): Boolean = verify(TYPED_KEY, input.trim())
 
-    fun verifySpoken(recognizedPhrase: String): Boolean =
-        verify(SPOKEN_KEY, normalizeSpoken(recognizedPhrase))
+    fun verifySpoken(recognizedPhrase: String, challengeWord: String): Boolean {
+        val transcript = normalizeOwnerSpokenPhrase(recognizedPhrase)
+        val suffix = normalizeOwnerSpokenPhrase(challengeWord)
+        if (transcript.isBlank() || suffix.isBlank()) return false
+        val challengeSuffix = " " + suffix
+        if (!transcript.endsWith(challengeSuffix)) return false
+        val phraseOnly = transcript.removeSuffix(challengeSuffix).trim()
+        return verify(SPOKEN_KEY, phraseOnly)
+    }
 
     private fun verify(key: String, candidate: String): Boolean {
         if (candidate.isEmpty()) return false
@@ -69,8 +85,7 @@ internal class OwnerApprovalPhraseStore(
         }
     }
 
-    private fun normalizeSpoken(value: String): String =
-        value.trim().lowercase().replace(Regex("\\s+"), " ")
+    private fun normalizeSpoken(value: String): String = normalizeOwnerSpokenPhrase(value)
 
     private companion object {
         const val TYPED_KEY = "owner_approval_typed_phrase_v1"

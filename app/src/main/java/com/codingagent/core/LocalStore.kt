@@ -60,8 +60,8 @@ class LocalStore(context: Context) : ChatMessageStore {
     internal fun verifyOwnerTypedPhrase(phrase: String): Boolean =
         ownerApprovalPhrases.verifyTyped(phrase)
 
-    internal fun verifyOwnerSpokenPhrase(recognizedPhrase: String): Boolean =
-        ownerApprovalPhrases.verifySpoken(recognizedPhrase)
+    internal fun verifyOwnerSpokenPhrase(recognizedPhrase: String, challengeWord: String): Boolean =
+        ownerApprovalPhrases.verifySpoken(recognizedPhrase, challengeWord)
 
     companion object {
         private const val KEY_PROJECT_PATH = "project_path"

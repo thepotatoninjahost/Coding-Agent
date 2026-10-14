@@ -19,8 +19,9 @@ class OwnerApprovalPhraseStoreTest {
         assertTrue(store.verifyTyped("Typed-phrase-Blue"))
         assertFalse(store.verifyTyped("typed-phrase-blue"))
         assertFalse(store.verifyTyped("wrong"))
-        assertTrue(store.verifySpoken("Spoken Phrase Cedar"))
-        assertFalse(store.verifySpoken("spoken phrase maple"))
+        assertTrue(store.verifySpoken("Spoken Phrase Cedar, Maple.", "maple"))
+        assertFalse(store.verifySpoken("Spoken Phrase Cedar", "maple"))
+        assertFalse(store.verifySpoken("Spoken Phrase Cedar, Harbor.", "maple"))
         assertTrue(values.values.all { !it.orEmpty().contains("Typed-phrase-Blue") && !it.orEmpty().contains("spoken phrase cedar") })
         assertNotEquals(values.values.first(), values.values.last())
     }

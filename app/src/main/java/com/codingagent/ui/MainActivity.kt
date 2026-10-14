@@ -90,6 +90,7 @@ import com.codingagent.research.DurableDeepResearchProvider
 import com.codingagent.workspace.EditorDocument
 import com.codingagent.knowledge.KnowledgeBase
 import com.codingagent.core.LocalStore
+import com.codingagent.core.normalizeOwnerSpokenPhrase
 import com.codingagent.workspace.OwnerApprovalKey
 import com.codingagent.model.ModelBackend
 import com.codingagent.model.ModelDownloadProgress
@@ -109,6 +110,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.security.SecureRandom
 import com.codingagent.agent.AgentRuntimeResult
 import com.codingagent.model.ModelConnectionProbe
 import com.codingagent.model.ProbeResult
@@ -189,7 +191,8 @@ private fun CodingAgentApp(privateDir: File) {
     var ownerTypedPhraseConfirm by remember { mutableStateOf("") }
     var ownerSpokenPhrase by remember { mutableStateOf("") }
     var ownerSpeechVerified by remember { mutableStateOf(false) }
-    var ownerSpeechStatus by remember { mutableStateOf("Speak the owner-created spoken passphrase.") }
+    var ownerSpeechChallenge by remember { mutableStateOf(newOwnerSpeechChallenge()) }
+    var ownerSpeechStatus by remember { mutableStateOf("Speak your passphrase followed by the displayed one-time word.") }
     var ownerApprovalError by remember { mutableStateOf<String?>(null) }
     var speechPurpose by remember { mutableStateOf("approval") }
     var speechRecognizer by remember { mutableStateOf<SpeechRecognizer?>(null) }
@@ -403,7 +406,6 @@ private fun CodingAgentApp(privateDir: File) {
         ownerSpeechVerified = false
         ownerApprovalError = null
         speechRecognizer?.cancel()
-        speechRecognizer?.destroy()
         speechRecognizer = null
     }
 
@@ -416,7 +418,6 @@ private fun CodingAgentApp(privateDir: File) {
         }
         runCatching {
             speechRecognizer?.cancel()
-            speechRecognizer?.destroy()
             val recognizer = SpeechRecognizer.createOnDeviceSpeechRecognizer(context)
             speechRecognizer = recognizer
             recognizer.setRecognitionListener(object : RecognitionListener {
@@ -433,7 +434,7 @@ private fun CodingAgentApp(privateDir: File) {
                     ownerSpeechVerified = false
                     ownerSpeechStatus = "Speech recognition failed. Try again."
                     ownerApprovalError = "Spoken passphrase was not verified; approval remains blocked."
-                    speechRecognizer?.destroy()
+                    ownerSpeechChallenge = newOwnerSpeechChallenge(ownerSpeechChallenge)
                     speechRecognizer = null
                 }
                 override fun onResults(results: Bundle?) {
@@ -441,12 +442,13 @@ private fun CodingAgentApp(privateDir: File) {
                         ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                         ?.firstOrNull()
                         .orEmpty()
-                    val normalized = recognized.trim().lowercase().replace(Regex("\\s+"), " ")
+                    val normalized = normalizeOwnerSpokenPhrase(recognized)
+                    val expectedSetupTranscript = normalizeOwnerSpokenPhrase(ownerSpokenPhrase) +
+                        " " + normalizeOwnerSpokenPhrase(ownerSpeechChallenge)
                     val valid = if (speechPurpose == "setup") {
-                        normalized.isNotBlank() &&
-                            normalized == ownerSpokenPhrase.trim().lowercase().replace(Regex("\\s+"), " ")
+                        normalized.isNotBlank() && normalized == expectedSetupTranscript
                     } else {
-                        store.verifyOwnerSpokenPhrase(recognized)
+                        store.verifyOwnerSpokenPhrase(recognized, ownerSpeechChallenge)
                     }
                     ownerSpeechVerified = valid
                     ownerSpeechStatus = if (valid) {
@@ -455,7 +457,7 @@ private fun CodingAgentApp(privateDir: File) {
                         "Spoken passphrase did not match. Try again."
                     }
                     ownerApprovalError = if (valid) null else "Spoken passphrase was not verified; approval remains blocked."
-                    speechRecognizer?.destroy()
+                    if (!valid) ownerSpeechChallenge = newOwnerSpeechChallenge(ownerSpeechChallenge)
                     speechRecognizer = null
                 }
                 override fun onPartialResults(partialResults: Bundle?) {}
@@ -471,7 +473,7 @@ private fun CodingAgentApp(privateDir: File) {
             ownerSpeechVerified = false
             ownerSpeechStatus = "On-device speech recognition could not start."
             ownerApprovalError = "Speech recognition failed closed: ${error.message.orEmpty()}"
-            speechRecognizer?.destroy()
+            ownerSpeechChallenge = newOwnerSpeechChallenge(ownerSpeechChallenge)
             speechRecognizer = null
         }
     }
@@ -487,8 +489,17 @@ private fun CodingAgentApp(privateDir: File) {
         }
     }
 
+    DisposableEffect(speechRecognizer) {
+        val activeRecognizer = speechRecognizer
+        onDispose {
+            activeRecognizer?.cancel()
+            activeRecognizer?.destroy()
+        }
+    }
+
     fun requestSpeechCapture(purpose: String) {
         speechPurpose = purpose
+        if (ownerSpeechVerified) ownerSpeechChallenge = newOwnerSpeechChallenge(ownerSpeechChallenge)
         ownerSpeechVerified = false
         ownerApprovalError = null
         ownerSpeechStatus = "Preparing on-device speech recognition…"
@@ -681,10 +692,11 @@ private fun CodingAgentApp(privateDir: File) {
         ownerTypedPhraseConfirm = ""
         ownerSpokenPhrase = ""
         ownerSpeechVerified = false
+        ownerSpeechChallenge = newOwnerSpeechChallenge(ownerSpeechChallenge)
         ownerSpeechStatus = if (ownerApprovalSetupMode) {
-            "Create a spoken passphrase yourself, then speak it to verify enrollment."
+            "Create a spoken passphrase yourself, then speak it followed by the one-time word."
         } else {
-            "Speak your enrolled spoken passphrase."
+            "Speak your enrolled spoken passphrase followed by the one-time word."
         }
         ownerApprovalError = null
         showOwnerApprovalDialog = true
@@ -1024,7 +1036,7 @@ private fun CodingAgentApp(privateDir: File) {
                             if (ownerApprovalSetupMode)
                                 "You create both passphrases. They must be different. The app stores salted verifiers, not the phrases. Speech recognition runs on-device only."
                             else
-                                "Enter your typed passphrase and speak your separate spoken passphrase. A fresh device-authenticated signature is also required for this exact proposal.",
+                                "Enter your typed passphrase and speak your separate spoken passphrase followed by the one-time word. A fresh device-authenticated signature is also required for this exact proposal.",
                             color = SoftGreen,
                             fontSize = 11.sp
                         )
@@ -1033,6 +1045,11 @@ private fun CodingAgentApp(privateDir: File) {
                             value = ownerTypedPhrase,
                             onValueChange = {
                                 ownerTypedPhrase = it
+                                if (ownerSpeechVerified) {
+                                    ownerSpeechVerified = false
+                                    ownerSpeechChallenge = newOwnerSpeechChallenge(ownerSpeechChallenge)
+                                    ownerSpeechStatus = "Passphrase changed; speak the new challenge."
+                                }
                                 ownerApprovalError = null
                             },
                             modifier = Modifier.fillMaxWidth(),
@@ -1048,6 +1065,11 @@ private fun CodingAgentApp(privateDir: File) {
                                 value = ownerTypedPhraseConfirm,
                                 onValueChange = {
                                     ownerTypedPhraseConfirm = it
+                                    if (ownerSpeechVerified) {
+                                        ownerSpeechVerified = false
+                                        ownerSpeechChallenge = newOwnerSpeechChallenge(ownerSpeechChallenge)
+                                        ownerSpeechStatus = "Passphrase changed; speak the new challenge."
+                                    }
                                     ownerApprovalError = null
                                 },
                                 modifier = Modifier.fillMaxWidth(),
@@ -1062,8 +1084,9 @@ private fun CodingAgentApp(privateDir: File) {
                                 value = ownerSpokenPhrase,
                                 onValueChange = {
                                     ownerSpokenPhrase = it
+                                    if (ownerSpeechVerified) ownerSpeechChallenge = newOwnerSpeechChallenge(ownerSpeechChallenge)
                                     ownerSpeechVerified = false
-                                    ownerSpeechStatus = "Speak the spoken phrase to verify it."
+                                    ownerSpeechStatus = "Speak the spoken phrase followed by the one-time word."
                                     ownerApprovalError = null
                                 },
                                 modifier = Modifier.fillMaxWidth(),
@@ -1074,6 +1097,12 @@ private fun CodingAgentApp(privateDir: File) {
                                 colors = fieldColors()
                             )
                         }
+                        Text(
+                            "One-time word to speak after the passphrase: ${ownerSpeechChallenge.uppercase()}",
+                            color = FluoroOrange,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp
+                        )
                         Spacer(Modifier.height(8.dp))
                         Button(
                             onClick = { requestSpeechCapture(if (ownerApprovalSetupMode) "setup" else "approval") },
@@ -1239,4 +1268,20 @@ private fun CodingAgentApp(privateDir: File) {
             }
         }
     }
+}
+
+private val ownerSpeechChallengeRandom = SecureRandom()
+private val ownerSpeechChallengeWords = listOf(
+    "maple", "harbor", "silver", "copper", "meadow", "velvet", "planet", "window",
+    "garden", "rocket", "island", "pencil", "candle", "forest", "button", "bridge",
+    "rabbit", "sunset", "pocket", "basket", "thunder", "marble", "orange", "coffee",
+    "helmet", "tunnel", "winter", "market", "yellow", "camera", "pillow", "ocean"
+)
+
+private fun newOwnerSpeechChallenge(previous: String? = null): String {
+    var candidate: String
+    do {
+        candidate = ownerSpeechChallengeWords[ownerSpeechChallengeRandom.nextInt(ownerSpeechChallengeWords.size)]
+    } while (candidate == previous)
+    return candidate
 }
