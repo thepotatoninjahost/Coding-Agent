@@ -51,24 +51,7 @@ internal class DeviceUserMemoryStore(context: Context) : UserMemoryStore {
 
     private fun load(): List<UserMemory> {
         val raw = securePrefs.getString(KeystoreSecretStore.USER_MEMORY) ?: return emptyList()
-        return runCatching {
-            val array = JSONArray(raw)
-            buildList {
-                for (i in 0 until array.length()) {
-                    val item = array.getJSONObject(i)
-                    add(
-                        UserMemory(
-                            id = item.getString("id"),
-                            text = item.getString("text"),
-                            kind = UserMemory.Kind.valueOf(item.getString("kind")),
-                            importance = item.optInt("importance", 50).coerceIn(1, 99),
-                            createdAt = item.getLong("createdAt"),
-                            updatedAt = item.getLong("updatedAt")
-                        )
-                    )
-                }
-            }
-        }.getOrDefault(emptyList())
+        return UserMemoryJsonCodec.decode(raw)
     }
 
     private fun save(memories: List<UserMemory>) {
@@ -85,5 +68,35 @@ internal class DeviceUserMemoryStore(context: Context) : UserMemoryStore {
             )
         }
         securePrefs.putString(KeystoreSecretStore.USER_MEMORY, array.toString())
+    }
+}
+
+/**
+ * Parse the complete saved value or fail closed. Returning an empty list for corrupt data
+ * would let the next memory write replace the unreadable original and destroy recoverable data.
+ */
+internal object UserMemoryJsonCodec {
+    fun decode(raw: String): List<UserMemory> = try {
+        val array = JSONArray(raw)
+        buildList {
+            for (i in 0 until array.length()) {
+                val item = array.getJSONObject(i)
+                add(
+                    UserMemory(
+                        id = item.getString("id"),
+                        text = item.getString("text"),
+                        kind = UserMemory.Kind.valueOf(item.getString("kind")),
+                        importance = item.optInt("importance", 50).coerceIn(1, 99),
+                        createdAt = item.getLong("createdAt"),
+                        updatedAt = item.getLong("updatedAt")
+                    )
+                )
+            }
+        }
+    } catch (e: Exception) {
+        throw IllegalStateException(
+            "Saved user memories are unreadable; refusing to overwrite them.",
+            e
+        )
     }
 }
