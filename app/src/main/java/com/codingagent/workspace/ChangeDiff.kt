@@ -220,8 +220,8 @@ object ChangeDiff {
                 out += DiffLine(DiffLineKind.REMOVE, "-${clip(line)}", beforeLine = i + 1)
             }
             ChangeOperation.APPEND -> {
-                before.takeLast(3).forEachIndexed { i, line ->
-                    val n = before.size - 3 + i + 1
+                before.forEachIndexed { i, line ->
+                    val n = i + 1
                     out += DiffLine(DiffLineKind.CONTEXT, " ${clip(line)}", beforeLine = n.coerceAtLeast(1), afterLine = n.coerceAtLeast(1))
                 }
                 after.drop(before.size).forEachIndexed { i, line ->
