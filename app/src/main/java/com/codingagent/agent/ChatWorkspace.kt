@@ -155,7 +155,7 @@ class ChatWorkspace(
                     is AutonomousAgentEvent.Started -> progressListener?.onProgress("STARTED", event.request)
                     is AutonomousAgentEvent.Completed -> progressListener?.onProgress("DONE", "Completed")
                     is AutonomousAgentEvent.Failed -> progressListener?.onProgress("FAILED", event.message)
-                    is AutonomousAgentEvent.Stopped -> progressListener?.onProgress("STOPPED", event.message.take(120))
+                    is AutonomousAgentEvent.Stopped -> progressListener?.onProgress("STOPPED", event.message)
                     is AutonomousAgentEvent.ApprovalRequired -> progressListener?.onProgress("APPROVAL", "Waiting for owner approval")
                 }
             }
@@ -248,7 +248,7 @@ class ChatWorkspace(
             .asReversed()
             .filter { it.role == ChatRole.USER || it.role == ChatRole.AGENT }
             .takeLast(10)
-        val learned = memoryStore?.relevant(current, Int.MAX_VALUE).orEmpty()
+        val learned = memoryStore?.relevant(current, 6).orEmpty()
         if (prior.size <= 1 && job == null && learned.isEmpty()) return current
         return buildString {
             if (job != null && job.status != "applied") {
@@ -258,12 +258,16 @@ class ChatWorkspace(
             if (learned.isNotEmpty()) {
                 append("Relevant learned user memory. This is durable user context, not the system job description:\n")
                 learned.forEach { memory ->
-                    append("- ").append(memory.text).append('\n')
+                    append("- ").append(memory.text.take(500))
+                    if (memory.text.length > 500) {
+                        append(" [PREVIEW ONLY; retrieve the complete saved entry with read_user_memory or search_user_memory]")
+                    }
+                    append('\n')
                 }
-                append('\n')
+                append("The saved memories are preserved in full. These are context previews only; retrieve the complete entry whenever its exact wording matters.\n\n")
             }
             if (prior.size > 1) {
-                append("Conversation so far (oldest first). The last Current request is what to do now.\n")
+                append("Recent conversation excerpt (oldest first; only the 10 most recent messages are included here). The complete saved history remains available. Before relying on older conversation details, retrieve the relevant messages with read_chat_history or search_chat_history.\n")
                 for (msg in prior.dropLast(1)) {
                     val who = if (msg.role == ChatRole.USER) "OWNER" else "AGENT"
                     append(who).append(": ").append(msg.content).append('\n')
