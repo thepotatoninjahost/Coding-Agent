@@ -155,7 +155,7 @@ class ChatWorkspace(
                     is AutonomousAgentEvent.Started -> progressListener?.onProgress("STARTED", event.request)
                     is AutonomousAgentEvent.Completed -> progressListener?.onProgress("DONE", "Completed")
                     is AutonomousAgentEvent.Failed -> progressListener?.onProgress("FAILED", event.message)
-                    is AutonomousAgentEvent.Stopped -> progressListener?.onProgress("STOPPED", event.message.take(120))
+                    is AutonomousAgentEvent.Stopped -> progressListener?.onProgress("STOPPED", event.message)
                     is AutonomousAgentEvent.ApprovalRequired -> progressListener?.onProgress("APPROVAL", "Waiting for owner approval")
                 }
             }
