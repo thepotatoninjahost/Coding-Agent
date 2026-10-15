@@ -107,4 +107,17 @@ class KnowledgeIndexTest {
         assertTrue(index.search("orchid", 10).any { it.document == "Other" })
         assertFalse(index.removeDocument("Missing"))
     }
+
+    @Test
+    fun indexingPreservesShortFinalChunkInsteadOfDroppingContent() {
+        val root = Files.createTempDirectory("knowledge-short-final-chunk").toFile()
+        val index = KnowledgeIndex(root)
+        val source = (1..12).joinToString("\\n") { "Reference line $it contains enough text for indexing." } +
+            "\\nFINAL-KNOWLEDGE-SENTINEL"
+
+        index.indexText("Guide", "test-source", source)
+
+        val hits = index.search("FINAL-KNOWLEDGE-SENTINEL", 10)
+        assertTrue("short final chunk must remain searchable", hits.any { it.excerpt == "FINAL-KNOWLEDGE-SENTINEL" })
+    }
 }
