@@ -25,9 +25,6 @@ class ToolResultPagerTest {
         }
         assertTrue(pages > 1)
         assertEquals(original, rebuilt.toString())
-        assertEquals(original, com.codingagent.agent.LocalFileEvidence.readComplete(
-            "large.txt", com.codingagent.workspace.ProjectFileService(com.codingagent.workspace.ProjectWorkspace(root))
-        ))
     }
 
     @Test fun largeFileCanBeReadInOrderedChunksWithoutLoss() {
@@ -49,6 +46,9 @@ class ToolResultPagerTest {
         }
         assertTrue(pages > 1)
         assertEquals(original, rebuilt.toString())
+        assertEquals(original, com.codingagent.agent.LocalFileEvidence.readComplete(
+            "large.txt", com.codingagent.workspace.ProjectFileService(com.codingagent.workspace.ProjectWorkspace(root))
+        ))
     }
 
     @Test fun refusesToSkipUnseenParts() {
