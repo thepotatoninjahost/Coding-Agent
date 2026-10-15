@@ -312,7 +312,7 @@ class ChatWorkspace(
                         append(entry.optString("details")).append("\n\n")
                     }
                 }
-                append("Entries are shortened in this chat view when necessary; the stored JSONL records retain the full event payloads.")
+                append("Full event details are shown above; the original JSONL records remain stored.")
             }
         }
         val message = ChatMessage(role = ChatRole.AGENT, content = response)
