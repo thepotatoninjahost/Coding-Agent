@@ -14,6 +14,7 @@ import com.codingagent.agent.ChatMessage
 import com.codingagent.agent.ChatMessageStore
 import com.codingagent.agent.ChatRole
 import com.codingagent.agent.ChatWorkspace
+import com.codingagent.agent.DegenerateOutput
 import com.codingagent.agent.sanitizeTaskSummary
 import com.codingagent.agent.AgentRuntimeResult
 import com.codingagent.agent.UserMemory
@@ -23,6 +24,14 @@ import com.codingagent.workspace.KnowledgeHit
 import com.codingagent.workspace.OpenJobStore
 
 class ChatWorkspaceTest {
+    @Test
+    fun degenerateOutputDiagnosticPreservesTheCompleteRepeatedLine() {
+        val repeated = "REPEATED-LINE-START " + "diagnostic detail ".repeat(10) + "FINAL-DIAGNOSTIC-SENTINEL"
+        val output = DegenerateOutput.sanitize(List(5) { repeated }.joinToString("\n"))
+        assertTrue(output.contains(repeated))
+        assertTrue(output.contains("FINAL-DIAGNOSTIC-SENTINEL"))
+    }
+
     @Test
     fun ownerReviewSummaryIsNeverTruncated() {
         val review = "PROPOSED CHANGES — complete review\n" +
