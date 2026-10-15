@@ -72,6 +72,16 @@ class ProjectWorkspaceTest {
         assertEquals("err", result.stderr)
     }
 
+    @Test fun commandDiagnosticsPreserveStderrBeyondFourHundredCharacters() {
+        val root = Files.createTempDirectory("coding-agent-long-stderr").toFile()
+        val stderr = "x".repeat(600) + "FINAL-DIAGNOSTIC"
+        val report = ProjectWorkspace(root).runChecks(
+            listOf(listOf("sh", "-c", "printf '${stderr}' >&2; exit 1"))
+        )
+        assertFalse(report.passed)
+        assertTrue(report.issues.any { it.message.contains("FINAL-DIAGNOSTIC") })
+    }
+
     @Test fun verifyIgnoresScannerDocumentation() {
         val root = Files.createTempDirectory("coding-agent-docs").toFile()
         root.resolve("README.md").writeText("Always-on static verification (TODO/FIXME/stub scan)\n")
