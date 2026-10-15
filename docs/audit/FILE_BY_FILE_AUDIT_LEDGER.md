@@ -605,3 +605,11 @@ The project-wide static audit was complete for the prior 163-file snapshot. The 
 - **Security scope:** no credential policy or owner-approval behavior was changed.
 - **Official provider documentation checked:** OpenAI documents `finish_reason: length` as output stopping because a token limit was reached ([Chat Completions API reference](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create)); Google documents model-specific token counting and context limits ([Gemini token guide](https://ai.google.dev/gemini-api/docs/tokens)). These support detecting provider-reported limits, not assuming which provider or model the owner uses.
 
+## Information preservation audit follow-up — 2026-10-15
+
+- **Scope:** current-main follow-up to the historical baseline ledger; this entry does not rewrite the historical inventory above.
+- **File inspected:** `app/src/main/java/com/codingagent/knowledge/KnowledgeIndex.kt`.
+- **Finding:** the chunk builder discarded any normalized 12-line chunk shorter than 40 characters. That silently omitted valid content, including a short final section, from the searchable index.
+- **Fix under review:** PR #100 removes the per-chunk length filter and adds `KnowledgeIndexTest.indexingPreservesShortFinalChunkInsteadOfDroppingContent`.
+- **Verification status:** CI for the current PR head is pending; do not mark the finding verified or merge until the exact latest head passes.
+- **Classification:** silent content loss; not an intentional display preview or paged-result limit.
