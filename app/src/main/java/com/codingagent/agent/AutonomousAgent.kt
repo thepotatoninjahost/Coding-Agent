@@ -60,6 +60,10 @@ class AutonomousAgent(
         this.gateway = gateway
     }
 
+    fun setOwnerContextProvider(provider: () -> AgentOwnerContext) {
+        tools.setOwnerContextProvider(provider)
+    }
+
     fun setSystemPrompt(prompt: String?) {
         configuredSystemPrompt = prompt.orEmpty().trim()
             .ifBlank { AgentModelProtocol.DEFAULT_SYSTEM }

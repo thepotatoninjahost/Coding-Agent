@@ -29,11 +29,17 @@ class AgentToolDispatch(
 ) {
     @Volatile
     private var requestContext: String = ""
+    @Volatile
+    private var ownerContextProvider: () -> AgentOwnerContext = { AgentOwnerContext() }
     private val resultPager = ToolResultPager(maxOutputCharacters)
 
     fun setRequestContext(request: String) {
         requestContext = request.trim()
         resultPager.clear()
+    }
+
+    fun setOwnerContextProvider(provider: () -> AgentOwnerContext) {
+        ownerContextProvider = provider
     }
 
     fun execute(name: String, rawArguments: String): String {
@@ -48,6 +54,10 @@ class AgentToolDispatch(
                 "search_project" -> workspace.search(arguments.getString("query")).joinToString("\n") { "${it.path}:${it.line}: ${it.text}" }
                 "search_knowledge" -> knowledge.search(arguments.getString("query")).joinToString("\n") { "${it.document}/${it.section}: ${it.excerpt}" }
                 "research_web" -> researchWeb(arguments)
+                "read_chat_history" -> readChatHistory(arguments)
+                "search_chat_history" -> searchChatHistory(arguments)
+                "read_user_memory" -> readUserMemory(arguments)
+                "search_user_memory" -> searchUserMemory(arguments)
                 "replace_text" -> replaceText(arguments)
                 "create_file" -> createFile(arguments)
                 "run_command" -> runCommand(arguments)
@@ -62,6 +72,79 @@ class AgentToolDispatch(
             if (name == "read_file") result else resultPager.present(name, result)
         } catch (error: Exception) {
             "ERROR: ${error.message ?: error.javaClass.simpleName}"
+        }
+    }
+
+    private fun readChatHistory(arguments: JSONObject): String {
+        val history = ownerContextProvider().history
+        val start = arguments.optInt("offset", 0).coerceAtLeast(0)
+        val limit = arguments.optInt("limit", 10).coerceIn(1, 100)
+        val end = minOf(start + limit, history.size)
+        return buildString {
+            append("CHAT_HISTORY_TOTAL=").append(history.size).append('\n')
+            append("MESSAGES_START=").append(start).append('\n')
+            append("NEXT_OFFSET=").append(end).append('\n')
+            append("MORE_MESSAGES=").append(end < history.size).append('\n')
+            for (index in start until end) {
+                val message = history[index]
+                append("\nMESSAGE_INDEX=").append(index).append('\n')
+                append("ROLE=").append(message.role).append('\n')
+                append("CREATED_AT=").append(message.createdAt).append('\n')
+                append("TASK_ID=").append(message.taskId.orEmpty()).append('\n')
+                append("CONTENT_START\n").append(message.content).append("\nCONTENT_END\n")
+            }
+        }
+    }
+
+    private fun searchChatHistory(arguments: JSONObject): String {
+        val query = arguments.getString("query").trim()
+        require(query.isNotEmpty()) { "A conversation-history search phrase is required" }
+        val matches = ownerContextProvider().history.withIndex().filter { (_, message) ->
+            message.content.contains(query, ignoreCase = true)
+        }
+        return buildString {
+            append("CHAT_HISTORY_MATCHES=").append(matches.size).append('\n')
+            matches.forEach { (index, message) ->
+                append("\nMESSAGE_INDEX=").append(index).append(" ROLE=").append(message.role)
+                    .append(" CREATED_AT=").append(message.createdAt).append('\n')
+                append(message.content).append('\n')
+            }
+        }
+    }
+
+    private fun readUserMemory(arguments: JSONObject): String {
+        val memories = ownerContextProvider().memories
+        val start = arguments.optInt("offset", 0).coerceAtLeast(0)
+        val limit = arguments.optInt("limit", 20).coerceIn(1, 100)
+        val end = minOf(start + limit, memories.size)
+        return buildString {
+            append("SAVED_MEMORIES_TOTAL=").append(memories.size).append('\n')
+            append("MEMORIES_START=").append(start).append('\n')
+            append("NEXT_OFFSET=").append(end).append('\n')
+            append("MORE_MEMORIES=").append(end < memories.size).append('\n')
+            for (index in start until end) {
+                val memory = memories[index]
+                append("\nMEMORY_INDEX=").append(index).append('\n')
+                append("KIND=").append(memory.kind).append('\n')
+                append("IMPORTANCE=").append(memory.importance).append('\n')
+                append("CONTENT_START\n").append(memory.text).append("\nCONTENT_END\n")
+            }
+        }
+    }
+
+    private fun searchUserMemory(arguments: JSONObject): String {
+        val query = arguments.getString("query").trim()
+        require(query.isNotEmpty()) { "A saved-memory search phrase is required" }
+        val matches = ownerContextProvider().memories.withIndex().filter { (_, memory) ->
+            memory.text.contains(query, ignoreCase = true)
+        }
+        return buildString {
+            append("SAVED_MEMORY_MATCHES=").append(matches.size).append('\n')
+            matches.forEach { (index, memory) ->
+                append("\nMEMORY_INDEX=").append(index).append(" KIND=").append(memory.kind)
+                    .append(" IMPORTANCE=").append(memory.importance).append('\n')
+                append(memory.text).append('\n')
+            }
         }
     }
 

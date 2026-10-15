@@ -14,7 +14,8 @@ You investigate the real project, then work toward completing the owner's object
 4. Continue researching and working for as long as the objective requires. There is no arbitrary two-or-three-result stopping limit. Stop gathering when evidence is sufficient to act; stop work only when the goal is met, a real blocker exists, or owner input is required.
 5. Never mistake a partial tool result for a complete result. If MORE=true, call continue_result with the exact RESULT_ID and NEXT_START_CHARACTER until MORE=false. For read_file, continue with NEXT_START_CHARACTER until END_OF_FILE=true. Use pages instead of silently cutting content.
 5. For undocumented or experimental systems, inspect source and official documentation where available; form hypotheses, run controlled experiments, record observations, and distinguish facts from hypotheses. Prefer official documentation and tested reference implementations; apply only guidance compatible with the configured model/API and this app's security boundaries.
-6. Plan at the scale the task requires. A valid objective may need coordinated changes across many files, new tools, architectural work, or several experiments. Avoid unrelated changes, not ambitious work. Do not stop at a plan, a diagnosis, or a superficial edit. Continue through implementation, verification, and correction within the available turn budget.
+6. Older conversation history and saved memories remain stored even when not included in the initial context. Use read_chat_history/search_chat_history and read_user_memory/search_user_memory to retrieve relevant complete records before deciding.
+7. Plan at the scale the task requires. A valid objective may need coordinated changes across many files, new tools, architectural work, or several experiments. Avoid unrelated changes, not ambitious work. Do not stop at a plan, a diagnosis, or a superficial edit. Continue through implementation, verification, and correction within the available turn budget.
 7. Verify meaningful milestones before relying on them. After changes, run the strongest relevant checks available: targeted tests, broader tests, static checks, build/compile, and integration checks as appropriate. Know what each check does and does not prove.
 8. If a check fails, stop building on the unverified result. Inspect the failure, identify a cause, make a targeted correction or change approach, and rerun the relevant check. Preserve failed attempts and results in personal logs.
 9. Learn from outcomes. Reuse verified discoveries and prior lessons, and revise incorrect lessons when new evidence contradicts them.
@@ -76,6 +77,26 @@ list_files, read_file, search_project, search_knowledge, research_web, replace_t
             """{"type":"object","properties":{"resultId":{"type":"string"},"startCharacter":{"type":"integer"},"purpose":{"type":"string","description":"Why the next part is needed."}},"required":["resultId","startCharacter"]}"""
         ),
         ModelToolDefinition(
+            "read_chat_history",
+            "Read saved conversation messages in pages. Use offset and limit; older messages remain saved even if not included in the current prompt.",
+            """{"type":"object","properties":{"offset":{"type":"integer"},"limit":{"type":"integer"},"purpose":{"type":"string","description":"Why this history is relevant."}},"required":[]}"""
+        ),
+        ModelToolDefinition(
+            "search_chat_history",
+            "Search complete saved conversation messages for an exact phrase. Results may be split into parts; use continue_result until complete.",
+            """{"type":"object","properties":{"query":{"type":"string"},"purpose":{"type":"string","description":"Why this history search is relevant."}},"required":["query"]}"""
+        ),
+        ModelToolDefinition(
+            "read_user_memory",
+            "Read saved user memories in pages; do not assume the initially supplied memories are the complete set.",
+            """{"type":"object","properties":{"offset":{"type":"integer"},"limit":{"type":"integer"},"purpose":{"type":"string","description":"Why these memories are relevant."}},"required":[]}"""
+        ),
+        ModelToolDefinition(
+            "search_user_memory",
+            "Search complete saved user memories for an exact phrase. Results may be split into parts; use continue_result until complete.",
+            """{"type":"object","properties":{"query":{"type":"string"},"purpose":{"type":"string","description":"Why this memory search is relevant."}},"required":["query"]}"""
+        ),
+        ModelToolDefinition(
             "search_project",
             "Search project source for a case-insensitive literal string (maximum 256 characters). Returns matching lines with paths.",
             """{"type":"object","properties":{"query":{"type":"string","description":"Search query"},"purpose":{"type":"string","description":"Short evidence-based reason for this tool call."}},"required":["query"]}"""
@@ -116,9 +137,9 @@ list_files, read_file, search_project, search_knowledge, research_web, replace_t
         val all = tools().associateBy { it.name }
         val names = when (intent) {
             TaskIntent.INSPECT, TaskIntent.EXPLAIN, TaskIntent.UNKNOWN ->
-                listOf("list_files", "read_file", "continue_result", "search_project", "search_knowledge", "research_web", "run_command", "verify")
+                listOf("list_files", "read_file", "continue_result", "read_chat_history", "search_chat_history", "read_user_memory", "search_user_memory", "search_project", "search_knowledge", "research_web", "run_command", "verify")
             TaskIntent.CHANGE, TaskIntent.CREATE, TaskIntent.REFACTOR, TaskIntent.DEBUG ->
-                listOf("list_files", "read_file", "continue_result", "search_project", "search_knowledge", "research_web", "replace_text", "create_file", "verify", "run_command")
+                listOf("list_files", "read_file", "continue_result", "read_chat_history", "search_chat_history", "read_user_memory", "search_user_memory", "search_project", "search_knowledge", "research_web", "replace_text", "create_file", "verify", "run_command")
             TaskIntent.TEST ->
                 listOf("list_files", "read_file", "run_command", "verify", "search_project")
         }

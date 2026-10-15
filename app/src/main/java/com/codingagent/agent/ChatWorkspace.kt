@@ -129,6 +129,12 @@ class ChatWorkspace(
         val result = if (agent == null) {
             null
         } else {
+            agent.setOwnerContextProvider {
+                AgentOwnerContext(
+                    history = store.recentChatMessages(Int.MAX_VALUE).asReversed(),
+                    memories = memoryStore?.all().orEmpty()
+                )
+            }
             val events = agent.run(packaged) { event ->
                 when (event) {
                     is AutonomousAgentEvent.Phase -> {
@@ -238,11 +244,10 @@ class ChatWorkspace(
 
     private fun packageWithMemory(current: String): String {
         val job = OpenJobStore.loadBound()
-        val prior = store.recentChatMessages(Int.MAX_VALUE)
+        val prior = store.recentChatMessages(10)
             .asReversed()
             .filter { it.role == ChatRole.USER || it.role == ChatRole.AGENT }
-            .toList()
-        val learned = memoryStore?.relevant(current, Int.MAX_VALUE).orEmpty()
+        val learned = memoryStore?.relevant(current, 10).orEmpty()
         if (prior.size <= 1 && job == null && learned.isEmpty()) return current
         return buildString {
             if (job != null && job.status != "applied") {
@@ -263,6 +268,7 @@ class ChatWorkspace(
                     append(who).append(": ").append(msg.content).append('\n')
                 }
             }
+            append("Complete older conversation history and all saved memories remain preserved. Retrieve relevant older records with the history and memory tools before deciding.\n\n")
             append("Current request:\n")
             append(current)
         }
