@@ -135,7 +135,7 @@ class AutonomousAgent(
             experience.record(
                 task = task.request,
                 operation = task.status,
-                result = task.summary.take(2_000),
+                result = task.summary,
                 evidence = task.changes.joinToString(", ") { it.path },
                 passed = task.verification.passed
             )
@@ -660,7 +660,7 @@ class AutonomousAgent(
                 val content = runCatching { files.read(issue.path).content }.getOrNull()
                 if (content != null) {
                     append("\nFILE ").append(issue.path).append("\n")
-                    append(content.take(12_000)).append("\n")
+                    append(content).append("\n")
                 }
             }
         }
