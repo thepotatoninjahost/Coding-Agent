@@ -82,7 +82,7 @@ object DegenerateOutput {
 
     fun sanitize(text: String, fallbackPrefix: String = "Model output was degenerate"): String {
         val stripped = LogicReasoning.split(text).first.ifBlank { text }
-        if (!isDegenerate(stripped)) return stripped.take(2_000)
+        if (!isDegenerate(stripped)) return stripped
         val lines = stripped.lineSequence().map { it.trim() }.filter { it.isNotEmpty() }.toList()
         val top = lines.groupingBy { it }.eachCount().maxByOrNull { it.value }
         return if (top != null && top.value >= 5) {
