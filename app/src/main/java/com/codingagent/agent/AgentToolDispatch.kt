@@ -55,7 +55,7 @@ class AgentToolDispatch(
                 "list_files" -> listFiles(arguments)
                 "read_file" -> readFileChunk(arguments)
                 "search_project" -> workspace.search(arguments.getString("query")).joinToString("\n") { "${it.path}:${it.line}: ${it.text}" }
-                "search_knowledge" -> knowledge.search(arguments.getString("query")).joinToString("\n") { "${it.document}/${it.section}: ${it.excerpt}" }
+                "search_knowledge" -> knowledge.search(arguments.getString("query"), Int.MAX_VALUE).joinToString("\n") { "${it.document}/${it.section}: ${it.excerpt}" }
                 "research_web" -> researchWeb(arguments)
                 "read_chat_history" -> readChatHistory(arguments)
                 "search_chat_history" -> searchChatHistory(arguments)
