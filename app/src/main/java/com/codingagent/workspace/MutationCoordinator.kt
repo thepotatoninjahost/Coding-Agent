@@ -579,7 +579,7 @@ class MutationCoordinator(
         val timestamp = now()
         val proposal = PendingChangeProposal(
             id = UUID.randomUUID().toString(),
-            request = "Self-repair attempt $repairAttempt after failed change: ${rootRequest.take(180)}",
+            request = "Self-repair attempt $repairAttempt after failed change: ${rootRequest}",
             changeSet = changeSet,
             verification = verification,
             createdAt = timestamp,
