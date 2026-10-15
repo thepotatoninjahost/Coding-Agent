@@ -664,7 +664,7 @@ class AutonomousAgent(
             append("Failure diagnosis: ").append(diagnosis).append("\n")
             append("Current repository map:\n").append(repoMapSummary()).append("\n")
             workspace.verify().issues.forEach { issue ->
-                val content = runCatching { files.read(issue.path).content }.getOrNull()
+                val content = runCatching { LocalFileEvidence.readComplete(issue.path, files) }.getOrNull()
                 if (content != null) {
                     append("\nFILE ").append(issue.path).append("\n")
                     append(content).append("\n")
@@ -822,7 +822,7 @@ class AutonomousAgent(
 
     private fun buildLocalFileReport(nameOrPath: String): LocalFileReport? {
         val resolved = resolveProjectPath(nameOrPath) ?: return null
-        val content = runCatching { files.read(resolved).content }.getOrNull() ?: return null
+        val content = runCatching { LocalFileEvidence.readComplete(resolved, files) }.getOrNull() ?: return null
         val all = workspace.verify().issues
         val policy = all.filter { issue ->
             val ip = issue.path.replace('\\', '/')
