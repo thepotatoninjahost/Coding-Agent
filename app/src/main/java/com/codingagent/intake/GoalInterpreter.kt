@@ -33,7 +33,7 @@ class GoalInterpreter(private val root: File) {
         val confidence = score(intent, operation, paths, symbols, ambiguity)
         return GoalContract(
             request = normalized,
-            goal = effectiveRequest.take(500),
+            goal = effectiveRequest,
             intent = intent,
             targetPaths = paths,
             targetSymbols = symbols,
