@@ -325,7 +325,7 @@ class ToolCallOutcomeHandler(
                     val report = workspace.verify()
                     val summary = buildString {
                         append("File: ${path.trim().trimStart('/')}\n\u2500\u2500\u2500\n")
-                        append(toolResult.take(12_000))
+                        append(toolResult)
                         if (toolResult.length > 12_000) append("\n\u2026 (truncated)")
                     }
                     val task = AgentTask(
