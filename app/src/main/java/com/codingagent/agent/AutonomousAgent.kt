@@ -780,12 +780,12 @@ class AutonomousAgent(
         }
         val base = java.io.File(normalized).name
         val hits = workspace.sourcePaths().filter {
-            java.io.File(it.path).name.equals(base, ignoreCase = true)
+            java.io.File(it).name.equals(base, ignoreCase = true)
         }
         return when {
             hits.isEmpty() -> null
-            hits.size == 1 -> hits[0].path
-            else -> hits.minByOrNull { it.path.length }?.path
+            hits.size == 1 -> hits[0]
+            else -> hits.minByOrNull { it.length }
         }
     }
 
