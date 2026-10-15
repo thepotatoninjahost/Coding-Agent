@@ -258,10 +258,7 @@ class ChatWorkspace(
             if (learned.isNotEmpty()) {
                 append("Relevant learned user memory. This is durable user context, not the system job description:\n")
                 learned.forEach { memory ->
-                    append("- ").append(memory.text.take(500))
-                    if (memory.text.length > 500) {
-                        append(" [PREVIEW ONLY; retrieve the complete saved entry with read_user_memory or search_user_memory]")
-                    }
+                    append("- ").append(memory.text)
                     append('\n')
                 }
                 append("The saved memories are preserved in full. These are context previews only; retrieve the complete entry whenever its exact wording matters.\n\n")
