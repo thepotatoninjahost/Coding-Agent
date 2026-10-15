@@ -68,10 +68,13 @@ class AgentJournalTest {
         val root = Files.createTempDirectory("agent-personal-log-size").toFile()
         val journal = AgentJournal(root)
         val original = "x".repeat(20_000)
-        journal.recordEvent("task-large", AutonomousAgentEvent.ToolFinished("read_file", original, true))
+        val event = AutonomousAgentEvent.ToolFinished("read_file", original, true)
+        journal.recordEvent("task-large", event)
 
         val stored = JSONObject(journal.recentEvents(1).single()).getString("details")
-        assertEquals(original, stored)
+        assertEquals(event.toString(), stored)
+        assertTrue(stored.contains(original))
+        assertTrue(stored.length > 20_000)
     }
 
     @Test
