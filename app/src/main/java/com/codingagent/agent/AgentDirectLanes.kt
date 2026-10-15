@@ -139,8 +139,7 @@ class AgentDirectLanes(
         }
         val text = buildString {
             append("File: $resolved\n───\n")
-            append(content.take(12_000))
-            if (content.length > 12_000) append("\n… (truncated)")
+            append(content)
         }
         return AgentTask(
             taskId, request, "completed", plan, emptyList(), report,
