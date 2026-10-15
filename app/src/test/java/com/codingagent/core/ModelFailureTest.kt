@@ -38,6 +38,12 @@ class ModelFailureTest {
     }
 
     @Test
+    fun longUnclassifiedProviderErrorIsReturnedCompletely() {
+        val message = "provider failure " + "details ".repeat(100) + "FINAL-DIAGNOSTIC"
+        assertEquals(message, ModelFailure.humanize(message))
+    }
+
+    @Test
     fun waitSecondsDefaultsForCapacity() {
         assertEquals(12, ModelFailure.waitSeconds(nvidia503))
     }
