@@ -66,6 +66,12 @@ class ChatWorkspace(
         }
 
         val agent = runtimeProvider()
+        agent?.setOwnerContextProvider {
+            AgentOwnerContext(
+                history = store.recentChatMessages(Int.MAX_VALUE).asReversed(),
+                memories = memoryStore?.all().orEmpty()
+            )
+        }
         val approval = agent?.let { ChatApproval.tryApprove(it, trimmed) }
         if (approval != null) {
             progressListener?.onProgress("APPROVAL", approval.toString())
