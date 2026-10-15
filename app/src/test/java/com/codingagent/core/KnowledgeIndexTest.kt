@@ -18,8 +18,8 @@ class KnowledgeIndexTest {
         index.indexText("Long guide", "test-source", source)
 
         val hit = index.search("needle", 10).single()
-        assertEquals(source, hit.text)
-        assertTrue(hit.text.endsWith("FINAL-KNOWLEDGE-SENTINEL"))
+        assertEquals(source, hit.excerpt)
+        assertTrue(hit.excerpt.endsWith("FINAL-KNOWLEDGE-SENTINEL"))
     }
 
     @Test
