@@ -337,11 +337,14 @@ class AutonomousAgent(
 
         val transcript = mutableListOf<com.codingagent.model.ModelMessage>()
         val state = ToolTurnState()
-        state.lastEvidence = buildString {
+        val completeInitialEvidence = buildString {
             append(repoMapSummary())
             append("\nCall list_files or search_project before read_file. Do not invent paths.")
             append(researchEvidence)
         }
+        // Keep the full evidence available for ordered retrieval without forcing all of it
+        // into the first model request, whose token window depends on the configured model.
+        state.lastEvidence = tools.presentEvidence("initial repository and research evidence", completeInitialEvidence)
         var evidenceRefusals = 0
         var writeNowAnnounced = false
         val reviewJob = isWholeProjectReview(focus)

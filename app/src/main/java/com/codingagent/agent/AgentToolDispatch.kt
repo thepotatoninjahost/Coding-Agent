@@ -42,6 +42,9 @@ class AgentToolDispatch(
         ownerContextProvider = provider
     }
 
+    fun presentEvidence(label: String, completeEvidence: String): String =
+        resultPager.present(label, completeEvidence)
+
     fun execute(name: String, rawArguments: String): String {
         return try {
             val arguments = JSONObject(rawArguments)
