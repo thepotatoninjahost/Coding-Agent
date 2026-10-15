@@ -132,7 +132,7 @@ object AgentPrompt {
                 append("passed (static unfinished-work marker scan)")
             } else {
                 append("FAILED (").append(report.issues.size).append(" issue(s))")
-                report.issues.take(20).forEach { issue ->
+                report.issues.forEach { issue ->
                     append("\n- ").append(issue.path).append(":").append(issue.line).append(" — ").append(issue.message)
                 }
             }
