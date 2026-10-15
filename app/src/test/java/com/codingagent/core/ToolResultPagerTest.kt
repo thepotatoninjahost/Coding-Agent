@@ -19,8 +19,8 @@ class ToolResultPagerTest {
             assertTrue(start >= 0 && end > start)
             rebuilt.append(page.substring(start + "CONTENT_START\n".length, end))
             if (Regex("MORE=false").containsMatchIn(page)) break
-            val id = Regex("RESULT_ID=([^\n]+)").find(page)!!.groupValues[1]
-            val offset = Regex("NEXT_START_CHARACTER=(\d+)").find(page)!!.groupValues[1].toInt()
+            val id = page.lineSequence().first { it.startsWith("RESULT_ID=") }.substringAfter("=")
+            val offset = page.lineSequence().first { it.startsWith("NEXT_START_CHARACTER=") }.substringAfter("=").toInt()
             page = pager.continueResult(id, offset)
         }
         assertTrue(pages > 1)
@@ -30,7 +30,7 @@ class ToolResultPagerTest {
     @Test fun refusesToSkipUnseenParts() {
         val pager = ToolResultPager(4)
         val first = pager.present("test", "abcdefgh")
-        val id = Regex("RESULT_ID=([^\n]+)").find(first)!!.groupValues[1]
+        val id = first.lineSequence().first { it.startsWith("RESULT_ID=") }.substringAfter("=")
         assertTrue(pager.continueResult(id, 5).startsWith("ERROR: This result must be read in order."))
     }
 }
