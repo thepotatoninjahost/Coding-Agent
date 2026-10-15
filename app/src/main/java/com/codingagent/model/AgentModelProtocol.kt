@@ -69,7 +69,7 @@ list_files, read_file, search_project, search_knowledge, research_web, replace_t
         ModelToolDefinition(
             "read_file",
             "Read the full content of one project file. Required before analyzing or modifying any named file.",
-            """{"type":"object","properties":{"path":{"type":"string","description":"Project-relative file path"},"purpose":{"type":"string","description":"Short evidence-based reason for this tool call."}},"required":["path"]}"""
+            """{"type":"object","properties":{"path":{"type":"string","description":"Project-relative file path"},"startCharacter":{"type":"integer","description":"Zero-based character offset for the next part; omit to start at the beginning."},"maxCharacters":{"type":"integer","description":"Maximum characters for this part; omit for the configured page size."},"purpose":{"type":"string","description":"Short evidence-based reason for this tool call."}},"required":["path"]}"""
         ),
         ModelToolDefinition(
             "continue_result",
