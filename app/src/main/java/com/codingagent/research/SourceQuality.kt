@@ -116,7 +116,7 @@ object SourceQuality {
     fun contentRelevant(terms: Set<String>, title: String, content: String): Boolean {
         if (terms.isEmpty()) return false
         if (wikiNoise.matcher(content.take(800)).find()) return false
-        val hay = "$title ${content.take(4_000)}".lowercase()
+        val hay = "$title ${content}".lowercase()
         val hits = terms.count { hay.contains(it) }
         if (isUiQuery(terms)) {
             val hasUiSignal = uiSignals.any { hay.contains(it) } ||
