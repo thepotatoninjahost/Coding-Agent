@@ -210,7 +210,7 @@ object ModelConnectionProbe {
                     if (content.isEmpty()) {
                         ProbeResult.Failed("Model returned no usable message content")
                     } else {
-                        ProbeResult.Ok("Reached model (${content.take(80)})")
+                        ProbeResult.Ok("Reached model (${content})")
                     }
                 }
                 is ModelResponse.ToolCall -> ProbeResult.Ok("Reached model (tool call path)")
