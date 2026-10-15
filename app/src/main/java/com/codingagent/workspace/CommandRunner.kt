@@ -120,23 +120,15 @@ class CommandRunner(private val directory: File) {
 
     private fun readLimited(input: java.io.InputStream, output: StringBuilder, onChunk: ((String) -> Unit)? = null) {
         val buffer = CharArray(8 * 1024)
-        var delivered = 0
         input.reader(Charsets.UTF_8).use { reader ->
             while (true) {
                 val count = reader.read(buffer)
                 if (count < 0) break
-                val remaining = 256 * 1024 - delivered
-                if (remaining <= 0) continue
-                val chunk = String(buffer, 0, minOf(count, remaining))
-                appendLimited(output, chunk)
+                val chunk = String(buffer, 0, count)
+                output.append(chunk)
                 onChunk?.invoke(chunk)
-                delivered += chunk.length
             }
         }
     }
 
-    private fun appendLimited(output: StringBuilder, value: String) {
-        if (output.length >= 256 * 1024) return
-        output.append(value.take(256 * 1024 - output.length))
-    }
 }
