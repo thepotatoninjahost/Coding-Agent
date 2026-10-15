@@ -66,12 +66,6 @@ class ChatWorkspace(
         }
 
         val agent = runtimeProvider()
-        agent?.setOwnerContextProvider {
-            AgentOwnerContext(
-                history = store.recentChatMessages(Int.MAX_VALUE).asReversed(),
-                memories = memoryStore?.all().orEmpty()
-            )
-        }
         val approval = agent?.let { ChatApproval.tryApprove(it, trimmed) }
         if (approval != null) {
             progressListener?.onProgress("APPROVAL", approval.toString())
@@ -135,12 +129,6 @@ class ChatWorkspace(
         val result = if (agent == null) {
             null
         } else {
-            agent.setOwnerContextProvider {
-                AgentOwnerContext(
-                    history = store.recentChatMessages(Int.MAX_VALUE).asReversed(),
-                    memories = memoryStore?.all().orEmpty()
-                )
-            }
             val events = agent.run(packaged) { event ->
                 when (event) {
                     is AutonomousAgentEvent.Phase -> {
@@ -161,7 +149,7 @@ class ChatWorkspace(
                     is AutonomousAgentEvent.Started -> progressListener?.onProgress("STARTED", event.request)
                     is AutonomousAgentEvent.Completed -> progressListener?.onProgress("DONE", "Completed")
                     is AutonomousAgentEvent.Failed -> progressListener?.onProgress("FAILED", event.message)
-                    is AutonomousAgentEvent.Stopped -> progressListener?.onProgress("STOPPED", event.message)
+                    is AutonomousAgentEvent.Stopped -> progressListener?.onProgress("STOPPED", event.message.take(120))
                     is AutonomousAgentEvent.ApprovalRequired -> progressListener?.onProgress("APPROVAL", "Waiting for owner approval")
                 }
             }
@@ -250,10 +238,11 @@ class ChatWorkspace(
 
     private fun packageWithMemory(current: String): String {
         val job = OpenJobStore.loadBound()
-        val prior = store.recentChatMessages(10)
+        val prior = store.recentChatMessages(Int.MAX_VALUE)
             .asReversed()
             .filter { it.role == ChatRole.USER || it.role == ChatRole.AGENT }
-        val learned = memoryStore?.relevant(current, 10).orEmpty()
+            .takeLast(10)
+        val learned = memoryStore?.relevant(current, Int.MAX_VALUE).orEmpty()
         if (prior.size <= 1 && job == null && learned.isEmpty()) return current
         return buildString {
             if (job != null && job.status != "applied") {
@@ -274,7 +263,6 @@ class ChatWorkspace(
                     append(who).append(": ").append(msg.content).append('\n')
                 }
             }
-            append("Complete older conversation history and all saved memories remain preserved. Retrieve relevant older records with the history and memory tools before deciding.\n\n")
             append("Current request:\n")
             append(current)
         }
@@ -312,7 +300,7 @@ class ChatWorkspace(
                         append(entry.optString("details")).append("\n\n")
                     }
                 }
-                append("Full event details are shown above; the original JSONL records remain stored.")
+                append("Entries are shortened in this chat view when necessary; the stored JSONL records retain the full event payloads.")
             }
         }
         val message = ChatMessage(role = ChatRole.AGENT, content = response)
