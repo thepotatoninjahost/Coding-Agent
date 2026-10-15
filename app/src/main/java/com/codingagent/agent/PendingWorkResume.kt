@@ -106,7 +106,7 @@ object PendingWorkResume {
                     changes = emptyList(),
                     verification = VerificationReport(false, emptyList()),
                     events = emptyList(),
-                    summary = recentAgentText.take(400) +
+                    summary = recentAgentText +
                         "\nNot calling the model again yet — wait for the rate-limit window, then send the original task (not just \"continue\")."
                 )
             )
