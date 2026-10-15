@@ -225,8 +225,7 @@ class KnowledgeIndex(private val root: File) : KnowledgeProvider {
             val cleaned = page.lines().map { it.trim() }.filter { it.isNotBlank() }
             cleaned.chunked(12).mapIndexedNotNull { chunkIndex, lines ->
                 val value = lines.joinToString(" ").replace(Regex("\\s+"), " ").trim()
-                if (value.length < 40) null
-                else KnowledgeChunk(
+                KnowledgeChunk(
                     document,
                     "page " + (pageIndex + 1) + ", section " + (chunkIndex + 1),
                     value,
