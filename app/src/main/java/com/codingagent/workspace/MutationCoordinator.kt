@@ -96,7 +96,8 @@ class MutationCoordinator(
             )
         }
 
-        val changeSet = runCatching { workspace.preview(operations, reason) }
+        val reviewReason = ChangeDiff.ensurePlainEnglishExplanation(request, reason, operations)
+        val changeSet = runCatching { workspace.preview(operations, reviewReason) }
             .getOrElse { ex ->
                 return MutationProposeResult.Rejected(
                     "Preview failed: ${ex.message.orEmpty().ifBlank { ex.javaClass.simpleName }}"

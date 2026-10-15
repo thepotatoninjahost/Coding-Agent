@@ -404,31 +404,24 @@ class ChatWorkspace(
         append(summary)
     }
 
-    private fun sanitizeSummary(text: String): String {
-        if (text.isBlank()) return "(empty)"
-        val head = text.trimStart()
-        if (head.startsWith("Project files:") ||
-            head.startsWith("Source files:") ||
-            head.startsWith("Indexed source files") ||
-            head.startsWith("Directory listing:") ||
-            head.startsWith("File:") ||
-            head.startsWith("Hello.") ||
-            head.startsWith("Status report") ||
-            head.startsWith("APPLIED") ||
-            head.startsWith("PROPOSED CHANGES") ||
-            head.startsWith("OPEN JOB") ||
-            head.startsWith("Open job is still")
-        ) {
-            return text.take(12_000)
-        }
-        if (text.contains("<tool_call", ignoreCase = true) || text.contains("<function=", ignoreCase = true)) {
-            return "The model printed a raw tool call instead of a review. That is not an answer."
-        }
-        if (DegenerateOutput.isDegenerate(text)) {
-            return DegenerateOutput.sanitize(text)
-        }
-        return text.take(12_000)
+    private fun sanitizeSummary(text: String): String = sanitizeTaskSummary(text)
+
+}
+
+/**
+ * Preserve complete summaries. In particular, owner change reviews are authorization
+ * evidence and must never be clipped before approval. UI rendering must provide access
+ * to the complete text rather than silently substituting a shortened version.
+ */
+internal fun sanitizeTaskSummary(text: String): String {
+    if (text.isBlank()) return "(empty)"
+    if (text.contains("<tool_call", ignoreCase = true) || text.contains("<function=", ignoreCase = true)) {
+        return "The model printed a raw tool call instead of a review. That is not an answer."
     }
+    if (DegenerateOutput.isDegenerate(text)) {
+        return DegenerateOutput.sanitize(text)
+    }
+    return text
 }
 
 data class ChatTurn(

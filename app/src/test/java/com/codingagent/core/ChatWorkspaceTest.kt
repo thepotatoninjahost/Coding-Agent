@@ -14,6 +14,7 @@ import com.codingagent.agent.ChatMessage
 import com.codingagent.agent.ChatMessageStore
 import com.codingagent.agent.ChatRole
 import com.codingagent.agent.ChatWorkspace
+import com.codingagent.agent.sanitizeTaskSummary
 import com.codingagent.agent.AgentRuntimeResult
 import com.codingagent.agent.UserMemory
 import com.codingagent.agent.UserMemoryStore
@@ -22,6 +23,31 @@ import com.codingagent.workspace.KnowledgeHit
 import com.codingagent.workspace.OpenJobStore
 
 class ChatWorkspaceTest {
+    @Test
+    fun ownerReviewSummaryIsNeverTruncated() {
+        val review = "PROPOSED CHANGES — complete review\n" +
+            "x".repeat(16_000) +
+            "\nEND OF COMPLETE PROPOSAL REVIEW."
+
+        val sanitized = sanitizeTaskSummary(review)
+
+        assertEquals(review, sanitized)
+        assertTrue(sanitized.contains("END OF COMPLETE PROPOSAL REVIEW."))
+    }
+
+    @Test
+    fun ordinaryLongSummaryIsPreservedInFull() {
+        val output = (0..400).joinToString("\n") { index ->
+            "ordinary output segment $index: distinct content for full-output verification."
+        }
+
+        val sanitized = sanitizeTaskSummary(output)
+
+        assertEquals(output.length, sanitized.length)
+        assertEquals(output, sanitized)
+        assertTrue(sanitized.endsWith("ordinary output segment 400: distinct content for full-output verification."))
+    }
+
     private val emptyKnowledge = object : AgentKnowledge {
         override fun search(query: String, limit: Int): List<KnowledgeHit> = emptyList()
     }
