@@ -80,10 +80,17 @@ class CommandRunner(private val directory: File) {
             if (!completed && cancellationGeneration.get() == runGeneration && !process.isAlive) {
                 completed = true
             }
-            if (!completed) terminate(process)
+            if (!completed) {
+                terminate(process)
+                // A child process may inherit the shell's pipe handles and keep readers
+                // blocked after the shell itself has exited. Close our read ends so timeout
+                // and cancellation return promptly without dropping already captured text.
+                runCatching { process.inputStream.close() }
+                runCatching { process.errorStream.close() }
+            }
 
-            outThread.join(2_000)
-            errThread.join(2_000)
+            outThread.join(1_000)
+            errThread.join(1_000)
 
             val cancelled = !completed && cancellationGeneration.get() != runGeneration
             val timedOut = !completed && !cancelled
@@ -114,7 +121,7 @@ class CommandRunner(private val directory: File) {
     private fun terminate(process: Process) {
         runCatching {
             process.destroy()
-            if (!process.waitFor(2, TimeUnit.SECONDS)) process.destroyForcibly()
+            if (!process.waitFor(250, TimeUnit.MILLISECONDS)) process.destroyForcibly()
         }
     }
 
