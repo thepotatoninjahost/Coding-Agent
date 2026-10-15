@@ -63,6 +63,7 @@ class ProjectIndexer {
         }
         .map { ProjectPaths.relative(root, it) }
         .sorted()
+        .toList()
 
     fun search(root: File, query: String): List<SearchHit> {
         val normalized = query.trim()
