@@ -39,10 +39,10 @@ class AgentToolDispatch(
             val arguments = JSONObject(rawArguments)
             when (name) {
                 "list_files" -> listFiles(arguments)
-                "read_file" -> files.read(arguments.getString("path")).content.take(maxOutputCharacters)
+                "read_file" -> files.read(arguments.getString("path")).content
                 "search_project" -> workspace.search(arguments.getString("query"))
                     .joinToString("\n") { hit -> "${hit.path}:${hit.line}: ${hit.text}" }
-                    .take(maxOutputCharacters)
+                    
                 "search_knowledge" -> knowledge.search(arguments.getString("query"))
                     .joinToString("\n") { hit -> "${hit.document}/${hit.section}: ${hit.excerpt}" }
                     .take(maxOutputCharacters)

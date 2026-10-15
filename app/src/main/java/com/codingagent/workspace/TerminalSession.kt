@@ -22,7 +22,7 @@ class TerminalSession(
     fun workingDirectory(): File = root
     fun timeoutSeconds(): Long = timeoutSeconds
     fun isBusy(): Boolean = runner.isRunning()
-    fun history(limit: Int = 50): List<TerminalEntry> = entries.takeLast(limit)
+    fun history(limit: Int = Int.MAX_VALUE): List<TerminalEntry> = entries.takeLast(limit.coerceAtLeast(0))
     fun clearHistory() { entries.clear() }
 
     fun execute(

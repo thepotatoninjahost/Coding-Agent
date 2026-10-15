@@ -241,7 +241,7 @@ class ChatWorkspace(
         val prior = store.recentChatMessages(16)
             .asReversed()
             .filter { it.role == ChatRole.USER || it.role == ChatRole.AGENT }
-            .takeLast(10)
+            .toList()
         val learned = memoryStore?.relevant(current, 6).orEmpty()
         if (prior.size <= 1 && job == null && learned.isEmpty()) return current
         return buildString {
@@ -252,7 +252,7 @@ class ChatWorkspace(
             if (learned.isNotEmpty()) {
                 append("Relevant learned user memory. This is durable user context, not the system job description:\n")
                 learned.forEach { memory ->
-                    append("- ").append(memory.text.take(500)).append('\n')
+                    append("- ").append(memory.text).append('\n')
                 }
                 append('\n')
             }
@@ -260,7 +260,7 @@ class ChatWorkspace(
                 append("Conversation so far (oldest first). The last Current request is what to do now.\n")
                 for (msg in prior.dropLast(1)) {
                     val who = if (msg.role == ChatRole.USER) "OWNER" else "AGENT"
-                    append(who).append(": ").append(msg.content.take(700)).append('\n')
+                    append(who).append(": ").append(msg.content).append('\n')
                 }
             }
             append("Current request:\n")
@@ -290,14 +290,14 @@ class ChatWorkspace(
                 entries.forEach { line ->
                     val entry = runCatching { org.json.JSONObject(line) }.getOrNull()
                     if (entry == null) {
-                        append(line.take(1_000)).append('\n')
+                        append(line).append('\n')
                     } else {
                         val timestamp = runCatching {
                             java.time.Instant.ofEpochMilli(entry.optLong("timestamp")).toString()
                         }.getOrDefault("unknown time")
                         append('[').append(timestamp).append("] ")
                             .append(entry.optString("type", "Event")).append('\n')
-                        append(entry.optString("details").take(1_500)).append("\n\n")
+                        append(entry.optString("details")).append("\n\n")
                     }
                 }
                 append("Entries are shortened in this chat view when necessary; the stored JSONL records retain the full event payloads.")
@@ -330,7 +330,7 @@ class ChatWorkspace(
                 } else {
                     buildString {
                         append("Saved user preferences:\n")
-                        memories.take(20).forEach { append("- ").append(it.text).append('\n') }
+                        memories.forEach { append("- ").append(it.text).append('\n') }
                     }.trimEnd()
                 }
             }
@@ -350,7 +350,7 @@ class ChatWorkspace(
     private fun formatTask(task: AgentTask, workLog: List<String> = emptyList()): String = buildString {
         if (workLog.isNotEmpty()) {
             append("Work:\n")
-            workLog.distinct().take(16).forEach { line ->
+            workLog.distinct().forEach { line ->
                 append("- ")
                 append(line)
                 append('\n')
