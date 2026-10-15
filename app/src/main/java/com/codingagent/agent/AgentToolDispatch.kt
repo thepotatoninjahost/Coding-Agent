@@ -45,7 +45,7 @@ class AgentToolDispatch(
                     
                 "search_knowledge" -> knowledge.search(arguments.getString("query"))
                     .joinToString("\n") { hit -> "${hit.document}/${hit.section}: ${hit.excerpt}" }
-                    .take(maxOutputCharacters)
+                    
                 "research_web" -> researchWeb(arguments)
                 "replace_text" -> replaceText(arguments)
                 "create_file" -> createFile(arguments)
@@ -55,7 +55,7 @@ class AgentToolDispatch(
                     val issues = report.issues.joinToString("\n") { issue ->
                         "${issue.path}:${issue.line}: ${issue.message}"
                     }
-                    "passed=${report.passed}\n$issues".take(maxOutputCharacters)
+                    "passed=${report.passed}\n$issues"
                 }
                 "approve_change" -> ownerOnlyMutationControl("approve_change")
                 "reject_change" -> ownerOnlyMutationControl("reject_change")
@@ -78,7 +78,7 @@ class AgentToolDispatch(
             files.list(pathArg)
         }
         val result = if (listed.isEmpty()) "(no files)" else listed.joinToString("\n")
-        return result.take(maxOutputCharacters)
+        return result
     }
 
     private fun researchWeb(arguments: JSONObject): String {
@@ -111,7 +111,7 @@ class AgentToolDispatch(
                     "Learned ${brief.sourceCount} distinct full sources across ${brief.laneCount} lanes, " +
                         "${brief.wordCount} words, ${brief.codeExampleCount} code examples.\n" +
                         "Progress: $progressLine\n"
-                (header + brief.evidence).take(maxOutputCharacters)
+                (header + brief.evidence)
             }
         }
     }
@@ -176,7 +176,7 @@ class AgentToolDispatch(
         }
         val entry = terminal.execute(command)
         return "exit=${entry.exitCode} timeout=${entry.timedOut}\n${entry.stdout}\n${entry.stderr}"
-            .take(maxOutputCharacters)
+            
     }
 
     private fun ownerOnlyMutationControl(name: String): String =
