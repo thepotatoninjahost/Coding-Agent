@@ -107,7 +107,7 @@ class AgentDirectLanes(
             append("\n- Static verification: ")
             append(if (report.passed) "passed (0 unfinished-work markers)" else "FAILED (${report.issues.size} issue(s))")
             if (report.issues.isNotEmpty()) {
-                report.issues.take(15).forEach { issue ->
+                report.issues.forEach { issue ->
                     append("\n  - ${issue.path}:${issue.line} — ${issue.message}")
                 }
             }
