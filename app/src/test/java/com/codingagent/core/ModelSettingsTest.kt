@@ -12,7 +12,6 @@ import com.codingagent.model.ModelRequest
 import com.codingagent.model.ModelResponse
 import com.codingagent.model.ModelSettings
 import com.codingagent.model.ProbeResult
-import com.codingagent.model.MAX_SYSTEM_PROMPT_CHARS
 
 class ModelSettingsTest {
     @Test
@@ -131,9 +130,10 @@ class ModelSettingsTest {
     }
 
     @Test
-    fun customSystemInstructionsAreBounded() {
-        val normalized = ModelSettings(systemPrompt = "x".repeat(MAX_SYSTEM_PROMPT_CHARS + 1)).normalized()
-        assertEquals(MAX_SYSTEM_PROMPT_CHARS, normalized.systemPrompt.length)
+    fun customSystemInstructionsArePreservedInFull() {
+        val original = "owner instruction ".repeat(2_000)
+        val normalized = ModelSettings(systemPrompt = original).normalized()
+        assertEquals(original.trim(), normalized.systemPrompt)
     }
 
 
