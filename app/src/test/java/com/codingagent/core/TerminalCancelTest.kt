@@ -17,13 +17,13 @@ import com.codingagent.workspace.TerminalSession
 class TerminalCancelTest {
 
     @Test
-    fun streamedOutputCallbackStopsAtTheCaptureLimit() {
+    fun terminalOutputBeyondFormerCaptureLimitIsPreserved() {
         val root = Files.createTempDirectory("terminal-output-cap").toFile()
         val workspace = ProjectWorkspace(root)
         val seen = StringBuilder()
         val entry = workspace.terminal().execute("yes x | head -c 400000", onStdout = { seen.append(it) }, timeoutSeconds = 10)
-        assertTrue(entry.stdout.length <= 256 * 1024)
-        assertTrue(seen.length <= 256 * 1024)
+        assertEquals(400_000, entry.stdout.length)
+        assertEquals(400_000, seen.length)
     }
 
     @Test
