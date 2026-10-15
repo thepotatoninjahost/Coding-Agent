@@ -54,7 +54,7 @@ class UserMemoryTest {
     }
 
     @Test
-    fun memoryIndexConsolidatesRelatedUpdatesAndCapsGrowth() {
+    fun memoryIndexConsolidatesRelatedUpdatesWithoutDiscardingOlderMemories() {
         val index = UserMemoryIndex(maxEntries = 2)
         var memories = emptyList<UserMemory>()
         memories = index.remember(memories, "I prefer concise explanations", UserMemory.Kind.WORKFLOW, 60, 1)
@@ -67,7 +67,7 @@ class UserMemoryTest {
 
         memories = index.remember(memories, "I use Kotlin for Android work", UserMemory.Kind.FACT, 50, 3)
         memories = index.remember(memories, "I use Python for automation", UserMemory.Kind.FACT, 50, 4)
-        assertEquals(2, memories.size)
+        assertEquals(3, memories.size)
     }
 
     @Test
