@@ -29,41 +29,48 @@ class AgentToolDispatch(
 ) {
     @Volatile
     private var requestContext: String = ""
+    private val resultPager = ToolResultPager(maxOutputCharacters)
 
     fun setRequestContext(request: String) {
         requestContext = request.trim()
+        resultPager.clear()
     }
 
     fun execute(name: String, rawArguments: String): String {
         return try {
             val arguments = JSONObject(rawArguments)
-            when (name) {
+            if (name == "continue_result") {
+                return resultPager.continueResult(arguments.getString("resultId"), arguments.getInt("startCharacter"))
+            }
+            val result = when (name) {
                 "list_files" -> listFiles(arguments)
-                "read_file" -> files.read(arguments.getString("path")).content
-                "search_project" -> workspace.search(arguments.getString("query"))
-                    .joinToString("\n") { hit -> "${hit.path}:${hit.line}: ${hit.text}" }
-                    
-                "search_knowledge" -> knowledge.search(arguments.getString("query"))
-                    .joinToString("\n") { hit -> "${hit.document}/${hit.section}: ${hit.excerpt}" }
-                    
+                "read_file" -> readFileChunk(arguments)
+                "search_project" -> workspace.search(arguments.getString("query")).joinToString("\n") { "${it.path}:${it.line}: ${it.text}" }
+                "search_knowledge" -> knowledge.search(arguments.getString("query")).joinToString("\n") { "${it.document}/${it.section}: ${it.excerpt}" }
                 "research_web" -> researchWeb(arguments)
                 "replace_text" -> replaceText(arguments)
                 "create_file" -> createFile(arguments)
                 "run_command" -> runCommand(arguments)
                 "verify" -> {
                     val report = workspace.verify()
-                    val issues = report.issues.joinToString("\n") { issue ->
-                        "${issue.path}:${issue.line}: ${issue.message}"
-                    }
-                    "passed=${report.passed}\n$issues"
+                    "passed=${report.passed}\n" + report.issues.joinToString("\n") { "${it.path}:${it.line}: ${it.message}" }
                 }
                 "approve_change" -> ownerOnlyMutationControl("approve_change")
                 "reject_change" -> ownerOnlyMutationControl("reject_change")
                 else -> "ERROR: Unknown tool '$name'"
             }
+            if (name == "read_file") result else resultPager.present(name, result)
         } catch (error: Exception) {
             "ERROR: ${error.message ?: error.javaClass.simpleName}"
         }
+    }
+
+    private fun readFileChunk(arguments: JSONObject): String {
+        val path = arguments.getString("path")
+        val start = arguments.optInt("startCharacter", 0)
+        val size = arguments.optInt("maxCharacters", maxOutputCharacters).coerceIn(1, maxOutputCharacters.coerceAtLeast(1))
+        val part = files.readChunk(path, start, size)
+        return "FILE_PATH=${part.path}\nSTART_CHARACTER=${part.startCharacter}\nNEXT_START_CHARACTER=${part.nextCharacter}\nEND_OF_FILE=${!part.hasMore}\nCONTENT_START\n${part.content}\nCONTENT_END"
     }
 
     private fun listFiles(arguments: JSONObject): String {

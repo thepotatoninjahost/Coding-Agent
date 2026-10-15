@@ -12,6 +12,7 @@ You investigate the real project, then work toward completing the owner's object
 2. Gather real evidence. Never invent paths, file contents, command output, sources, or test results. Inspect relevant callers, dependencies, tests, and failure paths before changing code.
 3. Make exactly one tool call per turn. Inspect its actual result before choosing the next action.
 4. Continue researching and working for as long as the objective requires. There is no arbitrary two-or-three-result stopping limit. Stop gathering when evidence is sufficient to act; stop work only when the goal is met, a real blocker exists, or owner input is required.
+5. Never mistake a partial tool result for a complete result. If MORE=true, call continue_result with the exact RESULT_ID and NEXT_START_CHARACTER until MORE=false. For read_file, continue with NEXT_START_CHARACTER until END_OF_FILE=true. Use pages instead of silently cutting content.
 5. For undocumented or experimental systems, inspect source and official documentation where available; form hypotheses, run controlled experiments, record observations, and distinguish facts from hypotheses. Prefer official documentation and tested reference implementations; apply only guidance compatible with the configured model/API and this app's security boundaries.
 6. Plan at the scale the task requires. A valid objective may need coordinated changes across many files, new tools, architectural work, or several experiments. Avoid unrelated changes, not ambitious work. Do not stop at a plan, a diagnosis, or a superficial edit. Continue through implementation, verification, and correction within the available turn budget.
 7. Verify meaningful milestones before relying on them. After changes, run the strongest relevant checks available: targeted tests, broader tests, static checks, build/compile, and integration checks as appropriate. Know what each check does and does not prove.
@@ -70,6 +71,11 @@ list_files, read_file, search_project, search_knowledge, research_web, replace_t
             """{"type":"object","properties":{"path":{"type":"string","description":"Project-relative file path"},"purpose":{"type":"string","description":"Short evidence-based reason for this tool call."}},"required":["path"]}"""
         ),
         ModelToolDefinition(
+            "continue_result",
+            "Continue reading a complete tool result split into parts. Use the exact RESULT_ID and NEXT_START_CHARACTER from the previous part until MORE=false.",
+            """{"type":"object","properties":{"resultId":{"type":"string"},"startCharacter":{"type":"integer"},"purpose":{"type":"string","description":"Why the next part is needed."}},"required":["resultId","startCharacter"]}"""
+        ),
+        ModelToolDefinition(
             "search_project",
             "Search project source for a case-insensitive literal string (maximum 256 characters). Returns matching lines with paths.",
             """{"type":"object","properties":{"query":{"type":"string","description":"Search query"},"purpose":{"type":"string","description":"Short evidence-based reason for this tool call."}},"required":["query"]}"""
@@ -110,9 +116,9 @@ list_files, read_file, search_project, search_knowledge, research_web, replace_t
         val all = tools().associateBy { it.name }
         val names = when (intent) {
             TaskIntent.INSPECT, TaskIntent.EXPLAIN, TaskIntent.UNKNOWN ->
-                listOf("list_files", "read_file", "search_project", "search_knowledge", "research_web", "run_command", "verify")
+                listOf("list_files", "read_file", "continue_result", "search_project", "search_knowledge", "research_web", "run_command", "verify")
             TaskIntent.CHANGE, TaskIntent.CREATE, TaskIntent.REFACTOR, TaskIntent.DEBUG ->
-                listOf("list_files", "read_file", "search_project", "search_knowledge", "research_web", "replace_text", "create_file", "verify", "run_command")
+                listOf("list_files", "read_file", "continue_result", "search_project", "search_knowledge", "research_web", "replace_text", "create_file", "verify", "run_command")
             TaskIntent.TEST ->
                 listOf("list_files", "read_file", "run_command", "verify", "search_project")
         }
