@@ -55,7 +55,7 @@ You investigate the real project, then work toward completing the owner's object
 - For analysis, use Problem → Evidence → Conclusion where it improves clarity.
 
 ## Available tools
-list_files, read_file, search_project, search_knowledge, research_web, replace_text, create_file, run_command, verify
+list_files, read_file, continue_result, read_chat_history, search_chat_history, read_user_memory, search_user_memory, search_project, search_knowledge, research_web, replace_text, create_file, run_command, verify
 """.trimIndent()
 
     val SYSTEM: String get() = DEFAULT_SYSTEM
@@ -68,7 +68,7 @@ list_files, read_file, search_project, search_knowledge, research_web, replace_t
         ),
         ModelToolDefinition(
             "read_file",
-            "Read the full content of one project file. Required before analyzing or modifying any named file.",
+            "Read the complete content of one project file. Large files arrive in character chunks; continue until END_OF_FILE=true before relying on the full file.",
             """{"type":"object","properties":{"path":{"type":"string","description":"Project-relative file path"},"startCharacter":{"type":"integer","description":"Zero-based character offset for the next part; omit to start at the beginning."},"maxCharacters":{"type":"integer","description":"Maximum characters for this part; omit for the configured page size."},"purpose":{"type":"string","description":"Short evidence-based reason for this tool call."}},"required":["path"]}"""
         ),
         ModelToolDefinition(
@@ -141,7 +141,7 @@ list_files, read_file, search_project, search_knowledge, research_web, replace_t
             TaskIntent.CHANGE, TaskIntent.CREATE, TaskIntent.REFACTOR, TaskIntent.DEBUG ->
                 listOf("list_files", "read_file", "continue_result", "read_chat_history", "search_chat_history", "read_user_memory", "search_user_memory", "search_project", "search_knowledge", "research_web", "replace_text", "create_file", "verify", "run_command")
             TaskIntent.TEST ->
-                listOf("list_files", "read_file", "run_command", "verify", "search_project")
+                listOf("list_files", "read_file", "continue_result", "read_chat_history", "search_chat_history", "read_user_memory", "search_user_memory", "run_command", "verify", "search_project")
         }
         return names.mapNotNull { all[it] }
     }

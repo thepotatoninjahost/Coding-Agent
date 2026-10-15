@@ -104,7 +104,7 @@ object UserMemoryExtractor {
  * ONE JOB: Apply deterministic memory consolidation and relevance rules without Android dependencies.
  */
 class UserMemoryIndex(
-    private val maxEntries: Int = 64
+    @Suppress("UNUSED_PARAMETER") private val maxEntries: Int = 64
 ) {
     fun remember(
         existing: List<UserMemory>,
@@ -115,22 +115,15 @@ class UserMemoryIndex(
     ): List<UserMemory> {
         val clean = text.replace(Regex("\\s+"), " ").trim().trimEnd('.', '!', '?')
         if (clean.length < 3) return existing
-        val match = existing.maxByOrNull { similarity(it.text, clean) }
-        val next = if (match != null && (
-            similarity(match.text, clean) >= 0.55 ||
-                sameDirectiveTopic(match.text, clean)
-            )) {
+        val exact = existing.firstOrNull { it.text == clean }
+        val next = if (exact != null) {
             existing.map {
-                if (it.id == match.id) {
+                if (it.id == exact.id) {
                     it.copy(
-                        text = clean,
-                        kind = kind,
                         importance = maxOf(it.importance, importance.coerceIn(1, 99)),
                         updatedAt = now
                     )
-                } else {
-                    it
-                }
+                } else it
             }
         } else {
             existing + UserMemory(
