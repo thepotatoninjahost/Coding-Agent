@@ -165,7 +165,7 @@ private fun CodingAgentApp(privateDir: File) {
     var status by remember { mutableStateOf(AgentStatus.READY) }
     var detail by remember { mutableStateOf("Talk freely — or New / Import a project") }
     var chatInput by remember { mutableStateOf("") }
-    var chatMessages by remember { mutableStateOf(store.recentChatMessages().asReversed()) }
+    var chatMessages by remember { mutableStateOf(store.recentChatMessages(Int.MAX_VALUE).asReversed()) }
     var researchQuery by remember { mutableStateOf("") }
     var researchHits by remember { mutableStateOf(emptyList<ResearchHit>()) }
     var researchError by remember { mutableStateOf<String?>(null) }
@@ -395,7 +395,7 @@ private fun CodingAgentApp(privateDir: File) {
                     "\nRequest: ${result.proposal.request}\n$verificationSummary"
             )
         )
-        chatMessages = store.recentChatMessages().asReversed()
+        chatMessages = store.recentChatMessages(Int.MAX_VALUE).asReversed()
     }
 
     fun clearOwnerApprovalDialog() {
@@ -746,7 +746,7 @@ private fun CodingAgentApp(privateDir: File) {
                                     "Ask me to add files, scaffold a structure, or import more code."
                             )
                         )
-                        chatMessages = store.recentChatMessages().asReversed()
+                        chatMessages = store.recentChatMessages(Int.MAX_VALUE).asReversed()
                     }
                 }
                 .onFailure {
@@ -774,7 +774,7 @@ private fun CodingAgentApp(privateDir: File) {
                 content = "Project cleared. You can still talk. Say `create project` or tap New for an empty workspace, or Import an existing folder."
             )
         )
-        chatMessages = store.recentChatMessages().asReversed()
+        chatMessages = store.recentChatMessages(Int.MAX_VALUE).asReversed()
     }
 
     /** When no project is mounted, handle conversation + create/restart without requiring the agent root. */
@@ -833,7 +833,7 @@ private fun CodingAgentApp(privateDir: File) {
                     content = "Creating empty project${if (name != null) " `$name`" else ""}…"
                 )
             )
-            chatMessages = store.recentChatMessages().asReversed()
+            chatMessages = store.recentChatMessages(Int.MAX_VALUE).asReversed()
             startNewProject(name)
             return
         }
@@ -843,7 +843,7 @@ private fun CodingAgentApp(privateDir: File) {
             store.recordChatMessage(ChatMessage(role = ChatRole.USER, content = request))
             val reply = handleNoProjectChat(request)
             store.recordChatMessage(ChatMessage(role = ChatRole.AGENT, content = reply))
-            chatMessages = store.recentChatMessages().asReversed()
+            chatMessages = store.recentChatMessages(Int.MAX_VALUE).asReversed()
             status = AgentStatus.READY
             detail = reply
             return
