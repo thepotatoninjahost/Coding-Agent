@@ -11,6 +11,7 @@ import java.nio.charset.StandardCharsets
 /**
  * ONE JOB: Project tree → indexed file records with symbols and checksums.
  */
+private const val MAX_INDEXED_FILE_BYTES = 5L * 1024 * 1024
 private const val MAX_SEARCH_QUERY_LENGTH = 256
 private val SYMBOL_PATTERN = Regex("\\b(class|interface|object|fun|function|def|const|val|var|public|private|protected|static)\\s+([A-Za-z_][A-Za-z0-9_]*)")
 
@@ -24,7 +25,7 @@ class ProjectIndexer {
     fun index(root: File): List<ProjectFile> = root.walkTopDown()
         .onEnter { it.name !in ignored && isSafeProjectPath(root, it) }
         .filter {
-            it.isFile &&
+            it.isFile && it.length() <= MAX_INDEXED_FILE_BYTES &&
                 !java.nio.file.Files.isSymbolicLink(it.toPath()) &&
                 isSafeProjectPath(root, it) &&
                 (it.extension.lowercase() in extensions || it.name == "Makefile")
