@@ -190,8 +190,10 @@ class RemoteHttpGateway(
         return JsonModelResponseParser().parse(trimmed)
     }
 
-    private fun String?.isTruncatedFinishReason(): Boolean =
-        this?.lowercase() in setOf("length", "max_tokens", "max_output_tokens", "token_limit")
+    private fun String?.isTruncatedFinishReason(): Boolean {
+        val normalized = this?.lowercase() ?: return false
+        return normalized in setOf("length", "max_tokens", "max_output_tokens", "token_limit")
+    }
 
     private fun truncatedResponseFailure(reason: String): ModelResponse.Failure =
         ModelResponse.Failure(
