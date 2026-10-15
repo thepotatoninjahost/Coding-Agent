@@ -75,8 +75,10 @@ class AgentJournal(private val root: File) {
     fun recordEvent(taskId: String, event: AutonomousAgentEvent) {
         if (event is AutonomousAgentEvent.ModelDelta) {
             val buffer = pendingModelText.getOrPut(taskId) { StringBuilder() }
-            if (buffer.length < MAX_DETAIL_CHARS) {
-                buffer.append(event.text.take(MAX_DETAIL_CHARS - buffer.length))
+            buffer.append(event.text)
+            while (buffer.length >= MAX_DETAIL_CHARS) {
+                writeEvent(taskId, "ModelStream", buffer.substring(0, MAX_DETAIL_CHARS))
+                buffer.delete(0, MAX_DETAIL_CHARS)
             }
             return
         }
@@ -105,9 +107,6 @@ class AgentJournal(private val root: File) {
         safe = BEARER_TOKEN.replace(safe, "$1[REDACTED]")
         safe = ASSIGNED_SECRET.replace(safe, "$1[REDACTED]")
         safe = COMMON_TOKEN.replace(safe, "[REDACTED TOKEN]")
-        if (safe.length > MAX_DETAIL_CHARS) {
-            safe = safe.take(MAX_DETAIL_CHARS) + "…[truncated]"
-        }
         return safe
     }
 

@@ -22,7 +22,7 @@ data class OpenJob(
         append("OPEN JOB (do not claim there is no prior task):\n")
         append("- id: ").append(id).append('\n')
         append("- status: ").append(status).append('\n')
-        append("- goal: ").append(goal.take(1_200)).append('\n')
+        append("- goal: ").append(goal).append('\n')
         if (!proposalId.isNullOrBlank()) append("- proposal: ").append(proposalId).append('\n')
         if (!recoveryReason.isNullOrBlank()) append("- recovery reason: ").append(recoveryReason).append('\n')
         if (paths.isNotEmpty()) {
@@ -207,7 +207,7 @@ object OpenJobStore {
         // Recovery is the fail-closed state. If the old marker is missing or corrupt,
         // replace it with a minimal recovery record instead of leaving the workspace open.
         val current = runCatching { load(root) }.getOrNull()
-        val recoveryReason = reason.takeIf { it.isNotBlank() }?.take(600)
+        val recoveryReason = reason.takeIf { it.isNotBlank() }
         val recovery = if (current != null) {
             current.copy(
                 status = "recovery-required",
