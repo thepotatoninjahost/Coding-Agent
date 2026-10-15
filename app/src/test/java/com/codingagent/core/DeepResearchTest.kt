@@ -37,6 +37,24 @@ class DeepResearchTest {
         assertEquals("fun main() = 42", result.code.single())
     }
 
+    @Test fun preservesArticleTextBeyondFormerTwentyThousandCharacterCap() {
+        val body = "complete evidence ".repeat(1_500)
+        val result = ArticleExtractor.extract("<html><main><p>$body</p></main></html>")
+        assertTrue("full extracted text must not be silently clipped", result.text.length > 20_000)
+        assertEquals(3_000, result.wordCount)
+    }
+
+    @Test fun preservesEveryLongCodeBlockBeyondFormerCountAndLengthCaps() {
+        val blocks = (1..10).joinToString("") { index ->
+            "<pre>BLOCK-$index " + "code ".repeat(900) + "</pre>"
+        }
+        val result = ArticleExtractor.extract("<html><main>$blocks</main></html>")
+        assertEquals(10, result.codeBlocks.size)
+        assertTrue(result.codeBlocks.all { it.length > 4_000 })
+        assertTrue(result.codeBlocks.first().startsWith("BLOCK-1"))
+        assertTrue(result.codeBlocks.last().startsWith("BLOCK-10"))
+    }
+
     @Test fun researchFetcherRejectsPrivateAndMetadataTargetsBeforeConnection() {
         var opened = false
         val factory: (String) -> HttpURLConnection = {
