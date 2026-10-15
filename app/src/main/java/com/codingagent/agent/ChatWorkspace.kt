@@ -72,7 +72,7 @@ class ChatWorkspace(
                 memories = memoryStore?.all().orEmpty()
             )
         }
-        val approval = agent?.let { ChatApproval.tryApprove(it, trimmed)
+        val approval = agent?.let { ChatApproval.tryApprove(it, trimmed) }
         if (approval != null) {
             progressListener?.onProgress("APPROVAL", approval.toString())
             return persist(result = approval)
