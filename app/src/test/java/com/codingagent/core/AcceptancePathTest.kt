@@ -893,7 +893,9 @@ class AcceptancePathTest {
         val names = AgentModelProtocol.tools().map { it.name }
         assertEquals(
             listOf(
-                "list_files", "read_file", "search_project", "search_knowledge", "research_web",
+                "list_files", "read_file", "continue_result",
+                "read_chat_history", "search_chat_history", "read_user_memory", "search_user_memory",
+                "search_project", "search_knowledge", "research_web",
                 "replace_text", "create_file", "run_command", "verify"
             ),
             names
