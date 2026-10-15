@@ -129,7 +129,7 @@ class AgentDirectLanes(
         readPath: String
     ): AgentTask {
         val resolved = LocalFileEvidence.resolve(readPath, files, workspace) ?: readPath
-        val content = runCatching { files.read(resolved).content }.getOrElse {
+        val content = runCatching { LocalFileEvidence.readComplete(resolved, files) }.getOrElse {
             return AgentTask(
                 taskId, request, "failed", plan, emptyList(),
                 VerificationReport(false, listOf(VerificationIssue(resolved, 0, it.message ?: "read failed"))),
