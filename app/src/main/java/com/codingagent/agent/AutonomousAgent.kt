@@ -775,11 +775,11 @@ class AutonomousAgent(
         val normalized = nameOrPath.trim().trimStart('/').replace('\\', '/')
         if (normalized.isBlank()) return null
         runCatching {
-            files.read(normalized)
+            files.readChunk(normalized, 0, 1)
             return normalized
         }
         val base = java.io.File(normalized).name
-        val hits = workspace.summary().files.filter {
+        val hits = workspace.sourcePaths().filter {
             java.io.File(it.path).name.equals(base, ignoreCase = true)
         }
         return when {
