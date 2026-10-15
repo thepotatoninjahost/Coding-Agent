@@ -283,6 +283,39 @@ class ChatWorkspaceTest {
     }
 
     @Test
+    fun contextIncludesOlderConversationAndAllSavedMemories() {
+        val root = Files.createTempDirectory("chat-complete-context").toFile()
+        root.resolve("Main.kt").writeText("fun main() = 1\n")
+        val store = MemoryChatStore()
+        val memory = FakeUserMemoryStore()
+        repeat(12) { index ->
+            store.recordChatMessage(ChatMessage(ChatRole.USER, "CONVERSATION-SENTINEL-$index"))
+            store.recordChatMessage(ChatMessage(ChatRole.AGENT, "Agent reply $index"))
+        }
+        repeat(8) { index ->
+            memory.remember("MEMORY-SENTINEL-$index " + "complete memory detail ".repeat(40), UserMemory.Kind.PREFERENCE, 50)
+        }
+        val prompts = mutableListOf<String>()
+        val gateway = object : com.codingagent.model.ModelGateway {
+            override fun complete(request: com.codingagent.model.ModelRequest): com.codingagent.model.ModelResponse {
+                prompts += request.user
+                return com.codingagent.model.ModelResponse.Text("Understood.")
+            }
+            override fun cancel() = Unit
+        }
+        val agent = AutonomousAgent(root, emptyKnowledge, gateway = gateway)
+        val workspace = ChatWorkspace(store, memoryStore = memory, runtimeProvider = { agent })
+
+        workspace.send("Explain project structure")
+
+        val prompt = prompts.single()
+        assertTrue(prompt.contains("CONVERSATION-SENTINEL-0"))
+        assertTrue(prompt.contains("CONVERSATION-SENTINEL-11"))
+        assertTrue(prompt.contains("MEMORY-SENTINEL-0"))
+        assertTrue(prompt.contains("MEMORY-SENTINEL-7"))
+    }
+
+    @Test
     fun includesPreviousConversationInFollowUpRequest() {
         val root = Files.createTempDirectory("chat-context").toFile()
         root.resolve("Main.kt").writeText("fun main() = 1\n")
