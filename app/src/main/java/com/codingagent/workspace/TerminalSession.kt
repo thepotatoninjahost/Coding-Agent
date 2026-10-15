@@ -9,7 +9,7 @@ import java.util.concurrent.CopyOnWriteArrayList
  * Runs ProcessBuilder([resolvedSh, "-c", command]) with cwd = imported project root.
  * There is no pseudo-terminal: interactive programs (vim, less, ssh password prompts) will not work.
  * The resolved binary is stock Android /system/bin/sh when present, otherwise `sh` on PATH.
- * Default timeout is 180 seconds. Combined stream capture is capped at 256 KiB per stream.
+ * Default timeout is 180 seconds. Complete stdout and stderr are captured.
  */
 class TerminalSession(
     private val root: File,
@@ -22,7 +22,7 @@ class TerminalSession(
     fun workingDirectory(): File = root
     fun timeoutSeconds(): Long = timeoutSeconds
     fun isBusy(): Boolean = runner.isRunning()
-    fun history(limit: Int = 50): List<TerminalEntry> = entries.takeLast(limit)
+    fun history(limit: Int = Int.MAX_VALUE): List<TerminalEntry> = entries.takeLast(limit.coerceAtLeast(0))
     fun clearHistory() { entries.clear() }
 
     fun execute(

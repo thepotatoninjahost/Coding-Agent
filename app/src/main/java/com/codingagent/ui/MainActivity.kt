@@ -165,7 +165,7 @@ private fun CodingAgentApp(privateDir: File) {
     var status by remember { mutableStateOf(AgentStatus.READY) }
     var detail by remember { mutableStateOf("Talk freely — or New / Import a project") }
     var chatInput by remember { mutableStateOf("") }
-    var chatMessages by remember { mutableStateOf(store.recentChatMessages().asReversed()) }
+    var chatMessages by remember { mutableStateOf(store.recentChatMessages(Int.MAX_VALUE).asReversed()) }
     var researchQuery by remember { mutableStateOf("") }
     var researchHits by remember { mutableStateOf(emptyList<ResearchHit>()) }
     var researchError by remember { mutableStateOf<String?>(null) }
@@ -329,7 +329,7 @@ private fun CodingAgentApp(privateDir: File) {
                 scope.launch(Dispatchers.Main.immediate) {
                     if (epoch != progressEpoch.get()) return@launch
                     status = mapAgentPhase(phase)
-                    detail = detailText.take(140)
+                    detail = detailText
                 }
             }
         )
@@ -386,16 +386,16 @@ private fun CodingAgentApp(privateDir: File) {
         pendingProposal = null
         pendingProposalId = null
         status = AgentStatus.READY
-        detail = "APPLIED ${paths.size} file(s): ${paths.joinToString().take(100)}\n$verificationSummary"
+        detail = "APPLIED ${paths.size} file(s): ${paths.joinToString()}\n$verificationSummary"
         store.recordChatMessage(
             ChatMessage(
                 role = ChatRole.SYSTEM,
                 content = "APPLIED to disk after dual approval.\nFiles:\n" +
                     paths.joinToString("\n") { "- $it" } +
-                    "\nRequest: ${result.proposal.request.take(200)}\n$verificationSummary"
+                    "\nRequest: ${result.proposal.request}\n$verificationSummary"
             )
         )
-        chatMessages = store.recentChatMessages().asReversed()
+        chatMessages = store.recentChatMessages(Int.MAX_VALUE).asReversed()
     }
 
     fun clearOwnerApprovalDialog() {
@@ -746,7 +746,7 @@ private fun CodingAgentApp(privateDir: File) {
                                     "Ask me to add files, scaffold a structure, or import more code."
                             )
                         )
-                        chatMessages = store.recentChatMessages().asReversed()
+                        chatMessages = store.recentChatMessages(Int.MAX_VALUE).asReversed()
                     }
                 }
                 .onFailure {
@@ -774,7 +774,7 @@ private fun CodingAgentApp(privateDir: File) {
                 content = "Project cleared. You can still talk. Say `create project` or tap New for an empty workspace, or Import an existing folder."
             )
         )
-        chatMessages = store.recentChatMessages().asReversed()
+        chatMessages = store.recentChatMessages(Int.MAX_VALUE).asReversed()
     }
 
     /** When no project is mounted, handle conversation + create/restart without requiring the agent root. */
@@ -833,7 +833,7 @@ private fun CodingAgentApp(privateDir: File) {
                     content = "Creating empty project${if (name != null) " `$name`" else ""}…"
                 )
             )
-            chatMessages = store.recentChatMessages().asReversed()
+            chatMessages = store.recentChatMessages(Int.MAX_VALUE).asReversed()
             startNewProject(name)
             return
         }
@@ -843,9 +843,9 @@ private fun CodingAgentApp(privateDir: File) {
             store.recordChatMessage(ChatMessage(role = ChatRole.USER, content = request))
             val reply = handleNoProjectChat(request)
             store.recordChatMessage(ChatMessage(role = ChatRole.AGENT, content = reply))
-            chatMessages = store.recentChatMessages().asReversed()
+            chatMessages = store.recentChatMessages(Int.MAX_VALUE).asReversed()
             status = AgentStatus.READY
-            detail = reply.lineSequence().firstOrNull().orEmpty().take(120)
+            detail = reply
             return
         }
 
@@ -882,18 +882,18 @@ private fun CodingAgentApp(privateDir: File) {
                 }
                 detail = when (it.result) {
                     is com.codingagent.agent.AgentRuntimeResult.Failed ->
-                        "Agent failed: ${it.response.content.lineSequence().firstOrNull().orEmpty().take(140)}"
+                        "Agent failed: ${it.response.content}"
                     is com.codingagent.agent.AgentRuntimeResult.NeedsApproval ->
                         "Waiting for two owner approvals before any file write"
                     else ->
-                        it.response.content.lineSequence().firstOrNull().orEmpty().take(120)
+                        it.response.content
                 }
             }.onFailure {
                 val message = it.message.orEmpty().ifBlank { it.javaClass.simpleName }
                 store.recordChatMessage(ChatMessage(role = ChatRole.SYSTEM, content = "Request failed: $message"))
                 chatMessages = currentChat.history()
                 status = AgentStatus.FAILED
-                detail = "Request failed: ${message.take(140)}"
+                detail = "Request failed: ${message}"
             }
             activeJob = null
             if (messageQueue.isNotEmpty()) {
@@ -977,7 +977,7 @@ private fun CodingAgentApp(privateDir: File) {
                                     )
                                 }.onSuccess { entry ->
                                     if (entry != null) {
-                                        terminalHistory = (terminalHistory + entry).takeLast(40)
+                                        terminalHistory = terminalHistory + entry
                                     }
                                 }.onFailure { failure ->
                                     terminalLiveOutput += "\\n" + failure.message.orEmpty()
@@ -1002,7 +1002,7 @@ private fun CodingAgentApp(privateDir: File) {
                             val provider = DurableDeepResearchProvider(researchRoot)
                             val result = runCatching { provider.deepResearch(query, 12, ResearchModeDetector.detect(query)) { progress -> researchState = progress.toDisplayState() } }
                             result.onSuccess { session ->
-                                researchHits = session.sources.map { source -> ResearchHit(source.title, source.url, source.content.take(600)) }
+                                researchHits = session.sources.map { source -> ResearchHit(source.title, source.url, source.content) }
                                 researchState = researchState.copy(phase = "learned", completed = session.sources.size, total = session.sources.size, fullSources = session.sources.size, laneCount = session.sources.map { it.lane }.distinct().size, wordCount = session.sources.sumOf { it.wordCount }, codeExamples = session.sources.sumOf { it.codeExamples.size }, canSend = true)
                                 status = AgentStatus.READY
                                 detail = "Learned ${session.sources.size} distinct full sources"
@@ -1011,7 +1011,7 @@ private fun CodingAgentApp(privateDir: File) {
                                 researchError = message
                                 researchState = researchState.copy(phase = "blocked", canSend = true)
                                 status = AgentStatus.STOPPED
-                                detail = "Research failed: ${message.take(140)}"
+                                detail = "Research failed: ${message}"
                             }
                             activeJob = null
                         }

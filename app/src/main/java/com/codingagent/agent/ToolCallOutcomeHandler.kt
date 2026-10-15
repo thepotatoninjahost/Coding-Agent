@@ -281,14 +281,14 @@ class ToolCallOutcomeHandler(
         val success = toolExecutionSucceeded(response.name, toolResult)
 
         if (success) {
-            toolSelectionLoop.recordSuccess(response.name, toolKind, toolResult.take(300))
+            toolSelectionLoop.recordSuccess(response.name, toolKind, toolResult)
         } else {
-            toolSelectionLoop.recordFailure(response.name, toolKind, toolResult.take(300))
+            toolSelectionLoop.recordFailure(response.name, toolKind, toolResult)
         }
         if (success) {
-            planningLoop.recordSuccess(response.name, toolKind, toolResult.take(300))
+            planningLoop.recordSuccess(response.name, toolKind, toolResult)
         } else {
-            planningLoop.recordFailure(response.name, toolKind, toolResult.take(300))
+            planningLoop.recordFailure(response.name, toolKind, toolResult)
         }
 
 
@@ -325,8 +325,8 @@ class ToolCallOutcomeHandler(
                     val report = workspace.verify()
                     val summary = buildString {
                         append("File: ${path.trim().trimStart('/')}\n\u2500\u2500\u2500\n")
-                        append(toolResult.take(12_000))
-                        if (toolResult.length > 12_000) append("\n\u2026 (truncated)")
+                        append(toolResult)
+                        
                     }
                     val task = AgentTask(
                         taskId, normalized, "completed", plan,

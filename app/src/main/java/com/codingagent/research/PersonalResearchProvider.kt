@@ -125,7 +125,7 @@ class PersonalResearchProvider(
                     status = 200,
                     wordCount = fetched.wordCount,
                     content = body,
-                    codeExamples = fetched.codeBlocks.take(8)
+                    codeExamples = fetched.codeBlocks
                 )
             } else {
                 failed++
@@ -166,7 +166,7 @@ class PersonalResearchProvider(
                     .put("lane", s.lane)
                     .put("status", s.status)
                     .put("wordCount", s.wordCount)
-                    .put("content", s.content.take(12_000))
+                    .put("content", s.content)
                     .put("codeExamples", JSONArray(s.codeExamples))
                     .put("error", s.error)
             )

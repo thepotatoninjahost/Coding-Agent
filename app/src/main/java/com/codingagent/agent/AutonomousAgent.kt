@@ -60,8 +60,12 @@ class AutonomousAgent(
         this.gateway = gateway
     }
 
+    fun setOwnerContextProvider(provider: () -> AgentOwnerContext) {
+        tools.setOwnerContextProvider(provider)
+    }
+
     fun setSystemPrompt(prompt: String?) {
-        configuredSystemPrompt = prompt.orEmpty().trim().take(24_000)
+        configuredSystemPrompt = prompt.orEmpty().trim()
             .ifBlank { AgentModelProtocol.DEFAULT_SYSTEM }
     }
     // FIX: derive workspace from the shared MutationCoordinator instance so both always
@@ -135,7 +139,7 @@ class AutonomousAgent(
             experience.record(
                 task = task.request,
                 operation = task.status,
-                result = task.summary.take(2_000),
+                result = task.summary,
                 evidence = task.changes.joinToString(", ") { it.path },
                 passed = task.verification.passed
             )
@@ -333,11 +337,14 @@ class AutonomousAgent(
 
         val transcript = mutableListOf<com.codingagent.model.ModelMessage>()
         val state = ToolTurnState()
-        state.lastEvidence = buildString {
+        val completeInitialEvidence = buildString {
             append(repoMapSummary())
             append("\nCall list_files or search_project before read_file. Do not invent paths.")
             append(researchEvidence)
         }
+        // Keep the full evidence available for ordered retrieval without forcing all of it
+        // into the first model request, whose token window depends on the configured model.
+        state.lastEvidence = tools.presentEvidence("initial repository and research evidence", completeInitialEvidence)
         var evidenceRefusals = 0
         var writeNowAnnounced = false
         val reviewJob = isWholeProjectReview(focus)
@@ -441,7 +448,7 @@ class AutonomousAgent(
                     // Raw tool markup that isn't parseable into a real call (bad XML, unknown
                     // tag shape, etc.) is a dump, not an answer — nudge instead of accepting it.
                     if (looksLikeRawToolMarkup(response.content)) {
-                        transcript += com.codingagent.model.ModelMessage("assistant", response.content.take(800))
+                        transcript += com.codingagent.model.ModelMessage("assistant", response.content)
                         transcript += com.codingagent.model.ModelMessage(
                             "user",
                             "SYSTEM: That was a raw tool dump, not an answer. " +
@@ -466,7 +473,7 @@ class AutonomousAgent(
                         }
                         transcript += com.codingagent.model.ModelMessage(
                             "assistant",
-                            response.content.take(1_200)
+                            response.content
                         )
                         transcript += com.codingagent.model.ModelMessage(
                             "user",
@@ -486,12 +493,12 @@ class AutonomousAgent(
                             recordTask(task)
                             return events
                         }
-                        transcript += com.codingagent.model.ModelMessage("assistant", response.content.take(1_200))
+                        transcript += com.codingagent.model.ModelMessage("assistant", response.content)
                         transcript += com.codingagent.model.ModelMessage(
                             "user",
                             "SYSTEM CONSTRAINT: $missing You must call the read_file tool on the target path before any final report. Do not invent file contents."
                         )
-                        state.lastEvidence = missing + "\n\n" + state.lastEvidence.take(config.maxOutputCharacters / 2)
+                        state.lastEvidence = missing + "\n\n" + state.lastEvidence
                         continue
                     }
                     val report = workspace.verify()
@@ -654,13 +661,13 @@ class AutonomousAgent(
         val repairTools = AgentModelProtocol.tools().filter { it.name == "replace_text" || it.name == "create_file" }
         val evidence = buildString {
             append("Repair attempt ").append(attempt).append(".\n")
-            append("Failure diagnosis: ").append(diagnosis.take(8_000)).append("\n")
+            append("Failure diagnosis: ").append(diagnosis).append("\n")
             append("Current repository map:\n").append(repoMapSummary()).append("\n")
-            workspace.verify().issues.take(20).forEach { issue ->
-                val content = runCatching { files.read(issue.path).content }.getOrNull()
+            workspace.verify().issues.forEach { issue ->
+                val content = runCatching { LocalFileEvidence.readComplete(issue.path, files) }.getOrNull()
                 if (content != null) {
                     append("\nFILE ").append(issue.path).append("\n")
-                    append(content.take(12_000)).append("\n")
+                    append(content).append("\n")
                 }
             }
         }
@@ -717,7 +724,7 @@ class AutonomousAgent(
 
     private fun sanitizeModelText(text: String, report: VerificationReport): String {
         if (!isDegenerate(text)) {
-            return text.take(4_000)
+            return text
         }
         return buildString {
             append("The model produced garbled or incoherent output instead of a coherent report. ")
@@ -728,7 +735,7 @@ class AutonomousAgent(
                 append(" (none).")
             } else {
                 append(":")
-                report.issues.take(20).forEach { issue ->
+                report.issues.forEach { issue ->
                     append("\n- ")
                     append(issue.path)
                     append(":")
@@ -768,17 +775,17 @@ class AutonomousAgent(
         val normalized = nameOrPath.trim().trimStart('/').replace('\\', '/')
         if (normalized.isBlank()) return null
         runCatching {
-            files.read(normalized)
+            files.readChunk(normalized, 0, 1)
             return normalized
         }
         val base = java.io.File(normalized).name
-        val hits = workspace.summary().files.filter {
-            java.io.File(it.path).name.equals(base, ignoreCase = true)
+        val hits = workspace.sourcePaths().filter {
+            java.io.File(it).name.equals(base, ignoreCase = true)
         }
         return when {
             hits.isEmpty() -> null
-            hits.size == 1 -> hits[0].path
-            else -> hits.minByOrNull { it.path.length }?.path
+            hits.size == 1 -> hits[0]
+            else -> hits.minByOrNull { it.length }
         }
     }
 
@@ -815,7 +822,7 @@ class AutonomousAgent(
 
     private fun buildLocalFileReport(nameOrPath: String): LocalFileReport? {
         val resolved = resolveProjectPath(nameOrPath) ?: return null
-        val content = runCatching { files.read(resolved).content }.getOrNull() ?: return null
+        val content = runCatching { LocalFileEvidence.readComplete(resolved, files) }.getOrNull() ?: return null
         val all = workspace.verify().issues
         val policy = all.filter { issue ->
             val ip = issue.path.replace('\\', '/')

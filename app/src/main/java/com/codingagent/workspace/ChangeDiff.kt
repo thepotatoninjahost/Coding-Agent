@@ -42,8 +42,6 @@ data class ProposalDiffView(
 )
 
 object ChangeDiff {
-    private const val MAX_UNIFIED_LINES = 400
-    private const val MAX_LINE_CHARS = 240
 
     fun summarize(proposal: PendingChangeProposal): ProposalDiffView =
         ProposalDiffView(
@@ -206,7 +204,7 @@ object ChangeDiff {
         if (!content.endsWith("\n")) appendLine()
     }
 
-    fun unified(record: ChangeRecord, maxLines: Int = MAX_UNIFIED_LINES): List<DiffLine> {
+    fun unified(record: ChangeRecord, maxLines: Int = Int.MAX_VALUE): List<DiffLine> {
         val before = record.before?.lines().orEmpty()
         val after = record.after?.lines().orEmpty()
         val out = mutableListOf<DiffLine>()
@@ -222,8 +220,8 @@ object ChangeDiff {
                 out += DiffLine(DiffLineKind.REMOVE, "-${clip(line)}", beforeLine = i + 1)
             }
             ChangeOperation.APPEND -> {
-                before.takeLast(3).forEachIndexed { i, line ->
-                    val n = before.size - 3 + i + 1
+                before.forEachIndexed { i, line ->
+                    val n = i + 1
                     out += DiffLine(DiffLineKind.CONTEXT, " ${clip(line)}", beforeLine = n.coerceAtLeast(1), afterLine = n.coerceAtLeast(1))
                 }
                 after.drop(before.size).forEachIndexed { i, line ->
@@ -231,6 +229,10 @@ object ChangeDiff {
                 }
             }
             ChangeOperation.REPLACE -> {
+                if (before.size > 2_000 || after.size > 2_000) {
+                    before.forEachIndexed { i, line -> out += DiffLine(DiffLineKind.REMOVE, "-$line", beforeLine = i + 1) }
+                    after.forEachIndexed { i, line -> out += DiffLine(DiffLineKind.ADD, "+$line", afterLine = i + 1) }
+                } else {
                 val lcs = longestCommonSubsequence(before, after)
                 var bi = 0
                 var ai = 0
@@ -251,15 +253,9 @@ object ChangeDiff {
                             ai++
                         }
                     }
-                    if (out.size >= maxLines) {
-                        out += DiffLine(DiffLineKind.HEADER, "… truncated (${before.size}+${after.size} lines total)")
-                        break
-                    }
+                }
                 }
             }
-        }
-        if (out.size > maxLines) {
-            return out.take(maxLines) + DiffLine(DiffLineKind.HEADER, "… truncated")
         }
         return out
     }
@@ -276,8 +272,7 @@ object ChangeDiff {
 
     fun shortId(id: String): String = id.take(8)
 
-    private fun clip(line: String): String =
-        if (line.length <= MAX_LINE_CHARS) line else line.take(MAX_LINE_CHARS - 1) + "…"
+    private fun clip(line: String): String = line
 
     private fun countLineDelta(before: List<String>, after: List<String>): Pair<Int, Int> {
         val lcs = longestCommonSubsequence(before, after)
@@ -286,8 +281,9 @@ object ChangeDiff {
 
     internal fun longestCommonSubsequence(a: List<String>, b: List<String>): List<String> {
         if (a.isEmpty() || b.isEmpty()) return emptyList()
-        val left = a.take(2_000)
-        val right = b.take(2_000)
+        if (a.size > 2_000 || b.size > 2_000) return emptyList()
+        val left = a
+        val right = b
         val n = left.size
         val m = right.size
         val dp = Array(n + 1) { IntArray(m + 1) }

@@ -18,6 +18,17 @@ class UserMemoryTest {
     }
 
     @Test
+    fun explicitLongMemoryIsPreservedInFull() {
+        val original = "Remember that " + "important owner detail ".repeat(80)
+        val expected = original.removePrefix("Remember that ").trim().trimEnd('.', '!', '?')
+        val extracted = UserMemoryExtractor.extract(original)
+        assertEquals(expected, extracted)
+        val index = UserMemoryIndex(maxEntries = 1)
+        val saved = index.remember(emptyList(), extracted!!, UserMemory.Kind.WORKFLOW, 80, 1)
+        assertEquals(extracted, saved.single().text)
+    }
+
+    @Test
     fun transientTaskInstructionIsNotPromotedToDurableMemory() {
         assertEquals(
             null,
@@ -54,20 +65,19 @@ class UserMemoryTest {
     }
 
     @Test
-    fun memoryIndexConsolidatesRelatedUpdatesAndCapsGrowth() {
+    fun memoryIndexRetainsDistinctMemoriesWithoutDiscardingOlderEntries() {
         val index = UserMemoryIndex(maxEntries = 2)
         var memories = emptyList<UserMemory>()
         memories = index.remember(memories, "I prefer concise explanations", UserMemory.Kind.WORKFLOW, 60, 1)
         val firstId = memories.single().id
         memories = index.remember(memories, "I prefer concise answers", UserMemory.Kind.WORKFLOW, 80, 2)
-        assertEquals(1, memories.size)
-        assertEquals(firstId, memories.single().id)
-        assertEquals("I prefer concise answers", memories.single().text)
-        assertEquals(80, memories.single().importance)
+        assertEquals(2, memories.size)
+        assertTrue(memories.any { it.id == firstId && it.text == "I prefer concise explanations" })
+        assertTrue(memories.any { it.text == "I prefer concise answers" })
 
         memories = index.remember(memories, "I use Kotlin for Android work", UserMemory.Kind.FACT, 50, 3)
-        memories = index.remember(memories, "I use Python for automation", UserMemory.Kind.FACT, 50, 4)
-        assertEquals(2, memories.size)
+        memories = index.remember(memories, "My favorite color is blue", UserMemory.Kind.FACT, 50, 4)
+        assertEquals(4, memories.size)
     }
 
     @Test

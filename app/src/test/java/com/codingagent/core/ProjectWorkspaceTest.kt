@@ -53,6 +53,17 @@ class ProjectWorkspaceTest {
         assertTrue(report.issues.single().message.contains("TODO"))
     }
 
+    @Test fun sourceFilesLargerThanFiveMiBRemainIndexedAndSearchable() {
+        val root = Files.createTempDirectory("large-source-index").toFile()
+        val source = "x".repeat(5 * 1024 * 1024 + 1) + "SEARCH-SENTINEL"
+        root.resolve("Large.kt").writeText(source)
+        val workspace = ProjectWorkspace(root)
+
+        assertTrue(workspace.summary().files.any { it.path == "Large.kt" })
+        val hit = workspace.search("SEARCH-SENTINEL").single()
+        assertTrue(hit.text.endsWith("SEARCH-SENTINEL"))
+    }
+
     @Test fun commandRunnerCapturesFailure() {
         val root = Files.createTempDirectory("coding-agent").toFile()
         val result = CommandRunner(root).run(listOf("sh", "-c", "printf out; printf err >&2; exit 3"), 5)

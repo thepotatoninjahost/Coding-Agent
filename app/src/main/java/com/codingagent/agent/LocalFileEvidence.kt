@@ -44,17 +44,29 @@ object LocalFileEvidence {
         val normalized = nameOrPath.trim().trimStart('/').replace('\\', '/')
         if (normalized.isBlank()) return null
         runCatching {
-            files.read(normalized)
+            files.readChunk(normalized, 0, 1)
             return normalized
         }
         val base = java.io.File(normalized).name
-        val hits = workspace.summary().files.filter {
-            java.io.File(it.path).name.equals(base, ignoreCase = true)
+        val hits = workspace.sourcePaths().filter {
+            java.io.File(it).name.equals(base, ignoreCase = true)
         }
         return when {
             hits.isEmpty() -> null
-            hits.size == 1 -> hits[0].path
-            else -> hits.minByOrNull { it.path.length }?.path
+            hits.size == 1 -> hits[0]
+            else -> hits.minByOrNull { it.length }
+        }
+    }
+
+    fun readComplete(path: String, files: ProjectFileService): String {
+        val content = StringBuilder()
+        var offset = 0
+        while (true) {
+            val part = files.readChunk(path, offset, 12_000)
+            content.append(part.content)
+            if (!part.hasMore) return content.toString()
+            check(part.nextCharacter > offset) { "File reader made no progress at character $offset" }
+            offset = part.nextCharacter
         }
     }
 
@@ -64,7 +76,7 @@ object LocalFileEvidence {
         workspace: ProjectWorkspace
     ): Report? {
         val resolved = resolve(nameOrPath, files, workspace) ?: return null
-        val content = runCatching { files.read(resolved).content }.getOrNull() ?: return null
+        val content = runCatching { readComplete(resolved, files) }.getOrNull() ?: return null
         val all = workspace.verify().issues
         val policy = all.filter { issue ->
             val ip = issue.path.replace('\\', '/')

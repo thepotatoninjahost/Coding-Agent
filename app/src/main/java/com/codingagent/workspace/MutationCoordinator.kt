@@ -613,7 +613,7 @@ class MutationCoordinator(
         val root = workspace.projectRoot()
         if (runCatching { OpenJobStore.markReady(root) }.isSuccess) return ReadyState.READY
         return if (runCatching {
-                OpenJobStore.markRecoveryRequired(root, reason.take(600))
+                OpenJobStore.markRecoveryRequired(root, reason)
             }.isSuccess
         ) {
             ReadyState.RECOVERY_REQUIRED

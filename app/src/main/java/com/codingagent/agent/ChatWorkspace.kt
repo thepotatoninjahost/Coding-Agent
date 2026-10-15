@@ -40,7 +40,7 @@ class ChatWorkspace(
     private val memoryStore: UserMemoryStore? = null,
     private val runtimeProvider: () -> AutonomousAgent?
 ) {
-    fun history(limit: Int = 100): List<ChatMessage> = store.recentChatMessages(limit).asReversed()
+    fun history(limit: Int = Int.MAX_VALUE): List<ChatMessage> = store.recentChatMessages(limit).asReversed()
 
     fun cancel() {
         runtimeProvider()?.cancel("Stopped by owner")
@@ -66,9 +66,15 @@ class ChatWorkspace(
         }
 
         val agent = runtimeProvider()
+        agent?.setOwnerContextProvider {
+            AgentOwnerContext(
+                history = store.recentChatMessages(Int.MAX_VALUE).asReversed(),
+                memories = memoryStore?.all().orEmpty()
+            )
+        }
         val approval = agent?.let { ChatApproval.tryApprove(it, trimmed) }
         if (approval != null) {
-            progressListener?.onProgress("APPROVAL", approval.toString().take(80))
+            progressListener?.onProgress("APPROVAL", approval.toString())
             return persist(result = approval)
         }
         // Never replace the persisted open job while an older mutation proposal is still
@@ -107,7 +113,7 @@ class ChatWorkspace(
                 boundRoot?.let { OpenJobStore.startNew(it, trimmed) }
             }
         }
-        val lastAgent = store.recentChatMessages(20).firstOrNull { it.role == ChatRole.AGENT }?.content
+        val lastAgent = store.recentChatMessages(Int.MAX_VALUE).firstOrNull { it.role == ChatRole.AGENT }?.content
         val openJob = OpenJobStore.loadBound()
         val resumeOpenJob = agent != null &&
             isContinuationCommand(trimmed) &&
@@ -136,20 +142,20 @@ class ChatWorkspace(
                         progressListener?.onProgress(event.name, event.detail)
                     }
                     is AutonomousAgentEvent.ToolStarted -> {
-                        val purpose = event.purpose.ifBlank { "${event.name}: ${event.arguments.take(80)}" }
+                        val purpose = event.purpose.ifBlank { "${event.name}: ${event.arguments}" }
                         workLog += purpose
-                        progressListener?.onProgress("TOOL", purpose.take(120))
+                        progressListener?.onProgress("TOOL", purpose)
                     }
                     is AutonomousAgentEvent.ToolFinished -> progressListener?.onProgress(
                         "TOOL",
                         if (event.success) "${event.name} ok" else "${event.name} failed"
                     )
-                    is AutonomousAgentEvent.ModelDelta -> progressListener?.onProgress("MODEL", "Streaming… ${event.text.take(40)}")
+                    is AutonomousAgentEvent.ModelDelta -> progressListener?.onProgress("MODEL", "Streaming… ${event.text}")
                     is AutonomousAgentEvent.ModelMessage -> progressListener?.onProgress("MODEL", "Writing reply")
-                    is AutonomousAgentEvent.Started -> progressListener?.onProgress("STARTED", event.request.take(60))
+                    is AutonomousAgentEvent.Started -> progressListener?.onProgress("STARTED", event.request)
                     is AutonomousAgentEvent.Completed -> progressListener?.onProgress("DONE", "Completed")
-                    is AutonomousAgentEvent.Failed -> progressListener?.onProgress("FAILED", event.message.take(120))
-                    is AutonomousAgentEvent.Stopped -> progressListener?.onProgress("STOPPED", event.message.take(120))
+                    is AutonomousAgentEvent.Failed -> progressListener?.onProgress("FAILED", event.message)
+                    is AutonomousAgentEvent.Stopped -> progressListener?.onProgress("STOPPED", event.message)
                     is AutonomousAgentEvent.ApprovalRequired -> progressListener?.onProgress("APPROVAL", "Waiting for owner approval")
                 }
             }
@@ -238,7 +244,7 @@ class ChatWorkspace(
 
     private fun packageWithMemory(current: String): String {
         val job = OpenJobStore.loadBound()
-        val prior = store.recentChatMessages(16)
+        val prior = store.recentChatMessages(Int.MAX_VALUE)
             .asReversed()
             .filter { it.role == ChatRole.USER || it.role == ChatRole.AGENT }
             .takeLast(10)
@@ -252,15 +258,19 @@ class ChatWorkspace(
             if (learned.isNotEmpty()) {
                 append("Relevant learned user memory. This is durable user context, not the system job description:\n")
                 learned.forEach { memory ->
-                    append("- ").append(memory.text.take(500)).append('\n')
+                    append("- ").append(memory.text.take(500))
+                    if (memory.text.length > 500) {
+                        append(" [PREVIEW ONLY; retrieve the complete saved entry with read_user_memory or search_user_memory]")
+                    }
+                    append('\n')
                 }
-                append('\n')
+                append("The saved memories are preserved in full. These are context previews only; retrieve the complete entry whenever its exact wording matters.\n\n")
             }
             if (prior.size > 1) {
-                append("Conversation so far (oldest first). The last Current request is what to do now.\n")
+                append("Recent conversation excerpt (oldest first; only the 10 most recent messages are included here). The complete saved history remains available. Before relying on older conversation details, retrieve the relevant messages with read_chat_history or search_chat_history.\n")
                 for (msg in prior.dropLast(1)) {
                     val who = if (msg.role == ChatRole.USER) "OWNER" else "AGENT"
-                    append(who).append(": ").append(msg.content.take(700)).append('\n')
+                    append(who).append(": ").append(msg.content).append('\n')
                 }
             }
             append("Current request:\n")
@@ -290,14 +300,14 @@ class ChatWorkspace(
                 entries.forEach { line ->
                     val entry = runCatching { org.json.JSONObject(line) }.getOrNull()
                     if (entry == null) {
-                        append(line.take(1_000)).append('\n')
+                        append(line).append('\n')
                     } else {
                         val timestamp = runCatching {
                             java.time.Instant.ofEpochMilli(entry.optLong("timestamp")).toString()
                         }.getOrDefault("unknown time")
                         append('[').append(timestamp).append("] ")
                             .append(entry.optString("type", "Event")).append('\n')
-                        append(entry.optString("details").take(1_500)).append("\n\n")
+                        append(entry.optString("details")).append("\n\n")
                     }
                 }
                 append("Entries are shortened in this chat view when necessary; the stored JSONL records retain the full event payloads.")
@@ -330,7 +340,7 @@ class ChatWorkspace(
                 } else {
                     buildString {
                         append("Saved user preferences:\n")
-                        memories.take(20).forEach { append("- ").append(it.text).append('\n') }
+                        memories.forEach { append("- ").append(it.text).append('\n') }
                     }.trimEnd()
                 }
             }
@@ -350,7 +360,7 @@ class ChatWorkspace(
     private fun formatTask(task: AgentTask, workLog: List<String> = emptyList()): String = buildString {
         if (workLog.isNotEmpty()) {
             append("Work:\n")
-            workLog.distinct().take(16).forEach { line ->
+            workLog.distinct().forEach { line ->
                 append("- ")
                 append(line)
                 append('\n')

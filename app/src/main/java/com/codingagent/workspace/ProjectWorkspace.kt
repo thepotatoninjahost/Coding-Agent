@@ -39,6 +39,7 @@ class ProjectWorkspace(private val root: File) {
     fun projectRoot(): File = root
     fun terminal(): TerminalSession = terminalSession
     fun summary(): ProjectSummary = indexer.summarize(root)
+    fun sourcePaths(): List<String> = indexer.listSourcePaths(root)
     fun search(query: String): List<SearchHit> = indexer.search(root, query)
 
     @Synchronized

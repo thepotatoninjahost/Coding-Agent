@@ -36,8 +36,6 @@ object ModelEndpointPolicy {
     }
 }
 
-const val MAX_SYSTEM_PROMPT_CHARS = 12_000
-
 data class ModelSettings(
     val backend: ModelBackend = ModelBackend.REMOTE,
     val baseUrl: String = "",
@@ -61,7 +59,7 @@ data class ModelSettings(
         apiKey = apiKey.trim(),
         modelName = modelName.trim(),
         rotationModels = rotationModels.trim(),
-        systemPrompt = systemPrompt.trim().take(MAX_SYSTEM_PROMPT_CHARS),
+        systemPrompt = systemPrompt.trim(),
         extraHeaders = extraHeaders.trim()
     )
 

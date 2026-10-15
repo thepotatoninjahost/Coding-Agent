@@ -72,4 +72,17 @@ class AgentPromptTest {
         assertTrue(prompt.contains("personal logs"))
         assertTrue(prompt.contains("Do not stop merely because a file was read"))
     }
+
+    @Test
+    fun promptPreservesEvidenceBeyondFormerCharacterLimits() {
+        val root = Files.createTempDirectory("agent-prompt-complete-evidence").toFile()
+        val request = "Review all evidence"
+        val intake = TaskIntakeParser(root).parse(request)
+        val evidence = "EVIDENCE-BEGIN\n" + "x".repeat(20_000) + "\nEVIDENCE-END"
+
+        val prompt = AgentPrompt.build(request, intake, evidence, 4_000, lessons = "")
+
+        assertTrue(prompt.contains(evidence))
+        assertTrue(prompt.endsWith(evidence))
+    }
 }

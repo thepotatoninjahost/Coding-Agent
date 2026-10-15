@@ -17,13 +17,13 @@ import com.codingagent.workspace.TerminalSession
 class TerminalCancelTest {
 
     @Test
-    fun streamedOutputCallbackStopsAtTheCaptureLimit() {
+    fun terminalOutputBeyondFormerCaptureLimitIsPreserved() {
         val root = Files.createTempDirectory("terminal-output-cap").toFile()
         val workspace = ProjectWorkspace(root)
         val seen = StringBuilder()
-        val entry = workspace.terminal().execute("yes x | head -c 400000", onStdout = { seen.append(it) }, timeoutSeconds = 10)
-        assertTrue(entry.stdout.length <= 256 * 1024)
-        assertTrue(seen.length <= 256 * 1024)
+        val entry = workspace.terminal().execute("yes x | tr -d '\n' | head -c 400000", onStdout = { seen.append(it) }, timeoutSeconds = 10)
+        assertEquals(400_000, entry.stdout.length)
+        assertEquals(400_000, seen.length)
     }
 
     @Test
@@ -94,7 +94,7 @@ class TerminalCancelTest {
         val root = Files.createTempDirectory("term-tools-timeout").toFile()
         val tools = AgentTools(ProjectWorkspace(root))
 
-        val entry = tools.terminal(listOf("yes"), timeoutSeconds = 1)
+        val entry = tools.terminal(listOf("sh", "-c", "sleep 5"), timeoutSeconds = 1)
 
         assertTrue("Requested timeout should stop the command", entry.timedOut)
         assertTrue("Requested timeout should not wait for the full sleep", entry.durationMs < 4_000)

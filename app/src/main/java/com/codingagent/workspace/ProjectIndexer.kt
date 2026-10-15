@@ -11,7 +11,6 @@ import java.nio.charset.StandardCharsets
 /**
  * ONE JOB: Project tree → indexed file records with symbols and checksums.
  */
-private const val MAX_INDEXED_FILE_BYTES = 5L * 1024 * 1024
 private const val MAX_SEARCH_QUERY_LENGTH = 256
 private val SYMBOL_PATTERN = Regex("\\b(class|interface|object|fun|function|def|const|val|var|public|private|protected|static)\\s+([A-Za-z_][A-Za-z0-9_]*)")
 
@@ -25,7 +24,7 @@ class ProjectIndexer {
     fun index(root: File): List<ProjectFile> = root.walkTopDown()
         .onEnter { it.name !in ignored && isSafeProjectPath(root, it) }
         .filter {
-            it.isFile && it.length() <= MAX_INDEXED_FILE_BYTES &&
+            it.isFile &&
                 !java.nio.file.Files.isSymbolicLink(it.toPath()) &&
                 isSafeProjectPath(root, it) &&
                 (it.extension.lowercase() in extensions || it.name == "Makefile")
@@ -53,6 +52,18 @@ class ProjectIndexer {
         )
     }
 
+    /** Lists all supported source paths, including files too large for metadata indexing. */
+    fun listSourcePaths(root: File): List<String> = root.walkTopDown()
+        .onEnter { it.name !in ignored && isSafeProjectPath(root, it) }
+        .filter {
+            it.isFile && !java.nio.file.Files.isSymbolicLink(it.toPath()) &&
+                isSafeProjectPath(root, it) &&
+                (it.extension.lowercase() in extensions || it.name == "Makefile")
+        }
+        .map { ProjectPaths.relative(root, it) }
+        .sorted()
+        .toList()
+
     fun search(root: File, query: String): List<SearchHit> {
         val normalized = query.trim()
         if (normalized.isBlank() || normalized.length > MAX_SEARCH_QUERY_LENGTH) return emptyList()
@@ -65,7 +76,7 @@ class ProjectIndexer {
         return root.walkTopDown()
             .onEnter { it.name !in ignored && isSafeProjectPath(root, it) }
             .filter {
-                it.isFile && it.length() <= MAX_INDEXED_FILE_BYTES &&
+                it.isFile &&
                     !java.nio.file.Files.isSymbolicLink(it.toPath()) &&
                     isSafeProjectPath(root, it) &&
                     (it.extension.lowercase() in extensions || it.name == "Makefile")

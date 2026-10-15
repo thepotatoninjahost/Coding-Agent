@@ -152,7 +152,7 @@ class LocalStore(context: Context) : ChatMessageStore {
 
         // Keep only the requested physical tail. Parsing happens after the tail is
         // selected so malformed recent records preserve the previous semantics.
-        val tail = ArrayDeque<String>(limit)
+        val tail = ArrayDeque<String>(minOf(limit, 1024))
         file.useLines { lines ->
             lines.forEach { line ->
                 if (tail.size == limit) tail.removeFirst()

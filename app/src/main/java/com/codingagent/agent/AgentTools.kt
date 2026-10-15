@@ -4,6 +4,7 @@ import java.io.File
 import java.security.MessageDigest
 import com.codingagent.intake.OperationKind
 import com.codingagent.intake.TaskOperation
+import com.codingagent.workspace.AgentFileChunk
 import com.codingagent.workspace.EditorDocument
 import com.codingagent.workspace.MutationCoordinator
 import com.codingagent.workspace.MutationProposeResult
@@ -19,10 +20,46 @@ class AgentTools(private val workspace: ProjectWorkspace) {
 
     fun read(path: String): EditorDocument {
         val file = resolveExistingFile(path)
-        require(file.length() <= MAX_READ_BYTES) { "File exceeds the 2 MiB model-read limit" }
+        require(file.length() <= MAX_READ_BYTES) { "File exceeds the 2 MiB editor-read limit; use the agent's chunked file reader for complete access" }
         val content = file.readText()
         val relative = file.relativeTo(workspace.projectRoot()).invariantSeparatorsPath
         return EditorDocument(relative, content, checksum(content), false)
+    }
+
+    /** Reads a complete file through ordered character ranges without loading it all at once. */
+    fun readChunk(path: String, startCharacter: Int = 0, maxCharacters: Int = 12_000): AgentFileChunk {
+        require(startCharacter >= 0) { "startCharacter cannot be negative" }
+        require(maxCharacters > 0) { "maxCharacters must be positive" }
+        val file = resolveExistingFile(path)
+        java.io.PushbackReader(file.reader(Charsets.UTF_8), 1).use { reader ->
+            var skipped = 0
+            while (skipped < startCharacter) {
+                val amount = reader.skip((startCharacter - skipped).toLong()).toInt()
+                if (amount > 0) skipped += amount else {
+                    val next = reader.read()
+                    if (next < 0) return AgentFileChunk(
+                        file.relativeTo(workspace.projectRoot()).invariantSeparatorsPath, skipped, "", skipped, false
+                    )
+                    skipped++
+                }
+            }
+            val content = StringBuilder()
+            while (content.length < maxCharacters) {
+                val next = reader.read()
+                if (next < 0) break
+                content.append(next.toChar())
+            }
+            if (content.isNotEmpty() && content.last().isHighSurrogate()) {
+                val next = reader.read()
+                if (next >= 0 && next.toChar().isLowSurrogate()) content.append(next.toChar())
+                else if (next >= 0) reader.unread(next)
+            }
+            val lookahead = reader.read()
+            val hasMore = lookahead >= 0
+            if (lookahead >= 0) reader.unread(lookahead)
+            val relative = file.relativeTo(workspace.projectRoot()).invariantSeparatorsPath
+            return AgentFileChunk(relative, skipped, content.toString(), skipped + content.length, hasMore)
+        }
     }
 
     /**
@@ -92,7 +129,6 @@ class AgentTools(private val workspace: ProjectWorkspace) {
         require(!ProjectPaths.isSensitivePath(ProjectPaths.relative(root, match))) {
             "Sensitive project paths are not accessible as project source"
         }
-        require(match.length() <= MAX_READ_BYTES) { "File exceeds the 2 MiB model-read limit" }
         return match
     }
 

@@ -6,7 +6,7 @@ import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 
 /**
- * ONE JOB: Run a shell command with cancellation, a timeout, and bounded output capture.
+ * ONE JOB: Run a shell command with cancellation and a timeout while preserving complete output.
  * Extracted out of ProjectWorkspace.kt — process execution is unrelated to file-state,
  * transactions, and verification, which is what the rest of that file does.
  */
@@ -80,10 +80,17 @@ class CommandRunner(private val directory: File) {
             if (!completed && cancellationGeneration.get() == runGeneration && !process.isAlive) {
                 completed = true
             }
-            if (!completed) terminate(process)
+            if (!completed) {
+                terminate(process)
+                // A child process may inherit the shell's pipe handles and keep readers
+                // blocked after the shell itself has exited. Close our read ends so timeout
+                // and cancellation return promptly without dropping already captured text.
+                runCatching { process.inputStream.close() }
+                runCatching { process.errorStream.close() }
+            }
 
-            outThread.join(2_000)
-            errThread.join(2_000)
+            outThread.join(1_000)
+            errThread.join(1_000)
 
             val cancelled = !completed && cancellationGeneration.get() != runGeneration
             val timedOut = !completed && !cancelled
@@ -114,29 +121,21 @@ class CommandRunner(private val directory: File) {
     private fun terminate(process: Process) {
         runCatching {
             process.destroy()
-            if (!process.waitFor(2, TimeUnit.SECONDS)) process.destroyForcibly()
+            if (!process.waitFor(250, TimeUnit.MILLISECONDS)) process.destroyForcibly()
         }
     }
 
     private fun readLimited(input: java.io.InputStream, output: StringBuilder, onChunk: ((String) -> Unit)? = null) {
         val buffer = CharArray(8 * 1024)
-        var delivered = 0
         input.reader(Charsets.UTF_8).use { reader ->
             while (true) {
                 val count = reader.read(buffer)
                 if (count < 0) break
-                val remaining = 256 * 1024 - delivered
-                if (remaining <= 0) continue
-                val chunk = String(buffer, 0, minOf(count, remaining))
-                appendLimited(output, chunk)
+                val chunk = String(buffer, 0, count)
+                output.append(chunk)
                 onChunk?.invoke(chunk)
-                delivered += chunk.length
             }
         }
     }
 
-    private fun appendLimited(output: StringBuilder, value: String) {
-        if (output.length >= 256 * 1024) return
-        output.append(value.take(256 * 1024 - output.length))
-    }
 }

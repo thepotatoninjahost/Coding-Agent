@@ -60,7 +60,7 @@ object UserMemoryExtractor {
         val lower = normalized.lowercase(Locale.ROOT)
         val prefix = durablePrefixes.firstOrNull { lower.startsWith(it) } ?: return null
         val body = normalized.substring(prefix.length).trim().trimEnd('.', '!', '?')
-        if (body.length < 3 || body.length > 500) return null
+        if (body.length < 3) return null
         if (body.split(Regex("\\s+")).size < 2 && prefix != "remember ") return null
         return body
     }
@@ -104,7 +104,7 @@ object UserMemoryExtractor {
  * ONE JOB: Apply deterministic memory consolidation and relevance rules without Android dependencies.
  */
 class UserMemoryIndex(
-    private val maxEntries: Int = 64
+    @Suppress("UNUSED_PARAMETER") private val maxEntries: Int = 64
 ) {
     fun remember(
         existing: List<UserMemory>,
@@ -114,23 +114,16 @@ class UserMemoryIndex(
         now: Long
     ): List<UserMemory> {
         val clean = text.replace(Regex("\\s+"), " ").trim().trimEnd('.', '!', '?')
-        if (clean.length < 3 || clean.length > 500) return existing
-        val match = existing.maxByOrNull { similarity(it.text, clean) }
-        val next = if (match != null && (
-            similarity(match.text, clean) >= 0.55 ||
-                sameDirectiveTopic(match.text, clean)
-            )) {
+        if (clean.length < 3) return existing
+        val exact = existing.firstOrNull { it.text == clean }
+        val next = if (exact != null) {
             existing.map {
-                if (it.id == match.id) {
+                if (it.id == exact.id) {
                     it.copy(
-                        text = clean,
-                        kind = kind,
                         importance = maxOf(it.importance, importance.coerceIn(1, 99)),
                         updatedAt = now
                     )
-                } else {
-                    it
-                }
+                } else it
             }
         } else {
             existing + UserMemory(
@@ -151,7 +144,6 @@ class UserMemoryIndex(
         val stable = existing
             .filter { it.kind == UserMemory.Kind.WORKFLOW && it.importance >= 80 }
             .sortedWith(compareByDescending<UserMemory> { it.importance }.thenByDescending { it.updatedAt })
-            .take(2)
 
         val scored = if (queryTokens.isEmpty()) {
             emptyList()
@@ -184,9 +176,7 @@ class UserMemoryIndex(
     }
 
     private fun compact(memories: List<UserMemory>): List<UserMemory> =
-        memories
-            .sortedWith(compareByDescending<UserMemory> { it.importance }.thenByDescending { it.updatedAt })
-            .take(maxEntries)
+        memories.sortedWith(compareByDescending<UserMemory> { it.importance }.thenByDescending { it.updatedAt })
 
     private fun sameDirectiveTopic(a: String, b: String): Boolean {
         val left = directiveTopic(a)

@@ -6,6 +6,8 @@ import com.codingagent.agent.AgentTools
 /**
  * ONE JOB: Safe list/read of project files for agent tools.
  */
+data class AgentFileChunk(val path: String, val startCharacter: Int, val content: String, val nextCharacter: Int, val hasMore: Boolean)
+
 class ProjectFileService(private val workspace: ProjectWorkspace) {
     // Was constructing a fresh AgentTools(workspace) inside read() and save() on every call —
     // both are hot-path (once per model tool turn via AgentToolDispatch; once per editor
@@ -30,11 +32,12 @@ class ProjectFileService(private val workspace: ProjectWorkspace) {
             .sortedBy { it.lowercase() }
     }
 
-    fun listSourceFilePaths(): List<String> {
-        return workspace.summary().files.map { it.path }.sorted()
-    }
+    fun listSourceFilePaths(): List<String> = workspace.sourcePaths()
 
     fun read(path: String): EditorDocument = tools.read(path)
+
+    fun readChunk(path: String, startCharacter: Int, maxCharacters: Int): AgentFileChunk =
+        tools.readChunk(path, startCharacter, maxCharacters)
 
     fun save(path: String, content: String, coordinator: MutationCoordinator): MutationProposeResult =
         tools.proposeSave(path, content, coordinator)

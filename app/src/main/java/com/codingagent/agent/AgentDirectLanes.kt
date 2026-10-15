@@ -107,7 +107,7 @@ class AgentDirectLanes(
             append("\n- Static verification: ")
             append(if (report.passed) "passed (0 unfinished-work markers)" else "FAILED (${report.issues.size} issue(s))")
             if (report.issues.isNotEmpty()) {
-                report.issues.take(15).forEach { issue ->
+                report.issues.forEach { issue ->
                     append("\n  - ${issue.path}:${issue.line} — ${issue.message}")
                 }
             }
@@ -129,7 +129,7 @@ class AgentDirectLanes(
         readPath: String
     ): AgentTask {
         val resolved = LocalFileEvidence.resolve(readPath, files, workspace) ?: readPath
-        val content = runCatching { files.read(resolved).content }.getOrElse {
+        val content = runCatching { LocalFileEvidence.readComplete(resolved, files) }.getOrElse {
             return AgentTask(
                 taskId, request, "failed", plan, emptyList(),
                 VerificationReport(false, listOf(VerificationIssue(resolved, 0, it.message ?: "read failed"))),
@@ -139,8 +139,7 @@ class AgentDirectLanes(
         }
         val text = buildString {
             append("File: $resolved\n───\n")
-            append(content.take(12_000))
-            if (content.length > 12_000) append("\n… (truncated)")
+            append(content)
         }
         return AgentTask(
             taskId, request, "completed", plan, emptyList(), report,

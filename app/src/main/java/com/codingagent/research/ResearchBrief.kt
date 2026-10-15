@@ -33,11 +33,11 @@ object ResearchBriefBuilder {
                 append("SOURCE ").append(index + 1)
                 append(" [").append(source.lane).append("] ")
                 append(source.title).append(" <").append(source.url).append(">\n")
-                append(source.content.take(4_000)).append("\n")
-                source.codeExamples.take(2).forEach { append("CODE: ").append(it.take(2_000)).append("\n") }
+                append(source.content).append("\n")
+                source.codeExamples.forEach { append("CODE: ").append(it).append("\n") }
                 append("\n")
             }
-        }.take(maxCharacters)
+        }
         return ResearchBrief(
             query = session.query,
             sourceCount = usable.size,
