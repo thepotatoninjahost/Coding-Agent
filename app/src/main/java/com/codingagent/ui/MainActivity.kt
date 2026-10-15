@@ -329,7 +329,7 @@ private fun CodingAgentApp(privateDir: File) {
                 scope.launch(Dispatchers.Main.immediate) {
                     if (epoch != progressEpoch.get()) return@launch
                     status = mapAgentPhase(phase)
-                    detail = detailText.take(140)
+                    detail = detailText
                 }
             }
         )
@@ -386,13 +386,13 @@ private fun CodingAgentApp(privateDir: File) {
         pendingProposal = null
         pendingProposalId = null
         status = AgentStatus.READY
-        detail = "APPLIED ${paths.size} file(s): ${paths.joinToString().take(100)}\n$verificationSummary"
+        detail = "APPLIED ${paths.size} file(s): ${paths.joinToString()}\n$verificationSummary"
         store.recordChatMessage(
             ChatMessage(
                 role = ChatRole.SYSTEM,
                 content = "APPLIED to disk after dual approval.\nFiles:\n" +
                     paths.joinToString("\n") { "- $it" } +
-                    "\nRequest: ${result.proposal.request.take(200)}\n$verificationSummary"
+                    "\nRequest: ${result.proposal.request}\n$verificationSummary"
             )
         )
         chatMessages = store.recentChatMessages().asReversed()
@@ -845,7 +845,7 @@ private fun CodingAgentApp(privateDir: File) {
             store.recordChatMessage(ChatMessage(role = ChatRole.AGENT, content = reply))
             chatMessages = store.recentChatMessages().asReversed()
             status = AgentStatus.READY
-            detail = reply.lineSequence().firstOrNull().orEmpty().take(120)
+            detail = reply
             return
         }
 
@@ -882,18 +882,18 @@ private fun CodingAgentApp(privateDir: File) {
                 }
                 detail = when (it.result) {
                     is com.codingagent.agent.AgentRuntimeResult.Failed ->
-                        "Agent failed: ${it.response.content.lineSequence().firstOrNull().orEmpty().take(140)}"
+                        "Agent failed: ${it.response.content}"
                     is com.codingagent.agent.AgentRuntimeResult.NeedsApproval ->
                         "Waiting for two owner approvals before any file write"
                     else ->
-                        it.response.content.lineSequence().firstOrNull().orEmpty().take(120)
+                        it.response.content
                 }
             }.onFailure {
                 val message = it.message.orEmpty().ifBlank { it.javaClass.simpleName }
                 store.recordChatMessage(ChatMessage(role = ChatRole.SYSTEM, content = "Request failed: $message"))
                 chatMessages = currentChat.history()
                 status = AgentStatus.FAILED
-                detail = "Request failed: ${message.take(140)}"
+                detail = "Request failed: ${message}"
             }
             activeJob = null
             if (messageQueue.isNotEmpty()) {
