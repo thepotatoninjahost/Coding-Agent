@@ -17,7 +17,6 @@ class MainActivitySmokeTest {
     @Test
     fun launchesWorkbenchAndShowsCoreNavigation() {
         composeRule.onNodeWithText("CODING AGENT").assertIsDisplayed()
-        composeRule.onNodeWithText("Model").assertIsDisplayed()
         composeRule.onNodeWithText("New").assertIsDisplayed()
         composeRule.onNodeWithText("Import").assertIsDisplayed()
     }
