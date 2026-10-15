@@ -76,6 +76,8 @@ class RemoteHttpGateway(
         val toolCallArguments = StringBuilder()
         var sawToolCall = false
         var sawMultipleToolCalls = false
+        var sawDone = false
+        var finishReason: String? = null
 
         input.bufferedReader(StandardCharsets.UTF_8).useLines { lines ->
             for (rawLine in lines) {
@@ -84,9 +86,14 @@ class RemoteHttpGateway(
                 if (!line.startsWith("data:")) continue
                 val payload = line.removePrefix("data:").trim()
                 if (payload.isEmpty()) continue
-                if (payload == "[DONE]") break
+                if (payload == "[DONE]") {
+                    sawDone = true
+                    break
+                }
                 val chunk = runCatching { JSONObject(payload) }.getOrNull() ?: continue
-                val delta = chunk.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("delta") ?: continue
+                val choice = chunk.optJSONArray("choices")?.optJSONObject(0) ?: continue
+                choice.optString("finish_reason").takeIf { it.isNotBlank() && it != "null" }?.let { finishReason = it }
+                val delta = choice.optJSONObject("delta") ?: continue
 
                 val textPiece = delta.optString("content")
                 if (textPiece.isNotEmpty()) {
@@ -115,6 +122,10 @@ class RemoteHttpGateway(
         }
 
         if (isCancelled(generation)) return ModelResponse.Failure("Cancelled")
+        if (finishReason.isTruncatedFinishReason()) return truncatedResponseFailure(finishReason!!)
+        if (!sawDone && finishReason.isNullOrBlank()) {
+            return ModelResponse.Failure("Model stream ended without a completion marker; partial content was rejected.")
+        }
         if (sawMultipleToolCalls) {
             return ModelResponse.Failure("Model returned multiple tool calls; only one tool call is accepted per turn")
         }
@@ -170,12 +181,23 @@ class RemoteHttpGateway(
         val json = runCatching { JSONObject(trimmed) }.getOrNull()
             ?: return JsonModelResponseParser().parse(trimmed)
         val choice = json.optJSONArray("choices")?.optJSONObject(0)
+        val finishReason = choice?.optString("finish_reason")
+        if (finishReason.isTruncatedFinishReason()) return truncatedResponseFailure(finishReason!!)
         val message = choice?.optJSONObject("message") ?: choice?.optJSONObject("delta")
         if (message != null) return responseFromChatMessage(message)
         val textField = choice?.optString("text").orEmpty()
         if (textField.isNotBlank()) return JsonModelResponseParser().parse(textField)
         return JsonModelResponseParser().parse(trimmed)
     }
+
+    private fun String?.isTruncatedFinishReason(): Boolean =
+        this?.lowercase() in setOf("length", "max_tokens", "max_output_tokens", "token_limit")
+
+    private fun truncatedResponseFailure(reason: String): ModelResponse.Failure =
+        ModelResponse.Failure(
+            "Model response ended at a provider token limit (finish_reason=$reason); partial content was rejected. " +
+                "Check the configured model's output/context limits or split the input into smaller parts."
+        )
 
     private fun isEmptyContentFailure(message: String): Boolean {
         val lower = message.lowercase()

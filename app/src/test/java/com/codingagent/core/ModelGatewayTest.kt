@@ -33,6 +33,29 @@ class ModelGatewayTest {
     }
 
     @Test
+    fun providerLengthFinishReasonRejectsPartialNonStreamingContent() {
+        val gateway = RemoteHttpGateway("http://127.0.0.1:8080/v1", "", "local", connectionFactory = { _ ->
+            fakeConnection("""{"choices":[{"finish_reason":"length","message":{"content":"partial answer"}}]}""")
+        })
+        val result = gateway.complete(ModelRequest("system", "question", emptyList()))
+        assertTrue(result is ModelResponse.Failure)
+        assertTrue((result as ModelResponse.Failure).message.contains("partial content was rejected"))
+    }
+
+    @Test
+    fun providerLengthFinishReasonRejectsPartialStreamingContent() {
+        val gateway = RemoteHttpGateway("http://127.0.0.1:8080/v1", "", "local", connectionFactory = { _ ->
+            fakeConnection("""data: {"choices":[{"delta":{"content":"partial answer"}}]}
+data: {"choices":[{"delta":{},"finish_reason":"length"}]}
+data: [DONE]
+""".trimIndent())
+        })
+        val result = gateway.stream(ModelRequest("system", "question", emptyList())) {}
+        assertTrue(result is ModelResponse.Failure)
+        assertTrue((result as ModelResponse.Failure).message.contains("partial content was rejected"))
+    }
+
+    @Test
     fun multipleToolCallsAreRejectedRatherThanSilentlyDroppingCalls() {
         val gateway = RemoteHttpGateway("http://127.0.0.1:8080/v1", "", "local", connectionFactory = { _ ->
             fakeConnection("""{"choices":[{"message":{"tool_calls":[{"function":{"name":"read_file","arguments":"{}"}},{"function":{"name":"search_project","arguments":"{}"}}]}}]}""")
