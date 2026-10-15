@@ -1011,7 +1011,7 @@ private fun CodingAgentApp(privateDir: File) {
                                 researchError = message
                                 researchState = researchState.copy(phase = "blocked", canSend = true)
                                 status = AgentStatus.STOPPED
-                                detail = "Research failed: ${message.take(140)}"
+                                detail = "Research failed: ${message}"
                             }
                             activeJob = null
                         }
