@@ -25,6 +25,26 @@ class OpenJobStoreTest {
     }
 
     @Test
+    fun promptBlockPreservesLongDurableJobGoal() {
+        val root = Files.createTempDirectory("open-job-long-goal").toFile()
+        val goal = "Owner task: " + "preserve this requirement exactly ".repeat(100)
+        val job = OpenJobStore.startNew(root, goal)
+
+        assertTrue(goal.length > 1_200)
+        assertTrue(job.promptBlock().contains(goal))
+    }
+
+    @Test
+    fun recoveryReasonIsPreservedBeyondFormerCharacterLimit() {
+        val root = Files.createTempDirectory("open-job-long-recovery-reason").toFile()
+        val reason = "recovery detail ".repeat(100)
+
+        OpenJobStore.markRecoveryRequired(root, reason)
+
+        assertEquals(reason, OpenJobStore.load(root)?.recoveryReason)
+    }
+
+    @Test
     fun startNewReplacesExistingOpenJob() {
         val root = Files.createTempDirectory("open-job-new-goal").toFile()
         val first = OpenJobStore.openOrKeep(root, "fix the parser")
