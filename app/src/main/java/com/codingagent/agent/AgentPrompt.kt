@@ -24,12 +24,9 @@ object AgentPrompt {
             if (paths.isEmpty()) {
                 append("(no indexed source files)\n")
             } else {
-                paths.take(maxPaths).forEach { path ->
+                paths.forEach { path ->
                     append(path)
                     append('\n')
-                }
-                if (paths.size > maxPaths) {
-                    append("… and ${paths.size - maxPaths} more (use list_files / search_project)\n")
                 }
             }
         }
@@ -90,7 +87,7 @@ object AgentPrompt {
         }
         appendLine()
         appendLine("Evidence so far:")
-        append(evidence.take(maxEvidenceChars.coerceAtMost(6_000)))
+        append(evidence)
     }
 
     fun listingSummary(listing: String, report: VerificationReport, namesOnly: Boolean = true): String {
@@ -108,7 +105,7 @@ object AgentPrompt {
                 append("FAILED; ")
                 append(report.issues.size)
                 append(" issue(s)")
-                report.issues.take(20).forEach { issue ->
+                report.issues.forEach { issue ->
                     append("\n- ")
                     append(issue.path)
                     append(":")
@@ -129,7 +126,7 @@ object AgentPrompt {
         val draft = buildString {
             append("Review from gathered evidence (model did not write a final after tools were closed).\n\n")
             append("Request: ").append(request.trim()).append("\n\n")
-            append(evidence.take(maxChars))
+            append(evidence)
             append("\n\nVerification: ")
             if (report.passed) {
                 append("passed (static unfinished-work marker scan)")
