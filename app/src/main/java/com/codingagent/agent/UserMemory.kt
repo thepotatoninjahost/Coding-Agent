@@ -151,7 +151,6 @@ class UserMemoryIndex(
         val stable = existing
             .filter { it.kind == UserMemory.Kind.WORKFLOW && it.importance >= 80 }
             .sortedWith(compareByDescending<UserMemory> { it.importance }.thenByDescending { it.updatedAt })
-            .take(2)
 
         val scored = if (queryTokens.isEmpty()) {
             emptyList()
@@ -184,9 +183,7 @@ class UserMemoryIndex(
     }
 
     private fun compact(memories: List<UserMemory>): List<UserMemory> =
-        memories
-            .sortedWith(compareByDescending<UserMemory> { it.importance }.thenByDescending { it.updatedAt })
-            .take(maxEntries)
+        memories.sortedWith(compareByDescending<UserMemory> { it.importance }.thenByDescending { it.updatedAt })
 
     private fun sameDirectiveTopic(a: String, b: String): Boolean {
         val left = directiveTopic(a)
