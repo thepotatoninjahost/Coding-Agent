@@ -263,7 +263,7 @@ class ChatWorkspace(
                 append("All saved memories and prior conversation messages are included in full.\n\n")
             }
             if (prior.size > 1) {
-                append("Recent conversation excerpt (oldest first; only the 10 most recent messages are included here). The complete saved history remains available. Before relying on older conversation details, retrieve the relevant messages with read_chat_history or search_chat_history.\n")
+                append("Complete prior conversation history (oldest first). Every saved user and agent message is included in full.\n")
                 for (msg in prior.dropLast(1)) {
                     val who = if (msg.role == ChatRole.USER) "OWNER" else "AGENT"
                     append(who).append(": ").append(msg.content).append('\n')
