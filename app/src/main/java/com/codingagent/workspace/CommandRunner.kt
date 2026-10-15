@@ -6,7 +6,7 @@ import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 
 /**
- * ONE JOB: Run a shell command with cancellation, a timeout, and bounded output capture.
+ * ONE JOB: Run a shell command with cancellation and a timeout while preserving complete output.
  * Extracted out of ProjectWorkspace.kt — process execution is unrelated to file-state,
  * transactions, and verification, which is what the rest of that file does.
  */
