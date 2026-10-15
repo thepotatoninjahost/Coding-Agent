@@ -40,7 +40,7 @@ class ChatWorkspace(
     private val memoryStore: UserMemoryStore? = null,
     private val runtimeProvider: () -> AutonomousAgent?
 ) {
-    fun history(limit: Int = 100): List<ChatMessage> = store.recentChatMessages(limit).asReversed()
+    fun history(limit: Int = Int.MAX_VALUE): List<ChatMessage> = store.recentChatMessages(limit).asReversed()
 
     fun cancel() {
         runtimeProvider()?.cancel("Stopped by owner")
@@ -68,7 +68,7 @@ class ChatWorkspace(
         val agent = runtimeProvider()
         val approval = agent?.let { ChatApproval.tryApprove(it, trimmed) }
         if (approval != null) {
-            progressListener?.onProgress("APPROVAL", approval.toString().take(80))
+            progressListener?.onProgress("APPROVAL", approval.toString())
             return persist(result = approval)
         }
         // Never replace the persisted open job while an older mutation proposal is still
@@ -107,7 +107,7 @@ class ChatWorkspace(
                 boundRoot?.let { OpenJobStore.startNew(it, trimmed) }
             }
         }
-        val lastAgent = store.recentChatMessages(20).firstOrNull { it.role == ChatRole.AGENT }?.content
+        val lastAgent = store.recentChatMessages(Int.MAX_VALUE).firstOrNull { it.role == ChatRole.AGENT }?.content
         val openJob = OpenJobStore.loadBound()
         val resumeOpenJob = agent != null &&
             isContinuationCommand(trimmed) &&
@@ -136,19 +136,19 @@ class ChatWorkspace(
                         progressListener?.onProgress(event.name, event.detail)
                     }
                     is AutonomousAgentEvent.ToolStarted -> {
-                        val purpose = event.purpose.ifBlank { "${event.name}: ${event.arguments.take(80)}" }
+                        val purpose = event.purpose.ifBlank { "${event.name}: ${event.arguments}" }
                         workLog += purpose
-                        progressListener?.onProgress("TOOL", purpose.take(120))
+                        progressListener?.onProgress("TOOL", purpose)
                     }
                     is AutonomousAgentEvent.ToolFinished -> progressListener?.onProgress(
                         "TOOL",
                         if (event.success) "${event.name} ok" else "${event.name} failed"
                     )
-                    is AutonomousAgentEvent.ModelDelta -> progressListener?.onProgress("MODEL", "Streaming… ${event.text.take(40)}")
+                    is AutonomousAgentEvent.ModelDelta -> progressListener?.onProgress("MODEL", "Streaming… ${event.text}")
                     is AutonomousAgentEvent.ModelMessage -> progressListener?.onProgress("MODEL", "Writing reply")
-                    is AutonomousAgentEvent.Started -> progressListener?.onProgress("STARTED", event.request.take(60))
+                    is AutonomousAgentEvent.Started -> progressListener?.onProgress("STARTED", event.request)
                     is AutonomousAgentEvent.Completed -> progressListener?.onProgress("DONE", "Completed")
-                    is AutonomousAgentEvent.Failed -> progressListener?.onProgress("FAILED", event.message.take(120))
+                    is AutonomousAgentEvent.Failed -> progressListener?.onProgress("FAILED", event.message)
                     is AutonomousAgentEvent.Stopped -> progressListener?.onProgress("STOPPED", event.message.take(120))
                     is AutonomousAgentEvent.ApprovalRequired -> progressListener?.onProgress("APPROVAL", "Waiting for owner approval")
                 }
@@ -238,11 +238,11 @@ class ChatWorkspace(
 
     private fun packageWithMemory(current: String): String {
         val job = OpenJobStore.loadBound()
-        val prior = store.recentChatMessages(16)
+        val prior = store.recentChatMessages(Int.MAX_VALUE)
             .asReversed()
             .filter { it.role == ChatRole.USER || it.role == ChatRole.AGENT }
             .toList()
-        val learned = memoryStore?.relevant(current, 6).orEmpty()
+        val learned = memoryStore?.relevant(current, Int.MAX_VALUE).orEmpty()
         if (prior.size <= 1 && job == null && learned.isEmpty()) return current
         return buildString {
             if (job != null && job.status != "applied") {
