@@ -86,7 +86,7 @@ object DegenerateOutput {
         val lines = stripped.lineSequence().map { it.trim() }.filter { it.isNotEmpty() }.toList()
         val top = lines.groupingBy { it }.eachCount().maxByOrNull { it.value }
         return if (top != null && top.value >= 5) {
-            "$fallbackPrefix (repeated \"${top.key.take(80)}\" ×${top.value})."
+            "$fallbackPrefix (repeated \"${top.key}\" ×${top.value})."
         } else {
             "$fallbackPrefix (low-entropy or token spam, ${stripped.length} chars)."
         }
