@@ -27,6 +27,27 @@ class ToolResultPagerTest {
         assertEquals(original, rebuilt.toString())
     }
 
+    @Test fun largeFileCanBeReadInOrderedChunksWithoutLoss() {
+        val root = java.nio.file.Files.createTempDirectory("complete-large-file").toFile()
+        val original = "BEGIN\\n" + "x".repeat(2 * 1024 * 1024) + "\\n🌍END-OF-FILE"
+        root.resolve("large.txt").writeText(original)
+        val tools = com.codingagent.agent.AgentTools(com.codingagent.workspace.ProjectWorkspace(root))
+        val rebuilt = StringBuilder()
+        var offset = 0
+        var pages = 0
+        while (true) {
+            val part = tools.readChunk("large.txt", offset, 512 * 1024)
+            assertEquals(offset, part.startCharacter)
+            rebuilt.append(part.content)
+            pages++
+            if (!part.hasMore) break
+            assertTrue(part.nextCharacter > offset)
+            offset = part.nextCharacter
+        }
+        assertTrue(pages > 1)
+        assertEquals(original, rebuilt.toString())
+    }
+
     @Test fun refusesToSkipUnseenParts() {
         val pager = ToolResultPager(4)
         val first = pager.present("test", "abcdefgh")

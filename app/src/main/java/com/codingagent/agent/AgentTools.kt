@@ -20,7 +20,7 @@ class AgentTools(private val workspace: ProjectWorkspace) {
 
     fun read(path: String): EditorDocument {
         val file = resolveExistingFile(path)
-        require(file.length() <= MAX_READ_BYTES) { "File exceeds the 2 MiB model-read limit" }
+        require(file.length() <= MAX_READ_BYTES) { "File exceeds the 2 MiB editor-read limit; use the agent's chunked file reader for complete access" }
         val content = file.readText()
         val relative = file.relativeTo(workspace.projectRoot()).invariantSeparatorsPath
         return EditorDocument(relative, content, checksum(content), false)
