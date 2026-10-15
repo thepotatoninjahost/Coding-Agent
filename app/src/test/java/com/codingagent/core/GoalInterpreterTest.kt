@@ -139,6 +139,14 @@ class GoalInterpreterTest {
         assertTrue(!contract.goal.contains("\\nPrior owner instructions:"))
     }
 
+    @Test fun goalIsNotTruncatedAtFiveHundredCharacters() {
+        val root = Files.createTempDirectory("goal-long").toFile()
+        val request = "fix " + "instruction ".repeat(100) + "FINAL-OWNER-INSTRUCTION"
+        val contract = GoalInterpreter(root).interpret(request)
+        assertEquals(request, contract.goal)
+        assertTrue(contract.goal.endsWith("FINAL-OWNER-INSTRUCTION"))
+    }
+
     @Test fun buildMeACompilerIsCreateNotProjectTest() {
         val root = Files.createTempDirectory("goal-compiler").toFile()
         val contract = GoalInterpreter(root).interpret("Build me a compiler")
