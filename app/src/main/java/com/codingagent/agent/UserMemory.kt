@@ -60,7 +60,7 @@ object UserMemoryExtractor {
         val lower = normalized.lowercase(Locale.ROOT)
         val prefix = durablePrefixes.firstOrNull { lower.startsWith(it) } ?: return null
         val body = normalized.substring(prefix.length).trim().trimEnd('.', '!', '?')
-        if (body.length < 3)
+        if (body.length < 3) return null
         if (body.split(Regex("\\s+")).size < 2 && prefix != "remember ") return null
         return body
     }
