@@ -315,7 +315,7 @@ class ChatWorkspaceTest {
         val agent = AutonomousAgent(root, emptyKnowledge, gateway = gateway)
         val workspace = ChatWorkspace(store, memoryStore = memory, runtimeProvider = { agent })
 
-        workspace.send("Explain project structure")
+        workspace.send("Create a Kotlin helper in src/ContextProbe.kt")
 
         val prompt = prompts.single()
         assertTrue(prompt.contains("CONVERSATION-SENTINEL-0"))
