@@ -362,7 +362,7 @@ class RemoteHttpGateway(
     private fun failure(connection: HttpURLConnection): ModelResponse.Failure {
         val body = connection.errorStream?.bufferedReader()?.use { it.readText() }.orEmpty()
             .ifBlank { connection.inputStream?.bufferedReader()?.use { it.readText() }.orEmpty() }
-        val snippet = body.replace("\\s+".toRegex(), " ").trim().take(600)
+        val snippet = body
         return ModelResponse.Failure("Model HTTP ${connection.responseCode}: ${snippet.ifBlank { "(empty body)" }}")
     }
 
