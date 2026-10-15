@@ -66,7 +66,7 @@ class UserMemoryTest {
         assertEquals(80, memories.single().importance)
 
         memories = index.remember(memories, "I use Kotlin for Android work", UserMemory.Kind.FACT, 50, 3)
-        memories = index.remember(memories, "I use Python for automation", UserMemory.Kind.FACT, 50, 4)
+        memories = index.remember(memories, "My favorite color is blue", UserMemory.Kind.FACT, 50, 4)
         assertEquals(3, memories.size)
     }
 
