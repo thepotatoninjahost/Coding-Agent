@@ -29,7 +29,7 @@ object LessonSynthesizer {
             if (successes.isNotEmpty()) {
                 appendLine("Patterns that succeeded recently — repeat these:")
                 successes.forEach { line ->
-                    val task = col(line, 2).take(PREVIEW).ifBlank { return@forEach }
+                    val task = col(line, 2).ifBlank { return@forEach }
                     val op = col(line, 3).ifBlank { "?" }
                     appendLine("  - [$op] $task")
                 }
