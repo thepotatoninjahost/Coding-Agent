@@ -60,7 +60,7 @@ object UserMemoryExtractor {
         val lower = normalized.lowercase(Locale.ROOT)
         val prefix = durablePrefixes.firstOrNull { lower.startsWith(it) } ?: return null
         val body = normalized.substring(prefix.length).trim().trimEnd('.', '!', '?')
-        if (body.length < 3 || body.length > 500) return null
+        if (body.length < 3)
         if (body.split(Regex("\\s+")).size < 2 && prefix != "remember ") return null
         return body
     }
@@ -114,7 +114,7 @@ class UserMemoryIndex(
         now: Long
     ): List<UserMemory> {
         val clean = text.replace(Regex("\\s+"), " ").trim().trimEnd('.', '!', '?')
-        if (clean.length < 3 || clean.length > 500) return existing
+        if (clean.length < 3) return existing
         val match = existing.maxByOrNull { similarity(it.text, clean) }
         val next = if (match != null && (
             similarity(match.text, clean) >= 0.55 ||

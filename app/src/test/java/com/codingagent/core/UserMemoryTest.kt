@@ -18,6 +18,17 @@ class UserMemoryTest {
     }
 
     @Test
+    fun explicitLongMemoryIsPreservedInFull() {
+        val original = "Remember that " + "important owner detail ".repeat(80)
+        val expected = original.removePrefix("Remember that ").trim().trimEnd('.', '!', '?')
+        val extracted = UserMemoryExtractor.extract(original)
+        assertEquals(expected, extracted)
+        val index = UserMemoryIndex(maxEntries = 1)
+        val saved = index.remember(emptyList(), extracted!!, UserMemory.Kind.WORKFLOW, 80, 1)
+        assertEquals(extracted, saved.single().text)
+    }
+
+    @Test
     fun transientTaskInstructionIsNotPromotedToDurableMemory() {
         assertEquals(
             null,
