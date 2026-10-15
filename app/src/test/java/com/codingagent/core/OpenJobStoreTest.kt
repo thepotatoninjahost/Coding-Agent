@@ -27,11 +27,12 @@ class OpenJobStoreTest {
     @Test
     fun promptBlockPreservesLongDurableJobGoal() {
         val root = Files.createTempDirectory("open-job-long-goal").toFile()
-        val goal = "Owner task: " + "preserve this requirement exactly ".repeat(100)
+        val goal = ("Owner task: " + "preserve this requirement exactly ".repeat(100)).trimEnd()
         val job = OpenJobStore.startNew(root, goal)
 
         assertTrue(goal.length > 1_200)
         assertTrue(job.promptBlock().contains(goal))
+        assertEquals(goal, OpenJobStore.load(root)?.goal)
     }
 
     @Test
