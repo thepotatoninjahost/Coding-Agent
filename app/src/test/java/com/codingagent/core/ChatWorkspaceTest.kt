@@ -298,8 +298,8 @@ class ChatWorkspaceTest {
         val store = MemoryChatStore()
         val memory = FakeUserMemoryStore()
         repeat(12) { index ->
-            store.recordChatMessage(ChatMessage(ChatRole.USER, "CONVERSATION-SENTINEL-$index"))
-            store.recordChatMessage(ChatMessage(ChatRole.AGENT, "Agent reply $index"))
+            store.recordChatMessage(ChatMessage(role = ChatRole.USER, content = "CONVERSATION-SENTINEL-$index"))
+            store.recordChatMessage(ChatMessage(role = ChatRole.AGENT, content = "Agent reply $index"))
         }
         repeat(8) { index ->
             memory.remember("MEMORY-SENTINEL-$index " + "complete memory detail ".repeat(40), UserMemory.Kind.PREFERENCE, 50)
