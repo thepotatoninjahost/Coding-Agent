@@ -32,6 +32,13 @@ class ToolPurposeTest {
     }
 
     @Test
+    fun longExplicitPurposeIsNotTruncated() {
+        val purpose = "Owner intent: " + "preserve all instructions ".repeat(30) + "FINAL-INSTRUCTION"
+        val escaped = purpose.replace("\\", "\\\\").replace("\"", "\\\"")
+        assertEquals(purpose, ToolPurpose.of("read_file", """{\"purpose\":\"$escaped\"}"""))
+    }
+
+    @Test
     fun explicitPurposeIsUsedForOwnerFacingLog() {
         val purpose = ToolPurpose.of(
             "read_file",
