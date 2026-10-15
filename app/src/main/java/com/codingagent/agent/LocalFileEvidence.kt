@@ -48,7 +48,7 @@ object LocalFileEvidence {
             return normalized
         }
         val base = java.io.File(normalized).name
-        val hits = workspace.summary().files.filter {
+        val hits = workspace.sourcePaths().filter {
             java.io.File(it.path).name.equals(base, ignoreCase = true)
         }
         return when {
