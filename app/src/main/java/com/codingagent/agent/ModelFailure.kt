@@ -72,7 +72,6 @@ object ModelFailure {
                 "Model request timed out. Retry once; if it keeps happening, shorten the request or switch provider."
             "connection" in lower || "unreachable" in lower || "unknownhost" in lower ->
                 "Could not reach the model endpoint (network)."
-            message.length > 280 -> message.take(280) + "…"
             else -> message
         }
     }

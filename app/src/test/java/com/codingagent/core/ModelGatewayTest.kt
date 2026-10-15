@@ -111,6 +111,22 @@ data: [DONE]
     }
 
     @Test
+    fun longSystemAndUserPromptsReachTheProviderWithoutTruncation() {
+        var requestBody = ""
+        val systemPrompt = "SYSTEM-START-" + "s".repeat(900) + "-SYSTEM-END-SENTINEL"
+        val userPrompt = "USER-START-" + "u".repeat(1_200) + "-USER-END-SENTINEL"
+        val gateway = RemoteHttpGateway("http://127.0.0.1:8080/v1", "", "local", connectionFactory = { _ ->
+            fakeConnection("""{"choices":[{"message":{"content":"ok"}}]}""", onRequest = { requestBody = it })
+        })
+
+        val result = gateway.complete(ModelRequest(systemPrompt, userPrompt, emptyList()))
+
+        assertTrue(result is ModelResponse.Text)
+        assertTrue("complete system prompt must reach provider", requestBody.contains(systemPrompt))
+        assertTrue("complete user prompt must reach provider", requestBody.contains(userPrompt))
+    }
+
+    @Test
     fun `remote http request sends tool schemas and parses a tool call`() {
         var requestBody = ""
         val gateway = RemoteHttpGateway("http://127.0.0.1:8080/v1", "", "local", connectionFactory = { _ ->

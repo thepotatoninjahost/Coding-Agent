@@ -247,8 +247,7 @@ class ChatWorkspace(
         val prior = store.recentChatMessages(Int.MAX_VALUE)
             .asReversed()
             .filter { it.role == ChatRole.USER || it.role == ChatRole.AGENT }
-            .takeLast(10)
-        val learned = memoryStore?.relevant(current, 6).orEmpty()
+        val learned = memoryStore?.all().orEmpty()
         if (prior.size <= 1 && job == null && learned.isEmpty()) return current
         return buildString {
             if (job != null && job.status != "applied") {
@@ -258,16 +257,13 @@ class ChatWorkspace(
             if (learned.isNotEmpty()) {
                 append("Relevant learned user memory. This is durable user context, not the system job description:\n")
                 learned.forEach { memory ->
-                    append("- ").append(memory.text.take(500))
-                    if (memory.text.length > 500) {
-                        append(" [PREVIEW ONLY; retrieve the complete saved entry with read_user_memory or search_user_memory]")
-                    }
+                    append("- ").append(memory.text)
                     append('\n')
                 }
-                append("The saved memories are preserved in full. These are context previews only; retrieve the complete entry whenever its exact wording matters.\n\n")
+                append("All saved memories and prior conversation messages are included in full.\n\n")
             }
             if (prior.size > 1) {
-                append("Recent conversation excerpt (oldest first; only the 10 most recent messages are included here). The complete saved history remains available. Before relying on older conversation details, retrieve the relevant messages with read_chat_history or search_chat_history.\n")
+                append("Complete prior conversation history (oldest first). Every saved user and agent message is included in full.\n")
                 for (msg in prior.dropLast(1)) {
                     val who = if (msg.role == ChatRole.USER) "OWNER" else "AGENT"
                     append(who).append(": ").append(msg.content).append('\n')

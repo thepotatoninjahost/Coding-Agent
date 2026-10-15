@@ -83,7 +83,7 @@ class KnowledgeIndex(private val root: File) : KnowledgeProvider {
                             else -> 0
                         }
                     }
-                    KnowledgeHit(item.optString("document"), item.optString("section"), score, excerpt(text, terms))
+                    KnowledgeHit(item.optString("document"), item.optString("section"), score, text)
                 }
                 .filter { it.score > 0 }
                 .sortedByDescending { it.score }
@@ -234,13 +234,6 @@ class KnowledgeIndex(private val root: File) : KnowledgeProvider {
                 )
             }
         }
-    }
-
-    private fun excerpt(text: String, terms: List<String>): String {
-        val lower = text.lowercase(Locale.US)
-        val position = terms.map { lower.indexOf(it) }.filter { it >= 0 }.minOrNull() ?: 0
-        val start = (position - 120).coerceAtLeast(0)
-        return text.substring(start, (start + 360).coerceAtMost(text.length))
     }
 
     private fun tokenize(value: String): List<String> = value.lowercase(Locale.US)

@@ -101,7 +101,7 @@ class AgentTools(private val workspace: ProjectWorkspace) {
         terminalSession.cancel(reason)
     }
 
-    fun terminalHistory(limit: Int = 50): List<TerminalEntry> = terminalSession.history(limit)
+    fun terminalHistory(limit: Int = Int.MAX_VALUE): List<TerminalEntry> = terminalSession.history(limit)
 
     fun terminalWorkingDirectory(): File = terminalSession.workingDirectory()
 

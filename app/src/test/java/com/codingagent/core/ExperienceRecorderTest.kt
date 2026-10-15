@@ -8,7 +8,7 @@ import com.codingagent.agent.ExperienceRecorder
 
 class ExperienceRecorderTest {
     @Test
-    fun historyLoaderReturnsOnlyRecentBoundedEntries() {
+    fun historyLoaderReturnsEveryRecordedEntry() {
         val root = Files.createTempDirectory("experience-tail").toFile()
         val recorder = ExperienceRecorder(root)
         repeat(250) { index ->
@@ -22,8 +22,8 @@ class ExperienceRecorderTest {
         }
 
         val lines = recorder.all()
-        assertEquals(200, lines.size)
-        assertTrue(lines.first().contains("task-50"))
+        assertEquals(250, lines.size)
+        assertTrue(lines.first().contains("task-0"))
         assertTrue(lines.last().contains("task-249"))
     }
 }

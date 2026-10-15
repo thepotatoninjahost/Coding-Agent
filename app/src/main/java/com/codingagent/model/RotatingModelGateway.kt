@@ -56,7 +56,7 @@ class RotatingModelGateway(
             if (offset < entries.lastIndex) {
                 if (isCancelled(generation)) return ModelResponse.Failure("Cancelled")
                 val next = entries[(idx + 1) % entries.size]
-                onRotated?.invoke(entries[idx].modelId, next.modelId, response.message.take(160))
+                onRotated?.invoke(entries[idx].modelId, next.modelId, response.message)
                 try {
                     Thread.sleep(400L)
                 } catch (_: InterruptedException) {

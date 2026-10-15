@@ -14,6 +14,7 @@ import com.codingagent.agent.ChatMessage
 import com.codingagent.agent.ChatMessageStore
 import com.codingagent.agent.ChatRole
 import com.codingagent.agent.ChatWorkspace
+import com.codingagent.agent.DegenerateOutput
 import com.codingagent.agent.sanitizeTaskSummary
 import com.codingagent.agent.AgentRuntimeResult
 import com.codingagent.agent.UserMemory
@@ -23,6 +24,14 @@ import com.codingagent.workspace.KnowledgeHit
 import com.codingagent.workspace.OpenJobStore
 
 class ChatWorkspaceTest {
+    @Test
+    fun degenerateOutputDiagnosticPreservesTheCompleteRepeatedLine() {
+        val repeated = "REPEATED-LINE-START " + "diagnostic detail ".repeat(10) + "FINAL-DIAGNOSTIC-SENTINEL"
+        val output = DegenerateOutput.sanitize(List(5) { repeated }.joinToString("\n"))
+        assertTrue(output.contains(repeated))
+        assertTrue(output.contains("FINAL-DIAGNOSTIC-SENTINEL"))
+    }
+
     @Test
     fun ownerReviewSummaryIsNeverTruncated() {
         val review = "PROPOSED CHANGES — complete review\n" +
@@ -280,6 +289,39 @@ class ChatWorkspaceTest {
         assertEquals("needs-input", task.status)
         assertFalse("A clarification request must not claim verification passed", task.verification.passed)
         assertTrue(turn.response.content.isNotBlank())
+    }
+
+    @Test
+    fun contextIncludesOlderConversationAndAllSavedMemories() {
+        val root = Files.createTempDirectory("chat-complete-context").toFile()
+        root.resolve("Main.kt").writeText("fun main() = 1\n")
+        val store = MemoryChatStore()
+        val memory = FakeUserMemoryStore()
+        repeat(12) { index ->
+            store.recordChatMessage(ChatMessage(role = ChatRole.USER, content = "CONVERSATION-SENTINEL-$index"))
+            store.recordChatMessage(ChatMessage(role = ChatRole.AGENT, content = "Agent reply $index"))
+        }
+        repeat(8) { index ->
+            memory.remember("MEMORY-SENTINEL-$index " + "complete memory detail ".repeat(40), UserMemory.Kind.PREFERENCE, 50)
+        }
+        val prompts = mutableListOf<String>()
+        val gateway = object : com.codingagent.model.ModelGateway {
+            override fun complete(request: com.codingagent.model.ModelRequest): com.codingagent.model.ModelResponse {
+                prompts += request.user
+                return com.codingagent.model.ModelResponse.Text("Understood.")
+            }
+            override fun cancel() = Unit
+        }
+        val agent = AutonomousAgent(root, emptyKnowledge, gateway = gateway)
+        val workspace = ChatWorkspace(store, memoryStore = memory, runtimeProvider = { agent })
+
+        workspace.send("Review the architecture and explain how repository components interact, including tradeoffs and recommendations.")
+
+        val prompt = prompts.joinToString("\n\n")
+        assertTrue(prompt.contains("CONVERSATION-SENTINEL-0"))
+        assertTrue(prompt.contains("CONVERSATION-SENTINEL-11"))
+        assertTrue(prompt.contains("MEMORY-SENTINEL-0"))
+        assertTrue(prompt.contains("MEMORY-SENTINEL-7"))
     }
 
     @Test

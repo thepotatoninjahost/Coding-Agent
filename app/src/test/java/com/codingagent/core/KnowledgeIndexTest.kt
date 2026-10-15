@@ -11,6 +11,18 @@ import com.codingagent.knowledge.KnowledgeIndex
 
 class KnowledgeIndexTest {
     @Test
+    fun searchReturnsTheCompleteIndexedChunk() {
+        val root = Files.createTempDirectory("knowledge-complete-chunk").toFile()
+        val index = KnowledgeIndex(root)
+        val source = "needle " + "complete reference material ".repeat(40) + "FINAL-KNOWLEDGE-SENTINEL"
+        index.indexText("Long guide", "test-source", source)
+
+        val hit = index.search("needle", 10).single()
+        assertEquals(source, hit.excerpt)
+        assertTrue(hit.excerpt.endsWith("FINAL-KNOWLEDGE-SENTINEL"))
+    }
+
+    @Test
     fun replacingDocumentKeepsUnrelatedDocumentsAndRemovesOldChunks() {
         val root = Files.createTempDirectory("knowledge-replace").toFile()
         val index = KnowledgeIndex(root)
