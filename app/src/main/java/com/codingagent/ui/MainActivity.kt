@@ -977,7 +977,7 @@ private fun CodingAgentApp(privateDir: File) {
                                     )
                                 }.onSuccess { entry ->
                                     if (entry != null) {
-                                        terminalHistory = (terminalHistory + entry).takeLast(40)
+                                        terminalHistory = terminalHistory + entry
                                     }
                                 }.onFailure { failure ->
                                     terminalLiveOutput += "\\n" + failure.message.orEmpty()
@@ -1002,7 +1002,7 @@ private fun CodingAgentApp(privateDir: File) {
                             val provider = DurableDeepResearchProvider(researchRoot)
                             val result = runCatching { provider.deepResearch(query, 12, ResearchModeDetector.detect(query)) { progress -> researchState = progress.toDisplayState() } }
                             result.onSuccess { session ->
-                                researchHits = session.sources.map { source -> ResearchHit(source.title, source.url, source.content.take(600)) }
+                                researchHits = session.sources.map { source -> ResearchHit(source.title, source.url, source.content) }
                                 researchState = researchState.copy(phase = "learned", completed = session.sources.size, total = session.sources.size, fullSources = session.sources.size, laneCount = session.sources.map { it.lane }.distinct().size, wordCount = session.sources.sumOf { it.wordCount }, codeExamples = session.sources.sumOf { it.codeExamples.size }, canSend = true)
                                 status = AgentStatus.READY
                                 detail = "Learned ${session.sources.size} distinct full sources"
