@@ -23,18 +23,6 @@ class ExperienceRecorder(private val root: File) {
 
     fun all(): List<String> {
         if (!file.isFile) return emptyList()
-        val recent = ArrayDeque<String>(MAX_LINES)
-        file.useLines { lines ->
-            lines.forEach { line ->
-                if (line.isBlank()) return@forEach
-                if (recent.size == MAX_LINES) recent.removeFirst()
-                recent.addLast(line)
-            }
-        }
-        return recent.toList()
-    }
-
-    companion object {
-        private const val MAX_LINES = 200
+        return file.readLines().filter { it.isNotBlank() }
     }
 }
