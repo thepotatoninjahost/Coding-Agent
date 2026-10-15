@@ -161,7 +161,7 @@ class DurableDeepResearchProvider(
                     status = 200,
                     wordCount = fetched.wordCount,
                     content = fetched.text,
-                    codeExamples = fetched.codeBlocks.take(8)
+                    codeExamples = fetched.codeBlocks
                 )
             } else {
                 failed++
@@ -243,7 +243,7 @@ class DurableDeepResearchProvider(
                     .put("lane", s.lane)
                     .put("status", s.status)
                     .put("wordCount", s.wordCount)
-                    .put("content", s.content.take(12_000))
+                    .put("content", s.content)
                     .put("codeExamples", JSONArray(s.codeExamples))
                     .put("error", s.error)
             )
