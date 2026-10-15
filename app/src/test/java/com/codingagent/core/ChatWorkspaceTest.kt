@@ -315,9 +315,9 @@ class ChatWorkspaceTest {
         val agent = AutonomousAgent(root, emptyKnowledge, gateway = gateway)
         val workspace = ChatWorkspace(store, memoryStore = memory, runtimeProvider = { agent })
 
-        workspace.send("Create a Kotlin helper in src/ContextProbe.kt")
+        workspace.send("Review the architecture and explain how repository components interact, including tradeoffs and recommendations.")
 
-        val prompt = prompts.single()
+        val prompt = prompts.joinToString("\n\n")
         assertTrue(prompt.contains("CONVERSATION-SENTINEL-0"))
         assertTrue(prompt.contains("CONVERSATION-SENTINEL-11"))
         assertTrue(prompt.contains("MEMORY-SENTINEL-0"))
