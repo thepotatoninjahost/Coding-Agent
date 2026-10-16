@@ -246,7 +246,7 @@ class ProjectWorkspace(private val root: File) {
             changeSet.changes.map {
                 listOf(it.path, it.operation, it.beforeChecksum, it.afterChecksum, sanitize(it.reason)).joinToString("\t")
             }
-        writeAtomically(file, lines.joinToString("\n") + "\n")
+        AtomicFileWriter.write(file, lines.joinToString("\n") + "\n")
     }
 
     fun verify(): VerificationReport {
