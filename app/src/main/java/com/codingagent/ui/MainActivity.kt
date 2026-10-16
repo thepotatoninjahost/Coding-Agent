@@ -80,6 +80,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.documentfile.provider.DocumentFile
 import com.codingagent.agent.AgentKnowledge
+import com.codingagent.agent.ApprovalModality
 import com.codingagent.agent.AgentTools
 import com.codingagent.agent.AutonomousAgent
 import com.codingagent.agent.ChatMessage
@@ -583,7 +584,17 @@ private fun CodingAgentApp(privateDir: File) {
                     status = AgentStatus.WORKING
                     detail = "Cryptographically verified owner approval; recording it off the UI thread…"
                     activeJob = scope.launch(Dispatchers.IO) {
-                        val outcome = runCatching { coordinator.approve(id, token) }
+                        val outcome = runCatching {
+                            coordinator.approve(
+                                id,
+                                token,
+                                setOf(
+                                    ApprovalModality.SPOKEN,
+                                    ApprovalModality.TYPED,
+                                    ApprovalModality.DEVICE_AUTH
+                                )
+                            )
+                        }
                         withContext(Dispatchers.Main.immediate) {
                             outcome.onSuccess { result ->
                                 when (result) {
