@@ -94,6 +94,7 @@ class ProjectFileServiceBoundaryTest {
         assertTrue(workspace.search("PRIVATE_OUTSIDE_MARKER").isEmpty())
     }
 
+    @Test
     fun indexerExcludesCaseVariantPrivateMetadataDirectories() {
         val root = Files.createTempDirectory("project-index-case-variant-metadata").toFile()
         root.resolve("src").mkdirs()
@@ -111,6 +112,7 @@ class ProjectFileServiceBoundaryTest {
         assertTrue(workspace.search("NESTED_PRIVATE_MARKER").isEmpty())
     }
 
+    @Test
     fun rejectsSymlinkedPrivateMetadataDirectoriesBeforeWritingOutsideProject() {
         val root = Files.createTempDirectory("project-private-metadata-link").toFile()
         val outside = Files.createTempDirectory("project-private-metadata-outside").toFile()
@@ -126,6 +128,7 @@ class ProjectFileServiceBoundaryTest {
         assertFalse(outside.resolve("open-job.json").exists())
     }
 
+    @Test
     fun rejectsSymlinkedTransactionDirectory() {
         val root = Files.createTempDirectory("project-transaction-link").toFile()
         val outside = Files.createTempDirectory("project-transaction-outside").toFile()
@@ -140,6 +143,7 @@ class ProjectFileServiceBoundaryTest {
         assertFalse(outside.listFiles()?.isNotEmpty() == true)
     }
 
+    @Test
     fun rejectsSymlinkedResearchStorageBeforeCreatingSessions() {
         val root = Files.createTempDirectory("project-research-link").toFile()
         val outside = Files.createTempDirectory("project-research-outside").toFile()
@@ -158,6 +162,7 @@ class ProjectFileServiceBoundaryTest {
         assertFalse(outside.resolve("sessions").exists())
     }
 
+    @Test
     fun atomicRecoveryRejectsSymlinkedBackupAndPendingFiles() {
         val root = Files.createTempDirectory("atomic-metadata-link").toFile()
         val outside = Files.createTempDirectory("atomic-metadata-outside").toFile()
