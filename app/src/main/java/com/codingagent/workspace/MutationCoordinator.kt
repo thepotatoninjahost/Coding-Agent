@@ -5,6 +5,7 @@ import java.io.File
 import com.codingagent.agent.AgentAction
 import com.codingagent.agent.AgentActionCategory
 import com.codingagent.agent.AgentConstitution
+import com.codingagent.agent.ApprovalModality
 import com.codingagent.agent.ApprovalLedger
 import com.codingagent.agent.ApprovalRecord
 import com.codingagent.agent.ConstitutionRule
@@ -198,7 +199,11 @@ class MutationCoordinator(
     }
 
     @Synchronized
-    fun approve(id: String, ownerApproval: OwnerApprovalToken): MutationApprovalResult {
+    fun approve(
+        id: String,
+        ownerApproval: OwnerApprovalToken,
+        modalities: Set<ApprovalModality> = emptySet()
+    ): MutationApprovalResult {
         clearExpired()
         if (pendingReconciliationFailed) {
             return MutationApprovalResult.Rejected(
@@ -251,11 +256,22 @@ class MutationCoordinator(
         if (!ownerApproval.consume(proposal.id, proposal.approvalCount + 1, proposalFingerprint, timestamp)) {
             return MutationApprovalResult.Rejected("A fresh authenticated owner approval is required for this proposal")
         }
+        // Production tokens must carry spoken + typed + device-auth modalities.
+        // JVM test-only tokens may omit modalities so unit tests stay focused on coordinator logic.
+        if (!ownerApproval.isTestCapability) {
+            val required = AgentConstitution.REQUIRED_PRODUCTION_MODALITIES
+            if (!modalities.containsAll(required)) {
+                val missing = (required - modalities).joinToString(", ")
+                return MutationApprovalResult.Rejected(
+                    "Production approval requires spoken phrase, typed phrase, and device authentication. Missing: $missing"
+                )
+            }
+        }
         if (proposal.approvalCount >= 2) {
             return MutationApprovalResult.Rejected("This proposal already has the required two approvals")
         }
         val confirmationNumber = proposal.approvalCount + 1
-        val approval = ledger.record(id, "device-owner", timestamp, confirmationNumber)
+        val approval = ledger.record(id, "device-owner", timestamp, confirmationNumber, modalities)
         val candidate = proposal.copy(approvals = proposal.approvals + approval)
         val action = AgentAction(
             description = proposal.request,
