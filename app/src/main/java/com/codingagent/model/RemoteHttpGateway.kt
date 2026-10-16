@@ -77,6 +77,7 @@ class RemoteHttpGateway(
         var sawToolCall = false
         var sawMultipleToolCalls = false
         var sawDone = false
+        var malformedPayload = false
         var finishReason: String? = null
 
         input.bufferedReader(StandardCharsets.UTF_8).useLines { lines ->
@@ -90,7 +91,14 @@ class RemoteHttpGateway(
                     sawDone = true
                     break
                 }
-                val chunk = runCatching { JSONObject(payload) }.getOrNull() ?: continue
+                val chunk = try {
+                    JSONObject(payload)
+                } catch (_: Exception) {
+                    // A malformed data event may contain missing text or tool arguments.
+                    // Do not silently skip it and return a plausible-looking partial answer.
+                    malformedPayload = true
+                    break
+                }
                 val choice = chunk.optJSONArray("choices")?.optJSONObject(0) ?: continue
                 choice.optString("finish_reason").takeIf { it.isNotBlank() && it != "null" }?.let { finishReason = it }
                 val delta = choice.optJSONObject("delta") ?: continue
@@ -122,6 +130,9 @@ class RemoteHttpGateway(
         }
 
         if (isCancelled(generation)) return ModelResponse.Failure("Cancelled")
+        if (malformedPayload) {
+            return ModelResponse.Failure("Model stream contained a malformed event; partial content was rejected.")
+        }
         if (finishReason.isTruncatedFinishReason()) return truncatedResponseFailure(finishReason!!)
         if (!sawDone && finishReason.isNullOrBlank()) {
             return ModelResponse.Failure("Model stream ended without a completion marker; partial content was rejected.")
