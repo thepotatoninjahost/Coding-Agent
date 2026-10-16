@@ -1,6 +1,7 @@
 package com.codingagent.workspace
 
 import java.io.File
+import java.nio.file.Files
 import java.security.MessageDigest
 import java.time.Instant
 import java.util.UUID
@@ -206,7 +207,15 @@ class ProjectWorkspace(private val root: File) {
         else writeAtomically(file, record.before)
     }
 
-    private fun diskContent(path: String): String? = AtomicFileWriter.readTextIfExists(requireSafePath(path))
+    private fun diskContent(path: String): String? {
+        val file = requireSafePath(path)
+        require(!Files.isSymbolicLink(file.toPath())) { "Project file may not be a symbolic link: $path" }
+        if (!file.exists()) return null
+        require(file.isFile) { "Project path is not a regular file: $path" }
+        // Source files are user data, not AtomicFileWriter-managed app state.
+        // A real file named "notes.txt.bak" must never be consumed as a recovery sidecar for notes.txt.
+        return file.readText(Charsets.UTF_8)
+    }
 
     private fun requireSafePath(path: String): File {
         require(path.isNotBlank() && !path.startsWith('/') && !path.contains("..") && !path.contains('\\')) { "Unsafe project path" }
@@ -221,7 +230,7 @@ class ProjectWorkspace(private val root: File) {
         return file
     }
 
-    private fun writeAtomically(file: File, content: String) = AtomicFileWriter.write(file, content)
+    private fun writeAtomically(file: File, content: String) = AtomicFileWriter.writeProjectFile(file, transactionDir, content)
 
     private fun checksum(content: String?): String = content?.let {
         MessageDigest.getInstance("SHA-256").digest(it.toByteArray(Charsets.UTF_8)).joinToString("") { byte -> "%02x".format(byte) }
