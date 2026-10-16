@@ -9,7 +9,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 
-/** Verifies the installed app can launch and the two core setup flows are reachable. */
+/** Verifies the installed app launch and first-run setup flows. */
 @RunWith(AndroidJUnit4::class)
 class MainActivitySmokeTest {
     @get:Rule
@@ -17,6 +17,9 @@ class MainActivitySmokeTest {
 
     @Test
     fun launchesWorkbenchAndShowsCoreNavigation() {
+        // First launch deliberately opens Model settings when no provider is configured.
+        composeRule.onNodeWithText("Cancel").performClick()
+        composeRule.waitForIdle()
         composeRule.onNodeWithText("CODING AGENT").assertIsDisplayed()
         composeRule.onNodeWithText("New").assertIsDisplayed()
         composeRule.onNodeWithText("Import").assertIsDisplayed()
@@ -24,6 +27,8 @@ class MainActivitySmokeTest {
 
     @Test
     fun newProjectCreatesAndMountsWorkspace() {
+        composeRule.onNodeWithText("Cancel").performClick()
+        composeRule.waitForIdle()
         composeRule.onNodeWithText("New").performClick()
         composeRule.waitForIdle()
         composeRule.onNodeWithText("project mounted", substring = true).assertIsDisplayed()
@@ -31,8 +36,7 @@ class MainActivitySmokeTest {
 
     @Test
     fun modelSettingsExposeProviderConfigurationAndSaveAction() {
-        composeRule.onNodeWithText("Model").performClick()
-        composeRule.waitForIdle()
+        // Model settings are already open on first launch until a provider is configured.
         composeRule.onNodeWithText("Remote model API").assertIsDisplayed()
         composeRule.onNodeWithText("Base URL").assertIsDisplayed()
         composeRule.onNodeWithText("API key").assertIsDisplayed()
