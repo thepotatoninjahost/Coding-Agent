@@ -18,6 +18,9 @@ class OwnerApprovalToken private constructor(
 ) {
     private val consumed = AtomicBoolean(false)
 
+    /** True only for JVM unit-test tokens. Production Android tokens are never test capabilities. */
+    val isTestCapability: Boolean get() = testOnly
+
     internal fun consume(expectedProposalId: String, expectedApprovalNumber: Int, expectedFingerprint: String, now: Long): Boolean {
         if (proposalId != expectedProposalId) return false
         if (!(testOnly && approvalNumber == 0) && approvalNumber != expectedApprovalNumber) return false
