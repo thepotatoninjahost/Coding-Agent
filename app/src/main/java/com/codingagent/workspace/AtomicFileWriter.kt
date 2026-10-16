@@ -4,6 +4,8 @@ import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
 import java.nio.file.Files
+import java.nio.file.StandardCopyOption
+import java.util.UUID
 
 /**
  * Crash-safe text persistence for app-private filesystem state.
@@ -50,6 +52,48 @@ internal object AtomicFileWriter {
                 error.addSuppressed(
                     IOException("Could not remove failed atomic pending file: " + pending)
                 )
+            }
+            throw error
+        }
+    }
+
+
+    /**
+     * Atomically replace an ordinary project source file without interpreting
+     * sibling .bak/.new files as persistence sidecars. Those names may be
+     * legitimate files in an imported project. The temporary file lives in the
+     * workspace's private transaction directory, not beside user source files.
+     */
+    @Synchronized
+    fun writeProjectFile(file: File, transactionDirectory: File, content: String) {
+        val parent = file.parentFile ?: throw IOException("Project file must have a parent directory")
+        if (!parent.exists() && !parent.mkdirs() && !parent.isDirectory) {
+            throw IOException("Could not create project file directory: " + parent)
+        }
+        if (!transactionDirectory.isDirectory && !transactionDirectory.mkdirs() && !transactionDirectory.isDirectory) {
+            throw IOException("Could not create private transaction directory: " + transactionDirectory)
+        }
+        rejectSymbolicLink(file)
+        rejectSymbolicLink(transactionDirectory)
+        val temporary = File(transactionDirectory, "project-write-${UUID.randomUUID()}.tmp")
+        try {
+            writeAndSync(temporary, content)
+            val expected = content.toByteArray(Charsets.UTF_8)
+            require(temporary.readBytes().contentEquals(expected)) {
+                "Project file write verification failed for " + file.name
+            }
+            Files.move(
+                temporary.toPath(),
+                file.toPath(),
+                StandardCopyOption.ATOMIC_MOVE,
+                StandardCopyOption.REPLACE_EXISTING
+            )
+            require(file.isFile && file.readBytes().contentEquals(expected)) {
+                "Project file commit verification failed for " + file.name
+            }
+        } catch (error: Exception) {
+            if (temporary.exists() && !temporary.delete()) {
+                error.addSuppressed(IOException("Could not remove failed project temporary file: " + temporary.name))
             }
             throw error
         }
