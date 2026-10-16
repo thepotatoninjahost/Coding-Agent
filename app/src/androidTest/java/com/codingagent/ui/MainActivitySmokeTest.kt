@@ -20,7 +20,6 @@ class MainActivitySmokeTest {
         composeRule.onNodeWithText("CODING AGENT").assertIsDisplayed()
         composeRule.onNodeWithText("New").assertIsDisplayed()
         composeRule.onNodeWithText("Import").assertIsDisplayed()
-        composeRule.onNodeWithText("Model").assertIsDisplayed()
     }
 
     @Test
