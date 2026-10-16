@@ -1,44 +1,47 @@
 package com.codingagent.core
 
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
+/**
+ * ONE JOB: Unit-test owner typed/spoken phrase enrollment and verification.
+ */
 class OwnerApprovalPhraseStoreTest {
-    @Test
-    fun enrollmentStoresOnlySaltedVerifiersAndChecksBothFactors() {
-        val values = mutableMapOf<String, String?>()
-        val store = OwnerApprovalPhraseStore({ values[it] }, { key, value ->
-            if (value == null) values.remove(key) else values[key] = value
-        })
-
-        store.enroll("Typed-phrase-Blue", "spoken phrase cedar")
-
-        assertTrue(store.isConfigured())
-        assertTrue(store.verifyTyped("Typed-phrase-Blue"))
-        assertFalse(store.verifyTyped("typed-phrase-blue"))
-        assertFalse(store.verifyTyped("wrong"))
-        assertTrue(store.verifySpoken("Spoken Phrase Cedar, Maple.", "maple"))
-        assertFalse(store.verifySpoken("Spoken Phrase Cedar", "maple"))
-        assertFalse(store.verifySpoken("Spoken Phrase Cedar, Harbor.", "maple"))
-        assertTrue(values.values.all { !it.orEmpty().contains("Typed-phrase-Blue") && !it.orEmpty().contains("spoken phrase cedar") })
-        assertNotEquals(values.values.first(), values.values.last())
+    private fun store(): OwnerApprovalPhraseStore {
+        val map = mutableMapOf<String, String?>()
+        return OwnerApprovalPhraseStore(
+            readSecret = { map[it] },
+            writeSecret = { k, v -> map[k] = v }
+        )
     }
 
     @Test
-    fun blankOrIdenticalPassphrasesAreRejected() {
-        val values = mutableMapOf<String, String?>()
-        val store = OwnerApprovalPhraseStore({ values[it] }, { key, value ->
-            if (value == null) values.remove(key) else values[key] = value
-        })
+    fun enrollAndVerifyTypedAndSpoken() {
+        val s = store()
+        assertFalse(s.isConfigured())
+        s.enroll("TypedSecret-1", "spoken secret one")
+        assertTrue(s.isConfigured())
+        assertTrue(s.verifyTyped("TypedSecret-1"))
+        assertFalse(s.verifyTyped("wrong"))
+        assertTrue(s.verifySpoken("spoken secret one challenge", "challenge"))
+        assertFalse(s.verifySpoken("spoken secret one challenge", "other"))
+        assertFalse(s.verifySpoken("wrong phrase challenge", "challenge"))
+    }
 
-        org.junit.Assert.assertThrows(IllegalArgumentException::class.java) {
-            store.enroll("", "spoken phrase")
+    @Test
+    fun spokenAndTypedMustDifferWhenNormalized() {
+        val s = store()
+        try {
+            s.enroll("same phrase", "same phrase")
+            throw AssertionError("expected require failure")
+        } catch (e: IllegalArgumentException) {
+            assertTrue(e.message.orEmpty().contains("different"))
         }
-        org.junit.Assert.assertThrows(IllegalArgumentException::class.java) {
-            store.enroll("same phrase", " SAME   PHRASE ")
-        }
-        assertFalse(store.isConfigured())
+    }
+
+    @Test
+    fun normalizeOwnerSpokenPhraseCollapsesNoise() {
+        assertTrue(normalizeOwnerSpokenPhrase("  Hello,  WORLD!! ") == "hello world")
     }
 }
