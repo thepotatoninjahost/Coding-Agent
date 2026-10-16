@@ -12,6 +12,8 @@ import com.codingagent.workspace.ChangeSet
 import com.codingagent.workspace.FileIntegrity
 import com.codingagent.workspace.ProjectWorkspace
 import com.codingagent.workspace.TerminalSession
+import com.codingagent.intake.OperationKind
+import com.codingagent.intake.TaskOperation
 
 class ProjectWorkspaceTest {
     @Test fun replacementIsUniqueAndBackedUp() {
@@ -43,6 +45,23 @@ class ProjectWorkspaceTest {
             root.resolve(".coding-agent/transactions").listFiles().orEmpty()
                 .none { it.name.endsWith(".tmp") }
         )
+    }
+
+
+    @Test fun projectFilesNamedLikeAtomicSidecarsArePreservedDuringMutation() {
+        val root = Files.createTempDirectory("project-sidecar-collision").toFile()
+        val source = root.resolve("settings.json")
+        val backup = File(source.path + ".bak")
+        val pending = File(source.path + ".new")
+        source.writeText("before")
+        backup.writeText("legitimate user backup")
+        pending.writeText("legitimate user pending file")
+
+        ProjectWorkspace(root).replace("settings.json", "before", "after", "preserve neighboring files")
+
+        assertEquals("after", source.readText())
+        assertEquals("legitimate user backup", backup.readText())
+        assertEquals("legitimate user pending file", pending.readText())
     }
 
     @Test fun verifyRejectsUnfinishedMarkers() {
