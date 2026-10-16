@@ -27,6 +27,16 @@ enum class AgentActionCategory {
     READ_ONLY
 }
 
+/**
+ * Distinct owner confirmation channels required for production mutations.
+ * SPOKEN + TYPED are the dual-modality requirement; DEVICE_AUTH is the Keystore signature step.
+ */
+enum class ApprovalModality {
+    SPOKEN,
+    TYPED,
+    DEVICE_AUTH
+}
+
 data class AgentAction(
     val description: String,
     val category: AgentActionCategory,
@@ -48,6 +58,13 @@ data class ConstitutionViolation(
 
 object AgentConstitution {
     const val APPROVAL_EXPIRATION_MS = 30 * 60 * 1000L
+
+    /** Modalities required on every production (non-test) approval for code mutations. */
+    val REQUIRED_PRODUCTION_MODALITIES: Set<ApprovalModality> = setOf(
+        ApprovalModality.SPOKEN,
+        ApprovalModality.TYPED,
+        ApprovalModality.DEVICE_AUTH
+    )
 
     private val doubleConfirmationCategories = setOf(
         AgentActionCategory.CODE_CHANGE,
@@ -96,7 +113,8 @@ data class ApprovalRecord(
     val actionId: String,
     val approvedAt: Long,
     val ownerLabel: String,
-    val confirmationNumber: Int
+    val confirmationNumber: Int,
+    val modalities: Set<ApprovalModality> = emptySet()
 )
 
 class ApprovalLedger {
@@ -107,11 +125,12 @@ class ApprovalLedger {
         actionId: String,
         ownerLabel: String,
         at: Long = System.currentTimeMillis(),
-        confirmationNumber: Int? = null
+        confirmationNumber: Int? = null,
+        modalities: Set<ApprovalModality> = emptySet()
     ): ApprovalRecord {
         val current = records.getOrPut(actionId) { mutableListOf() }
         val number = confirmationNumber ?: (current.size + 1)
-        val record = ApprovalRecord(actionId, at, ownerLabel, number)
+        val record = ApprovalRecord(actionId, at, ownerLabel, number, modalities)
         current += record
         return record
     }
