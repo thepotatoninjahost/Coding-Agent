@@ -5,6 +5,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.nio.file.Files
+import java.io.File
 import com.codingagent.workspace.ChangeOperation
 import com.codingagent.workspace.CommandRunner
 import com.codingagent.workspace.ChangeRecord
