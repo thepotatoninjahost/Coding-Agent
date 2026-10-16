@@ -4,6 +4,7 @@ import java.io.File
 import org.json.JSONArray
 import org.json.JSONObject
 import com.codingagent.agent.ApprovalRecord
+import com.codingagent.agent.ApprovalModality
 
 /**
  * ONE JOB: Write pending dual-approval proposals to disk so Review survives process death.
@@ -74,12 +75,15 @@ object PendingProposalStore {
         }
         val approvals = JSONArray()
         p.approvals.forEach { a ->
+            val mods = JSONArray()
+            a.modalities.forEach { mods.put(it.name) }
             approvals.put(
                 JSONObject()
                     .put("actionId", a.actionId)
                     .put("approvedAt", a.approvedAt)
                     .put("ownerLabel", a.ownerLabel)
                     .put("confirmationNumber", a.confirmationNumber)
+                    .put("modalities", mods)
             )
         }
         return JSONObject()
@@ -127,11 +131,16 @@ object PendingProposalStore {
         val approvalsArr = o.optJSONArray("approvals") ?: JSONArray()
         val approvals = (0 until approvalsArr.length()).map { i ->
             val a = approvalsArr.getJSONObject(i)
+            val modsArr = a.optJSONArray("modalities") ?: JSONArray()
+            val modalities = (0 until modsArr.length()).mapNotNull { mi ->
+                runCatching { ApprovalModality.valueOf(modsArr.getString(mi)) }.getOrNull()
+            }.toSet()
             ApprovalRecord(
                 actionId = a.getString("actionId"),
                 approvedAt = a.getLong("approvedAt"),
                 ownerLabel = a.getString("ownerLabel"),
-                confirmationNumber = a.getInt("confirmationNumber")
+                confirmationNumber = a.getInt("confirmationNumber"),
+                modalities = modalities
             )
         }
         return PendingChangeProposal(
