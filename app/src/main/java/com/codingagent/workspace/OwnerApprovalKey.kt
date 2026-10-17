@@ -17,7 +17,7 @@ import com.codingagent.workspace.ChangeRecord
  * owner authentication for every signature operation. The signature binds the
  * proposal ID, approval ordinal, issue time, and random nonce.
  */
-internal object OwnerApprovalKey {
+object OwnerApprovalKey {
     private const val KEY_ALIAS = "coding-agent-owner-approval-signing-v3"
     private const val KEYSTORE = "AndroidKeyStore"
     private const val DOMAIN = "coding-agent-owner-approval-v1"
@@ -27,7 +27,7 @@ internal object OwnerApprovalKey {
 
     private var testKeyPair: KeyPair? = null
 
-    internal class Challenge internal constructor(
+    class Challenge internal constructor(
         val proposalId: String,
         val approvalNumber: Int,
         val issuedAt: Long,
