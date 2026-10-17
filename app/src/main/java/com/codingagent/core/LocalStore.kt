@@ -51,16 +51,16 @@ class LocalStore(context: Context) : ChatMessageStore {
     fun loadModelSettings(): ModelSettings = ModelSettings.fromJson(securePrefs.getString(KeystoreSecretStore.MODEL_SETTINGS))
 
     /** True only when both owner-created approval phrases have been enrolled. */
-    internal fun ownerApprovalPhrasesConfigured(): Boolean = ownerApprovalPhrases.isConfigured()
+    fun ownerApprovalPhrasesConfigured(): Boolean = ownerApprovalPhrases.isConfigured()
 
     /** Stores only salted verifiers; the supplied phrases are never persisted in plaintext. */
-    internal fun enrollOwnerApprovalPhrases(typedPhrase: String, spokenPhrase: String) =
+    fun enrollOwnerApprovalPhrases(typedPhrase: String, spokenPhrase: String) =
         ownerApprovalPhrases.enroll(typedPhrase, spokenPhrase)
 
-    internal fun verifyOwnerTypedPhrase(phrase: String): Boolean =
+    fun verifyOwnerTypedPhrase(phrase: String): Boolean =
         ownerApprovalPhrases.verifyTyped(phrase)
 
-    internal fun verifyOwnerSpokenPhrase(recognizedPhrase: String, challengeWord: String): Boolean =
+    fun verifyOwnerSpokenPhrase(recognizedPhrase: String, challengeWord: String): Boolean =
         ownerApprovalPhrases.verifySpoken(recognizedPhrase, challengeWord)
 
     companion object {
