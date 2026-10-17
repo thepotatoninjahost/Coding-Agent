@@ -23,8 +23,8 @@ internal val Blue = FluoroOrange
 internal val Amber = FluoroOrange
 internal val Danger = DangerRed
 
-internal enum class SurfaceTab(val label: String) { CHAT("Chat"), FILES("Files"), REVIEW("Review"), TERMINAL("Terminal"), RESEARCH("Research") }
-internal enum class AgentStatus(val label: String, val color: Color) {
+enum class SurfaceTab(val label: String) { CHAT("Chat"), FILES("Files"), REVIEW("Review"), TERMINAL("Terminal"), RESEARCH("Research") }
+enum class AgentStatus(val label: String, val color: Color) {
     READY("Ready", Accent),
     PLANNING("Planning", Blue),
     RESEARCHING("Researching", Blue),
@@ -38,7 +38,7 @@ internal enum class AgentStatus(val label: String, val color: Color) {
     STOPPED("Stopped", Danger)
 }
 
-internal fun mapAgentPhase(phase: String): AgentStatus = when (phase.uppercase()) {
+fun mapAgentPhase(phase: String): AgentStatus = when (phase.uppercase()) {
     "STARTED", "INTAKE", "PLAN", "PLANNING" -> AgentStatus.PLANNING
     "RESEARCH" -> AgentStatus.RESEARCHING
     "MODEL" -> AgentStatus.MODEL
