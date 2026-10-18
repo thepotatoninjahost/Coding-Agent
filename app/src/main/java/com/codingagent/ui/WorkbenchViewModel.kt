@@ -177,7 +177,7 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
-    private fun mountWorkspace(ws: ProjectWorkspace, files: List[String], detail: String) {
+    private fun mountWorkspace(ws: ProjectWorkspace, files: List<String>, detail: String) {
         mutationCoordinator = MutationCoordinator(ws)
         tools = AgentTools(ws)
         // Workspace must be in state before rebuildAgentIfNeeded() reads it.
@@ -331,7 +331,6 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
         progressEpoch.incrementAndGet()
         activeJob = viewModelScope.launch(Dispatchers.IO) {
             try {
-                // Plain-English "start a new project" should create one, not refuse.
                 if (_ui.value.workspace == null && asksToStartProject(trimmed)) {
                     val created = createEmptyProject(privateDir, null)
                     withContext(Dispatchers.Main) {
@@ -386,7 +385,6 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
             } finally {
                 withContext(Dispatchers.Main) {
                     activeJob = null
-                    // Must update state so Compose recomposes; clearing activeJob alone does not.
                     _ui.update { it.copy(agentBusy = false) }
                     val queue = _ui.value.messageQueue
                     if (queue.isNotEmpty()) {
@@ -552,20 +550,20 @@ data class WorkbenchUiState(
     val status: AgentStatus = AgentStatus.READY,
     val detail: String = "Ready",
     val workspace: ProjectWorkspace? = null,
-    val fileList: List[String] = emptyList(),
+    val fileList: List<String> = emptyList(),
     val projectQuery: String = "",
     val editorPath: String = "",
     val editorContent: String = "",
     val editorDocument: EditorDocument? = null,
-    val chatMessages: List[ChatMessage] = emptyList(),
+    val chatMessages: List<ChatMessage> = emptyList(),
     val chatInput: String = "",
-    val messageQueue: List[String] = emptyList(),
+    val messageQueue: List<String> = emptyList(),
     val researchQuery: String = "",
-    val researchHits: List[ResearchHit] = emptyList(),
+    val researchHits: List<ResearchHit> = emptyList(),
     val researchError: String? = null,
     val researchState: ResearchDisplayState = ResearchDisplayState(),
     val terminalCommand: String = "",
-    val terminalHistory: List[TerminalEntry] = emptyList(),
+    val terminalHistory: List<TerminalEntry> = emptyList(),
     val terminalLiveOutput: String = "",
     val pendingApproval: Boolean = false,
     val approvalCount: Int = 0,
