@@ -53,6 +53,8 @@ android {
 dependencies {
     implementation(platform("androidx.compose:compose-bom:2024.10.00"))
     implementation("androidx.activity:activity-compose:1.9.3")
+    // Required so registerForActivityResult on FragmentActivity passes lint (min 1.3.0).
+    implementation("androidx.fragment:fragment-ktx:1.8.5")
     implementation("androidx.documentfile:documentfile:1.0.1")
     implementation("androidx.biometric:biometric:1.1.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
