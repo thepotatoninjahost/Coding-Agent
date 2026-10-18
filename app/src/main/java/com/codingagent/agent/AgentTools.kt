@@ -67,33 +67,17 @@ class AgentTools(private val workspace: ProjectWorkspace) {
      * Returns [MutationProposeResult] — never throws. Callers must handle both branches.
      */
     fun proposeSave(path: String, content: String, coordinator: MutationCoordinator): MutationProposeResult {
-        // Try to read the file. If it exists, propose a REPLACE. If it does not exist,
-        // propose a CREATE_FILE. Any other read error remains a rejection.
-        val readResult = runCatching { read(path) }
-        val current = readResult.getOrNull()
-        if (current != null) {
-            if (current.content == content) return MutationProposeResult.Rejected("No changes to save")
-            return coordinator.propose(
-                request = "Editor save: $path",
-                operations = listOf(TaskOperation(OperationKind.REPLACE, path, current.content, content)),
-                reason = "Editor save"
-            )
-        }
-
-        // If read failed, check whether it failed because the file is absent.
-        val ex = readResult.exceptionOrNull()
-        if (ex is IllegalArgumentException && ex.message?.contains("File does not exist", ignoreCase = true) == true) {
-            // Target does not exist — propose CREATE_FILE
-            return coordinator.propose(
-                request = "Editor create file: $path",
-                operations = listOf(TaskOperation(OperationKind.CREATE_FILE, path, text = content)),
-                reason = "Editor create"
-            )
-        }
-
-        // Other failures remain rejections with the original message (safety checks, sensitive path, etc.)
-        return MutationProposeResult.Rejected(
-            "Could not read $path: ${ex?.message.orEmpty().ifBlank { ex?.javaClass?.simpleName ?: "Unknown" }}"
+        val current = runCatching { read(path) }
+            .getOrElse { ex ->
+                return MutationProposeResult.Rejected(
+                    "Could not read $path: ${ex.message.orEmpty().ifBlank { ex.javaClass.simpleName }}"
+                )
+            }
+        if (current.content == content) return MutationProposeResult.Rejected("No changes to save")
+        return coordinator.propose(
+            request = "Editor save: $path",
+            operations = listOf(TaskOperation(OperationKind.REPLACE, path, current.content, content)),
+            reason = "Editor save"
         )
     }
 
