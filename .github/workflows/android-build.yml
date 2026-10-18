@@ -64,7 +64,6 @@ jobs:
           if [[ "$actual" != "$expected" ]]; then
             echo "ERROR: Gradle Wrapper JAR checksum mismatch."
             echo "Expected official Gradle 8.7 Wrapper JAR SHA-256: $expected"
-            echo "Actual: $actual"
             exit 1
           fi
           echo "Gradle Wrapper JAR checksum matches the official Gradle 8.7 checksum."
@@ -98,9 +97,18 @@ jobs:
       - name: Assemble debug APK
         run: ./gradlew :app:assembleDebug --no-daemon --stacktrace
 
+      - name: Upload debug APK
+        if: success() || failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: coding-agent-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: ignore
+          retention-days: 14
+          compression-level: 9
+
       - name: Assemble release APK
         run: ./gradlew :app:assembleRelease --no-daemon --stacktrace
-
 
       - name: Enable KVM for Android emulator
         run: |
@@ -129,12 +137,3 @@ jobs:
             app/build/outputs/androidTest-results/
           if-no-files-found: ignore
           retention-days: 5
-
-      - name: Upload debug APK
-        uses: actions/upload-artifact@v7
-        with:
-          name: coding-agent-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
-          if-no-files-found: error
-          retention-days: 14
-          compression-level: 9
