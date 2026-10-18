@@ -56,7 +56,9 @@ data class ModelSettings(
     fun normalized(): ModelSettings = copy(
         backend = ModelBackend.REMOTE,
         baseUrl = baseUrl.trim().trimEnd('/'),
-        apiKey = apiKey.trim(),
+        // API keys never contain whitespace. Phone paste often injects newlines mid-key;
+        // those break HTTP Authorization headers (Unexpected char 0x0a) and must be stripped.
+        apiKey = apiKey.filterNot { it.isWhitespace() },
         modelName = modelName.trim(),
         rotationModels = rotationModels.trim(),
         systemPrompt = systemPrompt.trim(),
@@ -217,8 +219,25 @@ object ModelConnectionProbe {
                 is ModelResponse.Failure -> ProbeResult.Failed(explainProviderError(settings.modelName, response.message))
             }
         } catch (error: Exception) {
-            ProbeResult.Failed(error.message.orEmpty().ifBlank { error.javaClass.simpleName })
+            ProbeResult.Failed(sanitizeProbeError(error.message.orEmpty().ifBlank { error.javaClass.simpleName }))
         }
+    }
+
+    /**
+     * Never echo secrets (API keys, Bearer tokens) into UI-facing probe failures.
+     * Phone paste of long keys often injects newlines; the raw JVM message includes the header.
+     */
+    fun sanitizeProbeError(raw: String): String {
+        var msg = raw
+        msg = msg.replace(
+            Regex("""Bearer\s+\S+(?:\s+\S+)*""", RegexOption.IGNORE_CASE),
+            "Bearer [redacted]"
+        )
+        if ("0x0a" in msg || "Unexpected char" in msg) {
+            return "API key contains invalid characters (line breaks or spaces). " +
+                "Clear the API key field, paste it again as one continuous string, then Test."
+        }
+        return msg
     }
 
     fun explainProviderError(modelName: String, raw: String): String {
@@ -231,7 +250,7 @@ object ModelConnectionProbe {
                 "Use the paid id `$paid` (same model, billed), or pick another :free model that is not harness-gated " +
                 "(for example openrouter/free or qwen/qwen3-coder:free). See openrouter.ai/apps."
         }
-        return raw
+        return sanitizeProbeError(raw)
     }
 }
 
