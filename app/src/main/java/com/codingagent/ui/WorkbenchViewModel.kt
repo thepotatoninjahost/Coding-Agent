@@ -5,7 +5,6 @@ import android.content.Context
 import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.codingagent.agent.AgentKnowledge
 import com.codingagent.agent.AgentRuntimeResult
 import com.codingagent.agent.AgentTools
 import com.codingagent.agent.AutonomousAgent
@@ -543,7 +542,7 @@ data class WorkbenchUiState(
     val researchQuery: String = "",
     val researchHits: List<ResearchHit> = emptyList(),
     val researchError: String? = null,
-    val researchState: ResearchDisplayState = ResearchDisplayState.Idle,
+    val researchState: ResearchDisplayState = ResearchDisplayState(),
     val terminalCommand: String = "",
     val terminalHistory: List<TerminalEntry> = emptyList(),
     val terminalLiveOutput: String = "",
