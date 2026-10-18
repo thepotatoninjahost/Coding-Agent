@@ -469,7 +469,7 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
         _ui.update { it.copy(terminalLiveOutput = "") }
         activeJob = viewModelScope.launch(Dispatchers.IO) {
             try {
-                t.terminal(
+                t.runTerminal(
                     command = command,
                     onStdout = { line ->
                         viewModelScope.launch(Dispatchers.Main) {
