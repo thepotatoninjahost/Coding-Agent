@@ -38,7 +38,12 @@ class MainActivitySmokeTest {
         composeRule.onNodeWithText("Cancel").performClick()
         composeRule.waitForIdle()
         composeRule.onNodeWithText("New").performClick()
-        composeRule.waitForIdle()
+        // Project creation runs on a background thread; wait until the status text appears.
+        composeRule.waitUntil(timeoutMillis = 15_000) {
+            composeRule.onAllNodesWithText("project mounted", substring = true)
+                .fetchSemanticsNodes()
+                .isNotEmpty()
+        }
         composeRule.onNodeWithText("project mounted", substring = true).assertIsDisplayed()
     }
 
