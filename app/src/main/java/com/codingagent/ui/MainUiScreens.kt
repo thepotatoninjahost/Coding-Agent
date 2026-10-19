@@ -55,6 +55,7 @@ import com.codingagent.model.ModelDownloadProgress
 import com.codingagent.research.ResearchDisplayState
 import com.codingagent.workspace.EditorDocument
 import com.codingagent.workspace.MutationCoordinator
+import com.codingagent.workspace.ProjectPaths
 import com.codingagent.workspace.ResearchHit
 import com.codingagent.workspace.TerminalEntry
 
@@ -288,7 +289,7 @@ internal fun FilesSurface(
                             .fillMaxWidth()
                             .clickable {
                                 onPath(file)
-                                tools?.read(file)?.let { onContent(it.content) }
+                                runCatching { tools?.read(file)?.let { onContent(it.content) } }
                             }
                             .padding(vertical = 6.dp, horizontal = 4.dp)
                     )
@@ -444,49 +445,103 @@ internal fun ResearchSurface(
     }
 }
 
+/**
+ * Create a genuinely empty project under app-private storage.
+ */
 internal fun createEmptyProject(privateDir: File, nameHint: String? = null): File {
-    val base = privateDir.resolve("projects")
-    base.mkdirs()
-    val name = (nameHint?.trim()?.takeIf { it.isNotEmpty() } ?: "project-${System.currentTimeMillis()}")
-        .replace(Regex("[^a-zA-Z0-9._-]"), "_")
-    val dir = base.resolve(name)
-    if (!dir.exists()) dir.mkdirs()
-    File(dir, "README.md").writeText("# $name\n\nCreated by Coding Agent.\n")
-    return dir
+    val projectsRoot = privateDir.resolve("projects")
+    if (!projectsRoot.exists()) require(projectsRoot.mkdirs()) { "Could not create projects root" }
+    val safeName = nameHint
+        ?.trim()
+        ?.replace(Regex("[^A-Za-z0-9._-]"), "-")
+        ?.trim('-')
+        ?.take(48)
+        ?.ifBlank { null }
+    val dirName = if (safeName != null) {
+        "project-$safeName-${System.currentTimeMillis()}"
+    } else {
+        "project-${System.currentTimeMillis()}"
+    }
+    val destination = projectsRoot.resolve(dirName)
+    require(destination.mkdirs()) { "Could not create empty project storage" }
+    destination.resolve("README.md").writeText(
+        "# ${safeName ?: "New project"}\n\nEmpty workspace created by Coding Agent.\nAsk the agent to add files, or import sources.\n"
+    )
+    return destination
+}
+
+internal const val MAX_PROJECT_IMPORT_FILES = 10_000
+internal const val MAX_PROJECT_IMPORT_BYTES = 250L * 1024L * 1024L
+internal const val MAX_PROJECT_IMPORT_DEPTH = 64
+
+internal data class ProjectImportBudget(
+    var files: Int = 0,
+    var bytes: Long = 0L
+)
+
+internal fun isReservedProjectImportEntry(relativePath: String, name: String): Boolean {
+    val candidate = if (relativePath.isEmpty()) name else relativePath + "/" + name
+    return ProjectPaths.isSensitivePath(candidate)
+}
+
+internal fun validateProjectImportEntryName(name: String) {
+    require(name.isNotBlank() && name != "." && name != ".." &&
+        !name.contains('/') && !name.contains('\\') && name.none { it.isISOControl() }) {
+        "Project entry has an unsafe name"
+    }
 }
 
 internal fun importProject(context: Context, privateDir: File, uri: Uri): File {
-    val takeFlags = ImportFlags
+    val source = DocumentFile.fromTreeUri(context, uri) ?: error("Folder is unavailable")
+    val projects = privateDir.resolve("projects")
+    require(projects.isDirectory || projects.mkdirs()) { "Could not create project storage" }
+    val destination = projects.resolve("project-${System.currentTimeMillis()}")
+    require(destination.mkdirs()) { "Could not create project storage" }
     try {
-        context.contentResolver.takePersistableUriPermission(uri, takeFlags)
-    } catch (_: SecurityException) {
+        copyDocumentTree(context, source, destination)
+        return destination
+    } catch (error: Exception) {
+        destination.deleteRecursively()
+        throw error
     }
-    val tree = DocumentFile.fromTreeUri(context, uri) ?: error("Could not open selected folder")
-    val base = privateDir.resolve("projects")
-    base.mkdirs()
-    val name = (tree.name ?: "imported-${System.currentTimeMillis()}").replace(Regex("[^a-zA-Z0-9._-]"), "_")
-    val targetRoot = base.resolve(name)
-    if (targetRoot.exists()) targetRoot.deleteRecursively()
-    targetRoot.mkdirs()
-    copyDocumentTree(context, tree, targetRoot, relativePath = "")
-    return targetRoot
 }
 
-private fun copyDocumentTree(context: Context, source: DocumentFile, targetDir: File, relativePath: String) {
+internal fun copyDocumentTree(
+    context: Context,
+    source: DocumentFile,
+    destination: File,
+    depth: Int = 0,
+    relativePath: String = "",
+    budget: ProjectImportBudget = ProjectImportBudget()
+) {
+    require(depth <= MAX_PROJECT_IMPORT_DEPTH) { "Project import exceeded the maximum folder depth" }
+    val canonicalRoot = destination.canonicalFile.toPath()
     for (child in source.listFiles()) {
-        val name = child.name ?: continue
+        val name = child.name ?: error("Project entry has no name")
+        validateProjectImportEntryName(name)
+        val childRelativePath = if (relativePath.isEmpty()) name else "$relativePath/$name"
+        if (isReservedProjectImportEntry(relativePath, name)) continue
+        val target = destination.resolve(name).canonicalFile
+        require(target.toPath().startsWith(canonicalRoot)) { "Project entry escapes the import destination" }
+        budget.files += 1
+        require(budget.files <= MAX_PROJECT_IMPORT_FILES) { "Project import exceeds $MAX_PROJECT_IMPORT_FILES entries" }
         if (child.isDirectory) {
-            val next = File(targetDir, name)
-            next.mkdirs()
-            copyDocumentTree(context, child, next, if (relativePath.isEmpty()) name else "$relativePath/$name")
+            require(target.isDirectory || target.mkdirs()) { "Could not create ${target.path}" }
+            copyDocumentTree(context, child, target, depth + 1, childRelativePath, budget)
         } else if (child.isFile) {
-            val target = File(targetDir, name)
+            require(target.parentFile?.canonicalFile?.toPath()?.startsWith(canonicalRoot) == true) {
+                "Project file escapes the import destination"
+            }
             context.contentResolver.openInputStream(child.uri)?.use { input ->
                 target.outputStream().use { output ->
                     val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
                     while (true) {
                         val read = input.read(buffer)
-                        if (read <= 0) break
+                        if (read < 0) break
+                        budget.bytes += read
+                        require(budget.bytes <= MAX_PROJECT_IMPORT_BYTES) {
+                            "Project import exceeds the $MAX_PROJECT_IMPORT_BYTES byte limit"
+                        }
                         output.write(buffer, 0, read)
                     }
                 }
