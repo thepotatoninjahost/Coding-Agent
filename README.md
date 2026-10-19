@@ -185,16 +185,57 @@ The Android unit tests are JVM tests and run with:
 
 ## Build on GitHub
 
-The repository includes `.github/workflows/android-build.yml`. GitHub Actions runs automatically on pushes to `main`, pull requests, and manual workflow dispatch. It installs the Android SDK, runs the unit tests, assembles the debug APK, and publishes the APK as the `coding-agent-debug-apk` workflow artifact.
+The repository includes `.github/workflows/android-build.yml`. That file is the source of truth for CI behavior.
 
-To run it manually:
+### When the workflow runs
+
+| Trigger | Behavior |
+|--------|----------|
+| Push to `main` | Runs, unless the commit only changes ignored paths (see below). |
+| Pull request targeting `main` | Runs, unless the PR only changes ignored paths (see below). |
+| Manual **Run workflow** (`workflow_dispatch`) | Always runs, even if the latest commit was docs-only. |
+
+**Paths ignored for automatic push/PR runs** (no automatic CI for these alone):
+
+- `**/*.md` (all Markdown files, including this README)
+- `LICENSE`
+- `.gitignore`
+
+If a push or PR changes only those paths, GitHub does **not** start the build. Change any other tracked file (Kotlin, Gradle, XML, the workflow itself, etc.) and CI runs as usual. Use **Actions → Android build → Run workflow** when you need a build after a docs-only change.
+
+### Concurrency
+
+Only one `Android build` run is active per branch/ref at a time:
+
+- Group: `android-build-${{ github.workflow }}-${{ github.ref }}`
+- `cancel-in-progress: true`
+
+A newer push to the same branch cancels the older in-progress run so the APK and status you see match the latest commit, not a stale job.
+
+### What the job does
+
+1. Checks out source (read-only permissions).
+2. Sets up JDK 17 (Temurin) and the Android SDK (API 35 / build-tools 35.0.0).
+3. Runs the security baseline audit (blocks tracked keystores and known browser/device impersonation strings in `app/src/main`).
+4. Verifies the Gradle Wrapper JAR SHA-256 against the pinned official Gradle 8.7 checksum.
+5. Compiles and runs unit tests, then re-runs the explicit acceptance-path tests.
+6. Runs Android lint (`lintDebug`).
+7. Assembles the **debug** APK and uploads it as the workflow artifact **`coding-agent-debug-apk`** (14-day retention).
+8. Assembles the release APK (not uploaded as an artifact).
+9. Starts an API 35 emulator and runs instrumentation tests (`connectedDebugAndroidTest`).
+10. On instrumentation failure, uploads Android test reports.
+
+Permissions: `contents: read` only.
+
+### Download the debug APK
 
 1. Open the repository on GitHub.
 2. Open **Actions**.
 3. Select **Android build**.
-4. Select **Run workflow**.
-5. Choose `main` and run it.
-6. Open the completed run and download `coding-agent-debug-apk` under **Artifacts**.
+4. Open a completed run for the commit you want (or start one with **Run workflow**).
+5. Under **Artifacts**, download **`coding-agent-debug-apk`**.
+
+The debug APK upload step is configured to run even when a later step fails, so a usable debug APK can still appear when unit tests, lint, and `assembleDebug` succeeded but a later step (for example emulator tests) failed. Confirm the artifact exists on that run before installing.
 
 ## Supported device contract
 
