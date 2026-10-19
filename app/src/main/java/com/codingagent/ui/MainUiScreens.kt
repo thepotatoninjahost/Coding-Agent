@@ -498,6 +498,7 @@ private fun copyDocumentTree(context: Context, source: DocumentFile, targetDir: 
 
 internal val ImportFlags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
 
+@Composable
 internal fun fieldColors() = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
     focusedTextColor = NeonGreen,
     unfocusedTextColor = NeonGreen,
