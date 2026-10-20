@@ -152,7 +152,7 @@ jobs:
 
       - name: Upload unit test reports
         if: failure()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: unit-test-reports
           path: |
@@ -202,11 +202,11 @@ jobs:
 
       - name: Upload Android instrumentation reports
         if: failure()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: android-instrumentation-reports
           path: |
             app/build/reports/androidTests/
             app/build/outputs/androidTest-results/
-          if-no-files-found: ignore
+          if-no-files-found: warn
           retention-days: 5
