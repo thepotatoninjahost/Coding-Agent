@@ -145,11 +145,10 @@ jobs:
       - name: Compile unit test sources
         run: ./gradlew :app:compileDebugUnitTestKotlin --no-daemon --stacktrace
 
+      # Full JVM unit suite — includes AcceptancePathTest, StorageGuardTest, AutonomousLoopTest
+      # (no second filtered re-run; that only doubled time without extra coverage)
       - name: Run unit tests
         run: ./gradlew :app:testDebugUnitTest --no-daemon --stacktrace
-
-      - name: Acceptance path tests (explicit)
-        run: ./gradlew :app:testDebugUnitTest --tests "com.codingagent.core.AcceptancePathTest" --tests "com.codingagent.core.StorageGuardTest" --tests "com.codingagent.core.AutonomousLoopTest" --no-daemon --stacktrace
 
       - name: Upload unit test reports
         if: failure()
@@ -159,7 +158,7 @@ jobs:
           path: |
             app/build/reports/tests/testDebugUnitTest/
             app/build/test-results/testDebugUnitTest/
-          if-no-files-found: ignore
+          if-no-files-found: warn
           retention-days: 5
 
       - name: Run Android lint
