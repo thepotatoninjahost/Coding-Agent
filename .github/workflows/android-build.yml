@@ -167,16 +167,19 @@ jobs:
       - name: Assemble debug APK
         run: ./gradlew :app:assembleDebug --no-daemon --stacktrace
 
+      # Primary deliverable for phone install. Fail hard if the APK is missing —
+      # ignore/warn would let a "green-looking" run ship with nothing to download.
       - name: Upload debug APK
         if: success() || failure()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: coding-agent-debug-apk
           path: app/build/outputs/apk/debug/*.apk
-          if-no-files-found: ignore
+          if-no-files-found: error
           retention-days: 14
           compression-level: 9
 
+      # Compile-check only (not uploaded). Debug APK remains the phone install artifact.
       - name: Assemble release APK
         run: ./gradlew :app:assembleRelease --no-daemon --stacktrace
 
