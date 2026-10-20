@@ -221,7 +221,7 @@ A newer push to the same branch cancels the older in-progress run so the APK and
 
 ### What the job does
 
-1. Checks out source (read-only permissions).
+1. Checks out source (read-only permissions; single-commit shallow clone, `fetch-depth: 1` — full git history is not required for this build).
 2. Sets up JDK 17 (Temurin) and the Android SDK (API 35 / build-tools 35.0.0).
 3. Runs the security baseline audit (blocks tracked keystores and known browser/device impersonation strings in `app/src/main`).
 4. Verifies the Gradle Wrapper JAR SHA-256 against the pinned official Gradle 8.7 checksum.
