@@ -223,7 +223,7 @@ A newer push to the same branch cancels the older in-progress run so the APK and
 
 1. Checks out source (read-only permissions; single-commit shallow clone, `fetch-depth: 1` — full git history is not required for this build).
 2. Sets up JDK 17 (Temurin) and the Android SDK (API 35 / build-tools 35.0.0). Android SDK licenses are accepted explicitly for headless CI; packages installed: platform-tools, platforms;android-35, build-tools;35.0.0.
-3. Runs the security baseline audit (blocks tracked keystores and known browser/device impersonation strings in `app/src/main`).
+3. Runs the security baseline audit: blocks tracked keystores/`.jks` files; blocks browser/device impersonation User-Agents in `app/src/main`; blocks common hardcoded secret shapes in `app/src/main` (private keys, `sk-…`, `ghp_…`, AWS `AKIA…`). Unit-test fixtures under `app/src/test` are excluded so redaction tests can still use fake secrets.
 4. Verifies the Gradle Wrapper JAR SHA-256 against the pinned official Gradle 8.7 checksum.
 5. Compiles and runs unit tests, then re-runs the explicit acceptance-path tests.
 6. Runs Android lint (`lintDebug`).
