@@ -227,8 +227,8 @@ A newer push to the same branch cancels the older in-progress run so the APK and
 4. Verifies the Gradle Wrapper JAR SHA-256 against a pinned official checksum from [gradle.org/release-checksums](https://gradle.org/release-checksums/) (`cb0da6751c2b753a16ac168bb354870ebb1e162e9083f116729cec9c781156b8`). The project downloads the **Gradle 8.9** distribution (`distributionUrl` / `distributionSha256Sum` in `gradle-wrapper.properties`). When upgrading Gradle, update the properties, the wrapper JAR, and this pinned hash together or CI fails on purpose.
 5. Compiles unit-test sources, then runs the full JVM unit suite (`testDebugUnitTest`), which already includes the acceptance-path classes (`AcceptancePathTest`, `StorageGuardTest`, `AutonomousLoopTest`). On unit-test failure, uploads unit test reports.
 6. Runs Android lint (`lintDebug`).
-7. Assembles the **debug** APK and uploads it as the workflow artifact **`coding-agent-debug-apk`** (14-day retention).
-8. Assembles the release APK (not uploaded as an artifact).
+7. Assembles the **debug** APK and uploads it as the workflow artifact **`coding-agent-debug-apk`** (14-day retention). Upload is pinned to `actions/upload-artifact` commit `cf430e0…` (v7.0.2) and **fails the job if no APK file is found** (`if-no-files-found: error`).
+8. Assembles the release APK as a compile check only (not uploaded — the phone install artifact is the debug APK).
 9. Starts an API 35 emulator and runs instrumentation tests (`connectedDebugAndroidTest`).
 10. On instrumentation failure, uploads Android test reports.
 
@@ -242,7 +242,7 @@ Permissions: `contents: read` only.
 4. Open a completed run for the commit you want (or start one with **Run workflow**).
 5. Under **Artifacts**, download **`coding-agent-debug-apk`**.
 
-The debug APK upload step is configured to run even when a later step fails, so a usable debug APK can still appear when unit tests, lint, and `assembleDebug` succeeded but a later step (for example emulator tests) failed. Confirm the artifact exists on that run before installing.
+The debug APK upload step runs even when a later step fails (so an emulator failure does not hide a successful debug APK). If `assembleDebug` did not produce an APK, the upload step **fails the job** instead of silently uploading nothing.
 
 ## Supported device contract
 
