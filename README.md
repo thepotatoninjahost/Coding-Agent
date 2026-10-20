@@ -229,8 +229,8 @@ A newer push to the same branch cancels the older in-progress run so the APK and
 6. Runs Android lint (`lintDebug`).
 7. Assembles the **debug** APK and uploads it as the workflow artifact **`coding-agent-debug-apk`** (14-day retention). Upload is pinned to `actions/upload-artifact` commit `cf430e0…` (v7.0.2) and **fails the job if no APK file is found** (`if-no-files-found: error`).
 8. Assembles the release APK as a compile check only (not uploaded — the phone install artifact is the debug APK).
-9. Starts an API 35 emulator and runs instrumentation tests (`connectedDebugAndroidTest`).
-10. On instrumentation failure, uploads Android test reports.
+9. Enables KVM, starts an **API 35** `google_apis` / `x86_64` / Pixel 7 emulator (pinned `android-emulator-runner@v2.38.0`), and runs instrumentation tests (`connectedDebugAndroidTest`). Clean boot (`-no-snapshot`), animations and spellchecker disabled to reduce flake. **Must pass** — no `continue-on-error`.
+10. On instrumentation failure, uploads Android test reports (`if-no-files-found: warn`).
 
 Permissions: `contents: read` only.
 
