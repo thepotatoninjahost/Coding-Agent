@@ -212,6 +212,13 @@ Only one `Android build` run is active per branch/ref at a time:
 
 A newer push to the same branch cancels the older in-progress run so the APK and status you see match the latest commit, not a stale job.
 
+### Runner
+
+- Image: `ubuntu-24.04`
+- Job timeout: 90 minutes (the job is cancelled if it runs longer)
+- Default shell for `run` steps: `bash`
+- One job (`build`), sequential steps — debug APK is assembled and uploaded before the emulator step so a later failure does not depend on skipping the APK upload
+
 ### What the job does
 
 1. Checks out source (read-only permissions).
