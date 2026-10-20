@@ -116,14 +116,28 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # Supply-chain check: gradle-wrapper.jar must match an official Gradle published SHA-256
+          # (https://gradle.org/release-checksums/).
+          #
+          # Current jar hash is the official wrapper JAR for Gradle 8.7 / 8.8.
+          # The distribution downloaded is Gradle 8.9 (see gradle/wrapper/gradle-wrapper.properties
+          # distributionUrl + distributionSha256Sum). An older official wrapper may bootstrap a
+          # newer distribution; the jar itself must still be an official untampered file.
+          #
+          # When upgrading Gradle, update ALL of these together or CI will fail on purpose:
+          #   1) distributionUrl + distributionSha256Sum in gradle-wrapper.properties
+          #   2) gradle/wrapper/gradle-wrapper.jar from the official release
+          #   3) the expected= value below (Wrapper JAR Checksum from gradle.org/release-checksums/)
           expected='cb0da6751c2b753a16ac168bb354870ebb1e162e9083f116729cec9c781156b8'
           actual="$(sha256sum gradle/wrapper/gradle-wrapper.jar | cut -d ' ' -f 1)"
           if [[ "$actual" != "$expected" ]]; then
             echo "ERROR: Gradle Wrapper JAR checksum mismatch."
-            echo "Expected official Gradle 8.7 Wrapper JAR SHA-256: $expected"
+            echo "Expected official wrapper JAR SHA-256: $expected"
+            echo "Actual: $actual"
+            echo "If you upgraded Gradle, update the jar and this expected hash together."
             exit 1
           fi
-          echo "Gradle Wrapper JAR checksum matches the official Gradle 8.7 checksum."
+          echo "Gradle Wrapper JAR checksum matches the pinned official checksum."
 
       - name: Make Gradle executable
         run: chmod +x ./gradlew
