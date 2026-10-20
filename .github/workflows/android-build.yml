@@ -66,16 +66,49 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
+          # 1) No private signing material tracked or left in the tree
           if git ls-files --error-unmatch app/debug-signing.keystore.b64 >/dev/null 2>&1; then
             echo "ERROR: repository-stored private debug signing material is tracked."
             exit 1
           fi
-          if find . -type f \( -name "*.keystore" -o -name "*.jks" \) -not -path "./.git/*" -not -path "*/build/*" -print | grep -q .; then
+          if find . -type f \( -name "*.keystore" -o -name "*.jks" \) \
+              ! -path "./.git/*" \
+              ! -path "*/build/*" \
+              -print -quit | grep -q .; then
             echo "ERROR: private signing material exists in the source tree."
+            find . -type f \( -name "*.keystore" -o -name "*.jks" \) \
+              ! -path "./.git/*" ! -path "*/build/*" -print
             exit 1
           fi
-          if git grep -n -E 'Mozilla/5\.0|Chrome/[0-9]+|Pixel 8' -- app/src/main >/dev/null 2>&1; then
+
+          # 2) No browser/device impersonation User-Agents in production source
+          #    (honest "Coding-Agent/..." agents are allowed; Mozilla/Chrome/Pixel/Samsung spoofing is not)
+          if git grep -n -E 'Mozilla/5\.0|Chrome/[0-9]+\.|Pixel [0-9]|SamsungBrowser|Windows NT [0-9]|iPhone OS|Android [0-9]+;[^"]*Chrome' -- app/src/main >/dev/null 2>&1; then
             echo "ERROR: browser/device impersonation remains in application source."
+            git grep -n -E 'Mozilla/5\.0|Chrome/[0-9]+\.|Pixel [0-9]|SamsungBrowser|Windows NT [0-9]|iPhone OS|Android [0-9]+;[^"]*Chrome' -- app/src/main || true
+            exit 1
+          fi
+
+          # 3) No hardcoded secret shapes in production source (app/src/main only;
+          #    unit tests may use fake sk-/Bearer strings to prove redaction works)
+          if git grep -n -E \
+              -e 'BEGIN (RSA |OPENSSH |EC |DSA )?PRIVATE KEY' \
+              -e 'sk-[a-zA-Z0-9]{20,}' \
+              -e 'sk_live_[a-zA-Z0-9]{20,}' \
+              -e 'ghp_[a-zA-Z0-9]{36}' \
+              -e 'github_pat_[a-zA-Z0-9_]{20,}' \
+              -e 'AKIA[0-9A-Z]{16}' \
+              -- app/src/main >/dev/null 2>&1; then
+            echo "ERROR: possible hardcoded secret pattern in app/src/main."
+            git grep -n -E \
+              -e 'BEGIN (RSA |OPENSSH |EC |DSA )?PRIVATE KEY' \
+              -e 'sk-[a-zA-Z0-9]{20,}' \
+              -e 'sk_live_[a-zA-Z0-9]{20,}' \
+              -e 'ghp_[a-zA-Z0-9]{36}' \
+              -e 'github_pat_[a-zA-Z0-9_]{20,}' \
+              -e 'AKIA[0-9A-Z]{16}' \
+              -- app/src/main || true
             exit 1
           fi
 
