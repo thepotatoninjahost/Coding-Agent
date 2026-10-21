@@ -82,7 +82,7 @@ Unit tests currently live under `app/src/test/java/com/codingagent/core/` even t
 
 - Import a project directory with Android's Storage Access Framework.
 - Copy imported project files into app-private storage.
-- Index files, languages, imports, symbols, line counts, and SHA-256 checksums.
+- Index files, languages, imports, symbols, and SHA-256 checksums.
 - Search project source.
 - Search the imported coding reference offline.
 - Keep knowledge retrieval behind the `AgentKnowledge` interface so additional providers can be added modularly.
@@ -214,7 +214,7 @@ A newer push to the same branch cancels the older in-progress run so the APK and
 
 ### Runner
 
-- Image: `ubuntu-24.04`
+- Image: `ubuntu-24.04-arm` (arm64 runner; matches S25-class ABI for emulator)
 - Job timeout: 120 minutes (the job is cancelled if it runs longer)
 - Default shell for `run` steps: `bash`
 - One job (`build`), sequential steps — debug APK is assembled and uploaded before the emulator step so a later failure does not depend on skipping the APK upload
@@ -223,13 +223,13 @@ A newer push to the same branch cancels the older in-progress run so the APK and
 
 1. Checks out source (read-only permissions; single-commit shallow clone, `fetch-depth: 1` — full git history is not required for this build).
 2. Sets up JDK 17 (Temurin) and the Android SDK (API 35 / build-tools 35.0.0). Android SDK licenses are accepted explicitly for headless CI; packages installed: platform-tools, platforms;android-35, build-tools;35.0.0.
-3. Runs the security baseline audit: blocks tracked keystores/`.jks` files; blocks browser/device impersonation User-Agents in `app/src/main`; blocks common hardcoded secret shapes in `app/src/main` (private keys, `sk-…`, `xai-…`, `ghp_…`, AWS `AKIA…`, Slack `xox…`). Unit-test fixtures under `app/src/test` are excluded so redaction tests can still use fake secrets.
+3. Runs the security baseline audit: blocks tracked keystores/`.jks` files; blocks browser/device impersonation User-Agents in `app/src/main`; blocks common hardcoded secret shapes in `app/src/main` (private keys, PGP private blocks, `sk-…`, `xai-…`, `ghp_…`, AWS `AKIA…`, Slack `xox…`, Google `AIza…` / `ya29.`). Unit-test fixtures under `app/src/test` are excluded so redaction tests can still use fake secrets.
 4. Downloads the official **Gradle 8.9** wrapper JAR from `gradle/gradle@v8.9.0` and verifies SHA-256 `498495120a03b9a6ab5d155f5de3c8f0d986a449153702fb80fc80e134484f17` ([gradle.org/release-checksums](https://gradle.org/release-checksums/)). Distribution remains `gradle-8.9-bin.zip` with its own `distributionSha256Sum`.
 5. Compiles unit-test sources, then runs the full JVM unit suite (`testDebugUnitTest`), which already includes the acceptance-path classes (`AcceptancePathTest`, `StorageGuardTest`, `AutonomousLoopTest`). On unit-test failure, uploads unit test reports.
 6. Runs Android lint (`lintDebug`).
 7. Assembles the **debug** APK and uploads it as the workflow artifact **`coding-agent-debug-apk`** (14-day retention). Upload is pinned to `actions/upload-artifact` commit `cf430e0…` (v7.0.2) and **fails the job if no APK file is found** (`if-no-files-found: error`).
 8. Assembles the release APK as a compile check only (not uploaded — the phone install artifact is the debug APK).
-9. Enables KVM, starts an **API 35** `google_apis` / `x86_64` / Pixel 7 emulator (pinned `android-emulator-runner@v2.38.0` via pinned `wretry.action` **v3.8.0_js_action**), and runs instrumentation tests (`connectedDebugAndroidTest`). Clean boot (`-no-snapshot`), animations and spellchecker disabled. **Up to 2 attempts** for transient infrastructure flake; if both fail, the **job fails**. Real test failures are not accepted as success.
+9. Enables KVM, starts an **API 35** `google_apis` / **arm64-v8a** / Pixel 7 emulator on `ubuntu-24.04-arm` (pinned `android-emulator-runner@v2.38.0`), and runs instrumentation tests (`connectedDebugAndroidTest`). Clean boot (`-no-snapshot`), animations and spellchecker disabled. **One attempt** — failure fails the job (no retry that could hide a real test failure).
 10. On instrumentation failure, uploads Android test reports (`if-no-files-found: warn`).
 
 Permissions: `contents: read` only.
