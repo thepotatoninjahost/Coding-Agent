@@ -12,7 +12,6 @@
 # survive shrinking, or recomposition correctness silently breaks at runtime with no build error.
 -keep class androidx.compose.runtime.** { *; }
 
-# AndroidX Security (EncryptedSharedPreferences) uses Tink under the hood, which does its own
-# reflective provider lookups.
+# KeystoreSecretStore uses Tink AndroidKeysetManager, which looks up providers by reflection.
 -keep class com.google.crypto.tink.** { *; }
 -dontwarn com.google.crypto.tink.**
