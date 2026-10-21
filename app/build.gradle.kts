@@ -23,14 +23,12 @@ android {
         vectorDrawables { useSupportLibrary = true }
     }
 
-    // Debug builds intentionally use Android's standard local debug signing.
+    // Debug builds use Android's standard local debug signing.
     // No private signing key is stored in the repository or reconstructed during builds.
     buildTypes {
-        debug {
-            // Keep the Android Gradle Plugin's standard debug signing configuration.
-        }
         release {
             isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 rootProject.file("proguard-rules.pro")
@@ -45,7 +43,6 @@ android {
     kotlinOptions { jvmTarget = "17" }
     buildFeatures { compose = true }
     packaging {
-        jniLibs.useLegacyPackaging = true
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
     }
 }
@@ -56,6 +53,9 @@ dependencies {
     // Required so registerForActivityResult on FragmentActivity passes lint (min 1.3.0).
     implementation("androidx.fragment:fragment-ktx:1.8.5")
     implementation("androidx.documentfile:documentfile:1.0.1")
+    // Owner gate: BiometricPrompt must stay. Approval of agent mutations is supposed to require
+    // the phone owner's fingerprint or face so the agent cannot approve itself and a stranger
+    // holding the phone cannot either. Wiring comes after the app actually runs.
     implementation("androidx.biometric:biometric:1.1.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("androidx.compose.ui:ui")
@@ -64,7 +64,8 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
-    // Tink is retained only to decode the legacy EncryptedSharedPreferences format during migration.
+    // Tink backs KeystoreSecretStore (AndroidKeysetManager AEAD). Do not remove
+    // until that store no longer imports com.google.crypto.tink.
     implementation("com.google.crypto.tink:tink-android:1.23.0")
     implementation("com.squareup.okhttp3:okhttp:5.3.0")
     testImplementation("junit:junit:4.13.2")
@@ -72,5 +73,5 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
-    androidTestImplementation("androidx.compose.ui:ui-test-junit4:1.7.2")
+    androidTestImplementation("androidx.compose.ui:ui-test-junit4")
 }
