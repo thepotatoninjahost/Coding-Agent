@@ -26,6 +26,10 @@ class LocalStore(context: Context) : ChatMessageStore {
     // that remains inside Android Keystore; only ciphertext is persisted in SharedPreferences.
     private val securePrefs = KeystoreSecretStore(context).also {
         LegacyEncryptedPreferencesMigration.migrateIfNeeded(context, it)
+        NotesAtRest.install(object : NotesAtRest.Cipher {
+            override fun seal(plain: String) = it.sealNotes(plain)
+            override fun open(sealed: String) = it.openNotes(sealed)
+        })
     }
     private val ownerApprovalPhrases = OwnerApprovalPhraseStore(
         readSecret = { key -> securePrefs.getString(key) },
@@ -143,20 +147,21 @@ class LocalStore(context: Context) : ChatMessageStore {
     }
 
     private fun append(file: File, line: String) {
-        file.parentFile?.mkdirs()
-        file.appendText(line + "\n")
+        NotesAtRest.appendLine(file, line)
     }
 
     private fun read(file: File, limit: Int): List<JSONObject> {
         if (!file.exists() || limit <= 0) return emptyList()
+        NotesAtRest.migrate(file)
 
         // Keep only the requested physical tail. Parsing happens after the tail is
         // selected so malformed recent records preserve the previous semantics.
         val tail = ArrayDeque<String>(minOf(limit, 1024))
         file.useLines { lines ->
             lines.forEach { line ->
+                val opened = NotesAtRest.openLine(line)
                 if (tail.size == limit) tail.removeFirst()
-                tail.addLast(line)
+                tail.addLast(opened)
             }
         }
 
