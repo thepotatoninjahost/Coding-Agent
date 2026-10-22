@@ -55,9 +55,18 @@ jobs:
       - name: Install Android SDK packages
         run: |
           set -euo pipefail
-          # setup-android already accepts licenses; re-run sdkmanager licenses without
-          # swallowing failures (|| true would hide a real license/tooling break).
+          # setup-android already accepts licenses. Asking again is still useful if a
+          # package license was missed, but "yes | sdkmanager" must not use pipefail:
+          # sdkmanager closes the pipe when it finishes, yes then exits 1 ("Broken pipe"),
+          # and the step stops before any package is installed.
+          set +o pipefail
           yes | sdkmanager --licenses >/dev/null
+          license_status=${PIPESTATUS[1]}
+          set -o pipefail
+          if [[ "$license_status" -ne 0 ]]; then
+            echo "Could not accept the Android SDK licenses (status ${license_status})."
+            exit "$license_status"
+          fi
           sdkmanager --install \
             "platform-tools" \
             "platforms;android-35" \
@@ -234,9 +243,15 @@ jobs:
       contents: write
       actions: read
     steps:
+      - name: Check out source
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 1
+
       - name: Download the debug APK from this run
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           gh run download "${{ github.run_id }}" --name coding-agent-debug-apk --dir apk
@@ -245,6 +260,7 @@ jobs:
       - name: Update the latest-debug prerelease
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           src="$(find apk -name '*.apk' -print -quit)"
