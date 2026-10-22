@@ -123,6 +123,7 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
                 draftBaseUrl = normalized.baseUrl,
                 draftExtraHeaders = normalized.extraHeaders,
                 draftSystemPrompt = normalized.systemPrompt,
+                draftMemoryRetention = normalized.memoryRetention,
                 modelStatus = normalized.statusSummary(),
                 modelLoadError = if (gateway == null)
                     normalized.validationErrors().joinToString("; ").ifBlank { "The secret password is missing." }
@@ -144,6 +145,7 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
     fun updateDraftBaseUrl(value: String) = _ui.update { it.copy(draftBaseUrl = value) }
     fun updateDraftExtraHeaders(value: String) = _ui.update { it.copy(draftExtraHeaders = value) }
     fun updateDraftSystemPrompt(value: String) = _ui.update { it.copy(draftSystemPrompt = value) }
+    fun updateDraftMemoryRetention(value: String) = _ui.update { it.copy(draftMemoryRetention = value) }
     fun setShowModelSettings(show: Boolean) = _ui.update { it.copy(showModelSettings = show) }
 
     fun probeModelConnection() {
@@ -156,7 +158,8 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
                 modelName = s.draftModelName,
                 systemPrompt = s.draftSystemPrompt,
                 extraHeaders = s.draftExtraHeaders,
-                onboarded = true
+                onboarded = true,
+                memoryRetention = s.draftMemoryRetention
             )
             val result = ModelConnectionProbe.probe(candidate)
             withContext(Dispatchers.Main) {
@@ -183,7 +186,8 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
                 rotationModels = s.draftRotationModels,
                 systemPrompt = s.draftSystemPrompt,
                 extraHeaders = s.draftExtraHeaders,
-                onboarded = true
+                onboarded = true,
+                memoryRetention = s.draftMemoryRetention
             )
         )
         _ui.update {
@@ -722,6 +726,7 @@ data class WorkbenchUiState(
     val draftBaseUrl: String = ModelSettings.OPENROUTER_BASE_URL,
     val draftExtraHeaders: String = "",
     val draftSystemPrompt: String = "",
+    val draftMemoryRetention: String = ModelSettings.MEMORY_KEEP_CAPPED,
     val probeMessage: String? = null,
     val agentBusy: Boolean = false
 )

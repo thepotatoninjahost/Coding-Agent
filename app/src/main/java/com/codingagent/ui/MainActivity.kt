@@ -351,6 +351,25 @@ private fun CodingAgentApp(
                             maxLines = 4,
                             colors = fieldColors()
                         )
+                        Spacer(Modifier.height(8.dp))
+                        Text("What I remember", color = NeonGreen, fontSize = 14.sp)
+                        TextButton(onClick = { vm.updateDraftMemoryRetention(ModelSettings.MEMORY_KEEP_CAPPED) }) {
+                            Text(
+                                if (ui.draftMemoryRetention == ModelSettings.MEMORY_KEEP_CAPPED) "Selected: clean up old memories"
+                                else "Clean up old memories",
+                                color = SoftGreen,
+                                fontSize = 12.sp
+                            )
+                        }
+                        Text("I keep what you tell me, and I drop old unimportant notes after about six months. Strong rules stay.", color = SoftGreen, fontSize = 10.sp)
+                        TextButton(onClick = { vm.updateDraftMemoryRetention(ModelSettings.MEMORY_KEEP_FOREVER) }) {
+                            Text(
+                                if (ui.draftMemoryRetention == ModelSettings.MEMORY_KEEP_FOREVER) "Selected: keep everything I remember"
+                                else "Keep everything I remember",
+                                color = SoftGreen,
+                                fontSize = 12.sp
+                            )
+                        }
                         ui.probeMessage?.let {
                             Spacer(Modifier.height(8.dp))
                             Text(it, color = SoftGreen, fontSize = 12.sp)

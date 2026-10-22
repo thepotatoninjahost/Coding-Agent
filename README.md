@@ -107,6 +107,7 @@ Unit tests currently live under `app/src/test/java/com/codingagent/core/` even t
 - Run explicit verification commands with bounded timeouts.
 - Persist task, document, and lesson records locally.
 - Persist task, document, lesson, and Chat workspace messages locally in app-private JSONL records.
+- Remember things you ask it to remember. Setup starts on "Clean up old memories": old unimportant notes are dropped after about six months, and strong rules stay. "Keep everything I remember" turns that cleanup off.
 - Include prior Chat workspace messages in subsequent agent requests so follow-up work has conversation context.
 - Store versioned live modules and local model files outside the APK.
 - Reload changed modules and model bytes without rebuilding the Android host.

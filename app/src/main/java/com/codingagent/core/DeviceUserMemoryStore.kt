@@ -4,6 +4,7 @@ import android.content.Context
 import com.codingagent.agent.UserMemory
 import com.codingagent.agent.UserMemoryIndex
 import com.codingagent.agent.UserMemoryStore
+import com.codingagent.model.ModelSettings
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -26,7 +27,8 @@ internal class DeviceUserMemoryStore(context: Context) : UserMemoryStore {
             text = text,
             kind = kind,
             importance = importance,
-            now = System.currentTimeMillis()
+            now = System.currentTimeMillis(),
+            retention = retention()
         )
         if (next == current) return null
         save(next)
@@ -47,6 +49,11 @@ internal class DeviceUserMemoryStore(context: Context) : UserMemoryStore {
         val removed = current.size - next.size
         if (removed > 0) save(next)
         removed
+    }
+
+    private fun retention(): String {
+        val raw = securePrefs.getString(KeystoreSecretStore.MODEL_SETTINGS)
+        return ModelSettings.fromJson(raw).memoryRetention
     }
 
     private fun load(): List<UserMemory> {

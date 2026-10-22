@@ -112,7 +112,9 @@ data class ModelSettings(
     val systemPrompt: String = "",
     /** Optional extra HTTP headers, one per line: "Header-Name: value" */
     val extraHeaders: String = "",
-    val onboarded: Boolean = false
+    val onboarded: Boolean = false,
+    /** "capped" drops old low-importance memories. "forever" keeps them. */
+    val memoryRetention: String = MEMORY_KEEP_CAPPED
 ) {
     fun normalized(): ModelSettings = copy(
         backend = ModelBackend.REMOTE,
@@ -123,7 +125,12 @@ data class ModelSettings(
         modelName = modelName.trim(),
         rotationModels = rotationModels.trim(),
         systemPrompt = systemPrompt.trim(),
-        extraHeaders = extraHeaders.trim()
+        extraHeaders = extraHeaders.trim(),
+        memoryRetention = if (memoryRetention.trim().equals(MEMORY_KEEP_FOREVER, ignoreCase = true)) {
+            MEMORY_KEEP_FOREVER
+        } else {
+            MEMORY_KEEP_CAPPED
+        }
     )
 
     /** Primary model plus distinct fallbacks, order preserved. */
@@ -269,6 +276,8 @@ data class ModelSettings(
         const val OPENROUTER_FREE_MODEL = "cohere/north-mini-code:free"
         const val OPENROUTER_FREE_FALLBACKS =
             "poolside/laguna-s-2.1:free, google/gemma-4-31b-it:free, nvidia/nemotron-3-super-120b-a12b:free"
+        const val MEMORY_KEEP_CAPPED = "capped"
+        const val MEMORY_KEEP_FOREVER = "forever"
 
         data class FreeHelperChoice(val plainName: String, val modelId: String, val plainDetail: String)
 
@@ -312,7 +321,8 @@ data class ModelSettings(
                     rotationModels = o.optString("rotationModels", ""),
                     systemPrompt = o.optString("systemPrompt", ""),
                     extraHeaders = o.optString("extraHeaders", ""),
-                    onboarded = o.optBoolean("onboarded", false)
+                    onboarded = o.optBoolean("onboarded", false),
+                    memoryRetention = o.optString("memoryRetention", MEMORY_KEEP_CAPPED)
                 ).normalized().withOpenRouterDefaults()
             }.getOrDefault(ModelSettings().withOpenRouterDefaults())
         }
@@ -328,6 +338,7 @@ data class ModelSettings(
                 .put("systemPrompt", s.systemPrompt)
                 .put("extraHeaders", s.extraHeaders)
                 .put("onboarded", s.onboarded)
+                .put("memoryRetention", s.memoryRetention)
                 .toString()
         }
     }
