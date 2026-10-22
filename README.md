@@ -26,7 +26,7 @@ The current APK supports:
 - Autonomous model loop with real tool calling (list_files, read_file, search_project, verify, mutations with dual approval, etc.)
 - Always-on static verification (unfinished-work marker scan) — never reports a fake pass
 - Evidence requirement: inspect/error/analyze requests must actually read or search project files before a final answer is accepted
-- Setup screen for an OpenAI-compatible helper. OpenRouter's free helper (`openrouter/free` at `https://openrouter.ai/api/v1`) is filled in already. The secret password is typed on the phone and is never stored in this repository.
+- Setup screen for an OpenAI-compatible helper. One free OpenRouter helper (`cohere/north-mini-code:free` at `https://openrouter.ai/api/v1`) is filled in already. The same helper is used for the whole job. Another free helper is used only if that one is busy or fails. The secret password is typed on the phone and is never stored in this repository.
 - Transactional file changes with checksum-backed rollback
 - Persisted chat history and task journal
 
@@ -42,7 +42,7 @@ Terminal behavior and limits are documented in **Terminal limitations**.
 OpenRouter is the default. Setup already shows:
 
 - Web address: `https://openrouter.ai/api/v1`
-- Helper name: `openrouter/free` (a free helper; it does not switch you onto a paid one)
+- Helper name: `cohere/north-mini-code:free` (one free code helper). Setup lets you pick another free helper in plain English. The old name `openrouter/free` is not used, because it picked a different model on every step.
 - Secret password: paste it from [openrouter.ai/keys](https://openrouter.ai/keys). Leave this blank in the repository. Do not commit a key.
 
 A missing password, a rejected password, and a free-limit slowdown are explained in plain English on the phone. Another company's web address still works if you type it in Setup.
@@ -52,6 +52,9 @@ On a computer, the same loop can be run with your own key. The script reads `OPE
 ```bash
 export OPENROUTER_API_KEY='paste-your-key-here'
 ./scripts/run_openrouter_agent.sh "Explain this project in one short paragraph. Do not change any files."
+
+# Point it at a real project folder. The second argument is that folder.
+./scripts/run_openrouter_agent.sh "Explain this project in one short paragraph. Do not change any files." .
 ```
 
 ## Architecture
@@ -74,7 +77,7 @@ Production source is split by job under `app/src/main/java/com/codingagent/`:
 Execution path:
 
 1. `TaskIntakeParser` interprets a request into a typed goal contract and operation.
-2. `AutonomousAgent` owns the loop: gather evidence, plan, one tool per turn (a second tool call in the same reply is rejected), observe, verify, hand over.
+2. `AutonomousAgent` owns the loop: gather evidence, plan, one tool per turn (if a reply contains several tool calls, the first one runs and the task continues), observe, verify, hand over.
 3. `AgentPlanner` produces and revises the plan from evidence.
 4. `ProjectIndexer` inventories project files, languages, imports, symbols, and checksums.
 5. `AgentKnowledge` supplies local evidence. `WebResearchProvider` / deep-research providers supply internet evidence when the request requires it. Empty research fails closed.

@@ -128,7 +128,8 @@ class ModelSettingsTest {
         val defaults = ModelSettings()
         assertEquals(ModelBackend.REMOTE, defaults.backend)
         assertEquals("https://openrouter.ai/api/v1", defaults.baseUrl)
-        assertEquals("openrouter/free", defaults.modelName)
+        assertEquals(ModelSettings.OPENROUTER_FREE_MODEL, defaults.modelName)
+        assertFalse(defaults.modelName == "openrouter/free")
         assertTrue(defaults.apiKey.isEmpty())
         assertFalse(defaults.onboarded)
         assertFalse(defaults.isRemoteConfigured())
@@ -143,8 +144,20 @@ class ModelSettingsTest {
         val restored = ModelSettings.fromJson("""{"baseUrl":"","apiKey":"","modelName":""}""")
         assertEquals(ModelSettings.OPENROUTER_BASE_URL, restored.baseUrl)
         assertEquals(ModelSettings.OPENROUTER_FREE_MODEL, restored.modelName)
+        assertTrue(restored.rotationModels.contains("poolside/laguna-s-2.1:free"))
+        assertFalse(restored.rotationModels.contains("liquid/lfm-2.5-2.6b"))
         assertTrue(restored.apiKey.isEmpty())
         assertFalse(restored.isRemoteConfigured())
+    }
+
+    @Test
+    fun savedFreeRouterIsPinnedToOneCapableHelper() {
+        val restored = ModelSettings.fromJson(
+            """{"baseUrl":"https://openrouter.ai/api/v1","apiKey":"","modelName":"openrouter/free","rotationModels":""}"""
+        )
+        assertEquals(ModelSettings.OPENROUTER_FREE_MODEL, restored.modelName)
+        assertTrue(restored.rotationModels.contains("google/gemma-4-31b-it:free"))
+        assertFalse(restored.modelName.contains("2.6b"))
     }
 
     @Test

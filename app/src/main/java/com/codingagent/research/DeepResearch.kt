@@ -92,9 +92,12 @@ class DurableDeepResearchProvider(
         onProgress(DeepResearchProgress("searching", 0, effectiveTarget, 0, 0))
 
         val queryTerms = SourceQuality.queryTerms(normalized)
+        val searchErrors = mutableListOf<String>()
         val candidates = lanes.flatMap { lane ->
             check(!isCancelled(runGeneration)) { "Research cancelled" }
-            searchProvider.search(lane.query, 16).hits
+            val searched = searchProvider.search(lane.query, 16)
+            if (!searched.error.isNullOrBlank() && searched.hits.isEmpty()) searchErrors += searched.error.trim()
+            searched.hits
                 .filter { hit -> SourceQuality.isAcceptable(hit.url, hit.title, hit.excerpt) }
                 .filter { hit -> SourceQuality.hasQueryRelevance(queryTerms, hit.title, hit.excerpt, hit.url) }
                 .filter { hit -> hit.url.substringBefore('#').lowercase() !in alreadyLearned }
@@ -113,7 +116,9 @@ class DurableDeepResearchProvider(
             val focused = QueryLanes.focusedFallbacks(normalized)
             val fallback = focused.flatMap { fq ->
                 check(!isCancelled(runGeneration)) { "Research cancelled" }
-                searchProvider.search(fq, 12).hits
+                val searched = searchProvider.search(fq, 12)
+                if (!searched.error.isNullOrBlank() && searched.hits.isEmpty()) searchErrors += searched.error.trim()
+                searched.hits
                     .filter { hit -> SourceQuality.isAcceptable(hit.url, hit.title, hit.excerpt) }
                     .filter { hit -> SourceQuality.hasQueryRelevance(queryTerms, hit.title, hit.excerpt, hit.url) }
                     .filter { hit -> hit.url.substringBefore('#').lowercase() !in alreadyLearned }
@@ -129,6 +134,7 @@ class DurableDeepResearchProvider(
         onProgress(DeepResearchProgress("fetching", 0, diverse.size, 0, 0))
 
         val sources = mutableListOf<ResearchSource>()
+        val fetchErrors = mutableListOf<String>()
         var failed = 0
         diverse.forEachIndexed { index, candidate ->
             if (sources.size >= effectiveTarget) {
@@ -136,8 +142,8 @@ class DurableDeepResearchProvider(
                 return@forEachIndexed
             }
             check(!isCancelled(runGeneration)) { "Research cancelled" }
-            val fetched = runCatching {
-                ArticleExtractor.fetch(
+            val attempt = runCatching {
+                ArticleExtractor.fetchDetailed(
                     url = candidate.url,
                     connectionFactory = connectionFactory,
                     timeoutMillis = pageTimeoutMillis,
@@ -145,9 +151,13 @@ class DurableDeepResearchProvider(
                     onConnection = { connection -> activeConnection.set(connection) },
                     onCall = { call -> activeCall.set(call) }
                 )
-            }.getOrNull()
+            }.getOrElse { error ->
+                ArticleExtractor.FetchAttempt(null, error.message?.takeIf { it.isNotBlank() } ?: error.javaClass.simpleName)
+            }
             activeConnection.set(null)
             activeCall.set(null)
+            val fetched = attempt.page
+            if (fetched == null) attempt.error?.takeIf { it.isNotBlank() }?.let { fetchErrors += it }
             if (fetched != null &&
                 fetched.wordCount >= 40 &&
                 SourceQuality.isAcceptable(candidate.url, fetched.title.ifBlank { candidate.title }, fetched.text.take(500)) &&
@@ -177,8 +187,14 @@ class DurableDeepResearchProvider(
             sources = sources,
             learnedChunks = sources.size,
             errors = buildList {
-                if (failed > 0) add("$failed source fetch(es) failed or failed relevance")
-                if (sources.isEmpty()) add("No sources passed relevance filters for: $normalized")
+                if (sources.isEmpty() && searchErrors.isNotEmpty()) {
+                    add(searchErrors.distinct().take(4).joinToString(" | "))
+                }
+                fetchErrors.distinct().take(4).forEach { add(it) }
+                if (failed > 0 && fetchErrors.isEmpty()) add("$failed source fetch(es) failed or failed relevance")
+                if (sources.isEmpty() && searchErrors.isEmpty() && fetchErrors.isEmpty()) {
+                    add("No sources passed relevance filters for: $normalized")
+                }
             },
             mode = mode.name.lowercase()
         )

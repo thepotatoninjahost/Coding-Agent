@@ -328,12 +328,16 @@ class AutonomousAgent(
             if (isCancelled()) return stopNow(taskId, normalized, plan, events) { emit(it) }
             emit(AutonomousAgentEvent.Phase("RESEARCH", "Looking things up on the internet."))
             val mode = ResearchModeDetector.detect(focus)
-            val session = runCatching {
+            val researchAttempt = runCatching {
                 research.deepResearch(focus, 8, mode) { progress ->
                     if (isCancelled() || !personalLogHealthy) return@deepResearch
                     emit(AutonomousAgentEvent.Phase("RESEARCH", "Looking things up: ${progress.completed} of ${progress.total}. Found ${progress.successful}. Could not use ${progress.failed}."))
                 }
-            }.getOrNull()
+            }
+            val session = researchAttempt.getOrNull()
+            val researchFailure = researchAttempt.exceptionOrNull()?.let { error ->
+                error.message?.takeIf { it.isNotBlank() } ?: error.javaClass.simpleName
+            }
             if (!personalLogHealthy) return events
             if (isCancelled()) return stopNow(taskId, normalized, plan, events) { emit(it) }
             val brief = session?.takeIf { it.sources.isNotEmpty() }?.let(ResearchBriefBuilder::build)
@@ -341,13 +345,26 @@ class AutonomousAgent(
                 researchEvidence = "\n\nResearch brief:\n${brief.evidence}"
                 emit(AutonomousAgentEvent.Phase("RESEARCH", "I read ${brief.sourceCount} pages (${brief.wordCount} words) and saved them."))
             } else {
+                val why = (session?.errors.orEmpty() + listOfNotNull(researchFailure))
+                    .map { it.trim() }
+                    .filter { it.isNotBlank() }
+                    .distinct()
+                    .take(4)
+                    .joinToString(" | ")
+                    .ifBlank { "No error was recorded." }
                 researchEvidence =
-                    "\n\nResearch ran but returned no usable sources. Do not invent external docs or APIs. " +
-                        "Prefer local project evidence, or call research_web with a tighter technical query."
-                emit(AutonomousAgentEvent.Phase("RESEARCH", "I could not find usable pages. I will not invent facts from the internet."))
+                    "\n\nResearch ran but returned no usable sources. What went wrong: $why " +
+                        "Do not invent external docs or APIs. Prefer local project evidence, or call research_web with a tighter technical query."
+                emit(
+                    AutonomousAgentEvent.Phase(
+                        "RESEARCH",
+                        "I could not find usable pages. What went wrong: $why"
+                    )
+                )
                 if (ResearchGate.requiresUsableEvidence(focus, intake)) {
                     val message =
                         "I needed pages from the internet for this, and I could not get any. " +
+                            "What went wrong: $why " +
                             "I will not pretend I looked them up. Try again with fewer, clearer words."
                     val task = failedTask(taskId, focus, plan, message, emptyList())
                     recordTask(task)
@@ -483,29 +500,44 @@ class AutonomousAgent(
                     }
                     emit(AutonomousAgentEvent.ModelMessage(response.content))
                     // A change/debug/create/refactor task is not complete merely because the
-                    // model produced prose. Once the loop has reached its write gate, a textual
-                    // response before any mutation is a refusal to act, not task completion.
-                    // Keep the execution spine alive long enough for the model to produce the
-                    // required staged mutation, then fail closed if it repeatedly refuses.
-                    if (writeNow && changeWork && !state.mutationOccurred) {
-                        state.writeNowRefusals++
-                        if (state.writeNowRefusals >= 2) {
-                            val msg = "I looked at the project but did not prepare the change you asked for. Nothing was saved. Say what you want again, and name the file if you know it."
-                            val task = failedTask(taskId, normalized, plan, msg, changeSets.flatMap { it.changes })
-                            emit(AutonomousAgentEvent.Failed(task, msg))
-                            recordTask(task)
-                            return events
+                    // model wrote a plan or asked "would you like me to go ahead?". Nothing
+                    // was saved until a change is staged. Give the helper one more chance to
+                    // write the files, then ask the owner instead of reporting the job finished.
+                    if (changeWork && !state.mutationOccurred) {
+                        val askingPermission = asksOwnerBeforeDoingTheWork(response.content)
+                        val turnsRemain = turn < config.maxTurns - 1
+                        val askedAgain = askingPermission && state.writeNowRefusals >= 1
+                        if (turnsRemain && state.writeNowRefusals < 2 && !askedAgain) {
+                            state.writeNowRefusals++
+                            transcript += com.codingagent.model.ModelMessage(
+                                "assistant",
+                                response.content
+                            )
+                            transcript += com.codingagent.model.ModelMessage(
+                                "user",
+                                "SYSTEM: The owner already asked for this work. Do not ask permission and do not say you are finished. " +
+                                    "Call replace_text or create_file now using the evidence already gathered."
+                            )
+                            continue
                         }
-                        transcript += com.codingagent.model.ModelMessage(
-                            "assistant",
-                            response.content
+                        val question = if (askingPermission) {
+                            "I have not built anything yet. Nothing was saved. " +
+                                "The helper only described a plan and asked whether to continue. " +
+                                "Tell me to go ahead if you want the files written."
+                        } else {
+                            "I looked at the project but did not prepare the change you asked for. " +
+                                "Nothing was saved. Say what you want again, and name the file if you know it."
+                        }
+                        val task = AgentTask(
+                            taskId, normalized, "needs-input", plan,
+                            changeSets.flatMap { it.changes },
+                            VerificationReport(false, emptyList()),
+                            listOf("${Instant.now()}: change requested but nothing was staged"),
+                            question
                         )
-                        transcript += com.codingagent.model.ModelMessage(
-                            "user",
-                            "SYSTEM: This is a change task and no mutation has been staged yet. " +
-                                "Do not report completion. Call replace_text or create_file now using the evidence already gathered."
-                        )
-                        continue
+                        recordTask(task)
+                        emit(AutonomousAgentEvent.Completed(task))
+                        return events
                     }
                     val missing = missingEvidenceMessage(intake, state.readPaths, state.searchedProject)
                     if (missing != null) {
@@ -581,7 +613,10 @@ class AutonomousAgent(
                     )
                     when (outcome) {
                         ToolTurnOutcome.Continue -> continue
-                        ToolTurnOutcome.Stop -> return events
+                        ToolTurnOutcome.Stop -> {
+                            if (isCancelled()) return stopNow(taskId, normalized, plan, events) { emit(it) }
+                            return events
+                        }
                     }
                 }
             }
@@ -594,9 +629,15 @@ class AutonomousAgent(
             ) && !state.mutationOccurred
         if (changeStillOpen) {
             val msg = "I looked at the project but did not prepare the change you asked for. Nothing was saved. Say what you want again, and name the file if you know it."
-            val task = failedTask(taskId, normalized, plan, msg, changeSets.flatMap { it.changes })
+            val task = AgentTask(
+                taskId, normalized, "needs-input", plan,
+                changeSets.flatMap { it.changes },
+                VerificationReport(false, emptyList()),
+                listOf("${Instant.now()}: turn budget ended before a change was staged"),
+                msg
+            )
             recordTask(task)
-            emit(AutonomousAgentEvent.Failed(task, msg))
+            emit(AutonomousAgentEvent.Completed(task))
             return events
         }
         val report = workspace.verify()
@@ -679,6 +720,31 @@ class AutonomousAgent(
     // DEBUG-intent error patterns that this method used to miss).
     private fun shouldResearch(request: String, intake: TaskIntake): Boolean =
         ResearchGate.shouldAutoResearch(request, intake)
+
+    private fun asksOwnerBeforeDoingTheWork(text: String): Boolean {
+        val lower = text.lowercase()
+        val phrases = listOf(
+            "would you like me to",
+            "would you like me",
+            "shall i ",
+            "do you want me to",
+            "want me to go ahead",
+            "should i go ahead",
+            "should i proceed",
+            "if you'd like me to",
+            "if you would like me to",
+            "let me know if you want",
+            "before i start",
+            "before i begin",
+            "before i make",
+            "before i write",
+            "ready for me to",
+            "want me to start",
+            "want me to build",
+            "go ahead?"
+        )
+        return phrases.any { it in lower }
+    }
 
     /**
      * Compact repo map for the model (Aider-style). Paths only — not full file bodies.

@@ -127,7 +127,16 @@ class SearxResearchProvider(
                     continue
                 }
                 val body = connection.inputStream.readCapped()
-                val json = JSONObject(body)
+                if (body.trimStart().startsWith("<")) {
+                    errors += "$base returned a web page instead of search results"
+                    continue
+                }
+                val json = try {
+                    JSONObject(body)
+                } catch (_: Exception) {
+                    errors += "$base returned a web page instead of search results"
+                    continue
+                }
                 val results = json.optJSONArray("results") ?: JSONArray()
                 val hits = mutableListOf<ResearchHit>()
                 for (i in 0 until results.length()) {
@@ -293,7 +302,8 @@ class GitHubResearchProvider(
         val repoUrl = "https://api.github.com/search/repositories?q=$encoded&per_page=${limit.coerceIn(1, 10)}&sort=stars"
         val hits = mutableListOf<ResearchHit>()
         val errors = mutableListOf<String>()
-        fetchJson(repoUrl)?.let { json ->
+        val fetched = fetchJson(repoUrl)
+        fetched.json?.let { json ->
             val items = json.optJSONArray("items") ?: JSONArray()
             for (i in 0 until items.length()) {
                 val item = items.optJSONObject(i) ?: continue
@@ -304,12 +314,15 @@ class GitHubResearchProvider(
                     hits += ResearchHit(name, html, desc.ifBlank { "GitHub repository: $name" })
                 }
             }
-        } ?: errors.add("GitHub repo search failed")
+        }
+        fetched.error?.let { errors.add(it) }
         return if (hits.isEmpty()) ResearchResult(query, emptyList(), errors.joinToString(" | ").ifBlank { "GitHub returned no results" })
         else ResearchResult(query, hits.distinctBy { it.url }.take(limit))
     }
 
-    private fun fetchJson(url: String): JSONObject? {
+    private data class JsonFetch(val json: JSONObject?, val error: String?)
+
+    private fun fetchJson(url: String): JsonFetch {
         val connection = connectionFactory(url)
         return try {
             connection.connectTimeout = timeoutMillis
@@ -318,10 +331,16 @@ class GitHubResearchProvider(
                 connection.requestMethod = "GET"
             connection.setRequestProperty("User-Agent", "Coding-Agent/1.0 (Android; https://github.com/thepotatoninjahost/Coding-Agent)")
             connection.setRequestProperty("Accept", "application/vnd.github+json")
-            if (connection.responseCode !in 200..299) return null
-            JSONObject(connection.inputStream.readCapped())
-        } catch (_: Exception) {
-            null
+            val code = connection.responseCode
+            if (code !in 200..299) {
+                val errBody = runCatching { connection.errorStream?.readCapped(4_096).orEmpty() }.getOrDefault("")
+                val message = runCatching { JSONObject(errBody).optString("message") }.getOrNull().orEmpty().trim()
+                val detail = message.ifBlank { "HTTP $code" }.take(240)
+                return JsonFetch(null, "GitHub search failed: $detail")
+            }
+            JsonFetch(JSONObject(connection.inputStream.readCapped()), null)
+        } catch (error: Exception) {
+            JsonFetch(null, "GitHub search failed: ${error.message ?: error.javaClass.simpleName}")
         } finally {
             connection.disconnect()
         }

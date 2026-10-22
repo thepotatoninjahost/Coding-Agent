@@ -204,9 +204,17 @@ class AgentToolDispatch(
                 val err = sessionResult.exceptionOrNull()
                 "ERROR: research_web failed: ${err?.message ?: err?.javaClass?.simpleName ?: "unknown"}"
             }
-            session == null || session.sources.isEmpty() ->
-                "ERROR: research_web found no usable sources for \"$query\". " +
+            session == null || session.sources.isEmpty() -> {
+                val why = session?.errors.orEmpty()
+                    .map { it.trim() }
+                    .filter { it.isNotBlank() }
+                    .distinct()
+                    .take(4)
+                    .joinToString(" | ")
+                    .ifBlank { "No error was recorded." }
+                "ERROR: research_web found no usable sources for \"$query\". What went wrong: $why " +
                     "Try a tighter technical query (library + API + error text). Do not invent docs."
+            }
             else -> {
                 val brief = ResearchBriefBuilder.build(session)
                 val header =

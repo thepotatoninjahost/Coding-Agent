@@ -275,10 +275,28 @@ private fun CodingAgentApp(
                     Column(Modifier.padding(16.dp)) {
                         Text("Connect a code helper", color = NeonGreen, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                         Text(
-                            "Writing new code needs a helper on the internet. OpenRouter is already filled in, with the free helper openrouter/free. Paste the secret password from openrouter.ai/keys. It stays on this phone and is not written into the app. You can change the web address or the helper name if you use another company. Looking things up on the Research tab does not need this.",
+                            "Writing new code needs a helper on the internet. One free helper is already chosen, and I stay with that same helper for the whole job. I switch to another free helper only if the first one is busy or fails. Paste the secret password from openrouter.ai/keys. It stays on this phone and is not written into the app. Looking things up on the Research tab does not need this.",
                             color = SoftGreen,
                             fontSize = 12.sp
                         )
+                        Spacer(Modifier.height(8.dp))
+                        Text("Which free helper?", color = SoftGreen, fontSize = 12.sp)
+                        ModelSettings.freeHelperChoices().forEach { choice ->
+                            TextButton(
+                                onClick = { vm.chooseFreeHelper(choice.modelId) },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    if (ui.draftModelName == choice.modelId) {
+                                        "Selected: ${choice.plainName}. ${choice.plainDetail}"
+                                    } else {
+                                        "${choice.plainName}. ${choice.plainDetail}"
+                                    },
+                                    color = if (ui.draftModelName == choice.modelId) NeonGreen else SoftGreen,
+                                    fontSize = 12.sp
+                                )
+                            }
+                        }
                         Spacer(Modifier.height(12.dp))
                         OutlinedTextField(
                             value = ui.draftBaseUrl,

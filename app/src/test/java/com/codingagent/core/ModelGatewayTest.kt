@@ -74,10 +74,33 @@ data: [DONE]
     @Test
     fun multipleToolCallsAreRejectedRatherThanSilentlyDroppingCalls() {
         val gateway = RemoteHttpGateway("http://127.0.0.1:8080/v1", "", "local", connectionFactory = { _ ->
-            fakeConnection("""{"choices":[{"message":{"tool_calls":[{"function":{"name":"read_file","arguments":"{}"}},{"function":{"name":"search_project","arguments":"{}"}}]}}]}""")
+            fakeConnection("""{"choices":[{"message":{"tool_calls":[{"id":"call_1","function":{"name":"read_file","arguments":"{}"}},{"function":{"name":"search_project","arguments":"{}"}}]}}]}""")
         })
         val result = gateway.complete(ModelRequest("system", "inspect", listOf(ModelToolDefinition("read_file", "read", "{}"))))
-        assertTrue(result is ModelResponse.Failure)
+        assertTrue(result is ModelResponse.ToolCall)
+        val call = result as ModelResponse.ToolCall
+        assertEquals("read_file", call.name)
+        assertTrue(call.thought.contains("next turn"))
+    }
+
+    @Test
+    fun freeRouterPinsTheFirstCapableModelForLaterSteps() {
+        val bodies = mutableListOf<String>()
+        var calls = 0
+        val gateway = RemoteHttpGateway("https://openrouter.ai/api/v1", "test-secret-value", "openrouter/free", connectionFactory = { _ ->
+            calls++
+            val body = if (calls == 1) {
+                """{"model":"cohere/north-mini-code:free","choices":[{"message":{"content":"first"}}]}"""
+            } else {
+                """{"model":"liquid/lfm-2.5-2.6b:free","choices":[{"message":{"content":"second"}}]}"""
+            }
+            fakeConnection(body, onRequest = { captured -> bodies += captured })
+        })
+        gateway.complete(ModelRequest("system", "one", emptyList()))
+        gateway.complete(ModelRequest("system", "two", emptyList()))
+        assertTrue(bodies[0].contains("\"model\":\"openrouter/free\""))
+        assertTrue(bodies[1].contains("\"model\":\"cohere/north-mini-code:free\""))
+        assertFalse(bodies[1].contains("liquid/lfm"))
     }
 
     @Test
@@ -203,7 +226,7 @@ data: [DONE]
     }
 
     @Test
-    fun `streamed multiple tool calls are rejected rather than silently dropping calls`() {
+    fun `streamed multiple tool calls keep the first call and continue`() {
         val gateway = RemoteHttpGateway("http://127.0.0.1:8080/v1", "", "local", connectionFactory = { _ ->
             fakeConnection("""data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"read_file","arguments":"{}"}}]}}]}
 data: {"choices":[{"delta":{"tool_calls":[{"index":1,"id":"call_2","function":{"name":"search_project","arguments":"{}"}}]}}]}
@@ -213,10 +236,11 @@ data: [DONE]
 
         val result = gateway.stream(ModelRequest("system", "inspect", emptyList())) {}
 
-        assertEquals(
-            ModelResponse.Failure("Model returned multiple tool calls; only one tool call is accepted per turn"),
-            result
-        )
+        assertTrue(result is ModelResponse.ToolCall)
+        val call = result as ModelResponse.ToolCall
+        assertEquals("read_file", call.name)
+        assertEquals("call_1", call.callId)
+        assertTrue(call.thought.contains("next turn"))
     }
 
     @Test

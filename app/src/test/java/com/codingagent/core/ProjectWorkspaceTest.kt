@@ -113,6 +113,18 @@ class ProjectWorkspaceTest {
         assertTrue("docs and UI copy about the scanner must not fail verify: " + report.issues, report.passed)
     }
 
+    @Test fun verifyDoesNotFlagTheCheckersOwnComment() {
+        val root = Files.createTempDirectory("coding-agent-self-comment").toFile()
+        root.resolve("Notes.kt").writeText(
+            "// A comment or a call that names the unfinished-work marker is already handled above.\nfun ok() = 1\n"
+        )
+        assertTrue(ProjectWorkspace(root).verify().passed)
+        root.resolve("Broken.kt").writeText("// IMPLEMENT_ME still counts\n")
+        val flagged = ProjectWorkspace(root).verify()
+        assertFalse(flagged.passed)
+        assertTrue(flagged.issues.any { it.message.contains("IMPLEMENT_ME", ignoreCase = true) })
+    }
+
     @Test fun verifyStillCatchesRealTodoComments() {
         val root = Files.createTempDirectory("coding-agent-real-todo").toFile()
         root.resolve("Broken.kt").writeText("fun x() {\n  // TODO finish this\n}\n")

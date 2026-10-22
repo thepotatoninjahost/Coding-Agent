@@ -53,7 +53,16 @@ class ToolSelector {
         val needsProjectEvidence =
             intake.contract.targetPaths.isNotEmpty() ||
                 intake.contract.targetSymbols.isNotEmpty() ||
-                intake.intent in setOf(TaskIntent.INSPECT, TaskIntent.TEST, TaskIntent.DEBUG, TaskIntent.REFACTOR, TaskIntent.CHANGE, TaskIntent.CREATE)
+                intake.intent in setOf(
+                    TaskIntent.INSPECT,
+                    TaskIntent.TEST,
+                    TaskIntent.DEBUG,
+                    TaskIntent.REFACTOR,
+                    TaskIntent.CHANGE,
+                    TaskIntent.CREATE,
+                    TaskIntent.EXPLAIN,
+                    TaskIntent.UNKNOWN
+                )
         val searchId = if (needsProjectEvidence) {
             add(ToolKind.SEARCH_PROJECT, "Locate target files, symbols, and relevant project evidence", listOf(indexId))
         } else null

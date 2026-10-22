@@ -4,9 +4,9 @@ The current model response type supports one tool call per model response. The a
 
 ## Multiple tool calls in one response
 
-Multiple tool calls are **not currently queued**. The non-streaming response parser rejects responses containing multiple tool calls. The streaming parser currently assembles only the first indexed tool call. Do not rely on a provider returning several calls in one response.
+When a reply contains several tool calls, the first call is run and the task continues. The reply notes that any later call must be sent on the next turn. The task does not fail just because more than one call arrived.
 
-This behavior is covered by `ModelGatewayTest.multipleToolCallsAreRejectedRatherThanSilentlyDroppingCalls`. Support for multi-call queuing would require a deliberate implementation change in the model response types, streaming and non-streaming parsers, and agent execution loop, plus tests for ordering, partial failures, cancellation, and authorization.
+This behavior is covered by `ModelGatewayTest.multipleToolCallsAreRejectedRatherThanSilentlyDroppingCalls` and the streamed equivalent, which now expect the first call to be kept.
 
 ## Source of truth
 

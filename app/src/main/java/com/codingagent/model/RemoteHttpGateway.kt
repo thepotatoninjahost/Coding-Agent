@@ -22,6 +22,11 @@ class RemoteHttpGateway(
     private val activeConnection: AtomicReference<HttpURLConnection?> = AtomicReference(null),
     private val cancellationGeneration: AtomicLong = AtomicLong(0L)
 ) : ModelGateway {
+    /**
+     * openrouter/free picks a different free model on every request. After the first
+     * capable model answers, later steps in this task stay on that same model.
+     */
+    private val pinnedModel = AtomicReference<String?>(null)
     override fun cancel() {
         cancellationGeneration.incrementAndGet()
         activeConnection.getAndSet(null)?.disconnect()
@@ -109,6 +114,7 @@ class RemoteHttpGateway(
                     malformedPayload = true
                     break
                 }
+                noteServedModel(chunk.optString("model"))
                 val choice = chunk.optJSONArray("choices")?.optJSONObject(0) ?: continue
                 choice.optString("finish_reason").takeIf { it.isNotBlank() && it != "null" }?.let { finishReason = it }
                 val delta = choice.optJSONObject("delta") ?: continue
@@ -124,8 +130,8 @@ class RemoteHttpGateway(
                     for (i in 0 until calls.length()) {
                         val call = calls.optJSONObject(i) ?: continue
                         if (call.optInt("index", 0) != 0) {
-                            // This protocol executes exactly one tool per turn. Never silently
-                            // discard additional calls: reject the whole streamed response.
+                            // One tool runs this turn. Extra calls stay visible in the reply
+                            // so the task can continue with the next call instead of failing.
                             sawMultipleToolCalls = true
                             continue
                         }
@@ -148,7 +154,8 @@ class RemoteHttpGateway(
             return ModelResponse.Failure("Model stream ended without a completion marker; partial content was rejected.")
         }
         if (sawMultipleToolCalls) {
-            return ModelResponse.Failure("Model returned multiple tool calls; only one tool call is accepted per turn")
+            if (mergedContent.isNotEmpty()) mergedContent.append('\n')
+            mergedContent.append(EXTRA_TOOL_CALL_NOTE)
         }
 
         val merged = JSONObject().put("role", "assistant")
@@ -211,6 +218,7 @@ class RemoteHttpGateway(
         if (trimmed.isEmpty()) return ModelResponse.Failure("Model returned an empty response")
         val json = runCatching { JSONObject(trimmed) }.getOrNull()
             ?: return JsonModelResponseParser().parse(trimmed)
+        noteServedModel(json.optString("model"))
         val choice = json.optJSONArray("choices")?.optJSONObject(0)
         val finishReason = choice?.optString("finish_reason")
         if (finishReason.isTruncatedFinishReason()) return truncatedResponseFailure(finishReason!!)
@@ -319,7 +327,7 @@ class RemoteHttpGateway(
         }
         messages.put(JSONObject().put("role", "user").put("content", request.user))
         val body = JSONObject()
-            .put("model", model)
+            .put("model", modelForRequest())
             .put("messages", messages)
             .put("temperature", 0.1)
             .put("stream", false)
@@ -345,18 +353,23 @@ class RemoteHttpGateway(
 
     private fun responseFromChatMessage(message: JSONObject): ModelResponse {
         val calls = message.optJSONArray("tool_calls")
-        if (calls != null && calls.length() > 1) {
-            return ModelResponse.Failure("Model returned multiple tool calls; only one tool call is accepted per turn")
-        }
         if (calls != null && calls.length() > 0) {
             val first = calls.optJSONObject(0)
             val function = first?.optJSONObject("function") ?: first
             val name = function?.optString("name").orEmpty()
             if (name.isBlank()) return ModelResponse.Failure("Model returned a tool call without a function name")
+            val extra = calls.length() - 1
+            val thought = buildString {
+                append(extractMessageText(message))
+                if (extra > 0) {
+                    if (isNotEmpty()) append('\n')
+                    append(EXTRA_TOOL_CALL_NOTE)
+                }
+            }
             return ModelResponse.ToolCall(
                 name,
                 function?.optString("arguments", "{}") ?: "{}",
-                extractMessageText(message),
+                thought,
                 first?.optString("id")
             )
         }
@@ -441,6 +454,16 @@ class RemoteHttpGateway(
         return runCatching { bounded(stream, ERROR_BODY_BYTES).bufferedReader().use { it.readText() } }.getOrDefault("")
     }
 
+    private fun modelForRequest(): String = pinnedModel.get()?.takeIf { it.isNotBlank() } ?: model
+
+    private fun noteServedModel(served: String?) {
+        val name = served?.trim().orEmpty()
+        if (name.isBlank() || name.equals("openrouter/free", ignoreCase = true)) return
+        if (!model.equals("openrouter/free", ignoreCase = true)) return
+        if (name in WEAK_FREE_MODELS) return
+        pinnedModel.compareAndSet(null, name)
+    }
+
     private fun bounded(input: java.io.InputStream, maxBytes: Int = MAX_RESPONSE_BYTES): java.io.InputStream =
         object : java.io.FilterInputStream(input) {
             private var total = 0
@@ -468,5 +491,11 @@ class RemoteHttpGateway(
         private const val MAX_RESPONSE_BYTES = 4_000_000
         private const val ERROR_BODY_BYTES = 16_384
         private const val ERROR_SNIPPET_CHARS = 2_000
+        private const val EXTRA_TOOL_CALL_NOTE =
+            "Only the first tool call is being run. Send any other tool call on the next turn."
+        private val WEAK_FREE_MODELS = setOf(
+            "liquid/lfm-2.5-2.6b:free",
+            "nvidia/nemotron-3.5-content-safety:free"
+        )
     }
 }

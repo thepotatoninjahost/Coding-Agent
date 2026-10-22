@@ -7,7 +7,6 @@ import com.codingagent.agent.AutonomousAgentEvent
 import com.codingagent.model.ModelSettings
 import com.codingagent.workspace.KnowledgeHit
 import java.io.File
-import java.nio.file.Files
 import org.junit.Assert.assertFalse
 import org.junit.Assert.fail
 import org.junit.Test
@@ -36,8 +35,12 @@ class OpenRouterAgentRunner {
             fail("OpenRouter is not usable. The secret password was empty after cleanup.")
             return
         }
-        val root = Files.createTempDirectory("openrouter-agent").toFile()
-        root.resolve("README.md").writeText("This sample project prints a greeting.\n")
+        val project = OpenRouterRunReport.projectDirectory(System.getenv("OPENROUTER_AGENT_PROJECT"))
+        if (project is OpenRouterRunReport.ProjectDirectory.Missing) {
+            fail(project.message)
+            return
+        }
+        val root = (project as OpenRouterRunReport.ProjectDirectory.Ready).root
         val agent = AutonomousAgent(
             root,
             object : AgentKnowledge {
@@ -58,8 +61,9 @@ class OpenRouterAgentRunner {
         out.writeText(text)
         assertFalse(text.contains(key))
         val terminal = events.lastOrNull()
-        if (terminal !is AutonomousAgentEvent.Completed && terminal !is AutonomousAgentEvent.ApprovalRequired) {
-            fail(redact("OpenRouter run did not finish with an answer.\n$text", key))
+        val failure = OpenRouterRunReport.failureReason(terminal)
+        if (failure != null) {
+            fail(redact("$failure\n$text", key))
         }
     }
 
@@ -70,10 +74,10 @@ class OpenRouterAgentRunner {
         is AutonomousAgentEvent.ToolFinished -> "Tool ${event.name} finished. Success: ${event.success}"
         is AutonomousAgentEvent.ModelDelta -> ""
         is AutonomousAgentEvent.ModelMessage -> "Helper said: ${event.content.take(800)}"
-        is AutonomousAgentEvent.Completed -> "Finished: ${event.task.summary}"
+        is AutonomousAgentEvent.Completed -> OpenRouterRunReport.describeCompleted(event)
         is AutonomousAgentEvent.Failed -> "Failed: ${event.message}"
         is AutonomousAgentEvent.Stopped -> "Stopped: ${event.message}"
-        is AutonomousAgentEvent.ApprovalRequired -> "Waiting for approval. Nothing was saved yet."
+        is AutonomousAgentEvent.ApprovalRequired -> "Waiting for approval. Nothing was saved yet. That is not a finished job."
     }
 
     private fun resultFile(): File {

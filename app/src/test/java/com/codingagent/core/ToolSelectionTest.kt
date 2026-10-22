@@ -15,6 +15,22 @@ import com.codingagent.intake.TaskIntakeParser
 
 class ToolSelectionTest {
     @Test
+    fun explainAndUnknownMayListAndReadFiles() {
+        val root = Files.createTempDirectory("tools-explain").toFile()
+        val explain = ToolSelector().select(
+            TaskIntakeParser(root).parse("Explain this project in one short paragraph. Do not change any files.")
+        )
+        assertTrue(explain.tools.any { it.kind == ToolKind.SEARCH_PROJECT })
+        val explainLoop = ToolSelectionLoop(explain)
+        explainLoop.completeKind(ToolKind.INDEX_REPOSITORY, "indexed")
+        assertEquals(null, explainLoop.authorize("list_files", ToolKind.SEARCH_PROJECT))
+        assertEquals(null, explainLoop.authorize("read_file", ToolKind.SEARCH_PROJECT))
+
+        val unknown = ToolSelector().select(TaskIntakeParser(root).parse("hi"))
+        assertTrue(unknown.tools.any { it.kind == ToolKind.SEARCH_PROJECT })
+    }
+
+    @Test
     fun selectsToolsFromIntentAndDependencies() {
         val root = Files.createTempDirectory("tools").toFile()
         val intake = TaskIntakeParser(root).parse("create a Kotlin helper in src/Helper.kt")

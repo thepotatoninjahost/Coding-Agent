@@ -113,12 +113,15 @@ object ResearchUrlSafety {
 
 object ArticleExtractor {
     private const val MAX_RESPONSE_BYTES = 2 * 1024 * 1024
+    private const val MAX_REDIRECTS = 3
 
     data class Extracted(val title: String, val text: String, val wordCount: Int, val codeBlocks: List<String>) {
         val code: List<String> get() = codeBlocks
     }
 
     fun extract(html: String, fallbackTitle: String = "document"): Extracted = parse(html, fallbackTitle)
+
+    data class FetchAttempt(val page: Extracted?, val error: String?)
 
     fun fetch(
         url: String,
@@ -128,74 +131,131 @@ object ArticleExtractor {
         isCancelled: () -> Boolean = { false },
         onConnection: (HttpURLConnection) -> Unit = {},
         onCall: (okhttp3.Call) -> Unit = {}
-    ): Extracted? {
-        if (urlValidator(url) != null) return null
+    ): Extracted? = fetchDetailed(
+        url, connectionFactory, timeoutMillis, urlValidator, isCancelled, onConnection, onCall
+    ).page
+
+    /**
+     * Reads a public page and follows a few redirects only when the next address
+     * still passes the public-URL check. A redirect to a private or local address is refused.
+     * The error text is kept so a failed lookup is visible instead of a blank result.
+     */
+    fun fetchDetailed(
+        url: String,
+        connectionFactory: ((String) -> HttpURLConnection)? = null,
+        timeoutMillis: Int = 15_000,
+        urlValidator: (String) -> String? = ResearchUrlSafety::validatePublicHttpUrl,
+        isCancelled: () -> Boolean = { false },
+        onConnection: (HttpURLConnection) -> Unit = {},
+        onCall: (okhttp3.Call) -> Unit = {}
+    ): FetchAttempt {
         return if (connectionFactory == null) {
-            fetchWithOkHttp(url, timeoutMillis, isCancelled, onCall)
+            fetchWithOkHttp(url, timeoutMillis, urlValidator, isCancelled, onCall)
         } else {
-            fetchWithUrlConnection(url, connectionFactory, timeoutMillis, isCancelled, onConnection)
+            fetchWithUrlConnection(url, connectionFactory, timeoutMillis, urlValidator, isCancelled, onConnection)
         }
+    }
+
+    internal fun resolveRedirect(current: String, location: String): String {
+        val target = location.trim()
+        if (target.isEmpty()) return target
+        return runCatching { java.net.URI(current).resolve(target).toString() }.getOrDefault(target)
     }
 
     private fun fetchWithOkHttp(
         url: String,
         timeoutMillis: Int,
+        urlValidator: (String) -> String?,
         isCancelled: () -> Boolean,
         onCall: (okhttp3.Call) -> Unit
-    ): Extracted? {
-        val call = ResearchUrlSafety.clientForTimeout(timeoutMillis).newCall(
-            Request.Builder()
-                .url(url)
-                .header("User-Agent", "Coding-Agent/1.0 (Android; https://github.com/thepotatoninjahost/Coding-Agent)")
-                .header("Accept", "text/html,application/xhtml+xml")
-                .get()
-                .build()
-        )
-        return try {
-            onCall(call)
-            if (isCancelled()) {
-                call.cancel()
-                return null
+    ): FetchAttempt {
+        var current = url
+        repeat(MAX_REDIRECTS + 1) { hop ->
+            urlValidator(current)?.let { return FetchAttempt(null, it) }
+            val call = ResearchUrlSafety.clientForTimeout(timeoutMillis).newCall(
+                Request.Builder()
+                    .url(current)
+                    .header("User-Agent", "Coding-Agent/1.0 (Android; https://github.com/thepotatoninjahost/Coding-Agent)")
+                    .header("Accept", "text/html,application/xhtml+xml")
+                    .get()
+                    .build()
+            )
+            try {
+                onCall(call)
+                if (isCancelled()) {
+                    call.cancel()
+                    return FetchAttempt(null, "Research cancelled")
+                }
+                call.execute().use { response ->
+                    if (isCancelled()) return FetchAttempt(null, "Research cancelled")
+                    if (response.code in 300..399) {
+                        val next = response.header("Location")?.let { resolveRedirect(current, it) }.orEmpty()
+                        if (next.isBlank()) return FetchAttempt(null, "The page moved (HTTP ${response.code}) but gave no next address.")
+                        if (hop == MAX_REDIRECTS) return FetchAttempt(null, "The page moved too many times.")
+                        current = next
+                        return@use
+                    }
+                    if (response.code !in 200..299) {
+                        return FetchAttempt(null, "The page refused the lookup (HTTP ${response.code}).")
+                    }
+                    val body = response.body ?: return FetchAttempt(null, "The page was empty.")
+                    val html = body.byteStream().use { readBounded(it, isCancelled) }
+                        ?: return FetchAttempt(null, "The page was empty, too large, or the lookup was cancelled.")
+                    return FetchAttempt(parse(html, current), null)
+                }
+            } catch (error: Exception) {
+                return FetchAttempt(null, error.message?.takeIf { it.isNotBlank() } ?: error.javaClass.simpleName)
+            } finally {
+                if (isCancelled()) call.cancel()
             }
-            call.execute().use { response ->
-                if (response.code !in 200..299 || isCancelled()) return null
-                val body = response.body ?: return null
-                val html = body.byteStream().use { readBounded(it, isCancelled) } ?: return null
-                parse(html, url)
-            }
-        } catch (_: Exception) {
-            null
-        } finally {
-            if (isCancelled()) call.cancel()
         }
+        return FetchAttempt(null, "The page moved too many times.")
     }
 
     private fun fetchWithUrlConnection(
         url: String,
         connectionFactory: (String) -> HttpURLConnection,
         timeoutMillis: Int,
+        urlValidator: (String) -> String?,
         isCancelled: () -> Boolean,
         onConnection: (HttpURLConnection) -> Unit
-    ): Extracted? {
-        val connection = connectionFactory(url).apply {
-            connectTimeout = timeoutMillis
-            readTimeout = timeoutMillis
-            instanceFollowRedirects = false
-            requestMethod = "GET"
-            setRequestProperty("User-Agent", "Coding-Agent/1.0 (Android; https://github.com/thepotatoninjahost/Coding-Agent)")
-            setRequestProperty("Accept", "text/html,application/xhtml+xml")
+    ): FetchAttempt {
+        var current = url
+        var hop = 0
+        while (hop <= MAX_REDIRECTS) {
+            urlValidator(current)?.let { return FetchAttempt(null, it) }
+            val connection = connectionFactory(current).apply {
+                connectTimeout = timeoutMillis
+                readTimeout = timeoutMillis
+                instanceFollowRedirects = false
+                requestMethod = "GET"
+                setRequestProperty("User-Agent", "Coding-Agent/1.0 (Android; https://github.com/thepotatoninjahost/Coding-Agent)")
+                setRequestProperty("Accept", "text/html,application/xhtml+xml")
+            }
+            val moved = try {
+                onConnection(connection)
+                if (isCancelled()) return FetchAttempt(null, "Research cancelled")
+                val code = connection.responseCode
+                if (code in 300..399) {
+                    val next = connection.getHeaderField("Location")?.let { resolveRedirect(current, it) }.orEmpty()
+                    if (next.isBlank()) return FetchAttempt(null, "The page moved (HTTP $code) but gave no next address.")
+                    if (hop == MAX_REDIRECTS) return FetchAttempt(null, "The page moved too many times.")
+                    current = next
+                    true
+                } else {
+                    if (code !in 200..299) return FetchAttempt(null, "The page refused the lookup (HTTP $code).")
+                    val html = connection.inputStream.use { readBounded(it, isCancelled) }
+                        ?: return FetchAttempt(null, "The page was empty, too large, or the lookup was cancelled.")
+                    return FetchAttempt(parse(html, current), null)
+                }
+            } catch (error: Exception) {
+                return FetchAttempt(null, error.message?.takeIf { it.isNotBlank() } ?: error.javaClass.simpleName)
+            } finally {
+                connection.disconnect()
+            }
+            if (moved) hop++
         }
-        return try {
-            onConnection(connection)
-            if (isCancelled()) return null
-            if (connection.responseCode !in 200..299) return null
-            val html = connection.inputStream.use { readBounded(it, isCancelled) } ?: return null
-            parse(html, url)
-        } catch (_: Exception) {
-            null
-        } finally {
-            connection.disconnect()
-        }
+        return FetchAttempt(null, "The page moved too many times.")
     }
 
     private fun readBounded(input: java.io.InputStream, isCancelled: () -> Boolean): String? {

@@ -108,7 +108,7 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun applyModelSettings(settings: ModelSettings) {
-        val normalized = settings.normalized().copy(backend = ModelBackend.REMOTE)
+        val normalized = settings.normalized().withOpenRouterDefaults().copy(backend = ModelBackend.REMOTE)
         store.saveModelSettings(normalized)
         val gateway = normalized.remoteGateway()
         modelGateway = gateway
@@ -119,6 +119,7 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
                 modelSettings = normalized,
                 draftApiKey = normalized.apiKey,
                 draftModelName = normalized.modelName,
+                draftRotationModels = normalized.rotationModels,
                 draftBaseUrl = normalized.baseUrl,
                 draftExtraHeaders = normalized.extraHeaders,
                 draftSystemPrompt = normalized.systemPrompt,
@@ -132,6 +133,14 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun updateDraftApiKey(value: String) = _ui.update { it.copy(draftApiKey = value) }
     fun updateDraftModelName(value: String) = _ui.update { it.copy(draftModelName = value) }
+
+    fun chooseFreeHelper(modelId: String) = _ui.update {
+        it.copy(
+            draftModelName = modelId,
+            draftBaseUrl = if (it.draftBaseUrl.isBlank()) ModelSettings.OPENROUTER_BASE_URL else it.draftBaseUrl,
+            draftRotationModels = ModelSettings.rotationForChoice(modelId)
+        )
+    }
     fun updateDraftBaseUrl(value: String) = _ui.update { it.copy(draftBaseUrl = value) }
     fun updateDraftExtraHeaders(value: String) = _ui.update { it.copy(draftExtraHeaders = value) }
     fun updateDraftSystemPrompt(value: String) = _ui.update { it.copy(draftSystemPrompt = value) }
@@ -171,6 +180,7 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
                 baseUrl = s.draftBaseUrl,
                 apiKey = s.draftApiKey,
                 modelName = s.draftModelName,
+                rotationModels = s.draftRotationModels,
                 systemPrompt = s.draftSystemPrompt,
                 extraHeaders = s.draftExtraHeaders,
                 onboarded = true
@@ -708,6 +718,7 @@ data class WorkbenchUiState(
     val showModelSettings: Boolean = false,
     val draftApiKey: String = "",
     val draftModelName: String = ModelSettings.OPENROUTER_FREE_MODEL,
+    val draftRotationModels: String = ModelSettings.OPENROUTER_FREE_FALLBACKS,
     val draftBaseUrl: String = ModelSettings.OPENROUTER_BASE_URL,
     val draftExtraHeaders: String = "",
     val draftSystemPrompt: String = "",

@@ -158,8 +158,11 @@ object ChangeDiff {
         appendLine("WHAT YOU ASKED FOR (complete):")
         appendCompleteContent(proposal.request)
         appendLine()
+        appendLine("IN EVERYDAY WORDS:")
+        appendLine(everydaySummary(proposal))
+        appendLine()
         appendLine("THE AGENT'S PLAIN-ENGLISH EXPLANATION (complete):")
-        appendCompleteContent(proposal.changeSet.reason)
+        appendCompleteContent(ownerFacingReason(proposal.changeSet.reason))
         if (!hasCompletePlainEnglishExplanation(proposal.changeSet.reason)) {
             appendLine("WARNING: This proposal does not contain all six required explanation sections. Do not approve it until the agent provides a complete explanation.")
         }
@@ -179,7 +182,7 @@ object ChangeDiff {
             appendLine("=== $operationLabel: ${record.path} ===")
             if (record.reason != proposal.changeSet.reason) {
                 appendLine("Additional file-specific reason (complete):")
-                appendCompleteContent(record.reason)
+                appendCompleteContent(ownerFacingReason(record.reason))
             } else {
                 appendLine("Reason: see the complete plain-English explanation above.")
             }
@@ -197,6 +200,45 @@ object ChangeDiff {
         appendLine()
         appendLine("END OF COMPLETE PROPOSAL REVIEW.")
         appendLine("Open the Review tab to confirm or reject. Files tab only lists files already on disk.")
+    }
+
+    /**
+     * The approval card is what the owner reads. Specialist words are rewritten
+     * into everyday language before that card is shown.
+     */
+    fun ownerFacingReason(reason: String): String {
+        var text = reason
+        val replacements = listOf(
+            Regex("(?i)recursive[- ]descent parsers?") to "a reader that walks through the text from the top, one piece at a time",
+            Regex("(?i)abstract syntax trees?") to "an outline of the program",
+            Regex("(?i)\\bASTs?\\b") to "an outline of the program",
+            Regex("(?i)\\btokenizers?\\b") to "a splitter that breaks the text into small pieces",
+            Regex("(?i)\\blexers?\\b") to "a splitter that breaks the text into small pieces",
+            Regex("(?i)\\bparsers?\\b") to "a reader that understands how the text is structured",
+            Regex("(?i)\\bbytecodes?\\b") to "instructions the program can run",
+            Regex("(?i)\\binterpreters?\\b") to "a program that runs the text directly",
+            Regex("(?i)\\bcompilers?\\b") to "a program that turns written instructions into something that can run",
+            Regex("(?i)\\btokens?\\b") to "small pieces of the text",
+            Regex("(?i)\\bgrammars?\\b") to "the rules for how the text may be written",
+            Regex("(?i)semantic analysis") to "a check that the text makes sense",
+            Regex("(?i)code generation") to "writing the finished program"
+        )
+        replacements.forEach { (pattern, replacement) ->
+            text = text.replace(pattern, replacement)
+        }
+        return text
+    }
+
+    fun everydaySummary(proposal: PendingChangeProposal): String {
+        val files = proposal.changeSet.changes.map { it.path }.distinct()
+        val fileWords = if (files.isEmpty()) "the files listed below" else files.joinToString(", ")
+        val action = when {
+            proposal.changeSet.changes.isEmpty() -> "I prepared a change"
+            proposal.changeSet.changes.all { it.operation == ChangeOperation.CREATE } -> "I prepared new files"
+            proposal.changeSet.changes.any { it.operation == ChangeOperation.REMOVE } -> "I prepared a change that removes something"
+            else -> "I prepared a change"
+        }
+        return "$action: $fileWords. This is what you asked for. Nothing is saved until you say yes on this phone."
     }
 
     private fun StringBuilder.appendCompleteContent(content: String) {

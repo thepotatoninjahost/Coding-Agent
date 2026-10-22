@@ -105,7 +105,8 @@ data class ModelSettings(
      * Optional ordered fallback model IDs that share the same base URL and API key.
      * Comma, semicolon, or newline separated. When the primary model returns a
      * rate-limit / capacity / overfill error, [RotatingModelGateway] automatically
-     * tries the next id in this list.
+     * tries the next id in this list. The free helper starts on one model and
+     * switches only after that kind of error.
      */
     val rotationModels: String = "",
     val systemPrompt: String = "",
@@ -188,12 +189,31 @@ data class ModelSettings(
 
     /**
      * A saved setup with no web address and no helper name has not chosen a provider.
-     * Fill in OpenRouter's free helper. Never invent a secret password.
+     * Fill in one capable free OpenRouter helper. The old name openrouter/free picks
+     * a different model on every step, so it is replaced with the pinned helper.
+     * Never invent a secret password.
      */
     fun withOpenRouterDefaults(): ModelSettings {
         val s = normalized()
-        if (s.baseUrl.isNotBlank() || s.modelName.isNotBlank()) return s
-        return s.copy(baseUrl = OPENROUTER_BASE_URL, modelName = OPENROUTER_FREE_MODEL)
+        val blankProvider = s.baseUrl.isBlank() && s.modelName.isBlank()
+        val base = if (blankProvider) {
+            s.copy(baseUrl = OPENROUTER_BASE_URL, modelName = OPENROUTER_FREE_MODEL)
+        } else {
+            s
+        }
+        if (!base.baseUrl.contains("openrouter.ai")) return base
+        val usingRouter = base.modelName.isBlank() || base.modelName.equals(OPENROUTER_FREE_ROUTER, ignoreCase = true)
+        val modelName = if (usingRouter) OPENROUTER_FREE_MODEL else base.modelName
+        val rotation = when {
+            base.rotationModels.isNotBlank() -> base.rotationModels
+            usingRouter || modelName == OPENROUTER_FREE_MODEL -> OPENROUTER_FREE_FALLBACKS
+            else -> ""
+        }
+        return if (modelName == base.modelName && rotation == base.rotationModels) {
+            base
+        } else {
+            base.copy(modelName = modelName, rotationModels = rotation)
+        }
     }
 
     fun isRemoteConfigured(): Boolean = validationErrors().isEmpty()
@@ -236,11 +256,50 @@ data class ModelSettings(
 
     companion object {
         const val OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
-        /** Free Models Router. It picks a free model and does not fall back to a paid one. */
-        const val OPENROUTER_FREE_MODEL = "openrouter/free"
+        /**
+         * The free router. It chooses a different free model on every request, including
+         * very small ones, so it is not the helper this app starts with.
+         */
+        const val OPENROUTER_FREE_ROUTER = "openrouter/free"
+        /**
+         * One capable free coding helper. Checked against OpenRouter's public model list
+         * on 22 Oct 2026: it supports tool calls and costs nothing. Other free helpers
+         * are used only when this one returns an error or a rate limit.
+         */
+        const val OPENROUTER_FREE_MODEL = "cohere/north-mini-code:free"
+        const val OPENROUTER_FREE_FALLBACKS =
+            "poolside/laguna-s-2.1:free, google/gemma-4-31b-it:free, nvidia/nemotron-3-super-120b-a12b:free"
+
+        data class FreeHelperChoice(val plainName: String, val modelId: String, val plainDetail: String)
+
+        fun freeHelperChoices(): List<FreeHelperChoice> = listOf(
+            FreeHelperChoice(
+                "Cohere code helper",
+                OPENROUTER_FREE_MODEL,
+                "Good at writing code. This is the one I start with."
+            ),
+            FreeHelperChoice(
+                "Poolside code helper",
+                "poolside/laguna-s-2.1:free",
+                "Another strong code helper."
+            ),
+            FreeHelperChoice(
+                "Google Gemma",
+                "google/gemma-4-31b-it:free",
+                "A general helper that can also write code."
+            ),
+            FreeHelperChoice(
+                "NVIDIA Nemotron",
+                "nvidia/nemotron-3-super-120b-a12b:free",
+                "A larger free helper."
+            )
+        )
+
+        fun rotationForChoice(modelId: String): String =
+            freeHelperChoices().map { it.modelId }.filter { it != modelId }.joinToString(", ")
 
         fun fromJson(raw: String?): ModelSettings {
-            if (raw.isNullOrBlank()) return ModelSettings()
+            if (raw.isNullOrBlank()) return ModelSettings().withOpenRouterDefaults()
             return runCatching {
                 val o = org.json.JSONObject(raw)
                 val backendName = o.optString("backend", "REMOTE")
@@ -255,7 +314,7 @@ data class ModelSettings(
                     extraHeaders = o.optString("extraHeaders", ""),
                     onboarded = o.optBoolean("onboarded", false)
                 ).normalized().withOpenRouterDefaults()
-            }.getOrDefault(ModelSettings())
+            }.getOrDefault(ModelSettings().withOpenRouterDefaults())
         }
 
         fun toJson(settings: ModelSettings): String {
@@ -336,8 +395,7 @@ object ModelConnectionProbe {
         if ("agentic harness" in lower || "gate free endpoints by agentic harness" in lower) {
             val paid = modelName.removeSuffix(":free").removeSuffix(":Free")
             return "The free helper named $modelName refused this app. That company only lets a short list of other apps use the free version. " +
-                "Try the paid name `$paid` (the same helper, but you pay), or pick a different free helper that is not locked, " +
-                "such as openrouter/free or qwen/qwen3-coder:free. See openrouter.ai/apps."
+                "In Setup, pick a different free helper, such as Cohere code helper. See openrouter.ai/apps."
         }
         return sanitizeProbeError(raw)
     }

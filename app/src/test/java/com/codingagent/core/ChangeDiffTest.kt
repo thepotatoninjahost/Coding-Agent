@@ -1,6 +1,7 @@
 package com.codingagent.core
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import com.codingagent.agent.AgentConstitution
@@ -150,6 +151,58 @@ class ChangeDiffTest {
         assertTrue(review.contains("END OF COMPLETE PROPOSAL REVIEW."))
     }
 
+
+    @Test
+    fun approvalPreviewRewritesSpecialistWordsIntoEverydayLanguage() {
+        val proposal = PendingChangeProposal(
+            id = "prop-plain",
+            request = "Build me a tiny compiler",
+            changeSet = ChangeSet(
+                id = "cs-plain",
+                changes = listOf(
+                    ChangeRecord(
+                        path = "src/Compiler.kt",
+                        operation = ChangeOperation.CREATE,
+                        before = null,
+                        after = "class Compiler\n",
+                        reason = "recursive-descent parser",
+                        beforeChecksum = "",
+                        afterChecksum = "after"
+                    )
+                ),
+                createdAt = 1_000L,
+                reason = """
+                    What I want to do:
+                    Add a recursive-descent parser.
+
+                    Why:
+                    You asked for a tiny compiler.
+
+                    What will change:
+                    Create src/Compiler.kt with a lexer and an AST.
+
+                    Possible effects:
+                    The new file can read small programs.
+
+                    Risks:
+                    The grammar may be too small.
+
+                    What your approval means:
+                    Nothing is written until you say yes.
+                """.trimIndent()
+            ),
+            verification = VerificationReport(true, emptyList()),
+            createdAt = 1_000L,
+            expiresAt = 1_000L + AgentConstitution.APPROVAL_EXPIRATION_MS
+        )
+        val review = ChangeDiff.ownerReviewText(proposal)
+        assertTrue(review.contains("IN EVERYDAY WORDS:"))
+        assertTrue(review.contains("Nothing is saved until you say yes"))
+        assertTrue(review.contains("src/Compiler.kt"))
+        assertFalse(review.contains("recursive-descent"))
+        assertFalse(review.contains("lexer"))
+        assertFalse(Regex("\\bAST\\b").containsMatchIn(review))
+    }
 
     @Test
     fun plainEnglishProposalExplanationRequiresAllSixHeadingsInOrder() {

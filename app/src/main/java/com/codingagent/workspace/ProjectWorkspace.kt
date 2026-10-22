@@ -355,7 +355,7 @@ class ProjectWorkspace(private val root: File) {
             }
         }
 
-        // IMPLEMENT_ME in a comment or a call is already handled above.
+        // A comment or a call that names the unfinished-work marker is already handled above.
         // A bare substring match flagged the words inside ordinary sentences.
         if (trimmed.contains(listOf("throw", "Not" + "ImplementedError").joinToString(" "))) {
             return "unimplemented code remains"
