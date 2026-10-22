@@ -26,6 +26,28 @@ object ModelCallWithRetry {
             return null
         }
         var response = gateway.stream(request(), onDelta)
+        var resumes = 0
+        while (
+            response is ModelResponse.Failure &&
+            ModelFailure.isAllProvidersExhausted(response.message) &&
+            !ModelFailure.isNoAutoResume(response.message) &&
+            resumes < 3
+        ) {
+            onPhase(ModelFailure.humanize(response.message))
+            val waitMillis = ModelFailure.resumeDelayMillis(response.message)
+            if (waitMillis <= 0L) break
+            if (!waitCancellable(waitMillis, isCancelled)) return null
+            if (isCancelled()) {
+                gateway.cancel()
+                return null
+            }
+            resumes++
+            response = gateway.stream(request(), onDelta)
+        }
+        if (response is ModelResponse.Failure && ModelFailure.isAllProvidersExhausted(response.message)) {
+            onPhase(ModelFailure.humanize(response.message))
+            return response
+        }
         var attempt = 0
         while (
             response is ModelResponse.Failure &&

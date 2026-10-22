@@ -20,7 +20,8 @@ class RemoteHttpGateway(
     private val connectionFactory: (String) -> HttpURLConnection = { URL(it).openConnection() as HttpURLConnection },
     private val extraHeaders: Map<String, String> = emptyMap(),
     private val activeConnection: AtomicReference<HttpURLConnection?> = AtomicReference(null),
-    private val cancellationGeneration: AtomicLong = AtomicLong(0L)
+    private val cancellationGeneration: AtomicLong = AtomicLong(0L),
+    private val onQuota: ((Int, Int?, Long?) -> Unit)? = null
 ) : ModelGateway {
     /**
      * openrouter/free picks a different free model on every request. After the first
@@ -58,6 +59,7 @@ class RemoteHttpGateway(
             connection.outputStream.use { it.write(body.toString().toByteArray(StandardCharsets.UTF_8)) }
             if (isCancelled(generation)) return ModelResponse.Failure("Cancelled")
             val code = connection.responseCode
+            notifyQuota(connection, code)
             if (code in 300..399) {
                 return ModelResponse.Failure("The helper tried to send me to a different web address. I stopped so your secret password was not sent there.")
             }
@@ -198,6 +200,7 @@ class RemoteHttpGateway(
             connection.outputStream.use { it.write(requestBody(request).toString().toByteArray(StandardCharsets.UTF_8)) }
             if (isCancelled(generation)) return ModelResponse.Failure("Cancelled")
             val code = connection.responseCode
+            notifyQuota(connection, code)
             if (code in 300..399) {
                 return ModelResponse.Failure("The helper tried to send me to a different web address. I stopped so your secret password was not sent there.")
             }
@@ -436,8 +439,39 @@ class RemoteHttpGateway(
         val readable = readableError(body)
         val snippet = readable.take(ERROR_SNIPPET_CHARS)
         val suffix = if (readable.length > ERROR_SNIPPET_CHARS) "…" else ""
+        val quota = quotaSuffix(connection, body)
         // Keep the status code in the text. Retry and the plain-English rewrite both look for it.
-        return ModelResponse.Failure("Model HTTP ${connection.responseCode}: ${snippet.ifBlank { "(empty body)" }}$suffix")
+        return ModelResponse.Failure("Model HTTP ${connection.responseCode}: ${snippet.ifBlank { "(empty body)" }}$suffix$quota")
+    }
+
+    private fun notifyQuota(connection: HttpURLConnection, code: Int) {
+        val listener = onQuota ?: return
+        val remaining = runCatching { connection.getHeaderField("X-RateLimit-Remaining")?.trim()?.toIntOrNull() }.getOrNull()
+        val reset = QuotaHeaders.parseReset(
+            runCatching { connection.getHeaderField("X-RateLimit-Reset") }.getOrNull(),
+            System.currentTimeMillis()
+        )
+        listener(code, remaining, reset)
+    }
+
+    private fun quotaSuffix(connection: HttpURLConnection, body: String): String {
+        val lines = mutableListOf<String>()
+        val remaining = runCatching { connection.getHeaderField("X-RateLimit-Remaining") }.getOrNull()
+        val reset = runCatching { connection.getHeaderField("X-RateLimit-Reset") }.getOrNull()
+            ?: resetFromBody(body)
+        val retry = runCatching { connection.getHeaderField("Retry-After") }.getOrNull()
+        if (!remaining.isNullOrBlank()) lines += "X-RateLimit-Remaining: ${remaining.trim()}"
+        if (!reset.isNullOrBlank()) lines += "X-RateLimit-Reset: ${reset.trim()}"
+        if (!retry.isNullOrBlank()) lines += "Retry-After: ${retry.trim()}"
+        return if (lines.isEmpty()) "" else "\n" + lines.joinToString("\n")
+    }
+
+    private fun resetFromBody(body: String): String? {
+        val json = runCatching { JSONObject(body) }.getOrNull() ?: return null
+        val headers = json.optJSONObject("error")?.optJSONObject("metadata")?.optJSONObject("headers") ?: return null
+        return headers.optString("X-RateLimit-Reset").ifBlank {
+            headers.optString("x-ratelimit-reset")
+        }.ifBlank { null }
     }
 
     private fun readableError(body: String): String {

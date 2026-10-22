@@ -12,15 +12,7 @@ import com.codingagent.agent.ChatMessage
 import com.codingagent.agent.ChatRole
 import com.codingagent.agent.ChatWorkspace
 import com.codingagent.agent.ModelFailure
-import com.codingagent.agent.RiskyChange
 import com.codingagent.core.LocalStore
-import com.codingagent.github.GitHubChangeFiles
-import com.codingagent.github.GitHubFile
-import com.codingagent.github.GitHubPushClient
-import com.codingagent.github.GitHubPushFingerprint
-import com.codingagent.github.GitHubPushRequest
-import com.codingagent.github.GitHubPushResult
-import com.codingagent.github.UrlConnectionGitHubTransport
 import com.codingagent.intake.OperationKind
 import com.codingagent.intake.TaskOperation
 import com.codingagent.knowledge.KnowledgeBase
@@ -28,8 +20,18 @@ import com.codingagent.model.ModelBackend
 import com.codingagent.model.ModelConnectionProbe
 import com.codingagent.model.ModelDownloadProgress
 import com.codingagent.model.ModelGateway
+import com.codingagent.model.ModelRanking
 import com.codingagent.model.ModelSettings
 import com.codingagent.model.ProbeResult
+import com.codingagent.model.ProviderRotatingGateway
+import com.codingagent.github.GitHubChangeFiles
+import com.codingagent.github.GitHubFile
+import com.codingagent.github.GitHubPushClient
+import com.codingagent.github.GitHubPushFingerprint
+import com.codingagent.github.GitHubPushRequest
+import com.codingagent.github.GitHubPushResult
+import com.codingagent.github.UrlConnectionGitHubTransport
+import com.codingagent.agent.RiskyChange
 import com.codingagent.research.CompositeWebResearchProvider
 import com.codingagent.research.DurableDeepResearchProvider
 import com.codingagent.research.ResearchDisplayState
@@ -83,6 +85,14 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
         val loadedSettings = runCatching { store.loadModelSettings() }.getOrDefault(ModelSettings())
         applyModelSettings(loadedSettings)
         _ui.update { it.copy(draftGithubToken = store.loadGitHubToken().orEmpty()) }
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                ModelRanking.refreshIfStale(File(privateDir, "coding-agent")) { query ->
+                    val found = CompositeWebResearchProvider().search(query, 5)
+                    found.hits.joinToString("\n") { hit -> "${hit.title}\n${hit.excerpt}" }
+                }
+            }
+        }
         if (!loadedSettings.isRemoteConfigured()) {
             _ui.update {
                 it.copy(
@@ -122,7 +132,13 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
     fun applyModelSettings(settings: ModelSettings) {
         val normalized = settings.normalized().withOpenRouterDefaults().copy(backend = ModelBackend.REMOTE)
         store.saveModelSettings(normalized)
-        val gateway = normalized.remoteGateway()
+        val rankingDir = _ui.value.workspace?.projectRoot()?.resolve(".coding-agent")
+            ?: File(privateDir, "coding-agent")
+        val gateway = normalized.remoteGateway(
+            quotaFile = File(privateDir, "coding-agent/provider-quota.json"),
+            rankingDirectory = rankingDir
+        )
+        if (gateway is ProviderRotatingGateway) gateway.quota.forgetKeyRejections()
         modelGateway = gateway
         agent?.setGateway(gateway)
         agent?.setSystemPrompt(normalized.effectiveSystemPrompt())
@@ -138,6 +154,12 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
                 draftMemoryRetention = normalized.memoryRetention,
                 draftGithubRepo = normalized.githubRepo,
                 draftGithubBranch = normalized.githubBranch,
+                draftPreferredModel = normalized.preferredModel,
+                draftGroqApiKey = normalized.groqApiKey,
+                draftGeminiApiKey = normalized.geminiApiKey,
+                draftMistralApiKey = normalized.mistralApiKey,
+                draftCerebrasApiKey = normalized.cerebrasApiKey,
+                draftSambanovaApiKey = normalized.sambanovaApiKey,
                 modelStatus = normalized.statusSummary(),
                 modelLoadError = if (gateway == null)
                     normalized.validationErrors().joinToString("; ").ifBlank { "The secret password is missing." }
@@ -153,16 +175,25 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
         it.copy(
             draftModelName = modelId,
             draftBaseUrl = if (it.draftBaseUrl.isBlank()) ModelSettings.OPENROUTER_BASE_URL else it.draftBaseUrl,
-            draftRotationModels = ModelSettings.rotationForChoice(modelId)
+            draftRotationModels = ModelSettings.rotationForChoice(modelId),
+            draftPreferredModel = modelId
         )
     }
-    fun updateDraftBaseUrl(value: String) = _ui.update { it.copy(draftBaseUrl = value) }
-    fun updateDraftExtraHeaders(value: String) = _ui.update { it.copy(draftExtraHeaders = value) }
-    fun updateDraftSystemPrompt(value: String) = _ui.update { it.copy(draftSystemPrompt = value) }
+
+    fun chooseAutomaticHelper() = _ui.update { it.copy(draftPreferredModel = "") }
     fun updateDraftMemoryRetention(value: String) = _ui.update { it.copy(draftMemoryRetention = value) }
     fun updateDraftGithubRepo(value: String) = _ui.update { it.copy(draftGithubRepo = value) }
     fun updateDraftGithubBranch(value: String) = _ui.update { it.copy(draftGithubBranch = value) }
     fun updateDraftGithubToken(value: String) = _ui.update { it.copy(draftGithubToken = value) }
+    fun updateDraftGroqApiKey(value: String) = _ui.update { it.copy(draftGroqApiKey = value) }
+    fun updateDraftGeminiApiKey(value: String) = _ui.update { it.copy(draftGeminiApiKey = value) }
+    fun updateDraftMistralApiKey(value: String) = _ui.update { it.copy(draftMistralApiKey = value) }
+    fun updateDraftCerebrasApiKey(value: String) = _ui.update { it.copy(draftCerebrasApiKey = value) }
+    fun updateDraftSambanovaApiKey(value: String) = _ui.update { it.copy(draftSambanovaApiKey = value) }
+    fun setShowMoreHelpers(show: Boolean) = _ui.update { it.copy(showMoreHelpers = show) }
+    fun updateDraftBaseUrl(value: String) = _ui.update { it.copy(draftBaseUrl = value) }
+    fun updateDraftExtraHeaders(value: String) = _ui.update { it.copy(draftExtraHeaders = value) }
+    fun updateDraftSystemPrompt(value: String) = _ui.update { it.copy(draftSystemPrompt = value) }
     fun setShowModelSettings(show: Boolean) = _ui.update { it.copy(showModelSettings = show) }
 
     fun probeModelConnection() {
@@ -175,8 +206,7 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
                 modelName = s.draftModelName,
                 systemPrompt = s.draftSystemPrompt,
                 extraHeaders = s.draftExtraHeaders,
-                onboarded = true,
-                memoryRetention = s.draftMemoryRetention
+                onboarded = true
             )
             val result = ModelConnectionProbe.probe(candidate)
             withContext(Dispatchers.Main) {
@@ -206,7 +236,13 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
                 onboarded = true,
                 memoryRetention = s.draftMemoryRetention,
                 githubRepo = s.draftGithubRepo,
-                githubBranch = s.draftGithubBranch
+                githubBranch = s.draftGithubBranch,
+                preferredModel = s.draftPreferredModel,
+                groqApiKey = s.draftGroqApiKey,
+                geminiApiKey = s.draftGeminiApiKey,
+                mistralApiKey = s.draftMistralApiKey,
+                cerebrasApiKey = s.draftCerebrasApiKey,
+                sambanovaApiKey = s.draftSambanovaApiKey
             )
         )
         store.saveGitHubToken(s.draftGithubToken)
@@ -810,6 +846,13 @@ data class WorkbenchUiState(
     val draftGithubRepo: String = ModelSettings.DEFAULT_GITHUB_REPO,
     val draftGithubBranch: String = "main",
     val draftGithubToken: String = "",
+    val draftPreferredModel: String = "",
+    val draftGroqApiKey: String = "",
+    val draftGeminiApiKey: String = "",
+    val draftMistralApiKey: String = "",
+    val draftCerebrasApiKey: String = "",
+    val draftSambanovaApiKey: String = "",
+    val showMoreHelpers: Boolean = false,
     val probeMessage: String? = null,
     val agentBusy: Boolean = false
 )

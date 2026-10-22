@@ -116,7 +116,14 @@ data class ModelSettings(
     /** "capped" drops old low-importance memories. "forever" keeps them. */
     val memoryRetention: String = MEMORY_KEEP_CAPPED,
     val githubRepo: String = DEFAULT_GITHUB_REPO,
-    val githubBranch: String = "main"
+    val githubBranch: String = "main",
+    /** Blank means the phone picks the best helper that is still available. */
+    val preferredModel: String = "",
+    val groqApiKey: String = "",
+    val geminiApiKey: String = "",
+    val mistralApiKey: String = "",
+    val cerebrasApiKey: String = "",
+    val sambanovaApiKey: String = ""
 ) {
     fun normalized(): ModelSettings = copy(
         backend = ModelBackend.REMOTE,
@@ -134,8 +141,20 @@ data class ModelSettings(
             MEMORY_KEEP_CAPPED
         },
         githubRepo = githubRepo.trim().ifBlank { DEFAULT_GITHUB_REPO },
-        githubBranch = githubBranch.trim().ifBlank { "main" }
+        githubBranch = githubBranch.trim().ifBlank { "main" },
+        preferredModel = preferredModel.trim(),
+        groqApiKey = groqApiKey.filterNot { it.isWhitespace() },
+        geminiApiKey = geminiApiKey.filterNot { it.isWhitespace() },
+        mistralApiKey = mistralApiKey.filterNot { it.isWhitespace() },
+        cerebrasApiKey = cerebrasApiKey.filterNot { it.isWhitespace() },
+        sambanovaApiKey = sambanovaApiKey.filterNot { it.isWhitespace() }
     )
+
+    fun hasAnyProviderKey(): Boolean {
+        val s = normalized()
+        return s.apiKey.isNotBlank() || s.groqApiKey.isNotBlank() || s.geminiApiKey.isNotBlank() ||
+            s.mistralApiKey.isNotBlank() || s.cerebrasApiKey.isNotBlank() || s.sambanovaApiKey.isNotBlank()
+    }
 
     /** Primary model plus distinct fallbacks, order preserved. */
     fun allModelIds(): List<String> {
@@ -182,17 +201,19 @@ data class ModelSettings(
 
     fun validationErrors(): List<String> {
         val s = normalized()
+        val local = ModelEndpointPolicy.isLocalEndpoint(s.baseUrl)
+        val custom = s.baseUrl.isNotBlank() && !s.baseUrl.contains("openrouter.ai") && !local
         return buildList {
-            ModelEndpointPolicy.validate(s.baseUrl)?.let(::add)
-            if (s.modelName.isBlank()) add("The helper name is missing.")
-            val local = ModelEndpointPolicy.isLocalEndpoint(s.baseUrl)
-            if (s.apiKey.isBlank() && !local) {
+            if (s.baseUrl.isBlank() || custom || local || s.apiKey.isNotBlank()) {
+                ModelEndpointPolicy.validate(s.baseUrl)?.let(::add)
+            }
+            if ((s.baseUrl.isBlank() || custom) && s.modelName.isBlank()) add("The helper name is missing.")
+            if (custom && s.apiKey.isBlank() && !local) {
+                add("The secret password is missing, unless the helper is on this phone.")
+            }
+            if (!custom && !s.hasAnyProviderKey() && !local) {
                 add(
-                    if (s.baseUrl.contains("openrouter.ai")) {
-                        "The secret password is missing. Paste the key from openrouter.ai/keys. It stays on this phone and is not written into the app."
-                    } else {
-                        "The secret password is missing, unless the helper is on this phone."
-                    }
+                    "The secret password is missing. Paste the key from openrouter.ai/keys. It stays on this phone and is not written into the app."
                 )
             }
         }
@@ -231,37 +252,33 @@ data class ModelSettings(
 
     fun statusSummary(): String {
         val s = normalized()
-        val host = runCatching {
-            java.net.URI(s.baseUrl).host ?: s.baseUrl
-        }.getOrDefault(s.baseUrl).ifBlank { "…" }
-        val ids = s.allModelIds()
+        val names = ProviderCatalog.providerNames(s)
         return when {
-            !s.isRemoteConfigured() && s.baseUrl.contains("openrouter.ai") && s.apiKey.isBlank() ->
+            !s.isRemoteConfigured() && s.baseUrl.contains("openrouter.ai") && !s.hasAnyProviderKey() ->
                 "Helper not connected yet. Free OpenRouter helper is selected. Paste the secret password in Setup."
             !s.isRemoteConfigured() -> "Helper not connected yet"
-            ids.size <= 1 -> "Helper · ${ids.firstOrNull() ?: modelName} at $host"
-            else -> "Helper · ${ids.first()} and ${ids.size - 1} backups at $host"
+            names.size <= 1 -> "Helper ready: ${names.firstOrNull() ?: "one helper"}. I use the best one that is still available."
+            else -> "Helpers ready: ${names.joinToString(", ")}. I use the best one that is still available."
         }
     }
 
     fun remoteGateway(
         timeoutMillis: Int = 60_000,
         connectionFactory: ((String) -> java.net.HttpURLConnection)? = null,
-        onRotated: ((fromModel: String, toModel: String, reason: String) -> Unit)? = null
+        quotaFile: java.io.File? = null,
+        rankingDirectory: java.io.File? = null,
+        probe: Boolean = false
     ): ModelGateway? {
         val s = normalized()
         if (s.validationErrors().isNotEmpty()) return null
-        val ids = allModelIds()
-        if (ids.isEmpty()) return null
-        val headers = s.parsedExtraHeaders()
-        return RotatingModelGateway.build(
-            baseUrl = s.baseUrl,
-            apiKey = s.apiKey,
-            modelIds = ids,
+        return ProviderRotatingGateway.build(
+            settings = s,
             timeoutMillis = timeoutMillis,
-            extraHeaders = headers,
             connectionFactory = connectionFactory,
-            onRotated = onRotated
+            quotaFile = quotaFile,
+            rankingDirectory = rankingDirectory,
+            probe = probe,
+            extraHeaders = s.parsedExtraHeaders()
         )
     }
 
@@ -329,7 +346,13 @@ data class ModelSettings(
                     onboarded = o.optBoolean("onboarded", false),
                     memoryRetention = o.optString("memoryRetention", MEMORY_KEEP_CAPPED),
                     githubRepo = o.optString("githubRepo", DEFAULT_GITHUB_REPO),
-                    githubBranch = o.optString("githubBranch", "main")
+                    githubBranch = o.optString("githubBranch", "main"),
+                    preferredModel = o.optString("preferredModel", ""),
+                    groqApiKey = o.optString("groqApiKey", ""),
+                    geminiApiKey = o.optString("geminiApiKey", ""),
+                    mistralApiKey = o.optString("mistralApiKey", ""),
+                    cerebrasApiKey = o.optString("cerebrasApiKey", ""),
+                    sambanovaApiKey = o.optString("sambanovaApiKey", "")
                 ).normalized().withOpenRouterDefaults()
             }.getOrDefault(ModelSettings().withOpenRouterDefaults())
         }
@@ -348,6 +371,12 @@ data class ModelSettings(
                 .put("memoryRetention", s.memoryRetention)
                 .put("githubRepo", s.githubRepo)
                 .put("githubBranch", s.githubBranch)
+                .put("preferredModel", s.preferredModel)
+                .put("groqApiKey", s.groqApiKey)
+                .put("geminiApiKey", s.geminiApiKey)
+                .put("mistralApiKey", s.mistralApiKey)
+                .put("cerebrasApiKey", s.cerebrasApiKey)
+                .put("sambanovaApiKey", s.sambanovaApiKey)
                 .toString()
         }
     }
@@ -356,7 +385,7 @@ data class ModelSettings(
 object ModelConnectionProbe {
     fun probe(
         settings: ModelSettings,
-        gatewayFactory: (ModelSettings) -> ModelGateway? = { it.remoteGateway() }
+        gatewayFactory: (ModelSettings) -> ModelGateway? = { it.remoteGateway(probe = true) }
     ): ProbeResult {
         val errors = settings.validationErrors()
         if (errors.isNotEmpty()) return ProbeResult.Failed(errors.joinToString("; "))

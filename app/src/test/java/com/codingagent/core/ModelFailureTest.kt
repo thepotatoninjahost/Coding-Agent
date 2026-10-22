@@ -14,12 +14,12 @@ class ModelFailureTest {
         """{"id":"gen-1","error":{"message":"Upstream error from Nvidia: ResourceExhausted: Worker local total request limit reached (16/16)"}}"""
 
     @Test
-    fun nvidiaWorkerCapIsCapacityAndRetryable() {
+    fun nvidiaWorkerCapSwitchesHelpersInsteadOfRetrying() {
         assertTrue(ModelFailure.isCapacity(nvidia503))
         assertTrue(ModelFailure.isRateLimit(nvidia503))
-        assertTrue(ModelFailure.isRetryable(nvidia503))
+        assertFalse(ModelFailure.isRetryable(nvidia503))
         assertTrue(ModelFailure.isCapacity(upstream))
-        assertTrue(ModelFailure.isRetryable(upstream))
+        assertFalse(ModelFailure.isRetryable(upstream))
     }
 
     @Test

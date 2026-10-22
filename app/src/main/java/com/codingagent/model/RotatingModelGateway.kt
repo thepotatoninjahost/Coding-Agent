@@ -72,6 +72,7 @@ class RotatingModelGateway(
 
     companion object {
         fun isRotatableFailure(message: String): Boolean {
+            if (com.codingagent.agent.ModelFailure.isDailyFreeLimit(message)) return false
             val lower = message.lowercase()
             return "429" in lower || "rate_limit" in lower || "rate limit" in lower ||
                 "too many requests" in lower || "tokens per minute" in lower || "tpm" in lower ||

@@ -20,6 +20,9 @@ Waiting for you to say yes is not a successful run. The script stops and says so
 
 On the phone, open Setup. The web address and one free helper are already filled in.
 Paste the same key into Secret password. It stays on the phone.
+This script uses the same step limit and the same backup helpers as the phone.
+Optional extra keys, if you have them, are GROQ_API_KEY, GEMINI_API_KEY,
+MISTRAL_API_KEY, CEREBRAS_API_KEY, and SAMBANOVA_API_KEY. They are not printed.
 
 The key is not saved in this repository. This script does not print it.
 EOF

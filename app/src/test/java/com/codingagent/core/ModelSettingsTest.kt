@@ -191,8 +191,11 @@ class ModelSettingsTest {
         assertFalse(rejected.contains("Invalid API key"))
         assertFalse(rejected.contains("{"))
 
-        val limited = probeFailure("""Model HTTP 429: {"error":{"message":"Rate limit exceeded: free-models-per-day"}}""")
-        assertTrue(limited.contains("slow down", ignoreCase = true))
+        val limited = probeFailure("""Model HTTP 429: {"error":{"message":"Rate limit exceeded: free-models-per-day"}} X-RateLimit-Reset: 1893456000""")
+        assertTrue(limited.contains("used up", ignoreCase = true))
+        assertTrue(limited.contains("1,000"))
+        assertTrue(limited.contains("$10"))
+        assertFalse(limited.contains("slow down", ignoreCase = true))
         assertFalse(limited.contains("free-models-per-day"))
         assertFalse(limited.contains("{"))
     }

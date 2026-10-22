@@ -26,7 +26,14 @@ class OpenRouterAgentRunner {
         }
         val request = System.getenv("OPENROUTER_AGENT_REQUEST")?.trim().takeUnless { it.isNullOrBlank() }
             ?: "Explain this project in one short paragraph. Do not change any files."
-        val settings = ModelSettings(apiKey = key).normalized()
+        val settings = ModelSettings(
+            apiKey = key,
+            groqApiKey = envKey("GROQ_API_KEY"),
+            geminiApiKey = envKey("GEMINI_API_KEY"),
+            mistralApiKey = envKey("MISTRAL_API_KEY"),
+            cerebrasApiKey = envKey("CEREBRAS_API_KEY"),
+            sambanovaApiKey = envKey("SAMBANOVA_API_KEY")
+        ).withOpenRouterDefaults()
         check(!settings.apiKey.isBlank())
         check(settings.baseUrl == ModelSettings.OPENROUTER_BASE_URL)
         check(settings.modelName == ModelSettings.OPENROUTER_FREE_MODEL)
@@ -47,15 +54,15 @@ class OpenRouterAgentRunner {
                 override fun search(query: String, limit: Int): List<KnowledgeHit> = emptyList()
             },
             gateway,
-            AutonomousAgentConfig(maxTurns = 4)
+            AutonomousAgentConfig()
         )
         val report = StringBuilder()
         report.append("Request: ").append(request).append('\n')
         val events = agent.run(request) { event ->
-            val line = redact(describe(event), key)
+            val line = redactAll(describe(event), settings)
             if (line.isNotBlank()) report.append(line).append('\n')
         }
-        val text = redact(report.toString(), key)
+        val text = redactAll(report.toString(), settings)
         val out = resultFile()
         out.parentFile?.mkdirs()
         out.writeText(text)
@@ -63,7 +70,7 @@ class OpenRouterAgentRunner {
         val terminal = events.lastOrNull()
         val failure = OpenRouterRunReport.failureReason(terminal)
         if (failure != null) {
-            fail(redact("$failure\n$text", key))
+            fail(redactAll("$failure\n$text", settings))
         }
     }
 
@@ -92,8 +99,20 @@ class OpenRouterAgentRunner {
         return File("build/openrouter-agent-result.txt")
     }
 
-    private fun redact(text: String, key: String): String {
-        if (key.isBlank()) return text
-        return text.replace(key, "[redacted]")
+    private fun envKey(name: String): String =
+        System.getenv(name).orEmpty().filterNot { it.isWhitespace() }
+
+    private fun redactAll(text: String, settings: com.codingagent.model.ModelSettings): String {
+        val secrets = listOf(
+            settings.apiKey,
+            settings.groqApiKey,
+            settings.geminiApiKey,
+            settings.mistralApiKey,
+            settings.cerebrasApiKey,
+            settings.sambanovaApiKey
+        )
+        var safe = text
+        secrets.filter { it.isNotBlank() }.forEach { safe = safe.replace(it, "[redacted]") }
+        return safe
     }
 }

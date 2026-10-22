@@ -45,7 +45,9 @@ OpenRouter is the default. Setup already shows:
 - Helper name: `cohere/north-mini-code:free` (one free code helper). Setup lets you pick another free helper in plain English. The old name `openrouter/free` is not used, because it picked a different model on every step.
 - Secret password: paste it from [openrouter.ai/keys](https://openrouter.ai/keys). Leave this blank in the repository. Do not commit a key.
 
-A missing password, a rejected password, and a free-limit slowdown are explained in plain English on the phone. Another company's web address still works if you type it in Setup.
+A missing password, a rejected password, and a used-up daily limit are explained in plain English. Setup can also hold a Groq key, a Google Gemini key, a Mistral key, a SambaNova key, and an optional Cerebras trial key. The phone starts with the best helper that still has room. If one is rate-limited, out of quota, or failing, the same job continues on the next helper. A helper is used again only after its reset time. The owner is told only when every helper is used up, including when work will resume. The ranking is refreshed from free web research about once a week. GitHub's free model service closed in July 2026, so there is no key for it. Another company's web address still works if you type it in Setup.
+
+The computer script uses the same step limit and the same backup helpers as the phone. Optional keys `GROQ_API_KEY`, `GEMINI_API_KEY`, `MISTRAL_API_KEY`, `CEREBRAS_API_KEY`, and `SAMBANOVA_API_KEY` are read from the environment and are not printed.
 
 On a computer, the same loop can be run with your own key. The script reads `OPENROUTER_API_KEY` from the environment and does not print it:
 
