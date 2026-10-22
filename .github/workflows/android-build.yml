@@ -28,7 +28,7 @@ permissions:
 jobs:
   build:
     name: Build and test Coding Agent
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-24.04
     timeout-minutes: 120
     defaults:
       run:
@@ -204,14 +204,17 @@ jobs:
           sudo udevadm trigger --name-match=kvm
 
       # Instrumentation must pass — one attempt, no retry that could hide a real test failure.
-      # Runner is ubuntu-24.04-arm; emulator arch arm64-v8a matches S25-class ABI.
+      # The runner is x86_64. Android Gradle Plugin 8.7's resource packager is an x86_64
+      # program, so an ARM runner stops before any install file exists. This app has no
+      # native code, so the phone install is the same file. The emulator uses x86_64,
+      # which this runner can boot.
       # -no-snapshot + disable-spellchecker reduce non-deterministic UI flake.
       - name: Run Android instrumentation tests on emulator
         uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         with:
           api-level: 35
           target: google_apis
-          arch: arm64-v8a
+          arch: x86_64
           profile: pixel_7
           emulator-boot-timeout: 600
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
@@ -238,7 +241,7 @@ jobs:
       github.event_name == 'push' &&
       (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/cursor/audit-fixes-ce5c') &&
       needs.build.result != 'cancelled'
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
       actions: read
