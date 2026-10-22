@@ -126,6 +126,7 @@ internal fun ChatSurface(
     pendingApproval: Boolean,
     approvalCount: Int,
     reason: String,
+    phoneLock: Boolean = false,
     onApprove: () -> Unit
 ) {
     val listState = rememberLazyListState()
@@ -151,7 +152,7 @@ internal fun ChatSurface(
             }
             items(messages, key = { it.id }) { ChatBubble(it) }
         }
-        if (pendingApproval) ApprovalCard(approvalCount, reason, onApprove)
+        if (pendingApproval) ApprovalCard(approvalCount, reason, onApprove, phoneLock)
         if (busy) {
             Text("Working on what you asked.", color = FluoroOrange, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp))
         }
@@ -190,7 +191,7 @@ internal fun ChatSurface(
 }
 
 @Composable
-internal fun ApprovalCard(approvalCount: Int, reason: String, onApprove: () -> Unit) {
+internal fun ApprovalCard(approvalCount: Int, reason: String, onApprove: () -> Unit, phoneLock: Boolean = false) {
     Card(
         Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
         colors = CardDefaults.cardColors(containerColor = RaisedPurple),
@@ -199,13 +200,18 @@ internal fun ApprovalCard(approvalCount: Int, reason: String, onApprove: () -> U
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("PLEASE CHECK THIS", color = FluoroOrange, fontWeight = FontWeight.Bold)
             Text(reason, color = NeonGreen, fontSize = 13.sp)
-            Text("Say yes twice, on purpose, before anything is saved.", color = SoftGreen, fontSize = 12.sp)
+            Text(
+                if (phoneLock) "Spoken words are not enough. Confirm with the phone lock, twice, before anything is saved."
+                else "Say yes twice, on purpose, before anything is saved.",
+                color = SoftGreen,
+                fontSize = 12.sp
+            )
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("${approvalCount}/2", color = SoftGreen, modifier = Modifier.weight(1f))
                 Button(
                     onClick = onApprove,
                     colors = ButtonDefaults.buttonColors(containerColor = FluoroOrange, contentColor = DarkPurple)
-                ) { Text(if (approvalCount == 0) "Say yes" else "Say yes again") }
+                ) { Text(if (phoneLock) "Confirm with phone lock" else if (approvalCount == 0) "Say yes" else "Say yes again") }
             }
         }
     }
@@ -328,6 +334,7 @@ internal fun ReviewSurface(
     pending: Boolean,
     approvals: Int,
     reason: String,
+    phoneLock: Boolean = false,
     onApprove: () -> Unit,
     onReject: () -> Unit
 ) {
@@ -340,7 +347,7 @@ internal fun ReviewSurface(
             Text("Yes so far: $approvals of 2", color = SoftGreen)
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Button(onClick = onApprove, colors = ButtonDefaults.buttonColors(containerColor = FluoroOrange, contentColor = DarkPurple)) {
-                    Text("Say yes")
+                    Text(if (phoneLock) "Confirm with phone lock" else "Say yes")
                 }
                 TextButton(onClick = onReject) { Text("Reject", color = Danger) }
             }

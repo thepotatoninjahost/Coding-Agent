@@ -12,6 +12,7 @@ import com.codingagent.agent.ChatMessage
 import com.codingagent.agent.ChatRole
 import com.codingagent.agent.ChatWorkspace
 import com.codingagent.agent.ModelFailure
+import com.codingagent.agent.RiskyChange
 import com.codingagent.core.LocalStore
 import com.codingagent.intake.OperationKind
 import com.codingagent.intake.TaskOperation
@@ -382,6 +383,9 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
                             approvalCount = proposal?.approvalCount ?: 0,
                             pendingReason = proposal?.request
                                 ?: "The helper wants to change your project. Read the note, then say yes twice if you agree.",
+                            pendingPhoneLock = proposal?.let { pending ->
+                                RiskyChange.kinds(pending.changeSet.changes, pending.request).isNotEmpty()
+                            } ?: false,
                             status = when (result) {
                                 is AgentRuntimeResult.NeedsApproval -> AgentStatus.APPROVAL
                                 is AgentRuntimeResult.Failed -> AgentStatus.FAILED
@@ -495,6 +499,7 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
                 pendingApproval = false,
                 pendingProposal = null,
                 pendingProposalId = null,
+                pendingPhoneLock = false,
                 status = AgentStatus.READY,
                 detail = "Saved ${paths.size} file(s): ${paths.joinToString()}. $verificationSummary"
             )
@@ -507,6 +512,7 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
                 pendingApproval = false,
                 pendingProposal = null,
                 pendingProposalId = null,
+                pendingPhoneLock = false,
                 approvalCount = 0
             )
         }
@@ -677,6 +683,7 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
                                 pendingProposalId = proposal.id,
                                 approvalCount = proposal.approvalCount,
                                 pendingReason = proposal.request,
+                                pendingPhoneLock = RiskyChange.kinds(proposal.changeSet.changes, proposal.request).isNotEmpty(),
                                 status = AgentStatus.APPROVAL,
                                 detail = "Your edits to $path are waiting. Open Review and say yes twice before they are saved."
                             )
@@ -713,6 +720,7 @@ data class WorkbenchUiState(
     val pendingApproval: Boolean = false,
     val approvalCount: Int = 0,
     val pendingReason: String = "The helper wants to change your project. Read the note, then say yes twice if you agree.",
+    val pendingPhoneLock: Boolean = false,
     val pendingProposalId: String? = null,
     val pendingProposal: PendingChangeProposal? = null,
     val modelSettings: ModelSettings = ModelSettings(),

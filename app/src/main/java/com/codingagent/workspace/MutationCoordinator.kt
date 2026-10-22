@@ -259,6 +259,13 @@ class MutationCoordinator(
         }
         // Production tokens must carry spoken + typed + device-auth modalities.
         // JVM test-only tokens may omit modalities so unit tests stay focused on coordinator logic.
+        val riskyRefusal = com.codingagent.agent.RiskyChange.deviceLockRefusal(
+            ownerApproval.isTestCapability,
+            proposal.changeSet.changes,
+            proposal.request,
+            modalities
+        )
+        if (riskyRefusal != null) return MutationApprovalResult.Rejected(riskyRefusal)
         if (!ownerApproval.isTestCapability) {
             val required = AgentConstitution.REQUIRED_PRODUCTION_MODALITIES
             if (!modalities.containsAll(required)) {

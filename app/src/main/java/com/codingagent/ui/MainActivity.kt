@@ -191,6 +191,7 @@ private fun CodingAgentApp(
                         pendingApproval = ui.pendingApproval,
                         approvalCount = ui.approvalCount,
                         reason = ui.pendingReason,
+                        phoneLock = ui.pendingPhoneLock,
                         onApprove = { ownerApproval.beginApprovalForPendingProposal() }
                     )
                     SurfaceTab.FILES -> FilesSurface(
@@ -210,6 +211,7 @@ private fun CodingAgentApp(
                         pending = ui.pendingApproval,
                         approvals = ui.approvalCount,
                         reason = ui.pendingReason,
+                        phoneLock = ui.pendingPhoneLock,
                         onApprove = { ownerApproval.beginApprovalForPendingProposal() },
                         onReject = {
                             ui.pendingProposalId?.let { vm.mutationCoordinator()?.reject(it) }
@@ -253,6 +255,8 @@ private fun CodingAgentApp(
                 speechStatus = ownerApproval.speechStatus,
                 speechVerified = ownerApproval.speechVerified,
                 error = ownerApproval.error,
+                phoneLock = ownerApproval.phoneLock,
+                riskNote = ownerApproval.riskNote,
                 onTypedChange = ownerApproval::onTypedChange,
                 onTypedConfirmChange = ownerApproval::onTypedConfirmChange,
                 onSpokenChange = ownerApproval::onSpokenChange,

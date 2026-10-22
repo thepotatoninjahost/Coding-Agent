@@ -33,6 +33,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import com.codingagent.agent.ApprovalModality
+import com.codingagent.agent.RiskyChange
 import com.codingagent.core.LocalStore
 import com.codingagent.workspace.MutationApprovalResult
 import com.codingagent.workspace.MutationCoordinator
@@ -97,6 +98,10 @@ internal class OwnerApprovalController(
         private set
     var pendingMicRequest by mutableStateOf(false)
         private set
+    var phoneLock by mutableStateOf(false)
+        private set
+    var riskNote by mutableStateOf("")
+        private set
 
     private var recognizer: SpeechRecognizer? = null
     private var biometricPrompt: BiometricPrompt? = null
@@ -111,6 +116,10 @@ internal class OwnerApprovalController(
             host?.onFailed("Still working. Wait until it finishes, then say yes.")
             return
         }
+        val proposal = coordinatorProvider()?.get(id)
+        val kinds = if (proposal == null) emptySet() else RiskyChange.kinds(proposal.changeSet.changes, proposal.request)
+        phoneLock = kinds.isNotEmpty()
+        riskNote = RiskyChange.plainSummary(kinds)
         error = null
         speechVerified = false
         spokenPhrase = ""
@@ -253,7 +262,13 @@ internal class OwnerApprovalController(
                 val signingChallenge = withContext(Dispatchers.IO) {
                     OwnerApprovalKey.prepare(proposal.id, nextOrdinal, now, fingerprint)
                 }
-                val unlocked = awaitDeviceSignature(activity, signingChallenge.signature, nextOrdinal)
+                val unlocked = awaitDeviceSignature(
+                    activity,
+                    signingChallenge.signature,
+                    if (phoneLock) "Confirm with phone lock ($nextOrdinal of 2)" else "Confirm it is you ($nextOrdinal of 2)",
+                    if (phoneLock) "Spoken words are not enough. Use your fingerprint, face, or screen lock."
+                    else "Use your fingerprint, face, or screen lock"
+                )
                 val token = withContext(Dispatchers.IO) {
                     OwnerApprovalKey.complete(signingChallenge, unlocked)
                 }
@@ -293,7 +308,8 @@ internal class OwnerApprovalController(
     private suspend fun awaitDeviceSignature(
         activity: FragmentActivity,
         signature: Signature,
-        approvalNumber: Int
+        title: String,
+        subtitle: String
     ): Signature = suspendCancellableCoroutine { cont ->
         val prompt = BiometricPrompt(
             activity,
@@ -321,8 +337,8 @@ internal class OwnerApprovalController(
             activity.runOnUiThread { runCatching { prompt.cancelAuthentication() } }
         }
         val promptInfo = BiometricPrompt.PromptInfo.Builder()
-            .setTitle("Confirm it is you ($approvalNumber of 2)")
-            .setSubtitle("Use your fingerprint, face, or screen lock")
+            .setTitle(title)
+            .setSubtitle(subtitle)
             .setAllowedAuthenticators(
                 BiometricManager.Authenticators.BIOMETRIC_STRONG or
                     BiometricManager.Authenticators.DEVICE_CREDENTIAL
@@ -403,6 +419,8 @@ internal fun OwnerApprovalDialog(
     speechStatus: String,
     speechVerified: Boolean,
     error: String?,
+    phoneLock: Boolean,
+    riskNote: String,
     onTypedChange: (String) -> Unit,
     onTypedConfirmChange: (String) -> Unit,
     onSpokenChange: (String) -> Unit,
@@ -420,17 +438,26 @@ internal fun OwnerApprovalDialog(
         ) {
             Column(Modifier.padding(16.dp)) {
                 Text(
-                    if (setupMode) "Save your two secret phrases" else "Confirm this is you",
+                    when {
+                        setupMode -> "Save your two secret phrases"
+                        phoneLock -> "Confirm with phone lock"
+                        else -> "Confirm this is you"
+                    },
                     color = NeonGreen,
                     fontWeight = FontWeight.Bold,
                     fontSize = 16.sp
                 )
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    if (setupMode)
-                        "Pick words you will type, and words you will say. You need both every time something is saved. They stay on this phone."
-                    else
-                        "Type the words you saved. Then say your spoken words followed by: $speechChallenge.",
+                    when {
+                        setupMode ->
+                            "Pick words you will type, and words you will say. You need both every time something is saved. They stay on this phone."
+                        phoneLock ->
+                            riskNote.ifBlank { "Spoken words are not enough. Confirm with the phone lock." } +
+                                " Type the words you saved. Then say your spoken words followed by: $speechChallenge."
+                        else ->
+                            "Type the words you saved. Then say your spoken words followed by: $speechChallenge."
+                    },
                     color = SoftGreen,
                     fontSize = 12.sp
                 )
@@ -475,7 +502,15 @@ internal fun OwnerApprovalDialog(
                     Spacer(Modifier.weight(1f))
                     TextButton(onClick = onDismiss) { Text("Cancel", color = SoftGreen) }
                     Button(onClick = onSubmit) {
-                        Text(if (setupMode) "Save phrases" else "Say yes", color = NeonGreen, fontWeight = FontWeight.Bold)
+                        Text(
+                            when {
+                                setupMode -> "Save phrases"
+                                phoneLock -> "Confirm with phone lock"
+                                else -> "Say yes"
+                            },
+                            color = NeonGreen,
+                            fontWeight = FontWeight.Bold
+                        )
                     }
                 }
             }
