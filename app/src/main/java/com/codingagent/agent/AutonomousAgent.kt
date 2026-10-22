@@ -345,32 +345,24 @@ class AutonomousAgent(
                 researchEvidence = "\n\nResearch brief:\n${brief.evidence}"
                 emit(AutonomousAgentEvent.Phase("RESEARCH", "I read ${brief.sourceCount} pages (${brief.wordCount} words) and saved them."))
             } else {
-                val why = (session?.errors.orEmpty() + listOfNotNull(researchFailure))
-                    .map { it.trim() }
-                    .filter { it.isNotBlank() }
-                    .distinct()
-                    .take(4)
-                    .joinToString(" | ")
-                    .ifBlank { "No error was recorded." }
+                val why = com.codingagent.research.ResearchErrors.plain(
+                    (session?.errors.orEmpty() + listOfNotNull(researchFailure))
+                        .map { it.trim() }
+                        .filter { it.isNotBlank() }
+                        .distinct()
+                        .take(4)
+                        .joinToString(" | ")
+                        .ifBlank { "No error was recorded." }
+                )
                 researchEvidence =
-                    "\n\nResearch ran but returned no usable sources. What went wrong: $why " +
-                        "Do not invent external docs or APIs. Prefer local project evidence, or call research_web with a tighter technical query."
+                    "\n\nI looked on the internet and did not find usable pages. $why " +
+                        "I will keep going with the project on this phone. Do not invent pages, docs, or APIs."
                 emit(
                     AutonomousAgentEvent.Phase(
                         "RESEARCH",
-                        "I could not find usable pages. What went wrong: $why"
+                        "I could not find usable pages. $why I will keep going with what is already on this phone."
                     )
                 )
-                if (ResearchGate.requiresUsableEvidence(focus, intake)) {
-                    val message =
-                        "I needed pages from the internet for this, and I could not get any. " +
-                            "What went wrong: $why " +
-                            "I will not pretend I looked them up. Try again with fewer, clearer words."
-                    val task = failedTask(taskId, focus, plan, message, emptyList())
-                    recordTask(task)
-                    emit(AutonomousAgentEvent.Failed(task, message))
-                    return events
-                }
             }
         } else {
             emit(AutonomousAgentEvent.Phase("RESEARCH", "I am using the project on this phone. I do not need the internet for this."))
@@ -388,6 +380,7 @@ class AutonomousAgent(
         state.lastEvidence = tools.presentEvidence("initial repository and research evidence", completeInitialEvidence)
         var evidenceRefusals = 0
         var writeNowAnnounced = false
+        var shrinks = 0
         val reviewJob = isWholeProjectReview(focus)
         val toolCallHandler = ToolCallOutcomeHandler(
             config = config,
@@ -444,20 +437,52 @@ class AutonomousAgent(
                     }
                 )
             }
+            fun modelRequest(): ModelRequest {
+                val system = ContextBudget.systemForRequest(configuredSystemPrompt)
+                val fitted = ContextBudget.fit(
+                    system,
+                    buildPrompt(normalized, intake, state.lastEvidence),
+                    transcript.toList(),
+                    targetTokens = if (shrinks == 0) ContextBudget.TARGET_TOKENS else 1400
+                )
+                return ModelRequest(
+                    fitted.system,
+                    fitted.user,
+                    toolsThisTurn,
+                    fitted.transcript,
+                    researchRequired = false
+                )
+            }
             var response: ModelResponse = ModelCallWithRetry.call(
                 gateway = activeGateway,
-                request = {
-                    ModelRequest(
-                        configuredSystemPrompt,
-                        buildPrompt(normalized, intake, state.lastEvidence),
-                        toolsThisTurn,
-                        transcript.toList(),
-                        researchRequired = false
-                    )
-                },
+                request = { modelRequest() },
                 isCancelled = { isCancelled() },
                 onPhase = { emit(AutonomousAgentEvent.Phase("MODEL", it)) }
             ) ?: return stopNow(taskId, normalized, plan, events) { emit(it) }
+            while (
+                response is ModelResponse.Failure &&
+                ModelFailure.isRequestTooLarge(response.message) &&
+                shrinks < 2
+            ) {
+                shrinks++
+                emit(
+                    AutonomousAgentEvent.Phase(
+                        "MODEL",
+                        "That request was too big for the helper. I am shortening it and trying again."
+                    )
+                )
+                state.lastEvidence = ContextBudget.shrinkEvidence(
+                    state.lastEvidence,
+                    (state.lastEvidence.length / 2).coerceAtLeast(300)
+                )
+                while (transcript.size > 2) transcript.removeAt(0)
+                response = ModelCallWithRetry.call(
+                    gateway = activeGateway,
+                    request = { modelRequest() },
+                    isCancelled = { isCancelled() },
+                    onPhase = { emit(AutonomousAgentEvent.Phase("MODEL", it)) }
+                ) ?: return stopNow(taskId, normalized, plan, events) { emit(it) }
+            }
             if (isCancelled()) return stopNow(taskId, normalized, plan, events) { emit(it) }
             // Some providers (NVIDIA NIM and others) never populate structured tool_calls and
             // instead emit the tool call as XML inside the text body. Recover that BEFORE the
@@ -498,7 +523,6 @@ class AutonomousAgent(
                         )
                         continue
                     }
-                    emit(AutonomousAgentEvent.ModelMessage(response.content))
                     // A change/debug/create/refactor task is not complete merely because the
                     // model wrote a plan or asked "would you like me to go ahead?". Nothing
                     // was saved until a change is staged. Give the helper one more chance to
@@ -558,17 +582,30 @@ class AutonomousAgent(
                         state.lastEvidence = missing + "\n\n" + state.lastEvidence
                         continue
                     }
+                    if (state.plainEnglishNudges < 1 && PlainEnglish.hasJargon(response.content)) {
+                        state.plainEnglishNudges++
+                        transcript += com.codingagent.model.ModelMessage("assistant", response.content)
+                        transcript += com.codingagent.model.ModelMessage(
+                            "user",
+                            "SYSTEM: Rewrite that answer in plain everyday English. The owner does not know computer jargon. " +
+                                "Do not use words like agentic, checksum, or rollback. Explain what happened in ordinary words."
+                        )
+                        continue
+                    }
                     val report = workspace.verify()
                     // Listing requests: prefer real tool evidence over model prose (which is often spam).
                     val useListingEvidence = isListingRequest(currentRequestFocus(normalized)) &&
                         state.searchedProject &&
                         state.lastEvidence.isNotBlank() &&
                         !state.lastEvidence.startsWith("ERROR:")
-                    val summary = if (useListingEvidence) {
-                        formatListingSummary(state.lastEvidence, report, isSourceFileListRequest(currentRequestFocus(normalized)))
-                    } else {
-                        sanitizeModelText(response.content, report)
-                    }
+                    emit(AutonomousAgentEvent.ModelMessage(PlainEnglish.soften(response.content)))
+                    val summary = PlainEnglish.soften(
+                        if (useListingEvidence) {
+                            formatListingSummary(state.lastEvidence, report, isSourceFileListRequest(currentRequestFocus(normalized)))
+                        } else {
+                            sanitizeModelText(response.content, report)
+                        }
+                    )
                     val status = when {
                         useListingEvidence -> "completed"
                         isDegenerate(response.content) -> "completed-with-warning"
@@ -779,7 +816,7 @@ class AutonomousAgent(
             gateway = model,
             request = {
                 ModelRequest(
-                    configuredSystemPrompt,
+                    ContextBudget.systemForRequest(configuredSystemPrompt),
                     "You are repairing a failed approved code change. $evidence\n" +
                         "Return exactly one replace_text or create_file tool call that fixes the diagnosed failure. " +
                         "Do not explain. Do not use any other tool. Never weaken tests or safety controls.",

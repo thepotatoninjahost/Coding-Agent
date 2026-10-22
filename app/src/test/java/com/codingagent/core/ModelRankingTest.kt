@@ -2,6 +2,7 @@ package com.codingagent.core
 
 import com.codingagent.model.ModelRanking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.nio.file.Files
 
@@ -17,7 +18,9 @@ class ModelRankingTest {
         )
         assertEquals("gemini-3.8-flash", researched[0])
         assertEquals("openai/gpt-oss-120b", researched[1])
-        assertEquals(bundled.size, researched.size)
+        // Requesty and OpenRouter can share one free model id. The ranking keeps that id once.
+        assertEquals(bundled.distinct().size, researched.size)
+        assertTrue(bundled.all { it in researched })
     }
 
     @Test

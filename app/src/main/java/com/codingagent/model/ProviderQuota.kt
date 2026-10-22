@@ -56,7 +56,7 @@ class ProviderQuotaBook(private val file: File? = null) {
         synchronized(lock) {
             val model = models.getOrPut(key(providerId, modelId)) { Gate() }
             if (remaining != null) model.remaining = remaining
-            if (resetAt != null && (code == 429 || remaining == 0)) {
+            if (code != 413 && resetAt != null && (code == 429 || remaining == 0)) {
                 model.exhaustedUntil = maxOf(model.exhaustedUntil, resetAt)
             }
             save()
@@ -68,6 +68,10 @@ class ProviderQuotaBook(private val file: File? = null) {
         val reset = headerReset ?: geminiDailyReset(providerId, message, now)
         synchronized(lock) {
             when {
+                ModelFailure.isOutOfFunds(message) -> {
+                    providers.getOrPut(providerId) { Gate() }.exhaustedUntil = now + FUNDS_WAIT_MS
+                }
+                ModelFailure.isRequestTooLarge(message) -> Unit
                 ModelFailure.isRejectedKey(message) -> {
                     providers.getOrPut(providerId) { Gate() }.keyRejected = true
                 }
@@ -177,6 +181,7 @@ class ProviderQuotaBook(private val file: File? = null) {
     companion object {
         const val UNKNOWN_DAILY_WAIT_MS = 6L * 60L * 60L * 1000L
         const val ERROR_COOLDOWN_MS = 60_000L
+        const val FUNDS_WAIT_MS = 24L * 60L * 60L * 1000L
     }
 }
 

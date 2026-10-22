@@ -40,6 +40,7 @@ class ToolTurnState {
     var searchedProject = false
     var successfulGathers = 0
     var writeNowRefusals = 0
+    var plainEnglishNudges = 0
 }
 
 /** ONE JOB: Tell AutonomousAgent.run() whether to loop again or stop (events already emitted). */

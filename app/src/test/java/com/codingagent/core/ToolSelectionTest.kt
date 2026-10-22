@@ -62,6 +62,16 @@ class ToolSelectionTest {
     }
 
     @Test
+    fun verifyIsAllowedOnceTheRepositorySummaryExists() {
+        val root = Files.createTempDirectory("tools-verify").toFile()
+        val plan = ToolSelector().select(TaskIntakeParser(root).parse("Build me a tiny compiler"))
+        val loop = ToolSelectionLoop(plan)
+        loop.completeKind(ToolKind.INDEX_REPOSITORY, "repository summary established")
+        assertEquals(null, loop.authorize("verify", ToolKind.VERIFY))
+        assertTrue(loop.authorize("create_file", ToolKind.APPLY_CHANGES)!!.contains("blocked"))
+    }
+
+    @Test
     fun productionGateRejectsMutationUntilProjectEvidence() {
         val plan = ToolSelectionPlan(
             "change",

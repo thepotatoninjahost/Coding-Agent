@@ -40,10 +40,12 @@ class OwnerProviderSettingsTest {
         assertTrue(groq.all { it.baseUrl == "https://api.groq.com/openai/v1" })
         assertTrue(groq.all { it.apiKey == groqKey })
 
-        val requesty = endpoints.filter { it.providerId == "requesty" }.single()
-        assertEquals("https://router.requesty.ai/v1", requesty.baseUrl)
-        assertEquals("anthropic/claude-fable-5", requesty.modelId)
-        assertEquals(requestyKey, requesty.apiKey)
+        val requesty = endpoints.filter { it.providerId == "requesty" }
+        assertTrue(requesty.size >= 2)
+        assertTrue(requesty.all { it.baseUrl == "https://router.requesty.ai/v1" })
+        assertTrue(requesty.first().modelId.endsWith(":free"))
+        assertTrue(requesty.none { it.modelId == "anthropic/claude-fable-5" })
+        assertTrue(requesty.all { it.apiKey == requestyKey })
 
         val aiml = endpoints.filter { it.providerId == "aiml" }.single()
         assertEquals("https://api.aimlapi.com/v1", aiml.baseUrl)

@@ -1,0 +1,110 @@
+package com.codingagent.agent
+
+import com.codingagent.model.AgentModelProtocol
+import com.codingagent.model.ModelMessage
+
+/**
+ * ONE JOB: Keep one model request small enough for a free helper's per-minute limit.
+ * The full system instructions stay in AgentModelProtocol. This only changes what is sent.
+ */
+object ContextBudget {
+    const val TARGET_TOKENS = 2600
+
+    fun estimateTokens(text: String): Int = (text.length + 3) / 4
+
+    private val COMPACT_SYSTEM = """
+        You are a Coding-Agent on the owner's phone. The owner does not know computer jargon.
+        Use plain, everyday language. Never use the words agentic, agentic loop, checksum, or checksum-backed rollback.
+        If you must use a technical word, explain it in the same sentence.
+
+        Make exactly one tool call per turn and include a purpose field. Read real files. Never invent paths, file contents, or test results.
+        Before staging a change, use these exact headings in order: "What I want to do:", "Why:", "What will change:", "Possible effects:", "Risks:", and "What your approval means:".
+        Code changes (create_file, replace_text) only STAGE a proposal. The owner must approve twice. Never claim a change was applied until then.
+        Before you say new code works, check that the file is complete and not cut off. If you did not run it, say you have not run it.
+        Verification honesty: a static unfinished-work marker scan is not a substitute for a real run. Never claim it passed when it was not run.
+        Do not invoke git, find, gradle, or project-local executables. Use the project tools for files.
+        There is no arbitrary two-or-three-result stopping limit. Do not stop at a plan. Continue until the goal is met, you are blocked, or the owner must decide.
+    """.trimIndent()
+
+    fun systemForRequest(configured: String): String {
+        val extra = when {
+            configured == AgentModelProtocol.DEFAULT_SYSTEM -> ""
+            configured.startsWith(AgentModelProtocol.DEFAULT_SYSTEM) ->
+                configured.removePrefix(AgentModelProtocol.DEFAULT_SYSTEM)
+            else -> null
+        }
+        if (extra != null) return COMPACT_SYSTEM + extra
+        if (estimateTokens(configured) > 700) return COMPACT_SYSTEM
+        return configured
+    }
+
+    data class Fitted(
+        val system: String,
+        val user: String,
+        val transcript: List<ModelMessage>
+    )
+
+    fun fit(
+        system: String,
+        user: String,
+        transcript: List<ModelMessage>,
+        targetTokens: Int = TARGET_TOKENS
+    ): Fitted {
+        var messages = transcript.map { message ->
+            if (message.content.length > 700) message.copy(content = shrinkBlock(message.content, 500)) else message
+        }
+        var prompt = shortenRules(user)
+        var guard = 0
+        while (overBudget(system, prompt, messages, targetTokens) && guard < 16) {
+            guard++
+            when {
+                messages.size > 2 -> messages = messages.drop(1)
+                prompt.length > 900 -> prompt = shrinkEvidence(prompt, (prompt.length * 2 / 3).coerceAtLeast(800))
+                messages.isNotEmpty() -> messages = messages.takeLast(1)
+                else -> break
+            }
+        }
+        return Fitted(system, prompt, messages)
+    }
+
+    fun shrinkEvidence(text: String, maxChars: Int): String {
+        if (text.length <= maxChars) return text
+        val marker = "Evidence so far:"
+        val at = text.lastIndexOf(marker)
+        if (at < 0) return "Earlier text was shortened so this request fits the helper.\n" + text.takeLast(maxChars)
+        val head = text.substring(0, at + marker.length)
+        val evidence = text.substring(at + marker.length)
+        val room = (maxChars - head.length - 80).coerceAtLeast(200)
+        if (evidence.length <= room) return text
+        return head + "\nEarlier notes were shortened. Call the tool again if you need them.\n" + evidence.takeLast(room)
+    }
+
+    private fun shortenRules(user: String): String {
+        val start = user.indexOf("Operating rules for this turn:")
+        if (start < 0) return user
+        val end = listOf(user.indexOf("Lessons from recent runs"), user.indexOf("Evidence so far:"))
+            .filter { it >= 0 }
+            .minOrNull() ?: return user
+        if (end <= start) return user
+        val short = """
+            Operating rules for this turn:
+            Exactly one tool call this turn. Include a purpose field.
+            Verify meaningful milestones. static marker scanning alone is not proof.
+            This work can include coordinated multi-file changes, new tools, and self-modification.
+            Do not stop merely because a file was read.
+            Keep personal logs. Use plain everyday English. Do not say the code works unless you ran it.
+            Before you finish a new file, check that it is not cut off, then fix it if the check fails.
+        """.trimIndent() + "\n\n"
+        return user.substring(0, start) + short + user.substring(end)
+    }
+
+    private fun shrinkBlock(text: String, maxChars: Int): String {
+        if (text.length <= maxChars) return text
+        return text.take(maxChars) + "\n[Earlier tool text was shortened. Call the tool again if you need the rest.]"
+    }
+
+    private fun overBudget(system: String, user: String, messages: List<ModelMessage>, targetTokens: Int): Boolean {
+        val tokens = estimateTokens(system) + estimateTokens(user) + messages.sumOf { estimateTokens(it.content) }
+        return tokens > targetTokens
+    }
+}

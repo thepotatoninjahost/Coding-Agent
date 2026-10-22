@@ -169,13 +169,17 @@ class OperationalAgentTest {
     }
 
     @Test
-    fun explicitResearchFailsWithoutCallingModelWhenNoUsableSourcesExist() {
-        val root = Files.createTempDirectory("agent-research-fail-closed").toFile()
+    fun researchKeepsGoingWhenNoUsableSourcesExist() {
+        val root = Files.createTempDirectory("agent-research-continues").toFile()
         var modelCalls = 0
         val gateway = object : ModelGateway {
             override fun complete(request: ModelRequest): ModelResponse {
                 modelCalls++
-                return ModelResponse.Text("Unsupported answer that must never be returned")
+                return if (modelCalls == 1) {
+                    ModelResponse.ToolCall("list_files", """{"path":""}""")
+                } else {
+                    ModelResponse.Text("I could not find pages, so this uses only the project.")
+                }
             }
         }
         val emptyResearch = object : DeepResearchProvider {
@@ -191,16 +195,26 @@ class OperationalAgentTest {
                 requestedSources = targetSources,
                 sources = emptyList(),
                 learnedChunks = 0,
-                errors = listOf("No results")
+                errors = listOf("PKIX path building failed: sun.security.provider.certpath.SunCertPathBuilderException")
             )
         }
         val spine = AutonomousAgent(root, emptyKnowledge, gateway, research = emptyResearch)
 
         val events = spine.run("Research the web for the latest Kotlin coroutine cancellation API documentation")
 
-        assertTrue(events.last() is AutonomousAgentEvent.Failed)
-        assertTrue((events.last() as AutonomousAgentEvent.Failed).message.contains("could not get any"))
-        assertEquals(0, modelCalls)
+        assertTrue(events.last() is AutonomousAgentEvent.Completed)
+        assertTrue(modelCalls > 0)
+        val shown = events.joinToString("\n") { event ->
+            when (event) {
+                is AutonomousAgentEvent.Phase -> event.detail
+                is AutonomousAgentEvent.Completed -> event.task.summary
+                is AutonomousAgentEvent.Failed -> event.message
+                else -> ""
+            }
+        }
+        assertFalse(shown.contains("PKIX"))
+        assertFalse(shown.contains("SunCertPathBuilderException"))
+        assertTrue(shown.contains("certificate", ignoreCase = true))
     }
 
     @Test

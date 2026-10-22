@@ -77,13 +77,15 @@ class ToolSelector {
                 listOf(searchId ?: indexId)
             )
         } else null
-        val checksId = if (intake.verificationCommands.isNotEmpty() || changeWork) {
+        if (intake.verificationCommands.isNotEmpty() || changeWork) {
             add(ToolKind.RUN_CHECKS, "Run project diagnostics and selected verification checks", listOf(indexId))
-        } else null
+        }
+        // The repository summary already completes INDEX before the model loop.
+        // Verify must be allowed then. It does not wait for a shell check.
         val verifyId = add(
             ToolKind.VERIFY,
             "Run static verification and evaluate acceptance evidence",
-            listOf(checksId ?: if (changeWork) applyId!! else searchId ?: indexId)
+            listOf(indexId)
         )
         add(ToolKind.RECORD_LESSON, "Persist the selected tools, result, and reusable evidence", listOf(verifyId))
         return ToolSelectionPlan(

@@ -202,18 +202,22 @@ class AgentToolDispatch(
         return when {
             sessionResult.isFailure -> {
                 val err = sessionResult.exceptionOrNull()
-                "ERROR: research_web failed: ${err?.message ?: err?.javaClass?.simpleName ?: "unknown"}"
+                val why = com.codingagent.research.ResearchErrors.plain(
+                    err?.message ?: err?.javaClass?.simpleName ?: "unknown"
+                )
+                "I could not look that up. $why I will keep going with the project. I will not invent pages I did not read."
             }
             session == null || session.sources.isEmpty() -> {
-                val why = session?.errors.orEmpty()
-                    .map { it.trim() }
-                    .filter { it.isNotBlank() }
-                    .distinct()
-                    .take(4)
-                    .joinToString(" | ")
-                    .ifBlank { "No error was recorded." }
-                "ERROR: research_web found no usable sources for \"$query\". What went wrong: $why " +
-                    "Try a tighter technical query (library + API + error text). Do not invent docs."
+                val why = com.codingagent.research.ResearchErrors.plain(
+                    session?.errors.orEmpty()
+                        .map { it.trim() }
+                        .filter { it.isNotBlank() }
+                        .distinct()
+                        .take(4)
+                        .joinToString(" | ")
+                        .ifBlank { "No error was recorded." }
+                )
+                "I looked this up and did not get usable pages. $why Keep going with the project. Do not invent documentation."
             }
             else -> {
                 val brief = ResearchBriefBuilder.build(session)
@@ -232,14 +236,23 @@ class AgentToolDispatch(
         if (!ChangeDiff.hasCompletePlainEnglishExplanation(reason)) {
             return "ERROR: I cannot stage this change yet. Explain it in plain English under all six headings: What I want to do, Why, What will change, Possible effects, Risks, and What your approval means."
         }
+        val oldText = arguments.getString("oldText")
+        val newText = arguments.getString("newText")
+        val existing = runCatching { files.read(path).content }.getOrNull()
+        val proposed = if (existing != null && oldText.isNotEmpty() && existing.contains(oldText)) {
+            existing.replace(oldText, newText)
+        } else {
+            newText
+        }
+        StagedSourceCheck.problem(path, proposed)?.let { return "ERROR: $it" }
         return when (val result = mutations.propose(
             request = requestContext.ifBlank { "replace_text $path" },
             operations = listOf(
                 TaskOperation(
                     OperationKind.REPLACE,
                     path,
-                    arguments.getString("oldText"),
-                    arguments.getString("newText")
+                    oldText,
+                    newText
                 )
             ),
             reason = reason
@@ -247,7 +260,8 @@ class AgentToolDispatch(
             is MutationProposeResult.Proposed ->
                 "PROPOSAL_READY id=${result.proposal.id} path=$path " +
                     "changes=${result.proposal.changeSet.changes.size} approval_required=2 " +
-                    "Confirm twice in the authenticated Review flow to APPLY this change to disk."
+                    "Confirm twice in the authenticated Review flow to APPLY this change to disk. " +
+                    "I checked that the file is not cut off. I have not run it. Do not say it works."
             is MutationProposeResult.Rejected ->
                 "ERROR: replace_text proposal rejected — ${result.reason}"
         }
@@ -259,13 +273,15 @@ class AgentToolDispatch(
         if (!ChangeDiff.hasCompletePlainEnglishExplanation(reason)) {
             return "ERROR: I cannot stage this change yet. Explain it in plain English under all six headings: What I want to do, Why, What will change, Possible effects, Risks, and What your approval means."
         }
+        val content = arguments.getString("content")
+        StagedSourceCheck.problem(path, content)?.let { return "ERROR: $it" }
         return when (val result = mutations.propose(
             request = requestContext.ifBlank { "create_file $path" },
             operations = listOf(
                 TaskOperation(
                     OperationKind.CREATE_FILE,
                     path,
-                    text = arguments.getString("content")
+                    text = content
                 )
             ),
             reason = reason
@@ -273,7 +289,8 @@ class AgentToolDispatch(
             is MutationProposeResult.Proposed ->
                 "PROPOSAL_READY id=${result.proposal.id} path=$path " +
                     "changes=${result.proposal.changeSet.changes.size} approval_required=2 " +
-                    "Confirm twice in the authenticated Review flow to APPLY this file to disk."
+                    "Confirm twice in the authenticated Review flow to APPLY this file to disk. " +
+                    "I checked that the file is not cut off. I have not run it. Do not say it works."
             is MutationProposeResult.Rejected ->
                 "ERROR: create_file proposal rejected — ${result.reason}"
         }

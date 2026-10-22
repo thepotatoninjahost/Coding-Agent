@@ -44,15 +44,19 @@ internal fun InputStream.readCapped(maxBytes: Int = 1_048_576): String {
  * Free-only search stack. No paid APIs.
  *
  * Priority:
- *  1. GitHub + Stack Overflow (primary technical sources for coding)
- *  2. Searx public instances (meta-search across the open web, free)
- *  3. MDN (web platform docs)
- *  4. DuckDuckGo last resort only
+ *  1. GitHub releases and official docs pages when the question matches
+ *  2. Wikipedia and Hacker News (no key)
+ *  3. GitHub repository search and Stack Overflow
+ *  4. Searx, MDN, then DuckDuckGo
  *
- * Wikipedia is intentionally excluded from the default list.
+ * A source that fails is explained in plain English. The search keeps going.
  */
 class CompositeWebResearchProvider(
     private val providers: List<WebResearchProvider> = listOf(
+        GitHubReleasesResearchProvider(),
+        OfficialDocsResearchProvider(),
+        WikipediaResearchProvider(),
+        HackerNewsResearchProvider(),
         GitHubResearchProvider(),
         StackOverflowResearchProvider(),
         SearxResearchProvider(),
@@ -70,7 +74,7 @@ class CompositeWebResearchProvider(
             val result = runCatching { provider.search(normalized, (limit * 2).coerceAtLeast(8)) }
                 .getOrElse { ResearchResult(normalized, emptyList(), it.message ?: it.javaClass.simpleName) }
             if (result.error != null && result.hits.isEmpty()) {
-                errors += "${provider.javaClass.simpleName}: ${result.error}"
+                errors += ResearchErrors.plain(result.error)
             }
             result.hits
                 .filter { SourceQuality.isAcceptable(it.url, it.title, it.excerpt) }
@@ -395,6 +399,229 @@ class StackOverflowResearchProvider(
         }
     }
 }
+
+/** Turns certificate errors, rate limits, and raw exceptions into one plain sentence. */
+object ResearchErrors {
+    fun plain(raw: String): String {
+        val parts = raw.split("|", "\n")
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+        if (parts.isEmpty()) return "A search site did not answer."
+        return parts.map(::one).distinct().joinToString(" ")
+    }
+
+    private fun one(raw: String): String {
+        val lower = raw.lowercase()
+        return when {
+            "pkix" in lower || "certificate" in lower || "certpath" in lower || "ssl" in lower ->
+                "A website's security certificate could not be checked."
+            "429" in lower || "too many requests" in lower ->
+                "A search site asked me to slow down."
+            "validation failed" in lower || "validation error" in lower ->
+                "GitHub did not accept that search."
+            "bot" in lower || "challenge" in lower || "anomaly" in lower ->
+                "A search site blocked the automatic request."
+            "no result" in lower || "empty" in lower || "no usable" in lower || "no technical" in lower ->
+                "A search site returned nothing."
+            "400" in lower ->
+                "A documentation site did not accept that search."
+            "timed out" in lower || "timeout" in lower ->
+                "A search site took too long to answer."
+            else -> "A search site did not answer."
+        }
+    }
+}
+
+class WikipediaResearchProvider(
+    private val timeoutMillis: Int = 12_000,
+    private val connectionFactory: (String) -> HttpURLConnection = { URL(it).openConnection() as HttpURLConnection }
+) : WebResearchProvider {
+    override fun search(query: String, limit: Int): ResearchResult {
+        val normalized = query.trim()
+        if (normalized.isBlank()) return ResearchResult(query, emptyList(), "A research query is required")
+        val encoded = URLEncoder.encode(normalized, StandardCharsets.UTF_8.toString())
+        val cap = limit.coerceIn(1, 8)
+        val url = "https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=$encoded&utf8=1&format=json&srlimit=$cap"
+        return fetchHits(query, url) { json ->
+            val items = json.optJSONObject("query")?.optJSONArray("search") ?: JSONArray()
+            buildList {
+                for (i in 0 until items.length()) {
+                    if (size >= cap) break
+                    val item = items.optJSONObject(i) ?: continue
+                    val title = item.optString("title").trim()
+                    if (title.isBlank()) continue
+                    val snippet = item.optString("snippet").replace(Regex("<[^>]+>"), " ").replace(Regex("\\s+"), " ").trim()
+                    val link = "https://en.wikipedia.org/wiki/" + title.replace(' ', '_')
+                    add(ResearchHit(title, link, snippet.ifBlank { title }))
+                }
+            }
+        }
+    }
+
+    private fun fetchHits(query: String, url: String, read: (JSONObject) -> List<ResearchHit>): ResearchResult {
+        val connection = connectionFactory(url)
+        return try {
+            connection.connectTimeout = timeoutMillis
+            connection.readTimeout = timeoutMillis
+            connection.disallowRedirects()
+            connection.requestMethod = "GET"
+            connection.setRequestProperty("User-Agent", USER_AGENT)
+            connection.setRequestProperty("Accept", "application/json")
+            if (connection.responseCode !in 200..299) {
+                return ResearchResult(query, emptyList(), "Wikipedia HTTP ${connection.responseCode}")
+            }
+            val hits = read(JSONObject(connection.inputStream.readCapped()))
+            if (hits.isEmpty()) ResearchResult(query, emptyList(), "Wikipedia returned no results")
+            else ResearchResult(query, hits)
+        } catch (error: Exception) {
+            ResearchResult(query, emptyList(), error.message ?: error.javaClass.simpleName)
+        } finally {
+            connection.disconnect()
+        }
+    }
+}
+
+class HackerNewsResearchProvider(
+    private val timeoutMillis: Int = 12_000,
+    private val connectionFactory: (String) -> HttpURLConnection = { URL(it).openConnection() as HttpURLConnection }
+) : WebResearchProvider {
+    override fun search(query: String, limit: Int): ResearchResult {
+        val normalized = query.trim()
+        if (normalized.isBlank()) return ResearchResult(query, emptyList(), "A research query is required")
+        val encoded = URLEncoder.encode(normalized, StandardCharsets.UTF_8.toString())
+        val cap = limit.coerceIn(1, 8)
+        val url = "https://hn.algolia.com/api/v1/search?query=$encoded&hitsPerPage=$cap"
+        val connection = connectionFactory(url)
+        return try {
+            connection.connectTimeout = timeoutMillis
+            connection.readTimeout = timeoutMillis
+            connection.disallowRedirects()
+            connection.requestMethod = "GET"
+            connection.setRequestProperty("User-Agent", USER_AGENT)
+            connection.setRequestProperty("Accept", "application/json")
+            if (connection.responseCode !in 200..299) {
+                return ResearchResult(query, emptyList(), "Hacker News HTTP ${connection.responseCode}")
+            }
+            val items = JSONObject(connection.inputStream.readCapped()).optJSONArray("hits") ?: JSONArray()
+            val hits = mutableListOf<ResearchHit>()
+            for (i in 0 until items.length()) {
+                if (hits.size >= cap) break
+                val item = items.optJSONObject(i) ?: continue
+                val title = item.optString("title").ifBlank { item.optString("story_title") }.trim()
+                if (title.isBlank()) continue
+                val link = item.optString("url").trim().ifBlank {
+                    val id = item.optString("objectID")
+                    if (id.isBlank()) "" else "https://news.ycombinator.com/item?id=$id"
+                }
+                if (link.isBlank()) continue
+                val excerpt = item.optString("story_text").replace(Regex("<[^>]+>"), " ").replace(Regex("\\s+"), " ").trim()
+                hits += ResearchHit(title, link, excerpt.ifBlank { title })
+            }
+            if (hits.isEmpty()) ResearchResult(query, emptyList(), "Hacker News returned no results")
+            else ResearchResult(query, hits)
+        } catch (error: Exception) {
+            ResearchResult(query, emptyList(), error.message ?: error.javaClass.simpleName)
+        } finally {
+            connection.disconnect()
+        }
+    }
+}
+
+class GitHubReleasesResearchProvider(
+    private val timeoutMillis: Int = 12_000,
+    private val connectionFactory: (String) -> HttpURLConnection = { URL(it).openConnection() as HttpURLConnection }
+) : WebResearchProvider {
+    override fun search(query: String, limit: Int): ResearchResult {
+        val normalized = query.trim()
+        if (normalized.isBlank()) return ResearchResult(query, emptyList(), null)
+        val repo = repoFor(normalized.lowercase()) ?: return ResearchResult(query, emptyList(), null)
+        val url = "https://api.github.com/repos/$repo/releases/latest"
+        val connection = connectionFactory(url)
+        return try {
+            connection.connectTimeout = timeoutMillis
+            connection.readTimeout = timeoutMillis
+            connection.disallowRedirects()
+            connection.requestMethod = "GET"
+            connection.setRequestProperty("User-Agent", USER_AGENT)
+            connection.setRequestProperty("Accept", "application/vnd.github+json")
+            if (connection.responseCode !in 200..299) {
+                return ResearchResult(query, emptyList(), "GitHub releases HTTP ${connection.responseCode}")
+            }
+            val json = JSONObject(connection.inputStream.readCapped())
+            val tag = json.optString("tag_name").trim()
+            val name = json.optString("name").ifBlank { tag }.trim()
+            val page = json.optString("html_url").trim()
+            if (tag.isBlank() || page.isBlank()) return ResearchResult(query, emptyList(), "GitHub releases returned no results")
+            val body = json.optString("body").replace(Regex("\\s+"), " ").trim().take(400)
+            ResearchResult(query, listOf(ResearchHit("$repo $name", page, "Latest release $tag. $body".trim())))
+        } catch (error: Exception) {
+            ResearchResult(query, emptyList(), error.message ?: error.javaClass.simpleName)
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    private fun repoFor(query: String): String? {
+        val wantsVersion = listOf("version", "latest", "release").any { it in query }
+        if (!wantsVersion) return null
+        return when {
+            "kotlin" in query -> "JetBrains/kotlin"
+            "gradle" in query -> "gradle/gradle"
+            else -> null
+        }
+    }
+}
+
+class OfficialDocsResearchProvider(
+    private val timeoutMillis: Int = 12_000,
+    private val connectionFactory: (String) -> HttpURLConnection = { URL(it).openConnection() as HttpURLConnection }
+) : WebResearchProvider {
+    override fun search(query: String, limit: Int): ResearchResult {
+        val normalized = query.trim()
+        if (normalized.isBlank()) return ResearchResult(query, emptyList(), null)
+        val page = pageFor(normalized.lowercase()) ?: return ResearchResult(query, emptyList(), null)
+        val connection = connectionFactory(page.second)
+        return try {
+            connection.connectTimeout = timeoutMillis
+            connection.readTimeout = timeoutMillis
+            connection.disallowRedirects()
+            connection.requestMethod = "GET"
+            connection.setRequestProperty("User-Agent", USER_AGENT)
+            connection.setRequestProperty("Accept", "text/html")
+            if (connection.responseCode !in 200..299) {
+                return ResearchResult(query, emptyList(), "Official docs HTTP ${connection.responseCode}")
+            }
+            val html = connection.inputStream.readCapped()
+            val title = Regex("(?is)<title>(.*?)</title>").find(html)?.groupValues?.getOrNull(1)
+                ?.replace(Regex("\\s+"), " ")?.trim().orEmpty().ifBlank { page.first }
+            val text = html.replace(Regex("(?is)<script.*?</script>"), " ")
+                .replace(Regex("(?is)<style.*?</style>"), " ")
+                .replace(Regex("<[^>]+>"), " ")
+                .replace(Regex("\\s+"), " ")
+                .trim()
+                .take(500)
+            ResearchResult(query, listOf(ResearchHit(title, page.second, text.ifBlank { title })))
+        } catch (error: Exception) {
+            ResearchResult(query, emptyList(), error.message ?: error.javaClass.simpleName)
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    private fun pageFor(query: String): Pair<String, String>? = when {
+        "kotlin" in query && "cancel" in query ->
+            "Kotlin cancellation" to "https://kotlinlang.org/docs/cancellation-and-timeouts.html"
+        "kotlin" in query ->
+            "Kotlin documentation" to "https://kotlinlang.org/docs/home.html"
+        "android" in query ->
+            "Android documentation" to "https://developer.android.com/docs"
+        "python" in query ->
+            "Python documentation" to "https://docs.python.org/3/"
+        else -> null
+    }
+}
+
+private const val USER_AGENT = "Coding-Agent/1.0 (Android; https://github.com/thepotatoninjahost/Coding-Agent)"
 
 data class HtmlFetch(val body: String, val error: String?)
 

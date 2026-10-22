@@ -31,6 +31,8 @@ object ModelFailure {
 
     fun isNoAutoResume(message: String): Boolean = "no-auto-resume" in message.lowercase()
 
+    fun gaveUpResume(message: String): Boolean = "resume-gave-up" in message.lowercase()
+
     fun isRejectedKey(message: String): Boolean {
         val lower = message.lowercase()
         return "401" in lower ||
@@ -40,7 +42,28 @@ object ModelFailure {
             "no auth credentials" in lower
     }
 
+    fun isRequestTooLarge(message: String): Boolean {
+        val lower = message.lowercase()
+        return "413" in lower ||
+            "request too large" in lower ||
+            "context_length_exceeded" in lower ||
+            "context length" in lower ||
+            "maximum context" in lower ||
+            "reduce the length" in lower
+    }
+
+    fun isOutOfFunds(message: String): Boolean {
+        val lower = message.lowercase()
+        return "out of funds" in lower ||
+            "insufficient_quota" in lower ||
+            "insufficient quota" in lower ||
+            "insufficient balance" in lower ||
+            (("402" in lower || "403" in lower) &&
+                ("fund" in lower || "credit" in lower || "balance" in lower || "quota" in lower))
+    }
+
     fun isRateLimit(message: String): Boolean {
+        if (isRequestTooLarge(message) || isOutOfFunds(message)) return false
         val lower = message.lowercase()
         return isCapacity(message) ||
             isDailyFreeLimit(message) ||
@@ -64,12 +87,27 @@ object ModelFailure {
     }
 
     /**
-     * A rate limit or a daily limit is not retried on the same helper.
-     * The provider router switches to the next helper instead.
-     * An empty answer is still tried once more.
+     * A daily limit, a busy helper, a request that is too big, or an empty account
+     * is not retried on the same call. A short "slow down" (429) is, because a
+     * single custom address has no other helper to switch to. An empty answer is too.
      */
-    fun isRetryable(message: String): Boolean =
-        !isDailyFreeLimit(message) && !isAllProvidersExhausted(message) && isEmpty(message)
+    fun isRetryable(message: String): Boolean {
+        if (isDailyFreeLimit(message) || isAllProvidersExhausted(message) || isCapacity(message)) return false
+        if (isRequestTooLarge(message) || isOutOfFunds(message) || isRejectedKey(message)) return false
+        return isEmpty(message) || isShortRateLimit(message)
+    }
+
+    fun isShortRateLimit(message: String): Boolean {
+        if (isCapacity(message) || isDailyFreeLimit(message) || isRequestTooLarge(message)) return false
+        if (isOutOfFunds(message) || isRejectedKey(message)) return false
+        val lower = message.lowercase()
+        return "429" in lower ||
+            "too many requests" in lower ||
+            "rate_limit" in lower ||
+            "rate limit" in lower ||
+            "tokens per minute" in lower ||
+            "tpm" in lower
+    }
 
     fun resumeDelayMillis(message: String, now: Long = System.currentTimeMillis()): Long {
         if (!isAllProvidersExhausted(message) || isNoAutoResume(message)) return 0L
@@ -81,8 +119,11 @@ object ModelFailure {
     fun waitSeconds(message: String): Int {
         val match = Regex("try again in ([0-9.]+)", RegexOption.IGNORE_CASE).find(message)
         val parsed = match?.groupValues?.getOrNull(1)?.toDoubleOrNull()?.toInt()
-        if (parsed != null && parsed > 0) return parsed
-        return if (isCapacity(message)) 12 else 20
+        if (parsed != null && parsed > 0) return parsed.coerceAtMost(120)
+        if (isRequestTooLarge(message) || isOutOfFunds(message)) return 0
+        if (isCapacity(message)) return 12
+        if (isRateLimit(message)) return 60
+        return 20
     }
 
     fun humanize(message: String): String {
@@ -90,15 +131,20 @@ object ModelFailure {
         return when {
             isAllProvidersExhausted(message) && isNoAutoResume(message) ->
                 "Every helper refused the secret password. Tap Setup and paste it again. I will not keep trying until you do."
+            isAllProvidersExhausted(message) && gaveUpResume(message) -> {
+                val whenText = resumePhrase(message)
+                val credit = creditNote(message)
+                "Every helper is used up until $whenText. I stopped this task. Send the request again then.$credit"
+            }
             isAllProvidersExhausted(message) -> {
                 val whenText = resumePhrase(message)
-                val credit = if ("openrouter" in message.lowercase() || isDailyFreeLimit(message)) {
-                    " Adding \$10 of credit at openrouter.ai raises the OpenRouter free limit to 1,000 requests a day."
-                } else {
-                    ""
-                }
-                "Every helper is used up for now. I will start again $whenText. You do not need to send the request again.$credit"
+                val credit = creditNote(message)
+                "Every helper is used up for now. I will start again $whenText. You can leave this open. You do not need to send the request again.$credit"
             }
+            isOutOfFunds(message) ->
+                "This helper is out of funds. I will skip it until tomorrow and use another helper if one is connected."
+            isRequestTooLarge(message) ->
+                "This request is too big for that helper. I will shorten it, or try a helper that can take more."
             isDailyFreeLimit(message) -> {
                 val whenText = resetPhrase(message)
                 val credit = if ("openrouter" in message.lowercase() || "free-models-per-day" in message.lowercase() || "openrouter_free_tier_daily" in message.lowercase()) {
@@ -144,6 +190,7 @@ object ModelFailure {
                     trimmed.startsWith("resume-at-ms:") ||
                     trimmed == "ALL_HELPERS_EXHAUSTED" ||
                     trimmed == "no-auto-resume" ||
+                    trimmed == "resume-gave-up" ||
                     trimmed == "openrouter"
             }
             .joinToString("\n")
@@ -154,6 +201,13 @@ object ModelFailure {
     private fun hideAccountAndPassword(text: String): String =
         text.replace(Regex("""Bearer\s+\S+""", RegexOption.IGNORE_CASE), "Bearer [redacted]")
             .replace(Regex("""/accounts/[a-fA-F0-9]{32}"""), "/accounts/[account]")
+
+    private fun creditNote(message: String): String =
+        if ("openrouter" in message.lowercase() || isDailyFreeLimit(message)) {
+            " Adding \$10 of credit at openrouter.ai raises the OpenRouter free limit to 1,000 requests a day."
+        } else {
+            ""
+        }
 
     private fun resetPhrase(message: String): String {
         val epoch = com.codingagent.model.QuotaHeaders.resetFromMessage(message, System.currentTimeMillis())

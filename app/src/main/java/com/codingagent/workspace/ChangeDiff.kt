@@ -207,24 +207,37 @@ object ChangeDiff {
      * into everyday language before that card is shown.
      */
     fun ownerFacingReason(reason: String): String {
+        val hidden = mutableListOf<String>()
+        fun hide(match: MatchResult): String {
+            hidden += match.value
+            return "\u0001${hidden.lastIndex}\u0001"
+        }
         var text = reason
+        text = Regex("```[\\s\\S]*?```").replace(text, ::hide)
+        text = Regex("`[^`\\n]+`").replace(text, ::hide)
+        text = Regex("""(?:[A-Za-z0-9_.-]+[/\\])+[A-Za-z0-9_.-]+""").replace(text, ::hide)
+        text = Regex("""\b[A-Za-z0-9_][A-Za-z0-9_.-]*\.[A-Za-z0-9]{1,8}\b""").replace(text, ::hide)
         val replacements = listOf(
-            Regex("(?i)recursive[- ]descent parsers?") to "a reader that walks through the text from the top, one piece at a time",
-            Regex("(?i)abstract syntax trees?") to "an outline of the program",
-            Regex("(?i)\\bASTs?\\b") to "an outline of the program",
-            Regex("(?i)\\btokenizers?\\b") to "a splitter that breaks the text into small pieces",
-            Regex("(?i)\\blexers?\\b") to "a splitter that breaks the text into small pieces",
-            Regex("(?i)\\bparsers?\\b") to "a reader that understands how the text is structured",
+            Regex("(?i)\\b((?:it|this|everything|the \\w+) (?:is |are )?(?:working|works)|works correctly|tests passed|all tests pass|i ran it|i tested it)\\b") to "has not been run",
+            Regex("(?i)recursive[- ]descent parsers?") to "reader that walks through the text from the top, one piece at a time",
+            Regex("(?i)abstract syntax trees?") to "outline of the program",
+            Regex("(?i)\\bASTs?\\b") to "outline of the program",
+            Regex("(?i)\\btokenizers?\\b") to "splitter that breaks the text into small pieces",
+            Regex("(?i)\\blexers?\\b") to "splitter that breaks the text into small pieces",
+            Regex("(?i)\\bparsers?\\b") to "reader that understands how the text is structured",
             Regex("(?i)\\bbytecodes?\\b") to "instructions the program can run",
-            Regex("(?i)\\binterpreters?\\b") to "a program that runs the text directly",
-            Regex("(?i)\\bcompilers?\\b") to "a program that turns written instructions into something that can run",
+            Regex("(?i)\\binterpreters?\\b") to "program that runs the text directly",
+            Regex("(?i)\\bcompilers?\\b") to "program that turns written instructions into something that can run",
             Regex("(?i)\\btokens?\\b") to "small pieces of the text",
-            Regex("(?i)\\bgrammars?\\b") to "the rules for how the text may be written",
-            Regex("(?i)semantic analysis") to "a check that the text makes sense",
+            Regex("(?i)\\bgrammars?\\b") to "rules for how the text may be written",
+            Regex("(?i)semantic analysis") to "check that the text makes sense",
             Regex("(?i)code generation") to "writing the finished program"
         )
         replacements.forEach { (pattern, replacement) ->
             text = text.replace(pattern, replacement)
+        }
+        hidden.forEachIndexed { index, original ->
+            text = text.replace("\u0001$index\u0001", original)
         }
         return text
     }
@@ -238,7 +251,7 @@ object ChangeDiff {
             proposal.changeSet.changes.any { it.operation == ChangeOperation.REMOVE } -> "I prepared a change that removes something"
             else -> "I prepared a change"
         }
-        return "$action: $fileWords. This is what you asked for. Nothing is saved until you say yes on this phone."
+        return "$action: $fileWords. This is what you asked for. I have not run this yet. Nothing is saved until you say yes on this phone."
     }
 
     private fun StringBuilder.appendCompleteContent(content: String) {
