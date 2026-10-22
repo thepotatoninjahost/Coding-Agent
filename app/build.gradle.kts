@@ -26,6 +26,13 @@ android {
 
     testOptions {
         execution = "ANDROIDX_TEST_ORCHESTRATOR"
+        unitTests.all {
+            // The OpenRouter runner talks to the network and needs the owner's key.
+            // It stays out of the normal test run. scripts/run_openrouter_agent.sh opts in.
+            if (!project.hasProperty("runOpenRouter")) {
+                it.exclude("**/OpenRouterAgentRunner*")
+            }
+        }
     }
 
     // Debug builds use Android's standard local debug signing.

@@ -26,7 +26,7 @@ The current APK supports:
 - Autonomous model loop with real tool calling (list_files, read_file, search_project, verify, mutations with dual approval, etc.)
 - Always-on static verification (unfinished-work marker scan) — never reports a fake pass
 - Evidence requirement: inspect/error/analyze requests must actually read or search project files before a final answer is accepted
-- Model settings UI for any OpenAI-compatible provider (Groq, SambaNova, OpenRouter, local, etc.)
+- Setup screen for an OpenAI-compatible helper. OpenRouter's free helper (`openrouter/free` at `https://openrouter.ai/api/v1`) is filled in already. The secret password is typed on the phone and is never stored in this repository.
 - Transactional file changes with checksum-backed rollback
 - Persisted chat history and task journal
 
@@ -37,14 +37,22 @@ Remaining product polish (not blockers for basic use):
 
 Terminal behavior and limits are documented in **Terminal limitations**.
 
-## Recommended remote provider (as of 2026-08)
+## Helper the phone uses
 
+OpenRouter is the default. Setup already shows:
 
-- Base URL: `https://api.groq.com/openai/v1`
-- Model: `llama-3.3-70b-versatile`
-- API key: from console.groq.com
+- Web address: `https://openrouter.ai/api/v1`
+- Helper name: `openrouter/free` (a free helper; it does not switch you onto a paid one)
+- Secret password: paste it from [openrouter.ai/keys](https://openrouter.ai/keys). Leave this blank in the repository. Do not commit a key.
 
-Any other OpenAI-compatible endpoint works the same way.
+A missing password, a rejected password, and a free-limit slowdown are explained in plain English on the phone. Another company's web address still works if you type it in Setup.
+
+On a computer, the same loop can be run with your own key. The script reads `OPENROUTER_API_KEY` from the environment and does not print it:
+
+```bash
+export OPENROUTER_API_KEY='paste-your-key-here'
+./scripts/run_openrouter_agent.sh "Explain this project in one short paragraph. Do not change any files."
+```
 
 ## Architecture
 
@@ -57,7 +65,7 @@ Production source is split by job under `app/src/main/java/com/codingagent/`:
 | `agent` | Single spine (`AutonomousAgent`), constitution, tool dispatch (`AgentToolDispatch`), planning (`AgentPlanner`), chat workspace, journal |
 | `intake` | Free text → typed goal (`TaskIntakeParser`, `GoalInterpreter`, `CodeSynthesisEngine`) |
 | `workspace` | Project import, index (`ProjectIndexer`), files, diffs, dual-approval mutations, terminal, verification, checksum rollback (`ProjectWorkspace`) |
-| `model` | User-configured OpenAI-compatible HTTP gateway (`RemoteHttpGateway`), settings, streamed SSE tool calls. No vendor is hardcoded. |
+| `model` | OpenAI-compatible HTTP gateway (`RemoteHttpGateway`). OpenRouter's free helper is the default. The secret password is entered at runtime. |
 | `research` | Web evidence (`WebResearchProvider`, `DurableDeepResearchProvider`, `PersonalResearchProvider`, `SourceQuality`, `QueryLanes`) |
 | `knowledge` | Local searchable chunks behind `AgentKnowledge` / `KnowledgeProvider` |
 | `ui` | Compose workbench (`MainActivity`, screens, theme) |

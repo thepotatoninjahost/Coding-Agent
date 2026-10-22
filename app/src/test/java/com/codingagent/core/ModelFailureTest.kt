@@ -32,6 +32,24 @@ class ModelFailureTest {
     }
 
     @Test
+    fun rejectedKeyAndRateLimitArePlainEnglish() {
+        val rejected = ModelFailure.humanize(
+            """Model HTTP 401: {"error":{"message":"Invalid API key"}}"""
+        )
+        assertTrue(rejected.contains("secret password", ignoreCase = true))
+        assertTrue(rejected.contains("openrouter.ai/keys"))
+        assertFalse(rejected.contains("{"))
+
+        val limited = ModelFailure.humanize(
+            """Model HTTP 429: {"error":{"message":"Rate limit exceeded"}}"""
+        )
+        assertTrue(ModelFailure.isRateLimit(limited).not())
+        assertTrue(ModelFailure.isRateLimit("""Model HTTP 429: {"error":{"message":"Rate limit exceeded"}}"""))
+        assertTrue(limited.contains("slow down", ignoreCase = true))
+        assertFalse(limited.contains("{"))
+    }
+
+    @Test
     fun ordinaryTextIsNotCapacity() {
         assertFalse(ModelFailure.isCapacity("file does not exist: SelfEvolution.kt"))
         assertFalse(ModelFailure.isRateLimit("Model returned no usable message content"))

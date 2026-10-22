@@ -275,7 +275,7 @@ private fun CodingAgentApp(
                     Column(Modifier.padding(16.dp)) {
                         Text("Connect a code helper", color = NeonGreen, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                         Text(
-                            "Writing new code needs a helper on the internet. Paste the web address, the helper's name, and the secret password that company gave you. They stay on this phone.\n\nA free starting point is Groq. Web address: https://api.groq.com/openai/v1. Helper name: llama-3.3-70b-versatile. Secret password: create one at console.groq.com. You can use another company instead. Looking things up on the Research tab does not need this.",
+                            "Writing new code needs a helper on the internet. OpenRouter is already filled in, with the free helper openrouter/free. Paste the secret password from openrouter.ai/keys. It stays on this phone and is not written into the app. You can change the web address or the helper name if you use another company. Looking things up on the Research tab does not need this.",
                             color = SoftGreen,
                             fontSize = 12.sp
                         )

@@ -420,9 +420,20 @@ class RemoteHttpGateway(
 
     private fun failure(connection: HttpURLConnection): ModelResponse.Failure {
         val body = readErrorBody(connection)
-        val snippet = ModelConnectionProbe.sanitizeProbeError(body).take(ERROR_SNIPPET_CHARS)
-        val suffix = if (body.length > ERROR_SNIPPET_CHARS) "…" else ""
+        val readable = readableError(body)
+        val snippet = readable.take(ERROR_SNIPPET_CHARS)
+        val suffix = if (readable.length > ERROR_SNIPPET_CHARS) "…" else ""
+        // Keep the status code in the text. Retry and the plain-English rewrite both look for it.
         return ModelResponse.Failure("Model HTTP ${connection.responseCode}: ${snippet.ifBlank { "(empty body)" }}$suffix")
+    }
+
+    private fun readableError(body: String): String {
+        val sanitized = ModelConnectionProbe.sanitizeProbeError(body).trim()
+        val json = runCatching { JSONObject(sanitized) }.getOrNull() ?: return sanitized
+        val nested = json.optJSONObject("error")?.optString("message").orEmpty()
+        val top = json.optString("message")
+        val message = nested.ifBlank { top }.trim()
+        return ModelConnectionProbe.sanitizeProbeError(message).ifBlank { sanitized }
     }
 
     private fun readErrorBody(connection: HttpURLConnection): String {

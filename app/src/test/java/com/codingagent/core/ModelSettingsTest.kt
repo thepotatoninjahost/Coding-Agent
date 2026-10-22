@@ -103,13 +103,14 @@ class ModelSettingsTest {
     }
 
     @Test
-    fun corruptJsonFallsBackToEmptyRemoteDefaults() {
+    fun corruptJsonFallsBackToOpenRouterFreeModelWithoutAKey() {
         val defaults = ModelSettings.fromJson("{not-json")
         assertEquals(ModelBackend.REMOTE, defaults.backend)
-        assertTrue(defaults.baseUrl.isEmpty())
-        assertTrue(defaults.modelName.isEmpty())
+        assertEquals(ModelSettings.OPENROUTER_BASE_URL, defaults.baseUrl)
+        assertEquals(ModelSettings.OPENROUTER_FREE_MODEL, defaults.modelName)
         assertTrue(defaults.apiKey.isEmpty())
         assertFalse(defaults.onboarded)
+        assertFalse(defaults.isRemoteConfigured())
     }
 
     @Test
@@ -123,15 +124,81 @@ class ModelSettingsTest {
     }
 
     @Test
-    fun defaultsDoNotHardcodeProviderOrModel() {
+    fun defaultsSelectOpenRouterFreeModelWithoutAKey() {
         val defaults = ModelSettings()
         assertEquals(ModelBackend.REMOTE, defaults.backend)
-        assertTrue(defaults.baseUrl.isEmpty())
-        assertTrue(defaults.modelName.isEmpty())
+        assertEquals("https://openrouter.ai/api/v1", defaults.baseUrl)
+        assertEquals("openrouter/free", defaults.modelName)
         assertTrue(defaults.apiKey.isEmpty())
         assertFalse(defaults.onboarded)
         assertFalse(defaults.isRemoteConfigured())
+        assertTrue(defaults.validationErrors().any { it.contains("openrouter.ai/keys") })
         assertTrue(defaults.statusSummary().contains("Helper not connected"))
+        assertFalse(ModelSettings.toJson(defaults).contains("sk-"))
+        assertFalse(defaults.statusSummary().contains("sk-"))
+    }
+
+    @Test
+    fun blankSavedProviderBecomesOpenRouterFreeModel() {
+        val restored = ModelSettings.fromJson("""{"baseUrl":"","apiKey":"","modelName":""}""")
+        assertEquals(ModelSettings.OPENROUTER_BASE_URL, restored.baseUrl)
+        assertEquals(ModelSettings.OPENROUTER_FREE_MODEL, restored.modelName)
+        assertTrue(restored.apiKey.isEmpty())
+        assertFalse(restored.isRemoteConfigured())
+    }
+
+    @Test
+    fun savedCustomProviderIsNotReplacedWithOpenRouter() {
+        val restored = ModelSettings.fromJson(
+            """{"baseUrl":"https://example.com/v1","apiKey":"","modelName":"custom-model"}"""
+        )
+        assertEquals("https://example.com/v1", restored.baseUrl)
+        assertEquals("custom-model", restored.modelName)
+        assertTrue(restored.apiKey.isEmpty())
+    }
+
+    @Test
+    fun probeReportsMissingOpenRouterKeyWithoutCallingTheNetwork() {
+        var called = false
+        val result = ModelConnectionProbe.probe(ModelSettings()) {
+            called = true
+            null
+        }
+        assertFalse(called)
+        val failed = result as ProbeResult.Failed
+        assertTrue(failed.reason.contains("secret password", ignoreCase = true))
+        assertTrue(failed.reason.contains("openrouter.ai/keys"))
+    }
+
+    @Test
+    fun probeExplainsRejectedSecretPasswordAndRateLimit() {
+        val rejected = probeFailure("""Model HTTP 401: {"error":{"message":"Invalid API key"}}""")
+        assertTrue(rejected.contains("secret password", ignoreCase = true))
+        assertTrue(rejected.contains("openrouter.ai/keys"))
+        assertFalse(rejected.contains("Invalid API key"))
+        assertFalse(rejected.contains("{"))
+
+        val limited = probeFailure("""Model HTTP 429: {"error":{"message":"Rate limit exceeded: free-models-per-day"}}""")
+        assertTrue(limited.contains("slow down", ignoreCase = true))
+        assertFalse(limited.contains("free-models-per-day"))
+        assertFalse(limited.contains("{"))
+    }
+
+    private fun probeFailure(message: String): String {
+        val result = ModelConnectionProbe.probe(
+            ModelSettings(
+                baseUrl = "https://openrouter.ai/api/v1",
+                apiKey = "not-a-real-key",
+                modelName = "openrouter/free"
+            ),
+            gatewayFactory = {
+                object : ModelGateway {
+                    override fun complete(request: ModelRequest): ModelResponse =
+                        ModelResponse.Failure(message)
+                }
+            }
+        )
+        return (result as ProbeResult.Failed).reason
     }
     @Test
     fun customSystemInstructionsAreAddedWithoutReplacingSafetyRules() {

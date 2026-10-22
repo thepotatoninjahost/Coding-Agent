@@ -1,5 +1,6 @@
 package com.codingagent.model
 
+import com.codingagent.agent.ModelFailure
 import com.codingagent.core.LocalStore
 import java.net.InetAddress
 import java.net.URI
@@ -97,9 +98,9 @@ object ModelEndpointPolicy {
 
 data class ModelSettings(
     val backend: ModelBackend = ModelBackend.REMOTE,
-    val baseUrl: String = "",
+    val baseUrl: String = OPENROUTER_BASE_URL,
     val apiKey: String = "",
-    val modelName: String = "",
+    val modelName: String = OPENROUTER_FREE_MODEL,
     /**
      * Optional ordered fallback model IDs that share the same base URL and API key.
      * Comma, semicolon, or newline separated. When the primary model returns a
@@ -173,19 +174,40 @@ data class ModelSettings(
             ModelEndpointPolicy.validate(s.baseUrl)?.let(::add)
             if (s.modelName.isBlank()) add("The helper name is missing.")
             val local = ModelEndpointPolicy.isLocalEndpoint(s.baseUrl)
-            if (s.apiKey.isBlank() && !local) add("The secret password is missing, unless the helper is on this phone.")
+            if (s.apiKey.isBlank() && !local) {
+                add(
+                    if (s.baseUrl.contains("openrouter.ai")) {
+                        "The secret password is missing. Paste the key from openrouter.ai/keys. It stays on this phone and is not written into the app."
+                    } else {
+                        "The secret password is missing, unless the helper is on this phone."
+                    }
+                )
+            }
         }
+    }
+
+    /**
+     * A saved setup with no web address and no helper name has not chosen a provider.
+     * Fill in OpenRouter's free helper. Never invent a secret password.
+     */
+    fun withOpenRouterDefaults(): ModelSettings {
+        val s = normalized()
+        if (s.baseUrl.isNotBlank() || s.modelName.isNotBlank()) return s
+        return s.copy(baseUrl = OPENROUTER_BASE_URL, modelName = OPENROUTER_FREE_MODEL)
     }
 
     fun isRemoteConfigured(): Boolean = validationErrors().isEmpty()
 
     fun statusSummary(): String {
+        val s = normalized()
         val host = runCatching {
-            java.net.URI(normalized().baseUrl).host ?: normalized().baseUrl
-        }.getOrDefault(normalized().baseUrl).ifBlank { "…" }
-        val ids = allModelIds()
+            java.net.URI(s.baseUrl).host ?: s.baseUrl
+        }.getOrDefault(s.baseUrl).ifBlank { "…" }
+        val ids = s.allModelIds()
         return when {
-            !isRemoteConfigured() -> "Helper not connected yet"
+            !s.isRemoteConfigured() && s.baseUrl.contains("openrouter.ai") && s.apiKey.isBlank() ->
+                "Helper not connected yet. Free OpenRouter helper is selected. Paste the secret password in Setup."
+            !s.isRemoteConfigured() -> "Helper not connected yet"
             ids.size <= 1 -> "Helper · ${ids.firstOrNull() ?: modelName} at $host"
             else -> "Helper · ${ids.first()} and ${ids.size - 1} backups at $host"
         }
@@ -213,6 +235,10 @@ data class ModelSettings(
     }
 
     companion object {
+        const val OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+        /** Free Models Router. It picks a free model and does not fall back to a paid one. */
+        const val OPENROUTER_FREE_MODEL = "openrouter/free"
+
         fun fromJson(raw: String?): ModelSettings {
             if (raw.isNullOrBlank()) return ModelSettings()
             return runCatching {
@@ -228,7 +254,7 @@ data class ModelSettings(
                     systemPrompt = o.optString("systemPrompt", ""),
                     extraHeaders = o.optString("extraHeaders", ""),
                     onboarded = o.optBoolean("onboarded", false)
-                ).normalized()
+                ).normalized().withOpenRouterDefaults()
             }.getOrDefault(ModelSettings())
         }
 
@@ -277,10 +303,14 @@ object ModelConnectionProbe {
                     }
                 }
                 is ModelResponse.ToolCall -> ProbeResult.Ok("Reached model (tool call path)")
-                is ModelResponse.Failure -> ProbeResult.Failed(explainProviderError(settings.modelName, response.message))
+                is ModelResponse.Failure -> ProbeResult.Failed(
+                    ModelFailure.humanize(explainProviderError(settings.modelName, response.message))
+                )
             }
         } catch (error: Exception) {
-            ProbeResult.Failed(sanitizeProbeError(error.message.orEmpty().ifBlank { error.javaClass.simpleName }))
+            ProbeResult.Failed(
+                ModelFailure.humanize(sanitizeProbeError(error.message.orEmpty().ifBlank { error.javaClass.simpleName }))
+            )
         }
     }
 

@@ -309,8 +309,8 @@ class AutonomousAgent(
             val msg =
                 "The code helper is not connected yet, so I cannot write new code from this request. " +
                     "You can still say hello, ask me to list files, ask for status, or ask me to read a file you name. " +
-                    "Tap Setup and add the helper's web address, name, and secret password. " +
-                    "A free starting point is Groq: web address https://api.groq.com/openai/v1, helper name llama-3.3-70b-versatile, and a secret password from console.groq.com."
+                    "Tap Setup. The free OpenRouter helper is already filled in. Paste the secret password from openrouter.ai/keys. " +
+                    "It stays on this phone and is not written into the app."
             val task = AgentTask(
                 taskId, focus, "needs-input", plan, emptyList(),
                 VerificationReport(false, emptyList()),

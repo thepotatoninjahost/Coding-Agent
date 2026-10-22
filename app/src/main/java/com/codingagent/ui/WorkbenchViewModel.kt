@@ -11,6 +11,7 @@ import com.codingagent.agent.AutonomousAgent
 import com.codingagent.agent.ChatMessage
 import com.codingagent.agent.ChatRole
 import com.codingagent.agent.ChatWorkspace
+import com.codingagent.agent.ModelFailure
 import com.codingagent.core.LocalStore
 import com.codingagent.intake.OperationKind
 import com.codingagent.intake.TaskOperation
@@ -74,7 +75,7 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
             _ui.update {
                 it.copy(
                     showModelSettings = true,
-                    detail = "To write new code, tap Setup and add the helper's web address, name, and secret password."
+                    detail = "To write new code, tap Setup and paste the secret password from openrouter.ai/keys. A free helper is already selected."
                 )
             }
         }
@@ -154,7 +155,7 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
                     it.copy(
                         probeMessage = when (result) {
                             is ProbeResult.Ok -> result.detail
-                            is ProbeResult.Failed -> "Could not connect: ${result.reason}"
+                            is ProbeResult.Failed -> "Could not connect: ${ModelFailure.humanize(result.reason)}"
                         }
                     )
                 }
@@ -706,8 +707,8 @@ data class WorkbenchUiState(
     val modelLoadError: String? = null,
     val showModelSettings: Boolean = false,
     val draftApiKey: String = "",
-    val draftModelName: String = "",
-    val draftBaseUrl: String = "",
+    val draftModelName: String = ModelSettings.OPENROUTER_FREE_MODEL,
+    val draftBaseUrl: String = ModelSettings.OPENROUTER_BASE_URL,
     val draftExtraHeaders: String = "",
     val draftSystemPrompt: String = "",
     val probeMessage: String? = null,

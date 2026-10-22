@@ -2,6 +2,7 @@ package com.codingagent.core
 
 import java.net.HttpURLConnection
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.concurrent.CountDownLatch
@@ -245,6 +246,41 @@ data: [DONE]
     }
 
     @Test
+    fun openRouterErrorJsonKeepsTheStatusAndDropsTheWrapper() {
+        val gateway = RemoteHttpGateway("http://127.0.0.1:9/v1", "sk-test", "openrouter/free", connectionFactory = { _ ->
+            fakeConnection("""{"error":{"message":"Invalid API key","code":401}}""", code = 401)
+        })
+        val result = gateway.complete(ModelRequest("system", "ping", emptyList()))
+        val message = (result as ModelResponse.Failure).message
+        assertTrue(message.contains("Model HTTP 401"))
+        assertTrue(message.contains("Invalid API key"))
+        assertFalse(message.contains("{"))
+    }
+
+    @Test
+    fun openRouterSendsAttributionHeadersAndDoesNotPutTheKeyInTheAddress() {
+        val headers = linkedMapOf<String, String>()
+        var requestedUrl = ""
+        val gateway = RemoteHttpGateway(
+            "https://openrouter.ai/api/v1",
+            "test-secret-value",
+            "openrouter/free",
+            connectionFactory = { url ->
+                requestedUrl = url
+                headerCapturingConnection(headers, """{"choices":[{"message":{"content":"pong"}}]}""")
+            }
+        )
+        val result = gateway.complete(ModelRequest("system", "ping", emptyList()))
+        assertTrue(result is ModelResponse.Text)
+        assertEquals("https://openrouter.ai/api/v1/chat/completions", requestedUrl)
+        assertFalse(requestedUrl.contains("test-secret-value"))
+        assertEquals("Bearer test-secret-value", headers["Authorization"])
+        assertEquals("Coding-Agent", headers["X-Title"])
+        assertTrue(headers["HTTP-Referer"].orEmpty().contains("Coding-Agent"))
+        assertEquals(1, headers.values.count { it.contains("test-secret-value") })
+    }
+
+    @Test
     fun errorBodiesDoNotEchoBearerTokens() {
         val gateway = RemoteHttpGateway("http://127.0.0.1:8080/v1", "sk-test", "local", connectionFactory = { _ ->
             fakeConnection("Authorization: Bearer sk-testvalueleaked", code = 401)
@@ -255,6 +291,27 @@ data: [DONE]
         assertTrue(message.contains("[redacted]"))
         assertTrue(!message.contains("sk-testvalueleaked"))
     }
+
+    private fun headerCapturingConnection(headers: MutableMap<String, String>, body: String): HttpURLConnection =
+        object : HttpURLConnection(java.net.URL("https://openrouter.ai/api/v1/chat/completions")) {
+            override fun connect() = Unit
+            override fun disconnect() = Unit
+            override fun usingProxy() = false
+            override fun getResponseCode() = 200
+            override fun getInputStream() = body.byteInputStream()
+            override fun getErrorStream(): java.io.InputStream? = null
+            override fun getOutputStream(): java.io.OutputStream = java.io.ByteArrayOutputStream()
+            override fun setRequestProperty(key: String?, value: String?) {
+                if (key != null && value != null) headers[key] = value
+            }
+            override fun getHeaderField(name: String?): String? = null
+            override fun getPermission() = null
+            override fun getContent() = null
+            override fun getContentLength() = -1
+            override fun getResponseMessage() = "OK"
+            override fun getRequestMethod() = "POST"
+            override fun setRequestMethod(method: String?) = Unit
+        }
 
     private fun fakeConnection(body: String, onRequest: (String) -> Unit = {}, code: Int = 200): HttpURLConnection = object : HttpURLConnection(java.net.URL("http://127.0.0.1:8080/v1/chat/completions")) {
         private val request = java.io.ByteArrayOutputStream()

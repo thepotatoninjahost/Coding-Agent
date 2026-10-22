@@ -57,13 +57,16 @@ object ModelFailure {
             }
             isRateLimit(message) -> {
                 val wait = waitSeconds(message)
-                "The helper asked me to slow down. Wait about $wait seconds, or tap Setup and try a different helper. " +
+                "The helper asked me to slow down. The free limit may be used up. Wait about $wait seconds, then try once. " +
+                    "Sending it again and again makes the wait longer. You can pick another free helper in Setup. " +
                     "I can still list files and read a file you name."
             }
             isEmpty(message) ->
                 "The helper sent an empty answer. I try again automatically. If this keeps happening, tap Setup and try a different helper."
-            "401" in lower || "unauthorized" in lower || "invalid api key" in lower ->
-                "The helper rejected the secret password. Tap Setup and paste it again as one line."
+            "401" in lower || "unauthorized" in lower || "invalid api key" in lower ||
+                "missing authentication" in lower || "no auth credentials" in lower ->
+                "The secret password was rejected. Tap Setup and paste it again as one line. " +
+                    "For OpenRouter, get the key at openrouter.ai/keys. It stays on this phone."
             "403" in lower || "forbidden" in lower ->
                 "The helper refused this request. The secret password or the helper name may be wrong. Check Setup."
             "timeout" in lower || "timed out" in lower ->
