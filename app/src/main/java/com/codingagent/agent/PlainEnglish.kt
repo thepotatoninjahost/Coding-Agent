@@ -10,7 +10,11 @@ object PlainEnglish {
         "checksum-backed rollback",
         "checksum-backed",
         "checksum",
-        "rollback"
+        "rollback",
+        "minsdk",
+        "jetpack compose",
+        "biometricprompt",
+        "aead"
     )
 
     fun hasJargon(text: String): Boolean {
@@ -39,7 +43,12 @@ object PlainEnglish {
             Regex("(?i)\\btokenizers?\\b") to "splitter",
             Regex("(?i)\\blexers?\\b") to "splitter",
             Regex("(?i)\\bparsers?\\b") to "reader",
-            Regex("(?i)\\bbytecodes?\\b") to "runnable instructions"
+            Regex("(?i)\\bbytecodes?\\b") to "runnable instructions",
+            Regex("(?i)\\bminsdk\\b") to "the oldest Android version this can run on",
+            Regex("(?i)jetpack compose") to "the screen-building tools",
+            Regex("(?i)\\bbiometricprompt\\b") to "the fingerprint or face check",
+            Regex("(?i)\\btink\\b") to "the lock library",
+            Regex("(?i)\\baead\\b") to "a locked message that also checks it was not changed"
         )
         replacements.forEach { (pattern, replacement) ->
             out = out.replace(pattern, replacement)

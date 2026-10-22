@@ -149,10 +149,28 @@ object ArticleExtractor {
         onConnection: (HttpURLConnection) -> Unit = {},
         onCall: (okhttp3.Call) -> Unit = {}
     ): FetchAttempt {
+        val target = releaseApiUrl(url) ?: url
         return if (connectionFactory == null) {
-            fetchWithOkHttp(url, timeoutMillis, urlValidator, isCancelled, onCall)
+            fetchWithOkHttp(target, timeoutMillis, urlValidator, isCancelled, onCall)
         } else {
-            fetchWithUrlConnection(url, connectionFactory, timeoutMillis, urlValidator, isCancelled, onConnection)
+            fetchWithUrlConnection(target, connectionFactory, timeoutMillis, urlValidator, isCancelled, onConnection)
+        }
+    }
+
+    /** GitHub release pages are menu-heavy. The releases API returns the tag and the date. */
+    internal fun releaseApiUrl(url: String): String? {
+        val uri = runCatching { java.net.URI(url.trim()) }.getOrNull() ?: return null
+        if (uri.host?.lowercase() != "github.com") return null
+        val parts = uri.path.trim('/').split('/').filter { it.isNotBlank() }
+        if (parts.size < 3 || parts[2] != "releases") return null
+        val owner = parts[0]
+        val repo = parts[1]
+        return when {
+            parts.size >= 5 && parts[3] == "tag" ->
+                "https://api.github.com/repos/$owner/$repo/releases/tags/${parts[4]}"
+            parts.getOrNull(3) == null || parts[3] == "latest" ->
+                "https://api.github.com/repos/$owner/$repo/releases/latest"
+            else -> null
         }
     }
 
@@ -176,7 +194,7 @@ object ArticleExtractor {
                 Request.Builder()
                     .url(current)
                     .header("User-Agent", "Coding-Agent/1.0 (Android; https://github.com/thepotatoninjahost/Coding-Agent)")
-                    .header("Accept", "text/html,application/xhtml+xml")
+                    .header("Accept", acceptFor(current))
                     .get()
                     .build()
             )
@@ -230,7 +248,7 @@ object ArticleExtractor {
                 instanceFollowRedirects = false
                 requestMethod = "GET"
                 setRequestProperty("User-Agent", "Coding-Agent/1.0 (Android; https://github.com/thepotatoninjahost/Coding-Agent)")
-                setRequestProperty("Accept", "text/html,application/xhtml+xml")
+                setRequestProperty("Accept", acceptFor(current))
             }
             val moved = try {
                 onConnection(connection)
@@ -273,7 +291,11 @@ object ArticleExtractor {
         return bytes.toString(Charsets.UTF_8.name())
     }
 
+    private fun acceptFor(url: String): String =
+        if (url.contains("api.github.com")) "application/vnd.github+json" else "text/html,application/xhtml+xml"
+
     private fun parse(html: String, url: String): Extracted {
+        releaseFromJson(html)?.let { return it }
         val title = Regex("<title[^>]*>(.*?)</title>", RegexOption.IGNORE_CASE).find(html)?.groupValues?.get(1)
             ?.replace(Regex("<[^>]+>"), " ")?.trim() ?: url
         val cleaned = html
@@ -287,6 +309,10 @@ object ArticleExtractor {
             .filter { it.length >= 8 }
             .toList()
         var text = cleaned.replace(Regex("<[^>]+>"), " ").replace(Regex("\\s+"), " ").trim()
+        listOf("Skip to content", "Navigation Menu", "Sign in", "Appearance settings").forEach { phrase ->
+            text = text.replace(phrase, " ")
+        }
+        text = text.replace(Regex("\\s+"), " ").trim()
         text = text
             .replace(Regex("\\{\\{[^}]{0,400}\\}\\}"), " ")
             .replace(Regex("\\[\\[(?:File|Image|Category|Help|Wikipedia|Talk|User):[^\\]]+\\]\\]", RegexOption.IGNORE_CASE), " ")
@@ -295,5 +321,18 @@ object ArticleExtractor {
             .trim()
         val words = text.split(Regex("\\s+")).filter { it.isNotBlank() }
         return Extracted(title, text, words.size, codeBlocks)
+    }
+
+    private fun releaseFromJson(body: String): Extracted? {
+        val trimmed = body.trim()
+        if (!trimmed.startsWith("{")) return null
+        val json = runCatching { org.json.JSONObject(trimmed) }.getOrNull() ?: return null
+        val tag = json.optString("tag_name").trim()
+        if (tag.isBlank()) return null
+        val date = json.optString("published_at").take(10)
+        val notes = json.optString("body").replace(Regex("\\s+"), " ").trim().take(1500)
+        val text = "Release $tag was published on $date. $notes".trim()
+        val words = text.split(Regex("\\s+")).filter { it.isNotBlank() }
+        return Extracted(json.optString("name").ifBlank { tag }, text, words.size, emptyList())
     }
 }

@@ -15,3 +15,4 @@
 # KeystoreSecretStore uses Tink AndroidKeysetManager, which looks up providers by reflection.
 -keep class com.google.crypto.tink.** { *; }
 -dontwarn com.google.crypto.tink.**
+-keep class org.mozilla.javascript.** { *; }

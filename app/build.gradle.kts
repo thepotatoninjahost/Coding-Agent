@@ -25,6 +25,7 @@ android {
     }
 
     testOptions {
+        unitTests.isReturnDefaultValues = true
         execution = "ANDROIDX_TEST_ORCHESTRATOR"
         unitTests.all {
             // The OpenRouter runner talks to the network and needs the owner's key.
@@ -103,6 +104,10 @@ dependencies {
     // until that store no longer imports com.google.crypto.tink.
     implementation("com.google.crypto.tink:tink-android:1.23.0")
     implementation("com.squareup.okhttp3:okhttp:5.3.0")
+    // quickjs-kt's published Android libraries all require compileSdk 36.
+    // This project stays on compileSdk 35 (AGP 8.7). JavaScript runs in Rhino.
+    implementation("org.mozilla:rhino:1.7.15")
+    implementation("org.jsoup:jsoup:1.18.3")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")
     debugImplementation("androidx.compose.ui:ui-tooling")

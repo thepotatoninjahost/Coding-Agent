@@ -150,7 +150,7 @@ object ChangeDiff {
      * Human-readable review body. Proposed files are not on disk until dual approval,
      * so this text is the only way the owner can see what they are confirming.
      */
-    fun ownerReviewText(proposal: PendingChangeProposal): String = buildString {
+    fun ownerReviewText(proposal: PendingChangeProposal, run: RunReport? = null): String = buildString {
         appendLine("PROPOSED CHANGES — nothing is written until you confirm twice.")
         appendLine("Read the plain-English explanation before deciding. If it does not clearly explain the change or its risks, reject it and ask the agent to explain.")
         appendLine("Proposal ${shortId(proposal.id)} · ${proposal.changeSet.changes.size} file(s) · ${expiryLabel(proposal.expiresAt)}")
@@ -159,7 +159,7 @@ object ChangeDiff {
         appendCompleteContent(proposal.request)
         appendLine()
         appendLine("IN EVERYDAY WORDS:")
-        appendLine(everydaySummary(proposal))
+        appendLine(everydaySummary(proposal, run))
         appendLine()
         appendLine("THE AGENT'S PLAIN-ENGLISH EXPLANATION (complete):")
         appendCompleteContent(ownerFacingReason(proposal.changeSet.reason))
@@ -203,8 +203,8 @@ object ChangeDiff {
     }
 
     /**
-     * The approval card is what the owner reads. Specialist words are rewritten
-     * into everyday language before that card is shown.
+     * The approval card is what the owner reads. The model's own words stay.
+     * A claim that the program already works is replaced with the real run result.
      */
     fun ownerFacingReason(reason: String): String {
         val hidden = mutableListOf<String>()
@@ -219,21 +219,7 @@ object ChangeDiff {
         text = Regex("""\b[A-Za-z0-9_][A-Za-z0-9_.-]*\.[A-Za-z0-9]{1,8}\b""").replace(text, ::hide)
         val replacements = listOf(
             Regex("(?i)prints the correct result") to "has not been run",
-            Regex("(?i)the correct result") to "a result that has not been checked",
-            Regex("(?i)\\b((?:it|this|everything|the \\w+) (?:is |are )?(?:working|works)|works correctly|tests passed|all tests pass|i ran it|i tested it)\\b") to "has not been run",
-            Regex("(?i)recursive[- ]descent parsers?") to "reader that walks through the text from the top, one piece at a time",
-            Regex("(?i)abstract syntax trees?") to "outline of the program",
-            Regex("(?i)\\bASTs?\\b") to "outline of the program",
-            Regex("(?i)\\btokenizers?\\b") to "splitter that breaks the text into small pieces",
-            Regex("(?i)\\blexers?\\b") to "splitter that breaks the text into small pieces",
-            Regex("(?i)\\bparsers?\\b") to "reader that understands how the text is structured",
-            Regex("(?i)\\bbytecodes?\\b") to "instructions the program can run",
-            Regex("(?i)\\binterpreters?\\b") to "program that runs the text directly",
-            Regex("(?i)\\bcompilers?\\b") to "program that turns written instructions into something that can run",
-            Regex("(?i)\\btokens?\\b") to "small pieces of the text",
-            Regex("(?i)\\bgrammars?\\b") to "rules for how the text may be written",
-            Regex("(?i)semantic analysis") to "check that the text makes sense",
-            Regex("(?i)code generation") to "writing the finished program"
+            Regex("(?i)\\b((?:it|this|everything|the \\w+) (?:is |are )?(?:working|works)|works correctly|tests passed|all tests pass|i ran it|i tested it)\\b") to "has not been run"
         )
         replacements.forEach { (pattern, replacement) ->
             text = text.replace(pattern, replacement)
@@ -244,12 +230,21 @@ object ChangeDiff {
         return text
     }
 
-    fun approvalCard(proposal: PendingChangeProposal, runMatched: Boolean): String {
-        val text = ownerReviewText(proposal)
-        return if (runMatched) text.replace("I have not run this yet.", "I ran the examples and they matched.") else text
+    fun approvalCard(proposal: PendingChangeProposal, runMatched: Boolean): String =
+        approvalCard(proposal, if (runMatched) RunReport("recorded", 0, "", "", false, listOf(CaseResult("example", "ok", "ok", true))) else null)
+
+    fun approvalCard(proposal: PendingChangeProposal, run: RunReport?): String {
+        return ownerReviewText(proposal, run)
     }
 
-    fun everydaySummary(proposal: PendingChangeProposal): String {
+    fun runSentence(run: RunReport?): String = when {
+        run == null || !run.ran -> "I have not run this yet."
+        run.timedOut -> "I started a run and it took too long, so I stopped it."
+        run.passed -> "I ran the examples and they matched."
+        else -> "I ran the examples and they did not match. I did not save the file."
+    }
+
+    fun everydaySummary(proposal: PendingChangeProposal, run: RunReport? = null): String {
         val files = proposal.changeSet.changes.map { it.path }.distinct()
         val fileWords = if (files.isEmpty()) "the files listed below" else files.joinToString(", ")
         val action = when {
@@ -258,8 +253,8 @@ object ChangeDiff {
             proposal.changeSet.changes.any { it.operation == ChangeOperation.REMOVE } -> "I prepared a change that removes something"
             else -> "I prepared a change"
         }
-        val ran = proposal.changeSet.reason.contains("RUN_EVIDENCE")
-        val checked = if (ran) "I ran the examples and they matched." else "I have not run this yet."
+        val fromReason = proposal.changeSet.reason.contains("RUN_EVIDENCE")
+        val checked = if (run != null) runSentence(run) else if (fromReason) "I ran the examples and they matched." else "I have not run this yet."
         return "$action: $fileWords. This is what you asked for. $checked Nothing is saved until you say yes on this phone."
     }
 

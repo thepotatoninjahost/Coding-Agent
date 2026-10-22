@@ -35,16 +35,20 @@ class RemoteHttpGateway(
     override fun stream(request: ModelRequest, onDelta: (String) -> Unit): ModelResponse {
         val generation = cancellationGeneration.get()
         if (isCancelled(generation)) return ModelResponse.Failure("Cancelled")
-        val first = streamOnce(request, onDelta, generation)
-        if (isCancelled(generation)) return ModelResponse.Failure("Cancelled")
-        if (first is ModelResponse.Failure && isEmptyContentFailure(first.message) && request.tools.isNotEmpty()) {
-            return streamOnce(request.copy(tools = emptyList()), onDelta, generation)
+        return continueCutOff(request, generation) { current ->
+            val first = streamOnce(current, onDelta, generation)
+            if (isCancelled(generation)) return@continueCutOff ModelResponse.Failure("Cancelled")
+            if (first is ModelResponse.Failure && isEmptyContentFailure(first.message) && current.tools.isNotEmpty()) {
+                streamOnce(current.copy(tools = emptyList()), onDelta, generation)
+            } else {
+                first
+            }
         }
-        return first
     }
 
     private fun streamOnce(request: ModelRequest, onDelta: (String) -> Unit, generation: Long): ModelResponse {
         if (isCancelled(generation)) return ModelResponse.Failure("Cancelled")
+        messageOrderFailure(request)?.let { return it }
         val connection = try {
             openConnection(generation)
         } catch (error: IOException) {
@@ -151,9 +155,15 @@ class RemoteHttpGateway(
         if (malformedPayload) {
             return ModelResponse.Failure("Model stream contained a malformed event; partial content was rejected.")
         }
-        if (finishReason.isTruncatedFinishReason()) return truncatedResponseFailure(finishReason!!)
+        if (finishReason.isTruncatedFinishReason()) {
+            return if (sawToolCall) toolCutOff() else textCutOff(mergedContent.toString())
+        }
         if (!sawDone && finishReason.isNullOrBlank()) {
-            return ModelResponse.Failure("Model stream ended without a completion marker; partial content was rejected.")
+            return if (mergedContent.isEmpty() && !sawToolCall) {
+                ModelResponse.Failure("The reply stopped before it finished. output-truncated")
+            } else {
+                textCutOff(mergedContent.toString())
+            }
         }
         if (sawMultipleToolCalls) {
             if (mergedContent.isNotEmpty()) mergedContent.append('\n')
@@ -178,16 +188,20 @@ class RemoteHttpGateway(
     override fun complete(request: ModelRequest): ModelResponse {
         val generation = cancellationGeneration.get()
         if (isCancelled(generation)) return ModelResponse.Failure("Cancelled")
-        val first = completeOnce(request, generation)
-        if (isCancelled(generation)) return ModelResponse.Failure("Cancelled")
-        if (first is ModelResponse.Failure && isEmptyContentFailure(first.message) && request.tools.isNotEmpty()) {
-            return completeOnce(request.copy(tools = emptyList()), generation)
+        return continueCutOff(request, generation) { current ->
+            val first = completeOnce(current, generation)
+            if (isCancelled(generation)) return@continueCutOff ModelResponse.Failure("Cancelled")
+            if (first is ModelResponse.Failure && isEmptyContentFailure(first.message) && current.tools.isNotEmpty()) {
+                completeOnce(current.copy(tools = emptyList()), generation)
+            } else {
+                first
+            }
         }
-        return first
     }
 
     private fun completeOnce(request: ModelRequest, generation: Long): ModelResponse {
         if (isCancelled(generation)) return ModelResponse.Failure("Cancelled")
+        messageOrderFailure(request)?.let { return it }
         val connection = try {
             openConnection(generation)
         } catch (error: IOException) {
@@ -223,9 +237,13 @@ class RemoteHttpGateway(
             ?: return JsonModelResponseParser().parse(trimmed)
         noteServedModel(json.optString("model"))
         val choice = json.optJSONArray("choices")?.optJSONObject(0)
-        val finishReason = choice?.optString("finish_reason")
-        if (finishReason.isTruncatedFinishReason()) return truncatedResponseFailure(finishReason!!)
         val message = choice?.optJSONObject("message") ?: choice?.optJSONObject("delta")
+        val finishReason = choice?.optString("finish_reason")
+        if (finishReason.isTruncatedFinishReason()) {
+            val partial = message?.let { extractMessageText(it) }.orEmpty()
+            val hasTool = message?.optJSONArray("tool_calls") != null || message?.optJSONObject("function_call") != null
+            return if (hasTool) toolCutOff() else textCutOff(partial)
+        }
         if (message != null) return responseFromChatMessage(message)
         val textField = choice?.optString("text").orEmpty()
         if (textField.isNotBlank()) return JsonModelResponseParser().parse(textField)
@@ -237,11 +255,50 @@ class RemoteHttpGateway(
         return normalized in setOf("length", "max_tokens", "max_output_tokens", "token_limit")
     }
 
-    private fun truncatedResponseFailure(reason: String): ModelResponse.Failure =
+    private fun textCutOff(partial: String): ModelResponse.Failure =
+        ModelResponse.Failure("CUTOFF_PARTIAL:\n$partial")
+
+    private fun toolCutOff(): ModelResponse.Failure =
         ModelResponse.Failure(
-            "Model response ended at a provider token limit (finish_reason=$reason); partial content was rejected. " +
-                "Check the configured model's output/context limits or split the input into smaller parts."
+            "Your previous response reached the output limit before the action was complete. " +
+                "Send one smaller action. output-truncated"
         )
+
+    private fun continueCutOff(
+        request: ModelRequest,
+        generation: Long,
+        once: (ModelRequest) -> ModelResponse
+    ): ModelResponse {
+        var current = request
+        var stitched = ""
+        var continuations = 0
+        while (true) {
+            if (isCancelled(generation)) return ModelResponse.Failure("Cancelled")
+            val response = once(current)
+            if (response !is ModelResponse.Failure || !response.message.startsWith("CUTOFF_PARTIAL:")) {
+                if (stitched.isNotEmpty() && response is ModelResponse.Text) {
+                    return ModelResponse.Text(stitched + response.content)
+                }
+                if (response is ModelResponse.Failure && response.message.startsWith("CUTOFF_PARTIAL:")) {
+                    return ModelResponse.Failure("The reply was cut off before it finished. output-truncated")
+                }
+                return response
+            }
+            ModelCaps.noteCutOff(modelForRequest())
+            val partial = response.message.removePrefix("CUTOFF_PARTIAL:\n")
+            stitched += partial
+            continuations++
+            if (continuations >= 3) {
+                return ModelResponse.Failure("The reply was cut off before it finished. output-truncated")
+            }
+            current = request.copy(
+                transcript = request.transcript + listOf(
+                    ModelMessage("assistant", stitched),
+                    ModelMessage("user", "Continue exactly where you stopped. Do not repeat.")
+                )
+            )
+        }
+    }
 
     private fun isEmptyContentFailure(message: String): Boolean {
         val lower = message.lowercase()
@@ -295,53 +352,29 @@ class RemoteHttpGateway(
         }
     }
 
+    private fun messageOrderFailure(request: ModelRequest): ModelResponse.Failure? {
+        val problem = MessageAssembler.problem(MessageAssembler.messages(request)) ?: return null
+        return ModelResponse.Failure("I could not send that step. $problem")
+    }
+
     private fun requestBody(request: ModelRequest): JSONObject {
-        val messages = JSONArray().put(JSONObject().put("role", "system").put("content", request.system))
-        // The owner's turn comes before any tool call. A function-call turn has to follow
-        // a user turn, or a function-response turn. Putting the user text last made the
-        // first tool call follow the system text, and Gemma rejected that.
-        messages.put(JSONObject().put("role", "user").put("content", request.user))
-        request.transcript.forEach { message ->
-            val serialized = JSONObject().put("role", message.role)
-            // Same fallback for both branches below: an assistant tool_calls[].id and the
-            // following tool message's tool_call_id MUST be byte-identical or a strict
-            // OpenAI-compatible provider rejects the request on the very next turn. The old
-            // code derived them independently ("call_$toolName" here, "" on the tool message),
-            // which silently broke every turn after the first tool call whenever
-            // message.toolCallId was null (recovered XML calls, providers that omit ids, etc.).
-            // A tool-role ModelMessage never carries toolName, so the fallback can't be
-            // reconstructed per-message — it must be a fixed sentinel shared by both sides.
-            val resolvedToolCallId = message.toolCallId?.takeIf { it.isNotBlank() } ?: "call_unmatched"
-            if (message.role == "assistant" && message.toolName != null) {
-                serialized.put("content", JSONObject.NULL)
-                serialized.put(
-                    "tool_calls",
-                    JSONArray().put(
-                        JSONObject()
-                            .put("id", resolvedToolCallId)
-                            .put("type", "function")
-                            .put(
-                                "function",
-                                JSONObject().put("name", message.toolName).put("arguments", message.toolArguments ?: "{}")
-                            )
-                    )
-                )
-            } else {
-                serialized.put("content", message.content)
-                if (message.role == "tool") serialized.put("tool_call_id", resolvedToolCallId)
-            }
-            messages.put(serialized)
+        val messages = MessageAssembler.messages(request)
+        val writing = OutputBudget.writesFile(request.tools.map { it.name })
+        val promptTokens = (request.system.length + request.user.length + request.transcript.sumOf { it.content.length }) / 4
+        var maxTokens = OutputBudget.forRequest(modelForRequest(), writing, promptTokens = promptTokens)
+        val left = ModelCaps.tokensLeft(modelForRequest())
+        if (left != null && left in 1 until maxTokens) {
+            maxTokens = left.coerceAtLeast(if (writing) 1_500 else 256)
         }
         val body = JSONObject()
             .put("model", modelForRequest())
             .put("messages", messages)
             .put("temperature", 0.1)
-            .put("max_tokens", OutputBudget.forModel(modelForRequest()))
+            .put("max_tokens", maxTokens)
             .put("stream", false)
         if (request.tools.isNotEmpty()) {
             // The agent executes one tool per turn. Prevent OpenAI-compatible models
             // from returning parallel calls that this single-call protocol would drop.
-            body.put("parallel_tool_calls", false)
             body.put("tool_choice", "auto")
             body.put("tools", JSONArray().apply {
                 request.tools.forEach { tool ->
@@ -450,12 +483,24 @@ class RemoteHttpGateway(
 
     private fun notifyQuota(connection: HttpURLConnection, code: Int) {
         val listener = onQuota ?: return
-        val remaining = runCatching { connection.getHeaderField("X-RateLimit-Remaining")?.trim()?.toIntOrNull() }.getOrNull()
-        val reset = QuotaHeaders.parseReset(
-            runCatching { connection.getHeaderField("X-RateLimit-Reset") }.getOrNull(),
-            System.currentTimeMillis()
-        )
+        val remaining = headerInt(connection, "X-RateLimit-Remaining")
+            ?: headerInt(connection, "x-ratelimit-remaining-requests")
+        val tokenRemaining = headerInt(connection, "x-ratelimit-remaining-tokens")
+        val now = System.currentTimeMillis()
+        val reset = QuotaHeaders.parseReset(connection.getHeaderField("X-RateLimit-Reset"), now)
+            ?: QuotaHeaders.parseReset(connection.getHeaderField("x-ratelimit-reset-tokens"), now)
+            ?: retryAfterMillis(connection, now)
+        ModelCaps.noteTokens(modelForRequest(), tokenRemaining, reset)
         listener(code, remaining, reset)
+    }
+
+    private fun headerInt(connection: HttpURLConnection, name: String): Int? =
+        runCatching { connection.getHeaderField(name)?.trim()?.substringBefore('.')?.toIntOrNull() }.getOrNull()
+
+    private fun retryAfterMillis(connection: HttpURLConnection, now: Long): Long? {
+        val raw = connection.getHeaderField("Retry-After")?.trim().orEmpty()
+        val seconds = raw.toLongOrNull() ?: return null
+        return now + seconds * 1000L
     }
 
     private fun quotaSuffix(connection: HttpURLConnection, body: String): String {

@@ -199,9 +199,10 @@ class ChangeDiffTest {
         assertTrue(review.contains("IN EVERYDAY WORDS:"))
         assertTrue(review.contains("Nothing is saved until you say yes"))
         assertTrue(review.contains("src/Compiler.kt"))
-        assertFalse(review.contains("recursive-descent"))
-        assertFalse(review.contains("lexer"))
-        assertFalse(Regex("\\bAST\\b").containsMatchIn(review))
+        assertTrue(review.contains("I have not run this yet."))
+        assertTrue(review.contains("recursive-descent"))
+        assertTrue(review.contains("lexer"))
+        assertTrue(Regex("\\bAST\\b").containsMatchIn(review))
     }
 
     @Test

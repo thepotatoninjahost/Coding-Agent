@@ -239,6 +239,8 @@ object ModelFailure {
             }
             isEmpty(message) ->
                 "The helper sent an empty answer. I try again automatically. If this keeps happening, tap Setup and try a different helper."
+            "output-truncated" in lower || "cutoff_partial" in lower || "finish_reason" in lower ->
+                "The reply was cut off before it finished."
             "401" in lower || "unauthorized" in lower || "invalid api key" in lower ||
                 "missing authentication" in lower || "no auth credentials" in lower ->
                 "The secret password was rejected. Tap Setup and paste it again as one line. " +

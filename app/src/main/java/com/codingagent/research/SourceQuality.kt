@@ -152,14 +152,14 @@ object SourceQuality {
         return score
     }
 
-    fun isAcceptable(url: String, title: String, excerpt: String): Boolean {
+    fun isAcceptable(url: String, title: String, excerpt: String, query: String = ""): Boolean {
         val u = url.lowercase()
         val t = title.lowercase()
         val e = excerpt.lowercase()
         if (u.contains("developer.mozilla.org")) {
-            val hay = "$u $t $e"
-            val webTopic = listOf("javascript", "css", "html", "dom", "firefox", "browser")
-            if (webTopic.none { hay.contains(it) }) return false
+            val asked = query.lowercase()
+            val webTopic = listOf("javascript", "css", "html", "dom", "browser")
+            if (webTopic.none { asked.contains(it) }) return false
         }
         if (u.contains("wikipedia.org")) {
             if (t.contains("talk") || u.contains("talk:") || u.contains("disambiguation")) return false

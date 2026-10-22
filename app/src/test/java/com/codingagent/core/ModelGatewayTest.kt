@@ -40,7 +40,8 @@ class ModelGatewayTest {
         })
         val result = gateway.complete(ModelRequest("system", "question", emptyList()))
         assertTrue(result is ModelResponse.Failure)
-        assertTrue((result as ModelResponse.Failure).message.contains("partial content was rejected"))
+        assertTrue((result as ModelResponse.Failure).message.contains("cut off"))
+        assertFalse((result as ModelResponse.Failure).message.contains("finish_reason"))
     }
 
     @Test
@@ -53,7 +54,8 @@ data: [DONE]
         })
         val result = gateway.stream(ModelRequest("system", "question", emptyList())) {}
         assertTrue(result is ModelResponse.Failure)
-        assertTrue((result as ModelResponse.Failure).message.contains("partial content was rejected"))
+        assertTrue((result as ModelResponse.Failure).message.contains("cut off"))
+        assertFalse((result as ModelResponse.Failure).message.contains("finish_reason"))
     }
 
     @Test

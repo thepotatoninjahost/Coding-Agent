@@ -21,9 +21,14 @@ import com.codingagent.model.ModelConnectionProbe
 import com.codingagent.model.ModelDownloadProgress
 import com.codingagent.model.ModelGateway
 import com.codingagent.model.ModelRanking
+import com.codingagent.model.ModelRequest
+import com.codingagent.model.ModelResponse
 import com.codingagent.model.ModelSettings
+import com.codingagent.model.ModelToolDefinition
 import com.codingagent.model.ProbeResult
+import com.codingagent.model.ProviderCatalog
 import com.codingagent.model.ProviderRotatingGateway
+import com.codingagent.model.RemoteHttpGateway
 import com.codingagent.github.GitHubChangeFiles
 import com.codingagent.github.GitHubFile
 import com.codingagent.github.GitHubPushClient
@@ -203,6 +208,77 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
     fun updateDraftExtraHeaders(value: String) = _ui.update { it.copy(draftExtraHeaders = value) }
     fun updateDraftSystemPrompt(value: String) = _ui.update { it.copy(draftSystemPrompt = value) }
     fun setShowModelSettings(show: Boolean) = _ui.update { it.copy(showModelSettings = show) }
+
+    fun testModels() {
+        val s = _ui.value
+        viewModelScope.launch(Dispatchers.IO) {
+            val candidate = ModelSettings(
+                backend = ModelBackend.REMOTE,
+                baseUrl = s.draftBaseUrl,
+                apiKey = s.draftApiKey,
+                modelName = s.draftModelName,
+                systemPrompt = s.draftSystemPrompt,
+                extraHeaders = s.draftExtraHeaders,
+                onboarded = true,
+                groqApiKey = s.draftGroqApiKey,
+                geminiApiKey = s.draftGeminiApiKey,
+                mistralApiKey = s.draftMistralApiKey,
+                cerebrasApiKey = s.draftCerebrasApiKey,
+                sambanovaApiKey = s.draftSambanovaApiKey,
+                requestyApiKey = s.draftRequestyApiKey,
+                aimlApiKey = s.draftAimlApiKey,
+                cloudflareApiToken = s.draftCloudflareApiToken,
+                cloudflareAccountId = s.draftCloudflareAccountId
+            )
+            val endpoints = ProviderCatalog.endpoints(candidate).take(8)
+            if (endpoints.isEmpty()) {
+                withContext(Dispatchers.Main) {
+                    _ui.update { it.copy(probeMessage = "Add a password first, then test the helpers.") }
+                }
+                return@launch
+            }
+            val tool = ModelToolDefinition(
+                "ping",
+                "Reply with this tool and no other text.",
+                """{"type":"object","properties":{}}"""
+            )
+            val lines = endpoints.map { endpoint ->
+                val gateway = RemoteHttpGateway(
+                    endpoint.baseUrl,
+                    endpoint.apiKey,
+                    endpoint.modelId,
+                    timeoutMillis = 20_000
+                )
+                val response = runCatching {
+                    gateway.complete(
+                        ModelRequest(
+                            system = "Call the ping tool.",
+                            user = "ping",
+                            tools = listOf(tool)
+                        )
+                    )
+                }.getOrElse { error ->
+                    ModelResponse.Failure(error.message ?: "The helper did not answer.")
+                }
+                val outcome = when (response) {
+                    is ModelResponse.ToolCall -> "answered"
+                    is ModelResponse.Text -> if (response.content.isNotBlank()) "answered in words" else "sent an empty reply"
+                    is ModelResponse.Failure -> {
+                        val plain = ModelFailure.humanize(response.message)
+                        if (plain.contains("Model HTTP", ignoreCase = true) || plain.trim().startsWith("{")) {
+                            "did not answer"
+                        } else {
+                            plain
+                        }
+                    }
+                }
+                "${endpoint.plainName}: $outcome"
+            }
+            withContext(Dispatchers.Main) {
+                _ui.update { it.copy(probeMessage = lines.joinToString("\n")) }
+            }
+        }
+    }
 
     fun probeModelConnection() {
         val s = _ui.value

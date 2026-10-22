@@ -10,8 +10,13 @@ import com.codingagent.research.DeepResearchProvider
 import com.codingagent.research.ResearchBriefBuilder
 import com.codingagent.research.ResearchMode
 import com.codingagent.research.ResearchModeDetector
+import com.codingagent.research.StructuredSources
 import com.codingagent.workspace.ChangeDiff
+import com.codingagent.workspace.DeviceCodeRunner
 import com.codingagent.workspace.MutationCoordinator
+import com.codingagent.workspace.ProgramRequest
+import com.codingagent.workspace.RunReport
+import com.codingagent.workspace.SearchReplace
 import com.codingagent.workspace.MutationProposeResult
 import com.codingagent.workspace.ProjectFileService
 import com.codingagent.workspace.ProjectWorkspace
@@ -28,6 +33,7 @@ class AgentToolDispatch(
     private val mutations: MutationCoordinator,
     private val terminal: TerminalSession,
     private val maxOutputCharacters: Int,
+    private val sourceConnect: (String) -> java.net.HttpURLConnection = { java.net.URL(it).openConnection() as java.net.HttpURLConnection },
     private val onResearchProgress: (String) -> Unit
 ) {
     @Volatile
@@ -47,6 +53,21 @@ class AgentToolDispatch(
 
     fun presentEvidence(label: String, completeEvidence: String): String =
         resultPager.present(label, completeEvidence)
+
+    private var lastRunReport: RunReport? = null
+
+    fun lastRun(): RunReport? = lastRunReport
+
+    fun applySearchBlocks(request: String, blocks: List<SearchReplace.Block>): String {
+        val notes = blocks.map { block ->
+            val base = stagedOrSaved(block.path)
+            when (val applied = SearchReplace.apply(base, block.search, block.replace)) {
+                is SearchReplace.ApplyResult.Failed -> "ERROR: ${block.path}: ${applied.reason}"
+                is SearchReplace.ApplyResult.Applied -> stageContent(request, block.path, applied.content)
+            }
+        }
+        return notes.joinToString("\n")
+    }
 
     fun execute(name: String, rawArguments: String): String {
         return try {
@@ -75,7 +96,11 @@ class AgentToolDispatch(
                 "search_user_memory" -> searchUserMemory(arguments)
                 "replace_text" -> replaceText(arguments)
                 "create_file" -> createFile(arguments)
+                "edit" -> editText(arguments)
+                "append_chunk" -> appendChunk(arguments)
                 "review_examples" -> reviewExamples(arguments)
+                "run_program" -> runProgram(arguments)
+                "submit" -> "SUBMIT status=${arguments.optString("status", "done")}"
                 "run_command" -> runCommand(arguments)
                 "verify" -> {
                     val report = workspace.verify()
@@ -189,6 +214,7 @@ class AgentToolDispatch(
 
     private fun researchWeb(arguments: JSONObject): String {
         val query = arguments.getString("query")
+        StructuredSources.answer(query, sourceConnect)?.let { return it }
         val mode = runCatching {
             ResearchMode.valueOf(arguments.optString("mode", "BROAD").uppercase())
         }.getOrDefault(ResearchModeDetector.detect(query))
@@ -237,11 +263,11 @@ class AgentToolDispatch(
     private fun replaceText(arguments: JSONObject): String {
         val path = arguments.getString("path")
         val reason = arguments.optString("reason").trim()
-        if (!ChangeDiff.hasCompletePlainEnglishExplanation(reason)) {
-            return "ERROR: I cannot stage this change yet. Explain it in plain English under all six headings: What I want to do, Why, What will change, Possible effects, Risks, and What your approval means."
-        }
         val oldText = arguments.getString("oldText")
         val newText = arguments.getString("newText")
+        if (oldText.length > ARG_LIMIT || newText.length > ARG_LIMIT) {
+            return "ERROR: That edit is too big for one call. Split it into smaller pieces of about $ARG_LIMIT characters."
+        }
         val existing = runCatching { files.read(path).content }.getOrNull()
         val proposed = if (existing != null && oldText.isNotEmpty() && existing.contains(oldText)) {
             existing.replace(oldText, newText)
@@ -274,10 +300,10 @@ class AgentToolDispatch(
     private fun createFile(arguments: JSONObject): String {
         val path = arguments.getString("path")
         val reason = arguments.optString("reason").trim()
-        if (!ChangeDiff.hasCompletePlainEnglishExplanation(reason)) {
-            return "ERROR: I cannot stage this change yet. Explain it in plain English under all six headings: What I want to do, Why, What will change, Possible effects, Risks, and What your approval means."
-        }
         val content = arguments.getString("content")
+        if (content.lines().size > 150) {
+            return "ERROR: That file is too long for one write. Create the first part, then use append_chunk for the rest."
+        }
         StagedSourceCheck.problem(path, content)?.let { return "ERROR: $it" }
         return when (val result = mutations.propose(
             request = requestContext.ifBlank { "create_file $path" },
@@ -304,31 +330,108 @@ class AgentToolDispatch(
         val path = arguments.optString("path").trim()
         val examples = arguments.optString("examples")
         val cases = examples.lines().map { it.trim() }.filter { it.contains("=>") }.map { line ->
-            val input = line.substringBefore("=>").trim().replace("||", "\n")
+            val rawInput = line.substringBefore("=>").trim()
+            val input = rawInput.removePrefix("STDIN:").removePrefix("ARGS:").trim().replace("||", "\n")
             val expected = line.substringAfter("=>").trim().replace("||", "\n")
-            input to expected
+            val asArgs = rawInput.startsWith("ARGS:")
+            Triple(input, expected, asArgs)
         }
         if (cases.size < 2) {
-            return "ERROR: Give at least two example inputs, written as INPUT => EXPECTED. If the program reads text, one example must be more than one line. Use || for a newline."
+            return "ERROR: Give at least two examples, written as INPUT => EXPECTED. Use || for a newline. A bad input can expect the word error."
         }
         val content = stagedOrSaved(path)
-        val readsText = content?.lowercase()?.let { body ->
-            "readlines" in body || "splitlines" in body || "sys.stdin" in body || "for line" in body || "input(" in body
-        } == true
-        if (readsText && cases.none { it.first.contains("\n") }) {
-            return "ERROR: This program reads text. Include one example that is more than one line. Use || between the lines."
+        if (content != null && (path.endsWith(".js") || path.endsWith(".py") || content.contains("console.log"))) {
+            val report = DeviceCodeRunner.cases(
+                code = content,
+                examples = cases.map { it.first to it.second },
+                argsFor = { input ->
+                    val match = cases.firstOrNull { it.first == input }
+                    if (match?.third == true) input.lines() else emptyList()
+                },
+                stdinFor = { input ->
+                    val match = cases.firstOrNull { it.first == input }
+                    if (match?.third == true) "" else input
+                }
+            )
+            lastRunReport = report
+            val matched = report.passed
+            return "CHECKED examples=${cases.size} ran=true matched=$matched\n" +
+                ChangeDiff.runSentence(report) + "\n" + report.stdout
         }
-        val ran = if (path.endsWith(".py") && content != null) runPython(content, cases) else null
-        return when {
-            ran == null ->
-                "CHECKED examples=${cases.size} ran=false matched=false\n" +
-                    "I could not run this file here. A review of ${cases.size} examples was recorded. Do not say it prints the correct result."
-            ran.all { it } ->
-                "CHECKED examples=${cases.size} ran=true matched=true\n" +
-                    "RUN_EVIDENCE: the examples matched."
-            else ->
-                "CHECKED examples=${cases.size} ran=true matched=false\n" +
-                    "The run did not match the examples. Fix the file before finishing. Do not say it prints the correct result."
+        lastRunReport = RunReport("none", 0, "", "This phone did not run this file.", false)
+        return "CHECKED examples=${cases.size} ran=false matched=false\n" +
+            "I could not run this file here. A review of ${cases.size} examples was recorded. Do not say it prints the correct result."
+    }
+
+    private fun editText(arguments: JSONObject): String {
+        val path = arguments.getString("path")
+        val oldText = arguments.optString("old_text", arguments.optString("oldText"))
+        val newText = arguments.optString("new_text", arguments.optString("newText"))
+        if (oldText.length > ARG_LIMIT || newText.length > ARG_LIMIT) {
+            return "ERROR: That edit is too big for one call. Use several smaller edits."
+        }
+        val base = stagedOrSaved(path)
+        return when (val applied = SearchReplace.apply(base, oldText, newText)) {
+            is SearchReplace.ApplyResult.Failed -> "ERROR: ${applied.reason}"
+            is SearchReplace.ApplyResult.Applied -> stageContent(requestContext, path, applied.content)
+        }
+    }
+
+    private fun appendChunk(arguments: JSONObject): String {
+        val path = arguments.getString("path")
+        val text = arguments.optString("text", arguments.optString("content"))
+        if (text.length > ARG_LIMIT) return "ERROR: That piece is too big. Send a shorter piece."
+        val base = stagedOrSaved(path).orEmpty()
+        return when (val applied = SearchReplace.apply(base, "", text)) {
+            is SearchReplace.ApplyResult.Failed -> "ERROR: ${applied.reason}"
+            is SearchReplace.ApplyResult.Applied -> stageContent(requestContext, path, applied.content)
+        }
+    }
+
+    private fun runProgram(arguments: JSONObject): String {
+        val path = arguments.optString("path", arguments.optString("file")).trim()
+        val inline = arguments.optString("code")
+        val code = inline.ifBlank { path.let { stagedOrSaved(it) }.orEmpty() }
+        if (code.isBlank()) return "ERROR: There is no program to run."
+        val stdin = arguments.optString("stdin")
+        val args = arguments.optJSONArray("args")?.let { array ->
+            (0 until array.length()).map { array.optString(it) }
+        }.orEmpty()
+        val expected = arguments.optString("expected")
+        val report = if (expected.isNotBlank()) {
+            DeviceCodeRunner.cases(code, listOf(stdin.ifBlank { args.joinToString("\n") } to expected))
+        } else {
+            DeviceCodeRunner.run(ProgramRequest(arguments.optString("language", "javascript"), code, args, stdin))
+        }
+        lastRunReport = report
+        val body = if (report.stdout.isBlank() && report.exitCode == 0 && !report.timedOut) {
+            "The program ran and produced no output."
+        } else {
+            report.stdout
+        }
+        return "exit=${report.exitCode} timed_out=${report.timedOut} runner=${report.runner}\n$body\n${report.stderr}\n${ChangeDiff.runSentence(report)}"
+    }
+
+    private fun stageContent(request: String, path: String, content: String): String {
+        StagedSourceCheck.problem(path, content)?.let { return "ERROR: $it" }
+        val pending = mutations.pending().firstOrNull()
+        if (pending != null) {
+            val sameFile = pending.changeSet.changes.any { it.path.trim().trimStart('/') == path.trim().trimStart('/') }
+            if (!sameFile) {
+                return "ERROR: Another change is waiting for a yes or a no. Finish that one before starting a different file."
+            }
+            mutations.reject(pending.id)
+        }
+        val onDisk = runCatching { files.read(path).content }.getOrNull()
+        val operation = if (onDisk == null) {
+            TaskOperation(OperationKind.CREATE_FILE, path, text = content)
+        } else {
+            TaskOperation(OperationKind.REPLACE, path, onDisk, content)
+        }
+        return when (val result = mutations.propose(request.ifBlank { "edit $path" }, listOf(operation), request.ifBlank { "edit $path" })) {
+            is MutationProposeResult.Proposed ->
+                "PROPOSAL_READY id=${result.proposal.id} path=$path changes=${result.proposal.changeSet.changes.size} approval_required=2"
+            is MutationProposeResult.Rejected -> "ERROR: edit proposal rejected — ${result.reason}"
         }
     }
 
@@ -388,5 +491,6 @@ class AgentToolDispatch(
 
     private companion object {
         const val KNOWLEDGE_RESULT_CAP = 30
+        const val ARG_LIMIT = 6_000
     }
 }

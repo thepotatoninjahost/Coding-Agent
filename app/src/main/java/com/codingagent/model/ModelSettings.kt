@@ -458,7 +458,7 @@ object ModelConnectionProbe {
                     if (content.isEmpty()) {
                         ProbeResult.Failed("Model returned no usable message content")
                     } else {
-                        ProbeResult.Ok("Connected. A helper answered.")
+                        ProbeResult.Ok("Connected. A helper answered." + OpenRouterDailyBudget.sentence().orEmpty())
                     }
                 }
                 is ModelResponse.ToolCall -> ProbeResult.Ok("Connected. A helper answered.")

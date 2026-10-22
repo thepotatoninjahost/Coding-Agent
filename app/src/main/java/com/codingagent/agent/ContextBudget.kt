@@ -1,7 +1,9 @@
 package com.codingagent.agent
 
 import com.codingagent.model.AgentModelProtocol
+import com.codingagent.model.ModelCaps
 import com.codingagent.model.ModelMessage
+import com.codingagent.model.OutputBudget
 
 /**
  * ONE JOB: Keep one model request small enough for a free helper's per-minute limit.
@@ -18,9 +20,8 @@ object ContextBudget {
         If you must use a technical word, explain it in the same sentence.
 
         Make exactly one tool call per turn and include a purpose field. Read real files. Never invent paths, file contents, or test results.
-        Before staging a change, use these exact headings in order: "What I want to do:", "Why:", "What will change:", "Possible effects:", "Risks:", and "What your approval means:".
         Code changes (create_file, replace_text) only STAGE a proposal. The owner must approve twice. Never claim a change was applied until then.
-        Before you say new code works, check that the file is complete and not cut off. Write the code, then run it if a runner exists, or review it against at least two example inputs. If the program reads text, one example must be more than one line. Fix it before you finish. If you did not run it, say you have not run it. Do not say the result is correct unless a run showed that.
+        When the phone must run the program, write JavaScript. Run it after you write it. If the run fails, fix it. If you did not run it, say you have not run it. Do not say the result is correct unless a run showed that.
         Verification honesty: a static unfinished-work marker scan is not a substitute for a real run. Never claim it passed when it was not run.
         Do not invoke git, find, gradle, or project-local executables. Use the project tools for files.
         There is no arbitrary two-or-three-result stopping limit. Do not stop at a plan. Continue until the goal is met, you are blocked, or the owner must decide.
@@ -50,8 +51,14 @@ object ContextBudget {
         transcript: List<ModelMessage>,
         targetTokens: Int = TARGET_TOKENS
     ): Fitted {
-        var messages = transcript.map { message ->
-            if (message.content.length > 700) message.copy(content = shrinkBlock(message.content, 500)) else message
+        var messages = transcript.mapIndexed { index, message ->
+            val age = transcript.size - index
+            when {
+                message.role == "tool" && age > 6 ->
+                    message.copy(content = "[old output cleared; re-run if needed]")
+                message.content.length > 10_000 -> message.copy(content = headTail(message.content))
+                else -> message
+            }
         }
         var prompt = shortenRules(user)
         var guard = 0
@@ -101,6 +108,24 @@ object ContextBudget {
             Before you finish a new file, check that it is not cut off, then review at least two examples. If it reads text, include more than one line. Fix it if the check fails.
         """.trimIndent() + "\n\n"
         return user.substring(0, start) + short + user.substring(end)
+    }
+
+    fun inputTarget(): Int = ModelCaps.inputBudget("", OutputBudget.forModel(""))
+
+    fun condense(messages: List<ModelMessage>): List<ModelMessage> {
+        if (messages.size <= 4) return messages
+        val note = ModelMessage(
+            "user",
+            "Earlier steps were shortened so the helper can keep going. The recent steps are still here. Re-run a tool if you need an old result."
+        )
+        return messages.take(2) + note + messages.takeLast(messages.size / 2)
+    }
+
+    fun headTail(text: String, limit: Int = 10_000): String {
+        if (text.length <= limit) return text
+        val keep = limit / 2
+        val elided = text.length - (keep * 2)
+        return text.take(keep) + "\n[$elided characters elided. Ask for a narrower part if you need the middle.]\n" + text.takeLast(keep)
     }
 
     private fun shrinkBlock(text: String, maxChars: Int): String {

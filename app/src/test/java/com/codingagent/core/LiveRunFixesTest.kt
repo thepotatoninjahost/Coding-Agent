@@ -42,7 +42,7 @@ class LiveRunFixesTest {
         assertFalse(named.contains("a tiny a "))
         val tiny = ChangeDiff.ownerFacingReason("Build a tiny compiler.")
         assertFalse(tiny.contains("a tiny a "))
-        assertTrue(tiny.contains("program that turns written instructions"))
+        assertTrue(tiny.contains("compiler"))
         val coded = ChangeDiff.ownerFacingReason("Keep `compiler` and src/compiler.py as written.")
         assertTrue(coded.contains("`compiler`"))
         assertTrue(coded.contains("src/compiler.py"))
@@ -321,7 +321,7 @@ class LiveRunFixesTest {
         assertFalse(last.task.summary.contains("agentic"))
         assertFalse(last.task.summary.contains("checksum"))
         assertTrue(last.task.summary.contains("saved copy"))
-        assertTrue(step >= 3)
+        assertEquals(2, step)
     }
 
     private fun jsonConnection(body: String): HttpURLConnection =

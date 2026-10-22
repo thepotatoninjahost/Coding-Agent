@@ -419,6 +419,9 @@ private fun CodingAgentApp(
                         TextButton(onClick = { vm.probeModelConnection() }, modifier = Modifier.fillMaxWidth()) {
                             Text("Try connection", color = FluoroOrange)
                         }
+                        TextButton(onClick = { vm.testModels() }, modifier = Modifier.fillMaxWidth()) {
+                            Text("Test models", color = FluoroOrange)
+                        }
                         Row(Modifier.fillMaxWidth()) {
                             TextButton(onClick = { vm.setShowModelSettings(false) }, modifier = Modifier.weight(1f)) {
                                 Text("Cancel", color = SoftGreen)

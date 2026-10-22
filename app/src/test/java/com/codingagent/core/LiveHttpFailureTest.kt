@@ -77,15 +77,14 @@ class LiveHttpFailureTest {
             assertFalse(shown.contains("function call turn"))
             assertTrue(events.last() is AutonomousAgentEvent.ApprovalRequired)
             val summary = (events.last() as AutonomousAgentEvent.ApprovalRequired).task.summary
-            if (!summary.contains("I ran the examples and they matched.")) {
-                assertTrue(summary.contains("I have not run this yet."))
-            }
+            assertTrue(summary.contains("I ran the examples and they matched."))
             assertFalse(summary.contains("prints the correct result"))
+            assertFalse(summary.contains("Model HTTP"))
+            assertFalse(summary.contains("finish_reason"))
+            assertFalse(summary.contains("partial content was rejected"))
             val toolNames = events.filterIsInstance<AutonomousAgentEvent.ToolFinished>().map { it.name }
-            assertTrue(toolNames.count { it == "list_files" } in 1..3)
             assertTrue(toolNames.contains("create_file"))
             assertTrue(toolNames.contains("review_examples"))
-            assertTrue(toolNames.indexOf("review_examples") < toolNames.size)
             assertTrue(toolNames.indexOf("create_file") < toolNames.indexOf("review_examples"))
             assertTrue(server.bodies.isNotEmpty())
             assertTrue(server.bodies.all { it.contains("\"max_tokens\"") })
@@ -199,8 +198,7 @@ private class ScriptedChatServer : AutoCloseable {
         val lower = transcript.lowercase()
         return when {
             "proposal_ready" in lower -> sseTool("review_examples", reviewArguments())
-            "already called" in lower -> sseTool("create_file", createArguments())
-            else -> sseTool("list_files", """{"path":""}""")
+            else -> sseTool("create_file", createArguments())
         }
     }
 
@@ -227,8 +225,8 @@ private class ScriptedChatServer : AutoCloseable {
     }
 
     private fun createArguments(): String = JSONObject()
-        .put("path", "compiler.py")
-        .put("content", COMPILER)
+        .put("path", "compiler.js")
+        .put("content", JS_COMPILER)
         .put(
             "reason",
             "What I want to do: Add compiler.py, a small program that reads simple sums.\n" +
@@ -241,8 +239,8 @@ private class ScriptedChatServer : AutoCloseable {
         .toString()
 
     private fun reviewArguments(): String = JSONObject()
-        .put("path", "compiler.py")
-        .put("examples", "1+1 => 2\n2+3||4+1 => 5||5")
+        .put("path", "compiler.js")
+        .put("examples", "1+1 => 2\n2+3||4+1 => 5||5\n1+ => error")
         .put("notes", "Two examples. One of them is more than one line.")
         .toString()
 
@@ -309,38 +307,23 @@ private class ScriptedChatServer : AutoCloseable {
     private data class HttpRequest(val method: String, val path: String, val body: String)
 
     companion object {
-        private val COMPILER = """
-            import sys
-
-            def evaluate(line):
-                compact = line.replace(" ", "")
-                if compact == "":
-                    return None
-                total = 0
-                number = ""
-                sign = 1
-                for ch in compact:
-                    if ch.isdigit():
-                        number += ch
-                    elif ch == "+" or ch == "-":
-                        if number == "":
-                            sign = -1 if ch == "-" else 1
-                            continue
-                        total += sign * int(number)
-                        number = ""
-                        sign = 1 if ch == "+" else -1
-                    else:
-                        raise SystemExit("invalid syntax")
-                if number == "":
-                    raise SystemExit("invalid syntax")
-                total += sign * int(number)
-                return total
-
-            lines = sys.stdin.read().splitlines()
-            for line in lines:
-                result = evaluate(line)
-                if result is not None:
-                    print(result)
+        private val JS_COMPILER = """
+            function evaluate(line) {
+              var compact = String(line).replace(/ /g, "");
+              if (compact === "") return;
+              if (/[+\-*/]${'$'}/.test(compact) || (compact.split("(").length !== compact.split(")").length)) {
+                console.log("error");
+                return;
+              }
+              try {
+                var value = Function("return (" + compact + ")")();
+                if (typeof value !== "number" || !isFinite(value)) console.log("error");
+                else console.log(String(value));
+              } catch (e) {
+                console.log("error");
+              }
+            }
+            String(__stdin || "").split("\n").forEach(evaluate);
         """.trimIndent() + "\n"
     }
 }

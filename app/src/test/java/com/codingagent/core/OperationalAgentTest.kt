@@ -180,7 +180,7 @@ class OperationalAgentTest {
             override fun complete(request: ModelRequest): ModelResponse {
                 modelCalls++
                 return if (modelCalls == 1) {
-                    ModelResponse.ToolCall("list_files", """{"path":""}""")
+                    ModelResponse.ToolCall("research_web", """{"query":"Kotlin coroutine cancellation"}""")
                 } else {
                     ModelResponse.Text("I could not find pages, so this uses only the project.")
                 }

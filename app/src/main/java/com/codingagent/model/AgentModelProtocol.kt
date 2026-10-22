@@ -115,13 +115,33 @@ list_files, read_file, continue_result, read_chat_history, search_chat_history, 
         ),
         ModelToolDefinition(
             "replace_text",
-            "Stage an exact text replacement. Before staging, write the complete plain-English proposal explanation in the required six-part format. Dual owner approval is required before it is applied.",
-            """{"type":"object","properties":{"path":{"type":"string","description":"The project file to change."},"oldText":{"type":"string","description":"The exact existing text to replace."},"newText":{"type":"string","description":"The replacement text."},"reason":{"type":"string","description":"Required plain-English explanation with these exact headings in order: What I want to do:, Why:, What will change:, Possible effects:, Risks:, What your approval means:. Use everyday words, name files, explain jargon, and state unknowns honestly."},"purpose":{"type":"string","description":"Short evidence-based reason for this tool call."}},"required":["path","oldText","newText","reason"]}"""
+            "Stage an exact text replacement. Nothing is saved until the owner says yes twice. Do not put an explanation in this call.",
+            """{"type":"object","properties":{"path":{"type":"string"},"oldText":{"type":"string","description":"Exact existing text. At most 6000 characters."},"newText":{"type":"string","description":"Replacement text. At most 6000 characters."},"purpose":{"type":"string"}},"required":["path","oldText","newText"]}"""
+        ),
+        ModelToolDefinition(
+            "edit",
+            "Stage one exact edit. old_text must match once. For a large change, use several calls. Nothing is saved until the owner says yes twice.",
+            """{"type":"object","properties":{"path":{"type":"string"},"old_text":{"type":"string"},"new_text":{"type":"string"},"purpose":{"type":"string"}},"required":["path","old_text","new_text"]}"""
         ),
         ModelToolDefinition(
             "create_file",
-            "Stage a new file. Before staging, write the complete plain-English proposal explanation in the required six-part format. Dual owner approval is required before it is written.",
-            """{"type":"object","properties":{"path":{"type":"string","description":"The new project file path."},"content":{"type":"string","description":"The complete proposed file contents."},"reason":{"type":"string","description":"Required plain-English explanation with these exact headings in order: What I want to do:, Why:, What will change:, Possible effects:, Risks:, What your approval means:. Use everyday words, name files, explain jargon, and state unknowns honestly."},"purpose":{"type":"string","description":"Short evidence-based reason for this tool call."}},"required":["path","content","reason"]}"""
+            "Stage a new file under about 150 lines. Bigger files are created, then extended with append_chunk. Nothing is saved until the owner says yes twice.",
+            """{"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"},"purpose":{"type":"string"}},"required":["path","content"]}"""
+        ),
+        ModelToolDefinition(
+            "append_chunk",
+            "Add a piece of at most 6000 characters to the end of a staged or saved file.",
+            """{"type":"object","properties":{"path":{"type":"string"},"text":{"type":"string"},"purpose":{"type":"string"}},"required":["path","text"]}"""
+        ),
+        ModelToolDefinition(
+            "run_program",
+            "Run a JavaScript program on this phone. Pass the file path or the code, optional args, and optional stdin. The result is the real exit code and output.",
+            """{"type":"object","properties":{"language":{"type":"string"},"path":{"type":"string"},"code":{"type":"string"},"stdin":{"type":"string"},"args":{"type":"array","items":{"type":"string"}},"expected":{"type":"string"},"purpose":{"type":"string"}},"required":[]}"""
+        ),
+        ModelToolDefinition(
+            "submit",
+            "Finish the task. Use status could_not_fix when a run still fails and say why in plain English.",
+            """{"type":"object","properties":{"status":{"type":"string"},"answer":{"type":"string"}},"required":["answer"]}"""
         ),
         ModelToolDefinition(
             "review_examples",
@@ -146,7 +166,7 @@ list_files, read_file, continue_result, read_chat_history, search_chat_history, 
             TaskIntent.INSPECT, TaskIntent.EXPLAIN, TaskIntent.UNKNOWN ->
                 listOf("list_files", "read_file", "continue_result", "read_chat_history", "search_chat_history", "read_user_memory", "search_user_memory", "search_project", "search_knowledge", "research_web", "run_command", "verify")
             TaskIntent.CHANGE, TaskIntent.CREATE, TaskIntent.REFACTOR, TaskIntent.DEBUG ->
-                listOf("list_files", "read_file", "continue_result", "read_chat_history", "search_chat_history", "read_user_memory", "search_user_memory", "search_project", "search_knowledge", "research_web", "replace_text", "create_file", "review_examples", "verify", "run_command")
+                listOf("list_files", "read_file", "continue_result", "read_chat_history", "search_chat_history", "read_user_memory", "search_user_memory", "search_project", "search_knowledge", "research_web", "replace_text", "edit", "create_file", "append_chunk", "run_program", "review_examples", "submit", "verify", "run_command")
             TaskIntent.TEST ->
                 listOf("list_files", "read_file", "continue_result", "read_chat_history", "search_chat_history", "read_user_memory", "search_user_memory", "run_command", "verify", "search_project")
         }

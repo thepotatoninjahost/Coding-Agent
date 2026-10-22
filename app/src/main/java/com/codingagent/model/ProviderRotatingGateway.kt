@@ -3,6 +3,7 @@ package com.codingagent.model
 import java.io.File
 import java.net.HttpURLConnection
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
 /**
@@ -25,6 +26,7 @@ class ProviderRotatingGateway(
     private val gateways = ConcurrentHashMap<String, RemoteHttpGateway>()
     private val avoidModelId = java.util.concurrent.atomic.AtomicReference<String?>(null)
     private val lastTriedModelId = java.util.concurrent.atomic.AtomicReference<String?>(null)
+    private val notedDailyBudget = AtomicBoolean(false)
 
     init {
         require(endpoints.isNotEmpty()) { "At least one helper is required" }
@@ -50,11 +52,26 @@ class ProviderRotatingGateway(
         } else {
             available.filter { it.modelId != skip }.ifEmpty { available }
         }
+        if (connectionFactory == null && notedDailyBudget.compareAndSet(false, true)) {
+            candidates.firstOrNull { "openrouter.ai" in it.baseUrl && it.apiKey.isNotBlank() }?.let { endpoint ->
+                OpenRouterDailyBudget.refresh(endpoint.baseUrl, endpoint.apiKey)
+            }
+        }
         var last: ModelResponse.Failure? = null
         for (endpoint in candidates) {
             if (cancelGeneration.get() != generation) return ModelResponse.Failure("Cancelled")
             if (!quota.isAvailable(endpoint.providerId, endpoint.modelId, clock())) continue
             lastTriedModelId.set(endpoint.modelId)
+            val writing = OutputBudget.writesFile(request.tools.map { it.name })
+            val needed = if (writing) 1_500 else 256
+            val wait = ModelCaps.tokenWaitMillis(endpoint.modelId, needed, clock())
+            val anotherCanTakeIt = candidates.any { other ->
+                other != endpoint &&
+                    ModelCaps.tokenWaitMillis(other.modelId, needed, clock()) == 0L &&
+                    !(writing && ModelCaps.demoteForLongWrites(other.modelId))
+            }
+            if (wait > 0 && anotherCanTakeIt) continue
+            if (writing && ModelCaps.demoteForLongWrites(endpoint.modelId) && anotherCanTakeIt) continue
             val response = gatewayFor(endpoint).stream(request, onDelta)
             if (cancelGeneration.get() != generation) return ModelResponse.Failure("Cancelled")
             if (response !is ModelResponse.Failure) {
@@ -153,7 +170,16 @@ class ProviderRotatingGateway(
                 if (connectionFactory != null) connectionFactory(url) else java.net.URL(url).openConnection() as HttpURLConnection
             }
             val expanded = OpenRouterFreeModels.apply(ProviderCatalog.endpoints(settings), connect, clock())
-            val endpoints = ModelIdCheck.filter(expanded, connect = connect)
+            val withRouter = if (expanded.any { it.providerId == "openrouter" } && expanded.none { it.modelId == "openrouter/free" }) {
+                val sample = expanded.first { it.providerId == "openrouter" }
+                expanded + ProviderEndpoint("openrouter", "Free router", "openrouter/free", sample.baseUrl, sample.apiKey)
+            } else {
+                expanded
+            }
+            val endpoints = ModelIdCheck.filter(withRouter, connect = connect).let { filtered ->
+                val router = withRouter.firstOrNull { it.modelId == "openrouter/free" }
+                if (router != null && filtered.none { it.modelId == "openrouter/free" }) filtered + router else filtered
+            }
             if (endpoints.isEmpty()) return null
             if (endpoints.size == 1 && endpoints.single().providerId == "custom") {
                 val endpoint = endpoints.single()

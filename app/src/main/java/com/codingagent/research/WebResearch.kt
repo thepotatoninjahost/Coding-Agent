@@ -59,6 +59,7 @@ class CompositeWebResearchProvider(
         HackerNewsResearchProvider(),
         GitHubResearchProvider(),
         StackOverflowResearchProvider(),
+        BingRssResearchProvider(),
         SearxResearchProvider(),
         MdnResearchProvider(),
         DuckDuckGoResearchProvider()
@@ -77,7 +78,7 @@ class CompositeWebResearchProvider(
                 errors += ResearchErrors.plain(result.error)
             }
             result.hits
-                .filter { SourceQuality.isAcceptable(it.url, it.title, it.excerpt) }
+                .filter { SourceQuality.isAcceptable(it.url, it.title, it.excerpt, normalized) }
                 .filter { terms.isEmpty() || SourceQuality.hasQueryRelevance(terms, it.title, it.excerpt, it.url) }
                 .forEach { hit ->
                     val key = hit.url.substringBefore('#').trim().lowercase()
@@ -98,6 +99,49 @@ class CompositeWebResearchProvider(
         }
         return ResearchResult(query, hits, error)
     }
+}
+
+/** Bing's public RSS search. No key. Structured lists are tried first. */
+class BingRssResearchProvider(
+    private val timeoutMillis: Int = 12_000,
+    private val connectionFactory: (String) -> HttpURLConnection = { URL(it).openConnection() as HttpURLConnection }
+) : WebResearchProvider {
+    override fun search(query: String, limit: Int): ResearchResult {
+        val normalized = query.trim()
+        if (normalized.isBlank()) return ResearchResult(query, emptyList(), "A research query is required")
+        val encoded = URLEncoder.encode(normalized, StandardCharsets.UTF_8.toString())
+        val connection = connectionFactory("https://www.bing.com/search?q=$encoded&format=rss")
+        return try {
+            connection.connectTimeout = timeoutMillis
+            connection.readTimeout = timeoutMillis
+            connection.disallowRedirects()
+            connection.requestMethod = "GET"
+            connection.setRequestProperty("User-Agent", USER_AGENT)
+            connection.setRequestProperty("Accept", "application/rss+xml, application/xml, text/xml")
+            if (connection.responseCode !in 200..299) {
+                return ResearchResult(query, emptyList(), "Bing search did not answer.")
+            }
+            val body = connection.inputStream.readCapped()
+            val cap = limit.coerceIn(1, 5)
+            val hits = Regex("<item>([\\s\\S]*?)</item>", RegexOption.IGNORE_CASE).findAll(body).mapNotNull { match ->
+                val item = match.groupValues[1]
+                val title = tag(item, "title")
+                val link = tag(item, "link")
+                if (title.isBlank() || link.isBlank()) return@mapNotNull null
+                val excerpt = StructuredSources.readableText(tag(item, "description")).take(1500)
+                ResearchHit(title, link, excerpt.ifBlank { title })
+            }.take(cap).toList()
+            if (hits.isEmpty()) ResearchResult(query, emptyList(), "Bing search returned nothing.") else ResearchResult(query, hits)
+        } catch (error: Exception) {
+            ResearchResult(query, emptyList(), error.message ?: error.javaClass.simpleName)
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    private fun tag(item: String, name: String): String =
+        Regex("<$name[^>]*>(?:<!\\[CDATA\\[)?([\\s\\S]*?)(?:]]>)?</$name>", RegexOption.IGNORE_CASE)
+            .find(item)?.groupValues?.get(1)?.trim().orEmpty()
 }
 
 /** Public Searx/SearxNG instances — free meta-search. No API key. */
