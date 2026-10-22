@@ -25,9 +25,10 @@ class ModelFailureTest {
     @Test
     fun humanizeDoesNotDumpRawJsonForWorkerCap() {
         val line = ModelFailure.humanize(nvidia503)
-        assertTrue(line.contains("worker pool", ignoreCase = true) || line.contains("ResourceExhausted"))
+        assertTrue(line.contains("too busy", ignoreCase = true))
         assertFalse(line.contains("\"origin\""))
-        assertTrue(line.contains("Model settings"))
+        assertFalse(line.contains("16/16"))
+        assertTrue(line.contains("Setup"))
     }
 
     @Test

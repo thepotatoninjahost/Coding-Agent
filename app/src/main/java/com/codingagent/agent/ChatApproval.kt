@@ -22,7 +22,7 @@ object ChatApproval {
             ?: return AgentRuntimeResult.Failed(
                 task(
                     request = text,
-                    summary = "Approval is ambiguous because multiple proposals are pending. Open Review and approve the intended proposal there.",
+                    summary = "More than one change is waiting. Open Review and say yes to the one you mean.",
                     status = "approval-ambiguous",
                     proposalId = pending.joinToString(",") { it.id }
                 )
@@ -31,12 +31,12 @@ object ChatApproval {
         return AgentRuntimeResult.NeedsApproval(
             task(
                 request = text,
-                summary = "Owner authentication is required before a proposal can be approved. Use the Confirm button in Review.",
+                summary = "Saying yes in chat is not enough. Open Review and say yes there, with your saved words and your phone's lock.",
                 status = "waiting-owner-authentication",
                 proposalId = proposal.id,
                 verification = proposal.verification
             ),
-            "Approval must be completed through the authenticated Review confirmation. Chat text cannot grant owner authority.",
+            "Open Review and say yes there. A chat message cannot approve a change by itself.",
             proposal.id
         )
     }

@@ -19,7 +19,10 @@ class ProjectFileService(private val workspace: ProjectWorkspace) {
         val directory = resolveDirectory(path)
         val root = workspace.projectRoot()
         return directory.listFiles()
-            ?.filterNot { ProjectPaths.isSensitivePath(ProjectPaths.relative(root, it)) }
+            ?.filter { child ->
+                !java.nio.file.Files.isSymbolicLink(child.toPath()) &&
+                    !ProjectPaths.isSensitivePath(ProjectPaths.relative(root, child))
+            }
             ?.sortedBy { it.name.lowercase() }
             ?.map { ProjectPaths.relative(root, it) }
             .orEmpty()

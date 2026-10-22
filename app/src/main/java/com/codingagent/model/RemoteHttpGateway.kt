@@ -39,19 +39,29 @@ class RemoteHttpGateway(
 
     private fun streamOnce(request: ModelRequest, onDelta: (String) -> Unit, generation: Long): ModelResponse {
         if (isCancelled(generation)) return ModelResponse.Failure("Cancelled")
-        val connection = openConnection(generation) ?: return if (isCancelled(generation)) ModelResponse.Failure("Cancelled") else ModelResponse.Failure("Model gateway configuration is incomplete")
+        val connection = try {
+            openConnection(generation)
+        } catch (error: IOException) {
+            return ModelResponse.Failure(
+                "Model request failed: ${ModelConnectionProbe.sanitizeProbeError(error.message.orEmpty().ifBlank { error.javaClass.simpleName })}"
+            )
+        } ?: return if (isCancelled(generation)) ModelResponse.Failure("Cancelled") else ModelResponse.Failure("The code helper is not fully set up.")
         return try {
             configure(connection)
             val body = requestBody(request)
             body.put("stream", true)
             connection.outputStream.use { it.write(body.toString().toByteArray(StandardCharsets.UTF_8)) }
             if (isCancelled(generation)) return ModelResponse.Failure("Cancelled")
-            if (connection.responseCode !in 200..299) return failure(connection)
-            parseStreamedBody(connection.inputStream, onDelta, generation)
+            val code = connection.responseCode
+            if (code in 300..399) {
+                return ModelResponse.Failure("The helper tried to send me to a different web address. I stopped so your secret password was not sent there.")
+            }
+            if (code !in 200..299) return failure(connection)
+            parseStreamedBody(bounded(connection.inputStream), onDelta, generation)
         } catch (error: IOException) {
-            ModelResponse.Failure("Model request failed: ${error.message.orEmpty().ifBlank { error.javaClass.simpleName }}")
+            ModelResponse.Failure("Model request failed: ${ModelConnectionProbe.sanitizeProbeError(error.message.orEmpty().ifBlank { error.javaClass.simpleName })}")
         } catch (error: Exception) {
-            ModelResponse.Failure("Model response could not be processed: ${error.message.orEmpty().ifBlank { error.javaClass.simpleName }}")
+            ModelResponse.Failure("Model response could not be processed: ${ModelConnectionProbe.sanitizeProbeError(error.message.orEmpty().ifBlank { error.javaClass.simpleName })}")
         } finally {
             activeConnection.compareAndSet(connection, null)
             connection.disconnect()
@@ -169,17 +179,27 @@ class RemoteHttpGateway(
 
     private fun completeOnce(request: ModelRequest, generation: Long): ModelResponse {
         if (isCancelled(generation)) return ModelResponse.Failure("Cancelled")
-        val connection = openConnection(generation) ?: return if (isCancelled(generation)) ModelResponse.Failure("Cancelled") else ModelResponse.Failure("Model gateway configuration is incomplete")
+        val connection = try {
+            openConnection(generation)
+        } catch (error: IOException) {
+            return ModelResponse.Failure(
+                "Model request failed: ${ModelConnectionProbe.sanitizeProbeError(error.message.orEmpty().ifBlank { error.javaClass.simpleName })}"
+            )
+        } ?: return if (isCancelled(generation)) ModelResponse.Failure("Cancelled") else ModelResponse.Failure("The code helper is not fully set up.")
         return try {
             configure(connection)
             connection.outputStream.use { it.write(requestBody(request).toString().toByteArray(StandardCharsets.UTF_8)) }
             if (isCancelled(generation)) return ModelResponse.Failure("Cancelled")
-            if (connection.responseCode !in 200..299) return failure(connection)
-            parseCompletionBody(connection.inputStream.bufferedReader().use { it.readText() })
+            val code = connection.responseCode
+            if (code in 300..399) {
+                return ModelResponse.Failure("The helper tried to send me to a different web address. I stopped so your secret password was not sent there.")
+            }
+            if (code !in 200..299) return failure(connection)
+            parseCompletionBody(bounded(connection.inputStream).bufferedReader().use { it.readText() })
         } catch (error: IOException) {
-            ModelResponse.Failure("Model request failed: ${error.message.orEmpty().ifBlank { error.javaClass.simpleName }}")
+            ModelResponse.Failure("Model request failed: ${ModelConnectionProbe.sanitizeProbeError(error.message.orEmpty().ifBlank { error.javaClass.simpleName })}")
         } catch (error: Exception) {
-            ModelResponse.Failure("Model response could not be processed: ${error.message.orEmpty().ifBlank { error.javaClass.simpleName }}")
+            ModelResponse.Failure("Model response could not be processed: ${ModelConnectionProbe.sanitizeProbeError(error.message.orEmpty().ifBlank { error.javaClass.simpleName })}")
         } finally {
             activeConnection.compareAndSet(connection, null)
             connection.disconnect()
@@ -226,6 +246,9 @@ class RemoteHttpGateway(
         if (endpoint.isBlank() || model.isBlank()) return null
         if (ModelEndpointPolicy.validate(endpoint) != null) return null
         if (apiKey.isBlank() && !ModelEndpointPolicy.isLocalEndpoint(endpoint)) return null
+        ModelEndpointPolicy.refuseResolvedDestination(endpoint)?.let { reason ->
+            throw java.io.IOException(reason)
+        }
         val connection = connectionFactory(endpoint.trimEnd('/') + "/chat/completions")
         if (isCancelled(generation)) {
             connection.disconnect()
@@ -240,6 +263,7 @@ class RemoteHttpGateway(
     }
 
     private fun configure(connection: HttpURLConnection) {
+        connection.instanceFollowRedirects = false
         connection.connectTimeout = timeoutMillis
         connection.readTimeout = timeoutMillis
         connection.requestMethod = "POST"
@@ -395,14 +419,43 @@ class RemoteHttpGateway(
     }
 
     private fun failure(connection: HttpURLConnection): ModelResponse.Failure {
-        val body = connection.errorStream?.bufferedReader()?.use { it.readText() }.orEmpty()
-            .ifBlank { connection.inputStream?.bufferedReader()?.use { it.readText() }.orEmpty() }
-        val snippet = body
-        return ModelResponse.Failure("Model HTTP ${connection.responseCode}: ${snippet.ifBlank { "(empty body)" }}")
+        val body = readErrorBody(connection)
+        val snippet = ModelConnectionProbe.sanitizeProbeError(body).take(ERROR_SNIPPET_CHARS)
+        val suffix = if (body.length > ERROR_SNIPPET_CHARS) "…" else ""
+        return ModelResponse.Failure("Model HTTP ${connection.responseCode}: ${snippet.ifBlank { "(empty body)" }}$suffix")
     }
+
+    private fun readErrorBody(connection: HttpURLConnection): String {
+        val stream = connection.errorStream ?: connection.inputStream ?: return ""
+        return runCatching { bounded(stream, ERROR_BODY_BYTES).bufferedReader().use { it.readText() } }.getOrDefault("")
+    }
+
+    private fun bounded(input: java.io.InputStream, maxBytes: Int = MAX_RESPONSE_BYTES): java.io.InputStream =
+        object : java.io.FilterInputStream(input) {
+            private var total = 0
+            override fun read(): Int {
+                val value = super.read()
+                if (value >= 0) addBytes(1)
+                return value
+            }
+            override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
+                val readCount = super.read(buffer, offset, length)
+                if (readCount > 0) addBytes(readCount)
+                return readCount
+            }
+            private fun addBytes(readCount: Int) {
+                total += readCount
+                if (total > maxBytes) {
+                    throw IOException("Model response exceeded $maxBytes bytes and was rejected")
+                }
+            }
+        }
 
     companion object {
         private const val USER_AGENT =
             "Coding-Agent/1.0 (Android; https://github.com/thepotatoninjahost/Coding-Agent)"
+        private const val MAX_RESPONSE_BYTES = 4_000_000
+        private const val ERROR_BODY_BYTES = 16_384
+        private const val ERROR_SNIPPET_CHARS = 2_000
     }
 }

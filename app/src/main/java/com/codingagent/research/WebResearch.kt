@@ -2,6 +2,7 @@ package com.codingagent.research
 
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URI
 import java.net.URL
@@ -17,6 +18,26 @@ import com.codingagent.workspace.ResearchResult
  */
 interface WebResearchProvider {
     fun search(query: String, limit: Int = 6): ResearchResult
+}
+
+internal fun HttpURLConnection.disallowRedirects() {
+    instanceFollowRedirects = false
+}
+
+internal fun InputStream.readCapped(maxBytes: Int = 1_048_576): String {
+    val out = java.io.ByteArrayOutputStream()
+    val buffer = ByteArray(8 * 1024)
+    var total = 0
+    use { input ->
+        while (true) {
+            val count = input.read(buffer)
+            if (count < 0) break
+            total += count
+            if (total > maxBytes) error("Research response exceeded $maxBytes bytes")
+            out.write(buffer, 0, count)
+        }
+    }
+    return out.toString(Charsets.UTF_8.name())
 }
 
 /**
@@ -97,6 +118,7 @@ class SearxResearchProvider(
             try {
                 connection.connectTimeout = timeoutMillis
                 connection.readTimeout = timeoutMillis
+                connection.disallowRedirects()
                 connection.requestMethod = "GET"
                 connection.setRequestProperty("User-Agent", "Coding-Agent/1.0 (Android; https://github.com/thepotatoninjahost/Coding-Agent)")
                 connection.setRequestProperty("Accept", "application/json")
@@ -104,7 +126,7 @@ class SearxResearchProvider(
                     errors += "$base HTTP ${connection.responseCode}"
                     continue
                 }
-                val body = connection.inputStream.bufferedReader().use { it.readText() }
+                val body = connection.inputStream.readCapped()
                 val json = JSONObject(body)
                 val results = json.optJSONArray("results") ?: JSONArray()
                 val hits = mutableListOf<ResearchHit>()
@@ -145,13 +167,14 @@ class MdnResearchProvider(
         return try {
             connection.connectTimeout = timeoutMillis
             connection.readTimeout = timeoutMillis
-            connection.requestMethod = "GET"
+            connection.disallowRedirects()
+                connection.requestMethod = "GET"
             connection.setRequestProperty("User-Agent", "Coding-Agent/1.0 (Android; https://github.com/thepotatoninjahost/Coding-Agent)")
             connection.setRequestProperty("Accept", "application/json")
             if (connection.responseCode !in 200..299) {
                 return ResearchResult(query, emptyList(), "MDN HTTP ${connection.responseCode}")
             }
-            val json = JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
+            val json = JSONObject(connection.inputStream.readCapped())
             val documents = json.optJSONArray("documents") ?: JSONArray()
             val hits = mutableListOf<ResearchHit>()
             for (i in 0 until documents.length()) {
@@ -198,7 +221,7 @@ class DuckDuckGoResearchProvider(
         return try {
             configure(connection, "application/json")
             if (connection.responseCode !in 200..299) return ResearchResult(url, emptyList(), "HTTP ${connection.responseCode}")
-            val json = JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
+            val json = JSONObject(connection.inputStream.readCapped())
             val hits = mutableListOf<ResearchHit>()
             json.optString("AbstractText").takeIf { it.isNotBlank() }?.let {
                 hits += ResearchHit(json.optString("Heading", "DuckDuckGo result"), json.optString("AbstractURL"), it)
@@ -217,7 +240,7 @@ class DuckDuckGoResearchProvider(
         return try {
             configure(connection, "text/html")
             if (connection.responseCode !in 200..299) return HtmlFetch("", "HTTP ${connection.responseCode}")
-            HtmlFetch(connection.inputStream.bufferedReader().use { it.readText() }, null)
+            HtmlFetch(connection.inputStream.readCapped(), null)
         } catch (error: Exception) {
             HtmlFetch("", error.message ?: error.javaClass.simpleName)
         } finally {
@@ -228,7 +251,8 @@ class DuckDuckGoResearchProvider(
     private fun configure(connection: HttpURLConnection, accept: String) {
         connection.connectTimeout = timeoutMillis
         connection.readTimeout = timeoutMillis
-        connection.requestMethod = "GET"
+        connection.disallowRedirects()
+                connection.requestMethod = "GET"
         connection.setRequestProperty("User-Agent", BROWSER_UA)
         connection.setRequestProperty("Accept", accept)
         connection.setRequestProperty("Accept-Language", "en-US,en;q=0.9")
@@ -290,11 +314,12 @@ class GitHubResearchProvider(
         return try {
             connection.connectTimeout = timeoutMillis
             connection.readTimeout = timeoutMillis
-            connection.requestMethod = "GET"
+            connection.disallowRedirects()
+                connection.requestMethod = "GET"
             connection.setRequestProperty("User-Agent", "Coding-Agent/1.0 (Android; https://github.com/thepotatoninjahost/Coding-Agent)")
             connection.setRequestProperty("Accept", "application/vnd.github+json")
             if (connection.responseCode !in 200..299) return null
-            JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
+            JSONObject(connection.inputStream.readCapped())
         } catch (_: Exception) {
             null
         } finally {
@@ -322,12 +347,13 @@ class StackOverflowResearchProvider(
         return try {
             connection.connectTimeout = timeoutMillis
             connection.readTimeout = timeoutMillis
-            connection.requestMethod = "GET"
+            connection.disallowRedirects()
+                connection.requestMethod = "GET"
             connection.setRequestProperty("User-Agent", "Coding-Agent/1.0 (Android; https://github.com/thepotatoninjahost/Coding-Agent)")
             connection.setRequestProperty("Accept", "application/json")
             connection.setRequestProperty("Accept-Encoding", "identity")
             if (connection.responseCode !in 200..299) return ResearchResult(query, emptyList(), "StackOverflow HTTP ${connection.responseCode}")
-            val json = JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
+            val json = JSONObject(connection.inputStream.readCapped())
             val items = json.optJSONArray("items") ?: JSONArray()
             val hits = mutableListOf<ResearchHit>()
             for (i in 0 until items.length()) {

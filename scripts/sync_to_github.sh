@@ -49,7 +49,9 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ ! -f "$SKILL_BUILD" ]]; then
-  echo "Missing build_push_payload.py at $SKILL_BUILD" >&2
+  echo "This helper is not part of the app. It expects an external safe-github-push checkout at:" >&2
+  echo "  $SKILL_BUILD" >&2
+  echo "That path is not in this repository. Use git commit and git push instead." >&2
   exit 1
 fi
 
@@ -103,48 +105,9 @@ if [[ "$DRY_RUN" -eq 1 ]]; then
   exit 0
 fi
 
-# Prefer GitHub CLI when authenticated; otherwise print agent instructions.
-if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
-  echo
-  echo "==> Pushing via gh api (git tree commit)"
-  # Use Contents API per file when gh is available
-  python3 - << PY
-import json, subprocess, base64, sys
-payload = json.load(open("$OUT"))
-owner, repo, branch = payload["owner"], payload["repo"], payload["branch"]
-for f in payload["files"]:
-    path = f["path"]
-    content = f["content"]
-    # Get current SHA if exists
-    sha = None
-    r = subprocess.run(
-        ["gh", "api", f"repos/{owner}/{repo}/contents/{path}?ref={branch}"],
-        capture_output=True, text=True,
-    )
-    if r.returncode == 0:
-        sha = json.loads(r.stdout).get("sha")
-    body = {
-        "message": payload["message"] + f" ({path})",
-        "content": base64.b64encode(content.encode()).decode(),
-        "branch": branch,
-    }
-    if sha:
-        body["sha"] = sha
-    r2 = subprocess.run(
-        ["gh", "api", "-X", "PUT", f"repos/{owner}/{repo}/contents/{path}",
-         "--input", "-"],
-        input=json.dumps(body), capture_output=True, text=True,
-    )
-    if r2.returncode != 0:
-        print(r2.stderr, file=sys.stderr)
-        sys.exit(r2.returncode)
-    print("updated", path, "->", json.loads(r2.stdout).get("content", {}).get("sha", "?"))
-print("OK: all files pushed via gh")
-PY
-else
-  echo
-  echo "==> No authenticated gh CLI; payload ready for agent tool"
-  echo "Call github___push_files with arguments loaded from: $OUT"
-  echo "Then verify each path with github___get_file_contents + $SKILL_VERIFY"
-  echo "AGENT_PAYLOAD=$OUT"
-fi
+echo
+echo "Refusing to update GitHub one file at a time."
+echo "The previous Contents API loop could leave $OWNER/$REPO@$BRANCH half-updated if a later file failed."
+echo "Commit the files with git and push that single commit instead."
+echo "Payload, if the external builder ran, is at $OUT"
+exit 2

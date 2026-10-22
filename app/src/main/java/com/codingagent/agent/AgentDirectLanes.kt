@@ -2,6 +2,7 @@ package com.codingagent.agent
 
 import java.time.Instant
 import com.codingagent.intake.TaskIntake
+import com.codingagent.intake.TaskIntent
 import com.codingagent.workspace.AgentTask
 import com.codingagent.workspace.MutationCoordinator
 import com.codingagent.workspace.ProjectFileService
@@ -54,15 +55,18 @@ class AgentDirectLanes(
         val summary = workspace.summary()
         val text = buildString {
             append("Hello. Coding Agent is ready.\n")
-            append("Project files indexed: ${summary.files.size} (source extensions only — not every file on disk).\n")
+            append("I can see ${summary.files.size} files that look like source code. That is not every file in the project.\n")
             append("Languages: ")
             append(
-                if (summary.languages.isEmpty()) "none detected"
-                else summary.languages.entries.sortedByDescending { it.value }.joinToString { "${it.key}=${it.value}" }
+                if (summary.languages.isEmpty()) "none yet"
+                else summary.languages.entries.sortedByDescending { it.value }.joinToString { "${it.key} (${it.value})" }
             )
             append(".\n")
-            append("Verification: ${if (report.passed) "passed (static marker scan)" else "FAILED (${report.issues.size} issue(s))"}.\n")
-            append("Ask me to list files, read a path, analyze something, research a topic, or propose a change.")
+            append(
+                if (report.passed) "A simple text check passed. This does not prove the program runs.\n"
+                else "A simple text check found ${report.issues.size} note(s). This does not by itself prove the program is broken.\n"
+            )
+            append("You can ask me to list files, read a file, explain something, look something up, or change the project. I ask before I save a change.")
         }
         return AgentTask(
             taskId, request, "completed", plan, emptyList(), report,
@@ -75,10 +79,10 @@ class AgentDirectLanes(
         val paths = files.listSourceFilePaths()
         val text = buildString {
             append("Indexed source files: ${paths.size}\n")
-            append("(Extension whitelist only — not a full disk listing.)\n")
-            if (paths.isEmpty()) append("(none)\n") else paths.forEach { append(it).append('\n') }
-            append("\nVerification: ")
-            append(if (report.passed) "passed (static unfinished-work marker scan)" else "FAILED (${report.issues.size} issue(s))")
+            append("These are source-code files only, not every file in the project.\n")
+            if (paths.isEmpty()) append("None yet.\n") else paths.forEach { append(it).append('\n') }
+            append("\n")
+            append(if (report.passed) "A simple text check passed. This does not prove the program runs." else "A simple text check found ${report.issues.size} note(s).")
         }
         return AgentTask(
             taskId, request, "completed", plan, emptyList(), report,
@@ -96,23 +100,23 @@ class AgentDirectLanes(
     ): AgentTask {
         val summary = workspace.summary()
         val text = buildString {
-            append("Status report\n")
-            append("- Indexed files: ${summary.files.size}\n")
-            append("- Symbols: ${summary.symbols}, imports: ${summary.imports}\n")
+            append("Here is where things stand.\n")
+            append("- Files I can see: ${summary.files.size}\n")
+            append("- Named pieces of code: ${summary.symbols}. Links between files: ${summary.imports}\n")
             append("- Languages: ")
             append(
-                if (summary.languages.isEmpty()) "none"
-                else summary.languages.entries.sortedByDescending { it.value }.joinToString { "${it.key}=${it.value}" }
+                if (summary.languages.isEmpty()) "none yet"
+                else summary.languages.entries.sortedByDescending { it.value }.joinToString { "${it.key} (${it.value})" }
             )
-            append("\n- Static verification: ")
-            append(if (report.passed) "passed (0 unfinished-work markers)" else "FAILED (${report.issues.size} issue(s))")
+            append("\n- Simple text check: ")
+            append(if (report.passed) "passed. This does not prove the program runs." else "found ${report.issues.size} note(s).")
             if (report.issues.isNotEmpty()) {
                 report.issues.forEach { issue ->
                     append("\n  - ${issue.path}:${issue.line} — ${issue.message}")
                 }
             }
-            append("\n- Pending change proposals: ${mutations.pending().size}")
-            append("\n- Intent classified as: ${intake.intent.name}")
+            append("\n- Changes waiting for your yes: ${mutations.pending().size}")
+            append("\n- I understood this as: ${plainIntent(intake.intent)}")
         }
         return AgentTask(
             taskId, request, "completed", plan, emptyList(), report,
@@ -134,7 +138,7 @@ class AgentDirectLanes(
                 taskId, request, "failed", plan, emptyList(),
                 VerificationReport(false, listOf(VerificationIssue(resolved, 0, it.message ?: "read failed"))),
                 listOf("${Instant.now()}: read failed for $resolved"),
-                "Could not read `$resolved`: ${it.message ?: it.javaClass.simpleName}"
+                "I could not read $resolved. ${it.message ?: "The file may be missing."}"
             )
         }
         val text = buildString {
@@ -154,7 +158,7 @@ class AgentDirectLanes(
                 taskId, request, "failed", plan, emptyList(),
                 VerificationReport(false, listOf(VerificationIssue(inspectTarget, 0, "file not found in project index"))),
                 listOf("${Instant.now()}: inspect target not found: $inspectTarget"),
-                "Could not find `$inspectTarget` in the project. Try `list project source files`, then use the exact name."
+                "I could not find $inspectTarget in the project. Ask me to list files, then use the exact name."
             )
         if (AgentRequestKind.isMarkerOnly(request)) {
             return AgentTask(
@@ -166,10 +170,10 @@ class AgentDirectLanes(
         }
         val text = buildString {
             append(local.asUserText(includePolicy = true, includeStructure = true))
-            append("\n\nScope note: local evidence only.\n")
-            append("- Policy markers (TODO/FIXME/stub) are rule violations, not compile errors.\n")
-            append("- Structure notes are heuristics, not a compiler.\n")
-            append("- For logic/API/compile diagnosis, retry when the model is not rate-limited, or switch provider in Model settings.")
+            append("\n\nThis is only what I can see in the file on this phone.\n")
+            append("- Notes such as TODO or FIXME are reminders, not proof the program is broken.\n")
+            append("- Structure notes are guesses, not a full check that the program runs.\n")
+            append("- For a deeper look, connect a code helper in Setup and ask again.")
         }
         return AgentTask(
             taskId, request, "completed", plan, emptyList(),
@@ -177,5 +181,16 @@ class AgentDirectLanes(
             listOf("${Instant.now()}: local evidence package ${local.path}"),
             text
         )
+    }
+
+    private fun plainIntent(intent: TaskIntent): String = when (intent) {
+        TaskIntent.INSPECT -> "look at the project"
+        TaskIntent.CHANGE -> "change existing work"
+        TaskIntent.CREATE -> "make something new"
+        TaskIntent.REFACTOR -> "rearrange existing work without changing what it is supposed to do"
+        TaskIntent.DEBUG -> "find and fix a problem"
+        TaskIntent.TEST -> "check that something works"
+        TaskIntent.EXPLAIN -> "explain something"
+        TaskIntent.UNKNOWN -> "not sure yet"
     }
 }

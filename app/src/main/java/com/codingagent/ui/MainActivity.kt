@@ -91,12 +91,15 @@ private fun CodingAgentApp(
             store = vm.store,
             scope = scope,
             coordinatorProvider = { vm.mutationCoordinator() },
-            pendingProposalIdProvider = { vm.ui.value.pendingProposalId }
+            pendingProposalIdProvider = { vm.ui.value.pendingProposalId },
+            activityProvider = { context as FragmentActivity }
         )
     }
     ownerApproval.host = object : OwnerApprovalHost {
         override fun isBusy(): Boolean = vm.isBusy()
-        override fun setActiveJob(job: Job?) {}
+        override fun setActiveJob(job: Job?) {
+            vm.attachApprovalJob(job)
+        }
         override fun setStatus(newStatus: AgentStatus, newDetail: String) {
             vm.setStatus(newStatus, newDetail)
         }
@@ -107,7 +110,7 @@ private fun CodingAgentApp(
         override fun onAwaitingSecond(proposal: PendingChangeProposal) {
             vm.setStatus(
                 AgentStatus.APPROVAL,
-                "Authenticated approval ${proposal.approvalCount}/2 recorded; transaction remains unapplied"
+                "Yes ${proposal.approvalCount} of 2 is saved. Nothing is written until you say yes a second time."
             )
         }
         override fun onRepairRequired(proposal: PendingChangeProposal, newDetail: String) {
@@ -195,13 +198,13 @@ private fun CodingAgentApp(
                         query = ui.projectQuery,
                         onQuery = vm::setProjectQuery,
                         path = ui.editorPath,
-                        onPath = vm::setEditorPath,
+                        onOpen = vm::openEditorFile,
                         content = ui.editorContent,
                         onContent = vm::setEditorContent,
                         document = ui.editorDocument,
                         tools = vm.tools(),
                         mutationCoordinator = vm.mutationCoordinator(),
-                        onStatus = { pair -> vm.setStatus(pair.first, pair.second) }
+                        onSave = { vm.saveEditor() }
                     )
                     SurfaceTab.REVIEW -> ReviewSurface(
                         pending = ui.pendingApproval,
@@ -211,7 +214,7 @@ private fun CodingAgentApp(
                         onReject = {
                             ui.pendingProposalId?.let { vm.mutationCoordinator()?.reject(it) }
                             vm.clearPendingApproval()
-                            vm.setStatus(AgentStatus.STOPPED, "Proposed changes rejected")
+                            vm.setStatus(AgentStatus.STOPPED, "You said no. Nothing was saved.")
                         }
                     )
                     SurfaceTab.TERMINAL -> TerminalSurface(
@@ -226,7 +229,7 @@ private fun CodingAgentApp(
                         enabled = vm.tools() != null,
                         onRun = { command -> vm.runTerminal(command) },
                         onStop = { vm.stopAgent() },
-                        onClear = { }
+                        onClear = { vm.clearTerminal() }
                     )
                     SurfaceTab.RESEARCH -> ResearchSurface(
                         query = ui.researchQuery,
@@ -234,7 +237,7 @@ private fun CodingAgentApp(
                         hits = ui.researchHits,
                         error = ui.researchError,
                         state = ui.researchState,
-                        onSearch = { query -> vm.setResearchQuery(query) }
+                        onSearch = { query -> vm.searchResearch(query) }
                     )
                 }
             }
@@ -270,18 +273,18 @@ private fun CodingAgentApp(
                         .padding(4.dp)
                 ) {
                     Column(Modifier.padding(16.dp)) {
-                        Text("Remote model API", color = NeonGreen, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                        Text("Connect a code helper", color = NeonGreen, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                         Text(
-                            "Remote API endpoint. Enter the base URL, model name, and API key for the provider you are using.",
+                            "Writing new code needs a helper on the internet. Paste the web address, the helper's name, and the secret password that company gave you. They stay on this phone.\n\nA free starting point is Groq. Web address: https://api.groq.com/openai/v1. Helper name: llama-3.3-70b-versatile. Secret password: create one at console.groq.com. You can use another company instead. Looking things up on the Research tab does not need this.",
                             color = SoftGreen,
-                            fontSize = 11.sp
+                            fontSize = 12.sp
                         )
                         Spacer(Modifier.height(12.dp))
                         OutlinedTextField(
                             value = ui.draftBaseUrl,
                             onValueChange = vm::updateDraftBaseUrl,
                             modifier = Modifier.fillMaxWidth(),
-                            label = { Text("Base URL", color = SoftGreen) },
+                            label = { Text("Web address", color = SoftGreen) },
                             singleLine = true,
                             colors = fieldColors()
                         )
@@ -290,7 +293,7 @@ private fun CodingAgentApp(
                             value = ui.draftModelName,
                             onValueChange = vm::updateDraftModelName,
                             modifier = Modifier.fillMaxWidth(),
-                            label = { Text("Model", color = SoftGreen) },
+                            label = { Text("Helper name", color = SoftGreen) },
                             singleLine = true,
                             colors = fieldColors()
                         )
@@ -299,7 +302,7 @@ private fun CodingAgentApp(
                             value = ui.draftApiKey,
                             onValueChange = vm::updateDraftApiKey,
                             modifier = Modifier.fillMaxWidth(),
-                            label = { Text("API key", color = SoftGreen) },
+                            label = { Text("Secret password", color = SoftGreen) },
                             singleLine = true,
                             visualTransformation = PasswordVisualTransformation(),
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
@@ -310,13 +313,13 @@ private fun CodingAgentApp(
                             value = ui.draftSystemPrompt,
                             onValueChange = vm::updateDraftSystemPrompt,
                             modifier = Modifier.fillMaxWidth(),
-                            label = { Text("Additional system instructions (optional)", color = SoftGreen) },
+                            label = { Text("Extra rules for the helper (optional)", color = SoftGreen) },
                             minLines = 3,
                             maxLines = 8,
                             colors = fieldColors()
                         )
                         Text(
-                            "Added to the built-in instructions; safety, evidence, and approval rules remain in force.",
+                            "These are added to the built-in rules. The helper still has to ask you before it changes your files.",
                             color = SoftGreen,
                             fontSize = 10.sp
                         )
@@ -325,7 +328,7 @@ private fun CodingAgentApp(
                             value = ui.draftExtraHeaders,
                             onValueChange = vm::updateDraftExtraHeaders,
                             modifier = Modifier.fillMaxWidth(),
-                            label = { Text("Extra headers (optional)", color = SoftGreen) },
+                            label = { Text("Extra connection lines (optional)", color = SoftGreen) },
                             minLines = 2,
                             maxLines = 4,
                             colors = fieldColors()
@@ -337,7 +340,7 @@ private fun CodingAgentApp(
                         Spacer(Modifier.height(12.dp))
                         Row {
                             TextButton(onClick = { vm.probeModelConnection() }) {
-                                Text("Test", color = FluoroOrange)
+                                Text("Try connection", color = FluoroOrange)
                             }
                             Spacer(Modifier.weight(1f))
                             TextButton(onClick = { vm.setShowModelSettings(false) }) {

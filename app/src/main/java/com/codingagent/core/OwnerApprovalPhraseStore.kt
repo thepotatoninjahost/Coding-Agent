@@ -32,10 +32,10 @@ internal class OwnerApprovalPhraseStore(
     fun enroll(typedPhrase: String, spokenPhrase: String) {
         val typed = typedPhrase.trim()
         val spoken = normalizeSpoken(spokenPhrase)
-        require(typed.isNotEmpty()) { "Typed owner passphrase cannot be blank" }
-        require(spoken.isNotEmpty()) { "Spoken owner passphrase cannot be blank" }
+        require(typed.isNotEmpty()) { "Type some words. That line cannot be empty." }
+        require(spoken.isNotEmpty()) { "Type the words you will say. That line cannot be empty." }
         require(normalizeSpoken(typed) != spoken) {
-            "Create different typed and spoken passphrases so they are independent factors"
+            "Use different words for typing and for speaking. They should not be the same."
         }
         val typedVerifier = createVerifier(typed)
         val spokenVerifier = createVerifier(spoken)

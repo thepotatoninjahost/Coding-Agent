@@ -12,6 +12,8 @@ import com.codingagent.agent.ChatMessage
 import com.codingagent.agent.ChatRole
 import com.codingagent.agent.ChatWorkspace
 import com.codingagent.core.LocalStore
+import com.codingagent.intake.OperationKind
+import com.codingagent.intake.TaskOperation
 import com.codingagent.knowledge.KnowledgeBase
 import com.codingagent.model.ModelBackend
 import com.codingagent.model.ModelConnectionProbe
@@ -19,11 +21,13 @@ import com.codingagent.model.ModelDownloadProgress
 import com.codingagent.model.ModelGateway
 import com.codingagent.model.ModelSettings
 import com.codingagent.model.ProbeResult
+import com.codingagent.research.CompositeWebResearchProvider
 import com.codingagent.research.DurableDeepResearchProvider
 import com.codingagent.research.ResearchDisplayState
 import com.codingagent.workspace.EditorDocument
 import com.codingagent.workspace.MutationApprovalResult
 import com.codingagent.workspace.MutationCoordinator
+import com.codingagent.workspace.MutationProposeResult
 import com.codingagent.workspace.PendingChangeProposal
 import com.codingagent.workspace.ProjectWorkspace
 import com.codingagent.workspace.ResearchHit
@@ -59,6 +63,8 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
     private var chat: ChatWorkspace? = null
     private var modelGateway: ModelGateway? = null
     private var activeJob: Job? = null
+    private var approvalJob: Job? = null
+    private var researchJob: Job? = null
     private val progressEpoch = AtomicInteger(0)
 
     init {
@@ -68,7 +74,7 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
             _ui.update {
                 it.copy(
                     showModelSettings = true,
-                    detail = "Enter base URL, model name, and API key in Model settings."
+                    detail = "To write new code, tap Setup and add the helper's web address, name, and secret password."
                 )
             }
         }
@@ -92,7 +98,7 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
             }
             restored?.let { (lastQuery, pair) ->
                 val (mounted, files) = pair
-                mountWorkspace(mounted, files, "Restored project · ${files.size} files")
+                mountWorkspace(mounted, files, "Opened your saved project. ${files.size} files.")
                 if (!lastQuery.isNullOrBlank()) {
                     _ui.update { it.copy(researchQuery = lastQuery) }
                 }
@@ -117,7 +123,7 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
                 draftSystemPrompt = normalized.systemPrompt,
                 modelStatus = normalized.statusSummary(),
                 modelLoadError = if (gateway == null)
-                    normalized.validationErrors().joinToString("; ").ifBlank { "API key required" }
+                    normalized.validationErrors().joinToString("; ").ifBlank { "The secret password is missing." }
                 else null
             )
         }
@@ -148,7 +154,7 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
                     it.copy(
                         probeMessage = when (result) {
                             is ProbeResult.Ok -> result.detail
-                            is ProbeResult.Failed -> "Probe failed: ${result.reason}"
+                            is ProbeResult.Failed -> "Could not connect: ${result.reason}"
                         }
                     )
                 }
@@ -172,7 +178,7 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
         _ui.update {
             it.copy(
                 showModelSettings = false,
-                detail = if (modelGateway != null) "Remote model gateway ready" else "Remote model settings saved (incomplete)"
+                detail = if (modelGateway != null) "The helper is connected." else "Saved, but the helper is not fully set up yet."
             )
         }
     }
@@ -220,13 +226,13 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
             unavailableMessageProvider = {
                 when {
                     _ui.value.workspace == null ->
-                        "No project mounted. Import a folder, or restore a previous project, before coding requests."
+                        "No project is open. Tap New to start one, or Import to open a folder you already have."
                     agent == null ->
-                        "Project is mounting — try again in a moment."
+                        "The project is still opening. Try again in a moment."
                     _ui.value.modelLoadError != null ->
-                        "Model settings error: ${_ui.value.modelLoadError.orEmpty()}. Local commands still work."
+                        "The helper is not set up yet: ${_ui.value.modelLoadError.orEmpty()} You can still say hello, list files, or ask me to read a file."
                     else ->
-                        "Agent not ready."
+                        "I am not ready yet. Try again in a moment."
                 }
             },
             progressListener = { phase, detailText ->
@@ -256,7 +262,7 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
                 withContext(Dispatchers.Main) {
                     val mounted = ProjectWorkspace(imported)
                     val files = mounted.summary().files.map { it.path }.sorted()
-                    mountWorkspace(mounted, files, "Project mounted · ${files.size} files indexed")
+                    mountWorkspace(mounted, files, "Project is ready. ${files.size} files.")
                     clearPendingApproval()
                 }
             }.onFailure { err ->
@@ -264,7 +270,7 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
                     _ui.update {
                         it.copy(
                             status = AgentStatus.STOPPED,
-                            detail = "Import failed: ${err.message.orEmpty()}"
+                            detail = "Could not open that folder: ${err.message.orEmpty()}"
                         )
                     }
                 }
@@ -279,7 +285,8 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
             }.onSuccess { created ->
                 withContext(Dispatchers.Main) {
                     val mounted = ProjectWorkspace(created)
-                    mountWorkspace(mounted, emptyList(), "New empty project mounted")
+                    val files = mounted.summary().files.map { it.path }.sorted()
+                    mountWorkspace(mounted, files, "Your new project is ready.")
                     clearPendingApproval()
                 }
             }.onFailure { err ->
@@ -287,7 +294,7 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
                     _ui.update {
                         it.copy(
                             status = AgentStatus.STOPPED,
-                            detail = "Could not create project: ${err.message.orEmpty()}"
+                            detail = "Could not start a new project: ${err.message.orEmpty()}"
                         )
                     }
                 }
@@ -312,7 +319,7 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
                 terminalHistory = emptyList(),
                 terminalLiveOutput = "",
                 status = AgentStatus.READY,
-                detail = "Project cleared"
+                detail = "Project closed."
             )
         }
         clearPendingApproval()
@@ -327,19 +334,21 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
             }
             return
         }
-        _ui.update { it.copy(chatInput = "", status = AgentStatus.WORKING, detail = "Working...", agentBusy = true) }
+        _ui.update { it.copy(chatInput = "", status = AgentStatus.WORKING, detail = "Working on what you asked.", agentBusy = true) }
         progressEpoch.incrementAndGet()
         activeJob = viewModelScope.launch(Dispatchers.IO) {
             try {
                 if (_ui.value.workspace == null && asksToStartProject(trimmed)) {
                     val created = createEmptyProject(privateDir, null)
+                    val mounted = ProjectWorkspace(created)
+                    val files = mounted.summary().files.map { it.path }.sorted()
                     withContext(Dispatchers.Main) {
-                        mountWorkspace(ProjectWorkspace(created), emptyList(), "New empty project mounted")
+                        mountWorkspace(mounted, files, "Your new project is ready.")
                     }
                 }
                 val workspace = chat ?: run {
                     rebuildChat()
-                    chat!!
+                    chat ?: error("Chat workspace could not be created")
                 }
                 val sendResult = workspace.send(trimmed)
                 withContext(Dispatchers.Main) {
@@ -357,7 +366,7 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
                             pendingProposalId = proposal?.id,
                             approvalCount = proposal?.approvalCount ?: 0,
                             pendingReason = proposal?.request
-                                ?: "The agent proposes a transactional code change.",
+                                ?: "The helper wants to change your project. Read the note, then say yes twice if you agree.",
                             status = when (result) {
                                 is AgentRuntimeResult.NeedsApproval -> AgentStatus.APPROVAL
                                 is AgentRuntimeResult.Failed -> AgentStatus.FAILED
@@ -365,10 +374,10 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
                             },
                             detail = when (result) {
                                 is AgentRuntimeResult.NeedsApproval ->
-                                    "Waiting for dual owner approval"
+                                    "Please say yes twice before anything is saved."
                                 is AgentRuntimeResult.Failed ->
-                                    result.task?.summary ?: "Request failed"
-                                else -> "Ready"
+                                    result.task?.summary ?: "That request did not finish."
+                                else -> "Ready for your next request."
                             }
                         )
                     }
@@ -401,6 +410,10 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
         progressEpoch.incrementAndGet()
         activeJob?.cancel()
         activeJob = null
+        approvalJob?.cancel()
+        approvalJob = null
+        researchJob?.cancel()
+        researchJob = null
         agent?.cancel("Stopped by owner")
         chat?.cancel()
         tools?.cancelTerminal("Stopped by owner")
@@ -414,7 +427,11 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
-    fun isBusy(): Boolean = _ui.value.agentBusy || activeJob != null
+    fun isBusy(): Boolean = _ui.value.agentBusy || activeJob != null || approvalJob?.isActive == true
+
+    fun attachApprovalJob(job: Job?) {
+        approvalJob = job
+    }
 
     private fun asksToStartProject(text: String): Boolean {
         val t = text.lowercase()
@@ -430,7 +447,10 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
         val paths = result.changeSet.changes.map { it.path }.distinct()
         val verification = result.proposal.verification
         val verificationSummary = buildString {
-            append(if (verification.passed) "Static verification passed." else "Static verification failed.")
+            append(
+                if (verification.passed) "A simple text check passed. This does not prove the program runs."
+                else "A simple text check found problems. This does not by itself prove the program is broken."
+            )
             if (verification.issues.isNotEmpty()) {
                 append("\nIssues:\n")
                 append(verification.issues.joinToString("\n") { "- ${it.path}:${it.line}: ${it.message}" })
@@ -448,9 +468,9 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
         store.recordChatMessage(
             ChatMessage(
                 role = ChatRole.SYSTEM,
-                content = "APPLIED to disk after dual approval.\nFiles:\n" +
+                content = "Saved after you said yes twice.\nFiles:\n" +
                     paths.joinToString("\n") { "- $it" } +
-                    "\nRequest: ${result.proposal.request}\n$verificationSummary"
+                    "\nYou asked: ${result.proposal.request}\n$verificationSummary"
             )
         )
         _ui.update {
@@ -461,7 +481,7 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
                 pendingProposal = null,
                 pendingProposalId = null,
                 status = AgentStatus.READY,
-                detail = "APPLIED ${paths.size} file(s): ${paths.joinToString()}\n$verificationSummary"
+                detail = "Saved ${paths.size} file(s): ${paths.joinToString()}. $verificationSummary"
             )
         }
     }
@@ -507,7 +527,7 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
                             terminalHistory = t.terminalHistory(),
                             terminalCommand = "",
                             status = AgentStatus.READY,
-                            detail = "Command finished"
+                            detail = "The command finished."
                         )
                     }
                 }
@@ -516,7 +536,7 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
                     _ui.update {
                         it.copy(
                             status = AgentStatus.FAILED,
-                            detail = e.message ?: "Terminal failed",
+                            detail = e.message ?: "The command failed.",
                             terminalHistory = t.terminalHistory()
                         )
                     }
@@ -531,17 +551,127 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
     fun setChatInput(value: String) = _ui.update { it.copy(chatInput = value) }
     fun setProjectQuery(value: String) = _ui.update { it.copy(projectQuery = value) }
     fun setEditorPath(value: String) = _ui.update { it.copy(editorPath = value) }
-    fun setEditorContent(value: String) = _ui.update { it.copy(editorContent = value) }
+    fun setEditorContent(value: String) = _ui.update {
+        val original = it.editorDocument?.content
+        it.copy(
+            editorContent = value,
+            editorDocument = it.editorDocument?.copy(dirty = original != null && value != original)
+        )
+    }
+
+    fun openEditorFile(path: String) {
+        val doc = tools?.let { runCatching { it.read(path) }.getOrNull() }
+        if (doc == null) {
+            setStatus(AgentStatus.FAILED, "Could not open $path.")
+            return
+        }
+        _ui.update {
+            it.copy(editorPath = doc.path, editorContent = doc.content, editorDocument = doc)
+        }
+    }
     fun setTerminalCommand(value: String) = _ui.update { it.copy(terminalCommand = value) }
     fun setResearchQuery(value: String) = _ui.update { it.copy(researchQuery = value) }
     fun setStatus(status: AgentStatus, detail: String) = _ui.update { it.copy(status = status, detail = detail) }
 
-    private fun mapAgentPhase(phase: String): AgentStatus = when (phase.lowercase()) {
-        "working", "thinking", "tool", "tools" -> AgentStatus.WORKING
-        "approval" -> AgentStatus.APPROVAL
-        "failed", "error" -> AgentStatus.FAILED
-        "stopped" -> AgentStatus.STOPPED
-        else -> AgentStatus.READY
+    fun clearTerminal() {
+        tools?.clearTerminalHistory()
+        _ui.update { it.copy(terminalHistory = emptyList(), terminalLiveOutput = "") }
+    }
+
+    fun searchResearch(query: String) {
+        val trimmed = query.trim()
+        if (trimmed.isEmpty()) return
+        researchJob?.cancel()
+        _ui.update {
+            it.copy(
+                researchQuery = trimmed,
+                researchError = null,
+                researchHits = emptyList(),
+                researchState = ResearchDisplayState(phase = "searching", canSend = false)
+            )
+        }
+        researchJob = viewModelScope.launch(Dispatchers.IO) {
+            val result = runCatching { CompositeWebResearchProvider().search(trimmed, 8) }
+            withContext(Dispatchers.Main) {
+                result.onSuccess { found ->
+                    _ui.update {
+                        it.copy(
+                            researchHits = found.hits,
+                            researchError = found.error,
+                            researchState = ResearchDisplayState(
+                                phase = if (found.hits.isEmpty()) "empty" else "results",
+                                fullSources = found.hits.size,
+                                canSend = true
+                            )
+                        )
+                    }
+                }.onFailure { err ->
+                    _ui.update {
+                        it.copy(
+                            researchError = err.message ?: err.javaClass.simpleName,
+                            researchState = ResearchDisplayState(phase = "failed", canSend = true)
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    fun saveEditor() {
+        val path = _ui.value.editorPath.trim()
+        val edited = _ui.value.editorContent
+        val coordinator = mutationCoordinator
+        val fileTools = tools
+        if (coordinator == null || fileTools == null) {
+            setStatus(AgentStatus.FAILED, "Open or start a project before saving a file.")
+            return
+        }
+        if (path.isBlank()) {
+            setStatus(AgentStatus.FAILED, "Tap a file before saving.")
+            return
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            val current = runCatching { fileTools.read(path).content }.getOrNull()
+            val operation = when {
+                current == null -> TaskOperation(kind = OperationKind.CREATE_FILE, path = path, text = edited)
+                current == edited -> null
+                current.isEmpty() -> TaskOperation(kind = OperationKind.APPEND, path = path, text = edited)
+                else -> TaskOperation(
+                    kind = OperationKind.REPLACE,
+                    path = path,
+                    oldText = current,
+                    newText = edited
+                )
+            }
+            if (operation == null) {
+                withContext(Dispatchers.Main) {
+                    setStatus(AgentStatus.READY, "Nothing new to save in $path.")
+                }
+                return@launch
+            }
+            val request = "Save editor changes to $path"
+            val result = coordinator.propose(request, listOf(operation), request)
+            withContext(Dispatchers.Main) {
+                when (result) {
+                    is MutationProposeResult.Proposed -> {
+                        val proposal = result.proposal
+                        _ui.update {
+                            it.copy(
+                                pendingApproval = true,
+                                pendingProposal = proposal,
+                                pendingProposalId = proposal.id,
+                                approvalCount = proposal.approvalCount,
+                                pendingReason = proposal.request,
+                                status = AgentStatus.APPROVAL,
+                                detail = "Your edits to $path are waiting. Open Review and say yes twice before they are saved."
+                            )
+                        }
+                    }
+                    is MutationProposeResult.Rejected ->
+                        setStatus(AgentStatus.FAILED, result.reason)
+                }
+            }
+        }
     }
 }
 
@@ -567,11 +697,11 @@ data class WorkbenchUiState(
     val terminalLiveOutput: String = "",
     val pendingApproval: Boolean = false,
     val approvalCount: Int = 0,
-    val pendingReason: String = "The agent proposes a transactional code change.",
+    val pendingReason: String = "The helper wants to change your project. Read the note, then say yes twice if you agree.",
     val pendingProposalId: String? = null,
     val pendingProposal: PendingChangeProposal? = null,
     val modelSettings: ModelSettings = ModelSettings(),
-    val modelStatus: String = "Remote · set base URL, model, and API key",
+    val modelStatus: String = "Helper not connected yet",
     val modelProgress: ModelDownloadProgress? = null,
     val modelLoadError: String? = null,
     val showModelSettings: Boolean = false,

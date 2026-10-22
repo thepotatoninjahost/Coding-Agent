@@ -66,6 +66,20 @@ class ModelSettingsTest {
             modelName = "model"
         )
         assertTrue(loopback.validationErrors().isEmpty())
+
+        val metadata = ModelSettings(
+            baseUrl = "https://169.254.169.254/latest",
+            apiKey = "key",
+            modelName = "model"
+        )
+        assertTrue(metadata.validationErrors().any { it.contains("link-local") })
+
+        val lan = ModelSettings(
+            baseUrl = "https://192.168.1.20:11434/v1",
+            apiKey = "key",
+            modelName = "model"
+        )
+        assertTrue(lan.validationErrors().isEmpty())
     }
 
     @Test
@@ -105,7 +119,7 @@ class ModelSettingsTest {
         val restored = ModelSettings.fromJson(legacy)
         assertEquals(ModelBackend.REMOTE, restored.backend)
         assertFalse(restored.isRemoteConfigured())
-        assertTrue(restored.statusSummary().contains("Remote"))
+        assertTrue(restored.statusSummary().contains("Helper not connected"))
     }
 
     @Test
@@ -117,7 +131,7 @@ class ModelSettingsTest {
         assertTrue(defaults.apiKey.isEmpty())
         assertFalse(defaults.onboarded)
         assertFalse(defaults.isRemoteConfigured())
-        assertTrue(defaults.statusSummary().contains("Remote"))
+        assertTrue(defaults.statusSummary().contains("Helper not connected"))
     }
     @Test
     fun customSystemInstructionsAreAddedWithoutReplacingSafetyRules() {

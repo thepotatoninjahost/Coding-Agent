@@ -39,14 +39,14 @@ object ModelCallWithRetry {
                 val waitSeconds = waitMillis / 1000L
                 onPhase(
                     if (ModelFailure.isCapacity(response.message)) {
-                        "Provider at capacity — waiting ${waitSeconds}s then retry $attempt/$MAX_RETRIES"
+                        "The helper is busy. Waiting $waitSeconds seconds, then trying again ($attempt of $MAX_RETRIES)."
                     } else {
-                        "Rate limited — waiting ${waitSeconds}s then retry $attempt/$MAX_RETRIES"
+                        "The helper asked me to slow down. Waiting $waitSeconds seconds, then trying again ($attempt of $MAX_RETRIES)."
                     }
                 )
                 if (!waitCancellable(waitMillis, isCancelled)) return null
             } else {
-                onPhase("Empty model response — retry $attempt/$MAX_RETRIES")
+                onPhase("The helper sent an empty answer. Trying again ($attempt of $MAX_RETRIES).")
                 if (isCancelled()) return null
             }
             if (isCancelled()) {

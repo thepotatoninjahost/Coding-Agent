@@ -199,7 +199,7 @@ class OperationalAgentTest {
         val events = spine.run("Research the web for the latest Kotlin coroutine cancellation API documentation")
 
         assertTrue(events.last() is AutonomousAgentEvent.Failed)
-        assertTrue((events.last() as AutonomousAgentEvent.Failed).message.contains("no usable external sources"))
+        assertTrue((events.last() as AutonomousAgentEvent.Failed).message.contains("could not get any"))
         assertEquals(0, modelCalls)
     }
 

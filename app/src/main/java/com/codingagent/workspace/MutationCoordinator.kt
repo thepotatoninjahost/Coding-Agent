@@ -249,7 +249,7 @@ class MutationCoordinator(
         val timestamp = now()
         if (timestamp > proposal.expiresAt) {
             return MutationApprovalResult.Rejected(
-                "Change proposal approval window expired. Open Review, reject, and the agent will restage the same files."
+                "This change expired before it was saved. Nothing was written. Say no, then ask again if you still want it."
             )
         }
         val proposalFingerprint = OwnerApprovalKey.fingerprint(proposal.id, proposal.changeSet.changes)

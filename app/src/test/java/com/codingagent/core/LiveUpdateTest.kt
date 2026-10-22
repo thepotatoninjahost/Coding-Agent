@@ -18,7 +18,9 @@ import com.codingagent.workspace.VerificationReport
 class LiveUpdateTest {
     @Test
     fun moduleParserAcceptsEscapedJsonStringsWithoutRegexCorruption() {
-        val store = LiveModuleStore(java.io.File.createTempFile("module-test", "").parentFile)
+        val parent = java.io.File.createTempFile("module-test", "").parentFile
+            ?: error("temporary file has no parent directory")
+        val store = LiveModuleStore(parent)
         val parsed = store.parse(
             """{"kind":"coding","version":1,"steps":[{"op":"emit","value":"quoted \"value\" and {braces}","argument":"a:b"}]}"""
         )

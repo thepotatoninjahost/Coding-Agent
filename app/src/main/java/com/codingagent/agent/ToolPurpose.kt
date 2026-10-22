@@ -11,7 +11,6 @@ object ToolPurpose {
         val path = args?.optString("path").orEmpty().trim()
         val query = args?.optString("query").orEmpty().trim()
         val command = args?.optString("command").orEmpty().trim()
-        val reason = args?.optString("reason").orEmpty().trim()
         val explicitPurpose = args?.optString("purpose").orEmpty().trim()
         if (explicitPurpose.isNotBlank()) return explicitPurpose
         return when (name) {

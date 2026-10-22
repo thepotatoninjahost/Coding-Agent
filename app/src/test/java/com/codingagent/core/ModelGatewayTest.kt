@@ -232,13 +232,38 @@ data: [DONE]
         assertEquals(ModelResponse.ToolCall("read_file", "{\"path\":\"src/Main.kt\"}", "", "call_1"), result)
     }
 
-    private fun fakeConnection(body: String, onRequest: (String) -> Unit = {}): HttpURLConnection = object : HttpURLConnection(java.net.URL("http://127.0.0.1:8080/v1/chat/completions")) {
+    @Test
+    fun redirectsAreRejectedWithoutUsingTheRedirectBody() {
+        val gateway = RemoteHttpGateway("http://127.0.0.1:8080/v1", "", "local", connectionFactory = { _ ->
+            fakeConnection("secret-body", code = 302)
+        })
+        val result = gateway.complete(ModelRequest("system", "question", emptyList()))
+        assertTrue(result is ModelResponse.Failure)
+        val message = (result as ModelResponse.Failure).message
+        assertTrue(message.contains("different web address"))
+        assertTrue(!message.contains("secret-body"))
+    }
+
+    @Test
+    fun errorBodiesDoNotEchoBearerTokens() {
+        val gateway = RemoteHttpGateway("http://127.0.0.1:8080/v1", "sk-test", "local", connectionFactory = { _ ->
+            fakeConnection("Authorization: Bearer sk-testvalueleaked", code = 401)
+        })
+        val result = gateway.complete(ModelRequest("system", "question", emptyList()))
+        assertTrue(result is ModelResponse.Failure)
+        val message = (result as ModelResponse.Failure).message
+        assertTrue(message.contains("[redacted]"))
+        assertTrue(!message.contains("sk-testvalueleaked"))
+    }
+
+    private fun fakeConnection(body: String, onRequest: (String) -> Unit = {}, code: Int = 200): HttpURLConnection = object : HttpURLConnection(java.net.URL("http://127.0.0.1:8080/v1/chat/completions")) {
         private val request = java.io.ByteArrayOutputStream()
         override fun connect() = Unit
         override fun disconnect() = Unit
         override fun usingProxy() = false
-        override fun getResponseCode() = 200
+        override fun getResponseCode() = code
         override fun getInputStream() = body.byteInputStream()
+        override fun getErrorStream() = if (code in 200..299) null else body.byteInputStream()
         override fun getOutputStream(): java.io.OutputStream {
             return object : java.io.FilterOutputStream(request) {
                 override fun close() { super.close(); onRequest(request.toString(Charsets.UTF_8.name())) }

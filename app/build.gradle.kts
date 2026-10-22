@@ -58,10 +58,9 @@ dependencies {
     // Required so registerForActivityResult on FragmentActivity passes lint (min 1.3.0).
     implementation("androidx.fragment:fragment-ktx:1.8.5")
     implementation("androidx.documentfile:documentfile:1.0.1")
-    // Owner gate: BiometricPrompt must stay. Approval of agent mutations is supposed to require
-    // the phone owner's fingerprint or face so the agent cannot approve itself and a stranger
-    // holding the phone cannot either. Wiring comes after the app actually runs.
+    // Owner gate: approval signs with an auth-per-use Keystore key inside BiometricPrompt.
     implementation("androidx.biometric:biometric:1.1.0")
+    implementation("androidx.core:core-ktx:1.13.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
@@ -77,6 +76,7 @@ dependencies {
     testImplementation("org.json:json:20240303")
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
+    androidTestImplementation(platform("androidx.compose:compose-bom:2024.10.00"))
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
     androidTestUtil("androidx.test:orchestrator:1.6.1")

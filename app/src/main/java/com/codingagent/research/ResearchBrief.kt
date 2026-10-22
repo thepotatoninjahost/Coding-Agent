@@ -12,11 +12,13 @@ data class ResearchBrief(
     val wordCount: Int,
     val codeExampleCount: Int,
     val sourceLines: List<String>,
-    val evidence: String
+    val evidence: String,
+    val truncated: Boolean = false
 )
 
 object ResearchBriefBuilder {
     fun build(session: ResearchSession, maxCharacters: Int = 48_000): ResearchBrief {
+        val limit = maxCharacters.coerceAtLeast(1)
         val usable = session.sources.filter { it.content.isNotBlank() }
         val queryTerms = SourceQuality.queryTerms(session.query)
         val ranked = usable.sortedWith(
@@ -24,11 +26,12 @@ object ResearchBriefBuilder {
                 .thenByDescending { authority(it.domain) }
                 .thenByDescending { it.wordCount }
         )
-        val evidence = buildString {
+        val fullWordCount = usable.sumOf { it.wordCount }
+        val fullEvidence = buildString {
             append("Research corpus for: ").append(session.query).append("\n")
             append("Full sources read: ").append(usable.size)
             append("; distinct lanes: ").append(usable.map { it.lane }.distinct().size)
-            append("; words: ").append(usable.sumOf { it.wordCount }).append("\n\n")
+            append("; words: ").append(fullWordCount).append("\n\n")
             ranked.forEachIndexed { index, source ->
                 append("SOURCE ").append(index + 1)
                 append(" [").append(source.lane).append("] ")
@@ -38,14 +41,26 @@ object ResearchBriefBuilder {
                 append("\n")
             }
         }
+        val truncated = fullEvidence.length > limit
+        val evidence = if (!truncated) {
+            fullEvidence
+        } else {
+            var end = limit
+            if (end < fullEvidence.length && fullEvidence[end - 1].isHighSurrogate()) end--
+            fullEvidence.substring(0, end) +
+                "\n\n[Research brief truncated to $limit characters for this turn. " +
+                "Retrieved corpus is still $fullWordCount words across ${usable.size} sources. " +
+                "The saved research session keeps the full text.]\n"
+        }
         return ResearchBrief(
             query = session.query,
             sourceCount = usable.size,
             laneCount = usable.map { it.lane }.distinct().size,
-            wordCount = usable.sumOf { it.wordCount },
+            wordCount = fullWordCount,
             codeExampleCount = usable.sumOf { it.codeExamples.size },
             sourceLines = ranked.map { "${it.title} — ${it.url}" },
-            evidence = evidence
+            evidence = evidence,
+            truncated = truncated
         )
     }
 

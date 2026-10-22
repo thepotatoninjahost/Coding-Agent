@@ -149,11 +149,24 @@ class AutonomousAgent(
     override fun execute(request: String): AgentRuntimeResult {
         val events = run(request)
         return when (val terminalEvent = events.lastOrNull()) {
-            is AutonomousAgentEvent.ApprovalRequired -> AgentRuntimeResult.NeedsApproval(terminalEvent.task, "Review proposal ${terminalEvent.proposal.id} and confirm twice before applying any code change.", terminalEvent.proposal.id)
+            is AutonomousAgentEvent.ApprovalRequired -> AgentRuntimeResult.NeedsApproval(terminalEvent.task, "Please read this change and say yes twice before anything is saved.", terminalEvent.proposal.id)
             is AutonomousAgentEvent.Completed -> AgentRuntimeResult.Completed(terminalEvent.task)
             is AutonomousAgentEvent.Failed -> terminalEvent.task?.let { AgentRuntimeResult.Failed(it) } ?: error(terminalEvent.message)
             is AutonomousAgentEvent.Stopped -> AgentRuntimeResult.Failed(terminalEvent.task)
-            else -> error("Autonomous agent ended without a terminal result")
+            else -> {
+                val detail = events.filterIsInstance<AutonomousAgentEvent.Phase>()
+                    .lastOrNull { it.name == "PERSONAL_LOG_ERROR" }
+                    ?.detail
+                if (detail != null) {
+                    val taskId = events.filterIsInstance<AutonomousAgentEvent.Started>().firstOrNull()?.taskId
+                        ?: UUID.randomUUID().toString()
+                    AgentRuntimeResult.Failed(
+                        failedTask(taskId, request, AgentPlan(request, emptyList(), emptyList()), detail, emptyList())
+                    )
+                } else {
+                    error("Autonomous agent ended without a terminal result")
+                }
+            }
         }
     }
 
@@ -193,7 +206,7 @@ class AutonomousAgent(
                 val detail = logFailure.message ?: logFailure.javaClass.simpleName
                 val warning = AutonomousAgentEvent.Phase(
                     "PERSONAL_LOG_ERROR",
-                    "Could not persist an audit event: $detail. The agent is stopping to preserve auditability."
+                    "I could not save a private note about what I just did: $detail. I stopped so I do not keep working without a record."
                 )
                 events += warning
                 onEvent(warning)
@@ -204,8 +217,22 @@ class AutonomousAgent(
             onEvent(event)
         }
         emit(AutonomousAgentEvent.Started(taskId, normalized))
-        emit(AutonomousAgentEvent.Phase("INTAKE", "Inspecting the request and repository"))
-        if (!personalLogHealthy) return events
+        emit(AutonomousAgentEvent.Phase("INTAKE", "Reading what you asked and looking at the project."))
+        if (!personalLogHealthy) {
+            val message = (events.lastOrNull() as? AutonomousAgentEvent.Phase)?.detail
+                ?: "I could not save a private note, so I stopped."
+            val task = failedTask(
+                taskId,
+                normalized,
+                AgentPlan(normalized, emptyList(), emptyList()),
+                message,
+                emptyList()
+            )
+            val failed = AutonomousAgentEvent.Failed(task, message)
+            events += failed
+            onEvent(failed)
+            return events
+        }
         // Keep the full packaged conversation for deterministic intake. GoalInterpreter
         // extracts the active job and prior owner instructions before the model sees them.
         // The current-turn focus remains the execution-facing request for direct lanes.
@@ -236,7 +263,7 @@ class AutonomousAgent(
         planningLoop.completePhase("intake", "request parsed")
         planningLoop.completePhase("understand", "repository summary established")
         toolSelectionLoop.completeKind(ToolKind.INDEX_REPOSITORY, "repository summary established")
-        emit(AutonomousAgentEvent.Phase("PLAN", plan.steps.joinToString(" → ") { it.phase }))
+        emit(AutonomousAgentEvent.Phase("PLAN", "Making a plan for what you asked."))
 
         // Direct lanes: do not force the full tool loop for social / status / explicit read.
         lanes.respond(taskId, focus, intake, plan)?.let { task ->
@@ -284,9 +311,10 @@ class AutonomousAgent(
         val activeGateway = gateway
         if (activeGateway == null) {
             val msg =
-                "Model is not configured. Local commands still work: hello, list files, status, read <path>, " +
-                    "and explicit replace/create when the operation is fully specified. " +
-                    "Open Model settings (base URL, model name, API key) for autonomous coding and research."
+                "The code helper is not connected yet, so I cannot write new code from this request. " +
+                    "You can still say hello, ask me to list files, ask for status, or ask me to read a file you name. " +
+                    "Tap Setup and add the helper's web address, name, and secret password. " +
+                    "A free starting point is Groq: web address https://api.groq.com/openai/v1, helper name llama-3.3-70b-versatile, and a secret password from console.groq.com."
             val task = AgentTask(
                 taskId, focus, "needs-input", plan, emptyList(),
                 VerificationReport(false, emptyList()),
@@ -302,29 +330,28 @@ class AutonomousAgent(
         val wantsResearch = shouldResearch(focus, intake)
         if (wantsResearch) {
             if (isCancelled()) return stopNow(taskId, normalized, plan, events) { emit(it) }
-            emit(AutonomousAgentEvent.Phase("RESEARCH", "Looking up external sources"))
+            emit(AutonomousAgentEvent.Phase("RESEARCH", "Looking things up on the internet."))
             val mode = ResearchModeDetector.detect(focus)
             val session = runCatching {
                 research.deepResearch(focus, 8, mode) { progress ->
                     if (isCancelled()) return@deepResearch
-                    emit(AutonomousAgentEvent.Phase("RESEARCH", "${progress.stage}: ${progress.completed}/${progress.total}; learned ${progress.successful}, failed ${progress.failed}"))
+                    emit(AutonomousAgentEvent.Phase("RESEARCH", "Looking things up: ${progress.completed} of ${progress.total}. Found ${progress.successful}. Could not use ${progress.failed}."))
                 }
             }.getOrNull()
             if (isCancelled()) return stopNow(taskId, normalized, plan, events) { emit(it) }
             val brief = session?.takeIf { it.sources.isNotEmpty() }?.let(ResearchBriefBuilder::build)
             if (brief != null && brief.sourceCount > 0 && brief.evidence.isNotBlank()) {
                 researchEvidence = "\n\nResearch brief:\n${brief.evidence}"
-                emit(AutonomousAgentEvent.Phase("RESEARCH", "Learned ${brief.sourceCount} sources (${brief.wordCount} words)"))
+                emit(AutonomousAgentEvent.Phase("RESEARCH", "I read ${brief.sourceCount} pages (${brief.wordCount} words) and saved them."))
             } else {
                 researchEvidence =
                     "\n\nResearch ran but returned no usable sources. Do not invent external docs or APIs. " +
                         "Prefer local project evidence, or call research_web with a tighter technical query."
-                emit(AutonomousAgentEvent.Phase("RESEARCH", "No usable sources — model must not invent external facts"))
+                emit(AutonomousAgentEvent.Phase("RESEARCH", "I could not find usable pages. I will not invent facts from the internet."))
                 if (ResearchGate.requiresUsableEvidence(focus, intake)) {
                     val message =
-                        "Research was required for this request, but no usable external sources were retrieved. " +
-                            "I will not present unsupported current documentation or web research as verified. " +
-                            "Retry with a narrower query or configure a working research provider."
+                        "I needed pages from the internet for this, and I could not get any. " +
+                            "I will not pretend I looked them up. Try again with fewer, clearer words."
                     val task = failedTask(taskId, focus, plan, message, emptyList())
                     recordTask(task)
                     emit(AutonomousAgentEvent.Failed(task, message))
@@ -332,7 +359,7 @@ class AutonomousAgent(
                 }
             }
         } else {
-            emit(AutonomousAgentEvent.Phase("RESEARCH", "Skipped — local project is enough for this request"))
+            emit(AutonomousAgentEvent.Phase("RESEARCH", "I am using the project on this phone. I do not need the internet for this."))
         }
 
         val transcript = mutableListOf<com.codingagent.model.ModelMessage>()
@@ -368,7 +395,7 @@ class AutonomousAgent(
 
         for (turn in 0 until config.maxTurns) {
             if (isCancelled()) return stopNow(taskId, normalized, plan, events) { emit(it) }
-            emit(AutonomousAgentEvent.Phase("MODEL", "Decision turn ${turn + 1}/${config.maxTurns}"))
+            emit(AutonomousAgentEvent.Phase("MODEL", "Thinking about the next step (${turn + 1} of ${config.maxTurns})."))
             val decision = LoopControl.decide(
                 turn = turn,
                 maxTurns = config.maxTurns,
@@ -465,7 +492,7 @@ class AutonomousAgent(
                     if (writeNow && changeWork && !state.mutationOccurred) {
                         state.writeNowRefusals++
                         if (state.writeNowRefusals >= 2) {
-                            val msg = "The model reached the execution gate twice without staging the requested change. No code was written."
+                            val msg = "I looked at the project but did not prepare the change you asked for. Nothing was saved. Say what you want again, and name the file if you know it."
                             val task = failedTask(taskId, normalized, plan, msg, changeSets.flatMap { it.changes })
                             emit(AutonomousAgentEvent.Failed(task, msg))
                             recordTask(task)
@@ -566,8 +593,8 @@ class AutonomousAgent(
         val summary = if (usableEvidence) {
             synthesizeFromEvidence(normalized, state.lastEvidence, report)
         } else {
-            "The model used ${config.maxTurns} turns without producing a final answer or usable tool evidence. " +
-                "Retry with a narrower request (one file or one question), or switch model in Model settings."
+            "I used every step I am allowed and still do not have a usable answer. " +
+                "Try a smaller request, such as one file or one question. Or tap Setup and try a different helper."
         }
         val task = AgentTask(
             taskId, normalized, if (usableEvidence) "completed-with-warning" else "failed", plan,
@@ -727,8 +754,8 @@ class AutonomousAgent(
             return text
         }
         return buildString {
-            append("The model produced garbled or incoherent output instead of a coherent report. ")
-            append("Static verification found ")
+            append("The helper's answer was garbled, so I am not treating it as a result. ")
+            append("A simple text check found ")
             append(report.issues.size)
             append(" issue(s)")
             if (report.issues.isEmpty()) {
@@ -826,8 +853,7 @@ class AutonomousAgent(
         val all = workspace.verify().issues
         val policy = all.filter { issue ->
             val ip = issue.path.replace('\\', '/')
-            ip == resolved || ip.endsWith("/$resolved") ||
-                java.io.File(ip).name.equals(java.io.File(resolved).name, ignoreCase = true)
+            ip == resolved || ip.endsWith("/$resolved")
         }
         val notes = structureHeuristics(content)
         return LocalFileReport(

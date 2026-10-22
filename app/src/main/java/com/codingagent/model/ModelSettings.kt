@@ -1,6 +1,8 @@
 package com.codingagent.model
 
 import com.codingagent.core.LocalStore
+import java.net.InetAddress
+import java.net.URI
 
 /**
  * ONE JOB: User-facing model gateway configuration (base URL, model id, API key,
@@ -15,24 +17,81 @@ enum class ModelBackend {
 object ModelEndpointPolicy {
     fun validate(raw: String): String? {
         val value = raw.trim()
-        if (value.isBlank()) return "Base URL is required for remote models"
-        val uri = runCatching { java.net.URI(value) }.getOrNull()
-            ?: return "Base URL is not a valid URI"
+        if (value.isBlank()) return "The web address is missing."
+        val uri = runCatching { URI(value) }.getOrNull()
+            ?: return "That web address is not valid."
         val scheme = uri.scheme?.lowercase()
-            ?: return "Base URL must include http:// or https://"
-        if (scheme != "http" && scheme != "https") return "Base URL must use http:// or https://"
-        if (uri.userInfo != null) return "Base URL must not contain embedded credentials"
-        if (uri.host.isNullOrBlank()) return "Base URL must contain a hostname"
+            ?: return "The web address must start with http:// or https://."
+        if (scheme != "http" && scheme != "https") return "The web address must use http:// or https://."
+        if (uri.userInfo != null) return "Do not put a password inside the web address."
+        if (uri.host.isNullOrBlank()) return "The web address needs a site name."
         if (scheme == "http" && !isLocalEndpoint(value)) {
-            return "Remote model endpoints must use HTTPS; HTTP is allowed only for localhost or loopback"
+            return "A helper on the internet must use HTTPS. HTTP is allowed only for a helper on this phone."
         }
+        dangerousLiteralHost(uri.host)?.let { return it }
         return null
     }
 
     fun isLocalEndpoint(raw: String): Boolean {
-        val uri = runCatching { java.net.URI(raw.trim()) }.getOrNull() ?: return false
+        val uri = runCatching { URI(raw.trim()) }.getOrNull() ?: return false
         val host = uri.host?.lowercase() ?: return false
         return host == "localhost" || host == "127.0.0.1" || host == "::1" || host == "[::1]"
+    }
+
+    /**
+     * Public hostnames must not resolve to a private or link-local address before the API key
+     * is sent. A literal private address is allowed because the owner typed that machine.
+     */
+    fun refuseResolvedDestination(raw: String): String? {
+        validate(raw)?.let { return it }
+        if (isLocalEndpoint(raw)) return null
+        val host = URI(raw.trim()).host?.trim()?.trim('[', ']') ?: return "Base URL must contain a hostname"
+        if (isLiteralIp(host)) return null
+        val addresses = try {
+            InetAddress.getAllByName(host).toList()
+        } catch (error: Exception) {
+            return "That site name could not be found: ${error.message ?: "lookup failed"}"
+        }
+        if (addresses.isEmpty()) return "That site name could not be found."
+        if (addresses.any(::blocksResolvedAddress)) {
+            return "That site name points at a private or link-local address. Your secret password was not sent. If you mean a computer in your home, type its address directly."
+        }
+        return null
+    }
+
+    private fun dangerousLiteralHost(host: String?): String? {
+        val normalized = host?.trim()?.trim('[', ']')?.lowercase() ?: return null
+        if (normalized == "metadata.google.internal" || normalized.endsWith(".metadata.google.internal")) {
+            return "That web address is blocked."
+        }
+        if (!isLiteralIp(normalized)) return null
+        val address = runCatching { InetAddress.getByName(normalized) }.getOrNull()
+            ?: return "That web address is not valid."
+        if (address.isLinkLocalAddress || address.isAnyLocalAddress || address.isMulticastAddress) {
+            return "That web address uses a link-local or blocked address, so it was refused."
+        }
+        return null
+    }
+
+    private fun isLiteralIp(host: String): Boolean {
+        val normalized = host.trim('[', ']')
+        if (normalized.contains(':')) return true
+        return normalized.split('.').size == 4 && normalized.split('.').all { part ->
+            part.toIntOrNull()?.let { it in 0..255 } == true
+        }
+    }
+
+    private fun blocksResolvedAddress(address: InetAddress): Boolean {
+        val bytes = address.address
+        if (bytes.size == 16 &&
+            bytes.take(10).all { it == 0.toByte() } &&
+            bytes[10] == 0xff.toByte() &&
+            bytes[11] == 0xff.toByte()
+        ) {
+            return blocksResolvedAddress(InetAddress.getByAddress(bytes.copyOfRange(12, 16)))
+        }
+        return address.isAnyLocalAddress || address.isLoopbackAddress || address.isLinkLocalAddress ||
+            address.isSiteLocalAddress || address.isMulticastAddress
     }
 }
 
@@ -90,7 +149,9 @@ data class ModelSettings(
             val idx = line.indexOf(sep)
             val name = line.substring(0, idx).trim()
             val value = line.substring(idx + 1).trim()
-            if (name.isNotBlank() && value.isNotBlank()) out[name] = value
+            if (name.isBlank() || value.isBlank()) continue
+            if (name.any { it.isISOControl() } || value.any { it.isISOControl() }) continue
+            out[name] = value
         }
         return out
     }
@@ -110,9 +171,9 @@ data class ModelSettings(
         val s = normalized()
         return buildList {
             ModelEndpointPolicy.validate(s.baseUrl)?.let(::add)
-            if (s.modelName.isBlank()) add("Model name is required")
+            if (s.modelName.isBlank()) add("The helper name is missing.")
             val local = ModelEndpointPolicy.isLocalEndpoint(s.baseUrl)
-            if (s.apiKey.isBlank() && !local) add("API key is required (except localhost endpoints)")
+            if (s.apiKey.isBlank() && !local) add("The secret password is missing, unless the helper is on this phone.")
         }
     }
 
@@ -124,9 +185,9 @@ data class ModelSettings(
         }.getOrDefault(normalized().baseUrl).ifBlank { "…" }
         val ids = allModelIds()
         return when {
-            !isRemoteConfigured() -> "Remote · set base URL, model, and API key"
-            ids.size <= 1 -> "Remote · ${ids.firstOrNull() ?: modelName} @ $host"
-            else -> "Remote · ${ids.first()} + ${ids.size - 1} fallback(s) @ $host"
+            !isRemoteConfigured() -> "Helper not connected yet"
+            ids.size <= 1 -> "Helper · ${ids.firstOrNull() ?: modelName} at $host"
+            else -> "Helper · ${ids.first()} and ${ids.size - 1} backups at $host"
         }
     }
 
@@ -234,8 +295,8 @@ object ModelConnectionProbe {
             "Bearer [redacted]"
         )
         if ("0x0a" in msg || "Unexpected char" in msg) {
-            return "API key contains invalid characters (line breaks or spaces). " +
-                "Clear the API key field, paste it again as one continuous string, then Test."
+            return "The secret password has a line break or a space in it. " +
+                "Clear that box, paste it again as one line, then tap Try connection."
         }
         return msg
     }
@@ -244,11 +305,9 @@ object ModelConnectionProbe {
         val lower = raw.lowercase()
         if ("agentic harness" in lower || "gate free endpoints by agentic harness" in lower) {
             val paid = modelName.removeSuffix(":free").removeSuffix(":Free")
-            return "OpenRouter blocked $modelName because that FREE endpoint is allowlisted " +
-                "to a short list of published harnesses (Claude Code, Codex, Hermes Agent, Cline, …). " +
-                "This app is a coding agent; OpenRouter still does not treat custom HTTP clients as that list. " +
-                "Use the paid id `$paid` (same model, billed), or pick another :free model that is not harness-gated " +
-                "(for example openrouter/free or qwen/qwen3-coder:free). See openrouter.ai/apps."
+            return "The free helper named $modelName refused this app. That company only lets a short list of other apps use the free version. " +
+                "Try the paid name `$paid` (the same helper, but you pay), or pick a different free helper that is not locked, " +
+                "such as openrouter/free or qwen/qwen3-coder:free. See openrouter.ai/apps."
         }
         return sanitizeProbeError(raw)
     }

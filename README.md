@@ -14,7 +14,7 @@ It is not a chatbot that answers coding questions in one shot. It works like a c
 
 It does not quit early out of convenience. It only stops early when a specific missing input from the user is required that tools cannot supply.
 
-The runtime keeps a degraded offline knowledge path. Non-trivial coding requests that require external knowledge fail closed unless a web research provider is configured and returns evidence. The model-driven autonomous path uses an OpenAI-compatible gateway with tool calling and streamed server-sent-event deltas. Configure the gateway via the in-app Model settings screen (base URL, model id, API key).
+The runtime keeps a degraded offline knowledge path. Non-trivial coding requests that require external knowledge fail closed unless a web research provider is configured and returns evidence. The model-driven autonomous path uses an OpenAI-compatible gateway with tool calling and streamed server-sent-event deltas. Configure the gateway via the in-app Setup screen (web address, helper name, secret password).
 
 ## Current product status
 
@@ -66,7 +66,7 @@ Production source is split by job under `app/src/main/java/com/codingagent/`:
 Execution path:
 
 1. `TaskIntakeParser` interprets a request into a typed goal contract and operation.
-2. `AutonomousAgent` owns the loop: gather evidence, plan, one tool per turn (queue extras), observe, verify, hand over.
+2. `AutonomousAgent` owns the loop: gather evidence, plan, one tool per turn (a second tool call in the same reply is rejected), observe, verify, hand over.
 3. `AgentPlanner` produces and revises the plan from evidence.
 4. `ProjectIndexer` inventories project files, languages, imports, symbols, and checksums.
 5. `AgentKnowledge` supplies local evidence. `WebResearchProvider` / deep-research providers supply internet evidence when the request requires it. Empty research fails closed.
@@ -138,7 +138,7 @@ The Terminal tab and the agent `run_command` tool use the same underlying runner
 - Command: `sh -c <your text>`
 - Working directory: the imported project copy in app-private storage
 - Timeout: 180 seconds (Stop sends `destroy` / `destroyForcibly`)
-- Output: stdout and stderr, each capture capped at 256 KiB
+- Output: stdout and stderr are kept in full. A very noisy command can use a lot of memory on the phone. There is no 256 KiB cap.
 
 The **Terminal tab is the owner-controlled terminal** and remains unrestricted. The **agent `run_command` tool is restricted** to project inspection and standard verification commands. Model commands cannot delete or modify files, chain shell commands, redirect output, access parent/absolute paths, use network tools, or change global Gradle configuration.
 
@@ -246,7 +246,7 @@ The debug APK upload step runs even when a later step fails (so an emulator fail
 
 ## Supported device contract
 
-This build targets the Samsung Galaxy S25 class of devices: Android API 35 or newer, `arm64-v8a`, and 64-bit ARM. The APK intentionally does not claim x86_64 or 32-bit ARM support.
+This build targets phones on `minSdk` 34 and `targetSdk` 35, including Samsung Galaxy S25-class devices. The app has no native libraries and Gradle does not set an ABI filter, so the same APK can install on arm64-v8a, armeabi-v7a, and x86_64 devices that meet `minSdk` 34. CI instrumentation uses an arm64 emulator. API 34 devices can install it; it is not limited to API 35.
 
 ## Reproducible source packaging
 

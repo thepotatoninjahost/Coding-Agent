@@ -82,7 +82,7 @@ internal fun CompactStatusBar(
             Column(Modifier.weight(1f)) {
                 Text("CODING AGENT", color = NeonGreen, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                 Text(
-                    if (mounted) "workspace active · $modelStatus" else "no project · $modelStatus",
+                    if (mounted) "Project open · $modelStatus" else "No project yet · $modelStatus",
                     color = SoftGreen,
                     fontSize = 11.sp,
                     maxLines = 2
@@ -91,7 +91,7 @@ internal fun CompactStatusBar(
             if (status != AgentStatus.READY && status != AgentStatus.STOPPED) {
                 TextButton(onClick = onStop) { Text("Stop", color = Danger, fontSize = 12.sp) }
             }
-            TextButton(onClick = onModelImport) { Text("Model", color = FluoroOrange, fontWeight = FontWeight.Bold, fontSize = 12.sp) }
+            TextButton(onClick = onModelImport) { Text("Setup", color = FluoroOrange, fontWeight = FontWeight.Bold, fontSize = 12.sp) }
             TextButton(onClick = onNewProject) { Text("New", color = NeonGreen, fontWeight = FontWeight.Bold, fontSize = 12.sp) }
             TextButton(onClick = onImport) { Text(if (mounted) "Switch" else "Import", color = SoftGreen, fontWeight = FontWeight.Bold, fontSize = 12.sp) }
         }
@@ -101,7 +101,7 @@ internal fun CompactStatusBar(
             Spacer(Modifier.width(6.dp))
             Text(status.label, color = status.color, fontWeight = FontWeight.Bold, fontSize = 12.sp)
             Spacer(Modifier.width(6.dp))
-            Text(detail, color = SoftGreen, fontSize = 11.sp, maxLines = 1)
+            Text(detail, color = SoftGreen, fontSize = 11.sp, maxLines = 4)
         }
         if (status == AgentStatus.RESEARCHING || status == AgentStatus.PLANNING || status == AgentStatus.WORKING || status == AgentStatus.MODEL || status == AgentStatus.TOOL || status == AgentStatus.RUNNING || modelProgress?.phase == "downloading") {
             Spacer(Modifier.height(4.dp))
@@ -142,7 +142,7 @@ internal fun ChatSurface(
             if (messages.isEmpty()) {
                 item {
                     Text(
-                        "Type a request in plain English about your project.\nThe agent will look at your files and reply here.",
+                        "Tell me what you want in ordinary words.\nI will look at your project and answer here. I ask before I save any change.",
                         color = SoftGreen,
                         fontSize = 14.sp,
                         modifier = Modifier.padding(vertical = 24.dp)
@@ -153,7 +153,7 @@ internal fun ChatSurface(
         }
         if (pendingApproval) ApprovalCard(approvalCount, reason, onApprove)
         if (busy) {
-            Text("Agent is working…", color = FluoroOrange, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp))
+            Text("Working on what you asked.", color = FluoroOrange, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp))
         }
         Column(
             Modifier
@@ -166,7 +166,7 @@ internal fun ChatSurface(
                 value = input,
                 onValueChange = onInput,
                 modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text("Describe what you want fixed or added…", color = SoftGreen) },
+                placeholder = { Text("Say what you want, in ordinary words…", color = SoftGreen) },
                 minLines = 2,
                 maxLines = 6,
                 textStyle = TextStyle(color = NeonGreen, fontSize = 16.sp, lineHeight = 22.sp),
@@ -197,15 +197,15 @@ internal fun ApprovalCard(approvalCount: Int, reason: String, onApprove: () -> U
         border = androidx.compose.foundation.BorderStroke(1.dp, FluoroOrange)
     ) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("CODE CHANGE REVIEW", color = FluoroOrange, fontWeight = FontWeight.Bold)
+            Text("PLEASE CHECK THIS", color = FluoroOrange, fontWeight = FontWeight.Bold)
             Text(reason, color = NeonGreen, fontSize = 13.sp)
-            Text("Two explicit approvals are required before a code transaction can proceed.", color = SoftGreen, fontSize = 12.sp)
+            Text("Say yes twice, on purpose, before anything is saved.", color = SoftGreen, fontSize = 12.sp)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("${approvalCount}/2", color = SoftGreen, modifier = Modifier.weight(1f))
                 Button(
                     onClick = onApprove,
                     colors = ButtonDefaults.buttonColors(containerColor = FluoroOrange, contentColor = DarkPurple)
-                ) { Text(if (approvalCount == 0) "Confirm" else "Confirm again") }
+                ) { Text(if (approvalCount == 0) "Say yes" else "Say yes again") }
             }
         }
     }
@@ -222,7 +222,7 @@ internal fun ChatBubble(message: ChatMessage) {
         Text(
             when {
                 isUser -> "YOU"
-                isSystem -> "SYSTEM"
+                isSystem -> "NOTE"
                 else -> "AGENT"
             },
             color = if (isUser) SoftGreen else if (isSystem) FluoroOrange else NeonGreen,
@@ -257,13 +257,13 @@ internal fun FilesSurface(
     query: String,
     onQuery: (String) -> Unit,
     path: String,
-    onPath: (String) -> Unit,
+    onOpen: (String) -> Unit,
     content: String,
     onContent: (String) -> Unit,
     document: EditorDocument?,
     tools: AgentTools?,
     mutationCoordinator: MutationCoordinator?,
-    onStatus: (Pair<AgentStatus, String>) -> Unit
+    onSave: () -> Unit
 ) {
     val filtered = remember(files, query) {
         if (query.isBlank()) files else files.filter { it.contains(query, ignoreCase = true) }
@@ -287,17 +287,29 @@ internal fun FilesSurface(
                         fontSize = 12.sp,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable {
-                                onPath(file)
-                                runCatching { tools?.read(file)?.let { onContent(it.content) } }
-                            }
+                            .clickable { onOpen(file) }
                             .padding(vertical = 6.dp, horizontal = 4.dp)
                     )
                 }
             }
             Spacer(Modifier.width(8.dp))
             Column(Modifier.weight(0.6f).fillMaxSize()) {
-                Text(path.ifBlank { "(no file selected)" }, color = SoftGreen, fontSize = 11.sp)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        path.ifBlank { "Tap a file to open it" },
+                        color = SoftGreen,
+                        fontSize = 11.sp,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Button(
+                        onClick = onSave,
+                        enabled = path.isNotBlank() && tools != null && mutationCoordinator != null,
+                        colors = ButtonDefaults.buttonColors(containerColor = NeonGreen, contentColor = DarkPurple)
+                    ) { Text("Save") }
+                }
+                if (document?.dirty == true) {
+                    Text("Unsaved edits", color = FluoroOrange, fontSize = 11.sp)
+                }
                 Spacer(Modifier.height(4.dp))
                 OutlinedTextField(
                     value = content,
@@ -322,13 +334,13 @@ internal fun ReviewSurface(
     Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("Review", color = NeonGreen, fontWeight = FontWeight.Bold, fontSize = 18.sp)
         if (!pending) {
-            Text("No pending code change proposal.", color = SoftGreen)
+            Text("Nothing is waiting for you to approve.", color = SoftGreen)
         } else {
             Text(reason, color = NeonGreen, fontSize = 14.sp)
-            Text("Approvals: $approvals/2", color = SoftGreen)
+            Text("Yes so far: $approvals of 2", color = SoftGreen)
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Button(onClick = onApprove, colors = ButtonDefaults.buttonColors(containerColor = FluoroOrange, contentColor = DarkPurple)) {
-                    Text("Approve")
+                    Text("Say yes")
                 }
                 TextButton(onClick = onReject) { Text("Reject", color = Danger) }
             }
@@ -352,13 +364,17 @@ internal fun TerminalSurface(
     onClear: () -> Unit
 ) {
     Column(Modifier.fillMaxSize().padding(12.dp)) {
-        Text("cwd: $cwd · shell: $shell · timeout: ${timeoutSeconds}s", color = SoftGreen, fontSize = 11.sp)
+        Text(
+            "This runs a simple command in your project. It is not a full computer. Folder: $cwd. Tool: $shell. It stops after $timeoutSeconds seconds.",
+            color = SoftGreen,
+            fontSize = 11.sp
+        )
         Spacer(Modifier.height(8.dp))
         OutlinedTextField(
             value = command,
             onValueChange = onCommand,
             modifier = Modifier.fillMaxWidth(),
-            placeholder = { Text("Command…", color = SoftGreen) },
+            placeholder = { Text("Type a simple command", color = SoftGreen) },
             singleLine = true,
             enabled = enabled && !running,
             colors = fieldColors()
@@ -414,7 +430,7 @@ internal fun ResearchSurface(
             value = query,
             onValueChange = onQuery,
             modifier = Modifier.fillMaxWidth(),
-            placeholder = { Text("Research query…", color = SoftGreen) },
+            placeholder = { Text("What do you want to look up?", color = SoftGreen) },
             colors = fieldColors()
         )
         Spacer(Modifier.height(8.dp))
@@ -423,6 +439,18 @@ internal fun ResearchSurface(
             enabled = query.isNotBlank(),
             colors = ButtonDefaults.buttonColors(containerColor = NeonGreen, contentColor = DarkPurple)
         ) { Text("Search") }
+        Spacer(Modifier.height(8.dp))
+        Text(
+            when (state.phase) {
+                "searching" -> "Looking on the internet…"
+                "results" -> "${state.fullSources} pages found"
+                "empty" -> "Nothing came up. Try different words."
+                "failed" -> "The lookup failed."
+                else -> "This looks up public pages. It does not change your project, and it does not need a password."
+            },
+            color = SoftGreen,
+            fontSize = 12.sp
+        )
         if (error != null) {
             Spacer(Modifier.height(8.dp))
             Text(error, color = Danger, fontSize = 12.sp)

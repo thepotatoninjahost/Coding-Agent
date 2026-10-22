@@ -12,6 +12,8 @@ import com.codingagent.workspace.VerificationReport
 object AgentPrompt {
     fun repoMap(files: ProjectFileService, workspace: ProjectWorkspace, maxPaths: Int = 100): String {
         val paths = files.listSourceFilePaths()
+        val limit = maxPaths.coerceAtLeast(1)
+        val shown = paths.take(limit)
         val summary = workspace.summary()
         return buildString {
             append("Repo map — indexed sources: ${paths.size}")
@@ -21,12 +23,15 @@ object AgentPrompt {
                 append(summary.languages.entries.sortedByDescending { it.value }.joinToString { "${it.key}=${it.value}" })
             }
             append('\n')
-            if (paths.isEmpty()) {
+            if (shown.isEmpty()) {
                 append("(no indexed source files)\n")
             } else {
-                paths.forEach { path ->
+                shown.forEach { path ->
                     append(path)
                     append('\n')
+                }
+                if (paths.size > shown.size) {
+                    append("Showing ${shown.size} of ${paths.size} indexed source files. The rest are still in the project; list files to see them.\n")
                 }
             }
         }
@@ -87,6 +92,8 @@ object AgentPrompt {
         }
         appendLine()
         appendLine("Evidence so far:")
+        // maxEvidenceChars is retained so callers can pass a budget, but the prompt keeps
+        // the full evidence. Cutting it hid owner and tool evidence from the model.
         append(evidence)
     }
 

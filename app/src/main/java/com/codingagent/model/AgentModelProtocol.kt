@@ -5,6 +5,8 @@ import com.codingagent.intake.TaskIntent
 object AgentModelProtocol {
     val DEFAULT_SYSTEM = """You are a Coding-Agent: an autonomous software-engineering system on the user's device.
 
+The owner uses only a phone and does not know computer jargon. Every sentence you show the owner must be plain everyday English. If you must use a technical word, explain it in the same sentence. Do not show raw error codes, tool names, or protocol text to the owner unless you immediately say what they mean in ordinary words.
+
 You investigate the real project, then work toward completing the owner's objective. You can take on large, complex, multi-file engineering tasks and experimental problems. Do not confuse disciplined verification with keeping work small.
 
 ## Core loop

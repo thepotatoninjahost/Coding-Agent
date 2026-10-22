@@ -52,26 +52,24 @@ object ModelFailure {
         return when {
             isCapacity(message) -> {
                 val wait = waitSeconds(message)
-                "Provider worker pool is full (ResourceExhausted / HTTP 503). " +
-                    "This is a concurrent-request cap on the model host (Nvidia NIM often 16/16), not a bug in your prompt. " +
-                    "Wait ~${wait}s and send the request once. Rapid retries make the cap worse. " +
-                    "If it keeps happening, switch model or provider in Model settings."
+                "The helper is too busy right now. Wait about $wait seconds, then send your request once. " +
+                    "Sending it again and again makes the wait longer. If this keeps happening, tap Setup and try a different helper."
             }
             isRateLimit(message) -> {
                 val wait = waitSeconds(message)
-                "Model rate-limited (tokens/minute). Wait ~${wait}s, or switch provider in Model settings. " +
-                    "Local file evidence still available via inspect/read."
+                "The helper asked me to slow down. Wait about $wait seconds, or tap Setup and try a different helper. " +
+                    "I can still list files and read a file you name."
             }
             isEmpty(message) ->
-                "Model returned an empty response. Retrying is automatic; if it keeps happening, switch model in Model settings."
+                "The helper sent an empty answer. I try again automatically. If this keeps happening, tap Setup and try a different helper."
             "401" in lower || "unauthorized" in lower || "invalid api key" in lower ->
-                "Model auth failed (check API key in Model settings)."
+                "The helper rejected the secret password. Tap Setup and paste it again as one line."
             "403" in lower || "forbidden" in lower ->
-                "Model request forbidden (provider rejected the key or model)."
+                "The helper refused this request. The secret password or the helper name may be wrong. Check Setup."
             "timeout" in lower || "timed out" in lower ->
-                "Model request timed out. Retry once; if it keeps happening, shorten the request or switch provider."
+                "The helper took too long to answer. Try once more. If it keeps happening, ask for something smaller or pick a different helper in Setup."
             "connection" in lower || "unreachable" in lower || "unknownhost" in lower ->
-                "Could not reach the model endpoint (network)."
+                "I could not reach the helper. Check that the phone has internet, then try again."
             else -> message
         }
     }
