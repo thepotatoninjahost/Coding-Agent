@@ -239,7 +239,7 @@ A newer push to the same branch cancels the older in-progress run so the APK and
 - Image: `ubuntu-24.04-arm` (arm64 runner; matches S25-class ABI for emulator)
 - Job timeout: 120 minutes (the job is cancelled if it runs longer)
 - Default shell for `run` steps: `bash`
-- One job (`build`), sequential steps — debug APK is assembled and uploaded before the emulator step so a later failure does not depend on skipping the APK upload
+- Two jobs. `build` runs the checks. `publish-debug-apk` runs after a push to `main` or `cursor/audit-fixes-ce5c` and attaches the debug APK to the `latest-debug` prerelease. Debug APK assembly and upload happen before the emulator step, so a later emulator failure does not hide the APK.
 
 ### What the job does
 
@@ -254,9 +254,13 @@ A newer push to the same branch cancels the older in-progress run so the APK and
 9. Enables KVM, starts an **API 35** `google_apis` / **arm64-v8a** / Pixel 7 emulator on `ubuntu-24.04-arm` (pinned `android-emulator-runner@v2.38.0`), and runs instrumentation tests (`connectedDebugAndroidTest`). Clean boot (`-no-snapshot`), animations and spellchecker disabled. **One attempt** — failure fails the job (no retry that could hide a real test failure).
 10. On instrumentation failure, uploads Android test reports (`if-no-files-found: warn`).
 
-Permissions: `contents: read` only.
+The `build` job can read the repository. The publish job can also write a release, and only on a push to `main` or this working branch.
 
 ### Download the debug APK
+
+On your phone, open the repository **Releases** page and install the `latest-debug` prerelease asset named `coding-agent-debug.apk`. That file is replaced each time a push to `main` or the working branch finishes a build. It is a test build, not a store release.
+
+You can also download the same APK from a workflow run:
 
 1. Open the repository on GitHub.
 2. Open **Actions**.
@@ -264,7 +268,7 @@ Permissions: `contents: read` only.
 4. Open a completed run for the commit you want (or start one with **Run workflow**).
 5. Under **Artifacts**, download **`coding-agent-debug-apk`**.
 
-The debug APK upload step runs even when a later step fails (so an emulator failure does not hide a successful debug APK). If `assembleDebug` did not produce an APK, the upload step **fails the job** instead of silently uploading nothing.
+The debug APK upload step runs even when a later step fails (so an emulator failure does not hide a successful debug APK). If `assembleDebug` did not produce an APK, the upload step **fails the job** instead of silently uploading nothing. The phone release is updated only after that artifact exists.
 
 ## Supported device contract
 

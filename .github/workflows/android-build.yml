@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - cursor/audit-fixes-ce5c
     paths-ignore:
       - '**/*.md'
       - 'LICENSE'
@@ -219,3 +220,42 @@ jobs:
             app/build/outputs/androidTest-results/
           if-no-files-found: warn
           retention-days: 5
+
+  publish-debug-apk:
+    name: Publish latest debug APK
+    needs: build
+    if: >-
+      always() &&
+      github.event_name == 'push' &&
+      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/cursor/audit-fixes-ce5c') &&
+      needs.build.result != 'cancelled'
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - name: Download the debug APK from this run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh run download "${{ github.run_id }}" --name coding-agent-debug-apk --dir apk
+          find apk -name '*.apk' -print
+
+      - name: Update the latest-debug prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          src="$(find apk -name '*.apk' -print -quit)"
+          test -n "$src"
+          cp "$src" coding-agent-debug.apk
+          notes='Debug build you can install on your phone. It is replaced whenever the app is updated. This is a test build, not a store release.'
+          if gh release view latest-debug >/dev/null 2>&1; then
+            gh release upload latest-debug coding-agent-debug.apk --clobber
+          else
+            gh release create latest-debug coding-agent-debug.apk \
+              --prerelease \
+              --title "Latest debug install" \
+              --notes "$notes"
+          fi
