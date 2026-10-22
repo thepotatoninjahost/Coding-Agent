@@ -149,7 +149,7 @@ The Terminal tab and the agent `run_command` tool use the same underlying runner
 - Command: `sh -c <your text>`
 - Working directory: the imported project copy in app-private storage
 - Timeout: 180 seconds (Stop sends `destroy` / `destroyForcibly`)
-- Output: stdout and stderr are kept in full. A very noisy command can use a lot of memory on the phone. There is no 256 KiB cap.
+- Output: the command that is running keeps its full output. Stored history keeps the first 256 KB and adds the note `output trimmed` when the rest is left out.
 
 The **Terminal tab is the owner-controlled terminal** and remains unrestricted. The **agent `run_command` tool is restricted** to project inspection and standard verification commands. Model commands cannot delete or modify files, chain shell commands, redirect output, access parent/absolute paths, use network tools, or change global Gradle configuration.
 
