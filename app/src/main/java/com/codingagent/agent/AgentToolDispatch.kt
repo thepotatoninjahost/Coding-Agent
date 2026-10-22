@@ -55,7 +55,16 @@ class AgentToolDispatch(
                 "list_files" -> listFiles(arguments)
                 "read_file" -> readFileChunk(arguments)
                 "search_project" -> workspace.search(arguments.getString("query")).joinToString("\n") { "${it.path}:${it.line}: ${it.text}" }
-                "search_knowledge" -> knowledge.search(arguments.getString("query"), Int.MAX_VALUE).joinToString("\n") { "${it.document}/${it.section}: ${it.excerpt}" }
+                "search_knowledge" -> {
+                    val hits = knowledge.search(arguments.getString("query"), KNOWLEDGE_RESULT_CAP + 1)
+                    val shown = hits.take(KNOWLEDGE_RESULT_CAP)
+                    val body = shown.joinToString("\n") { "${it.document}/${it.section}: ${it.excerpt}" }
+                    if (hits.size > KNOWLEDGE_RESULT_CAP) {
+                        body + "\nShowing $KNOWLEDGE_RESULT_CAP matches. Ask a tighter question for the rest."
+                    } else {
+                        body
+                    }
+                }
                 "research_web" -> researchWeb(arguments)
                 "read_chat_history" -> readChatHistory(arguments)
                 "search_chat_history" -> searchChatHistory(arguments)
@@ -275,5 +284,7 @@ class AgentToolDispatch(
     private fun ownerOnlyMutationControl(name: String): String =
         "ERROR: $name is owner-only. Use Review or chat for owner-controlled proposal decisions."
 
-
+    private companion object {
+        const val KNOWLEDGE_RESULT_CAP = 30
+    }
 }

@@ -36,4 +36,11 @@ class StorageGuardTest {
         assertTrue(message.contains("Not enough free space"))
         assertTrue(message.contains("remote") || message.contains("gateway") || message.contains("Free at least"))
     }
+
+    @Test
+    fun overflowDoesNotReportEnoughSpace() {
+        val dir = Files.createTempDirectory("storage-overflow").toFile()
+        val report = StorageGuard.report(dir, remainingDownloadBytes = Long.MAX_VALUE, marginBytes = 1L)
+        assertTrue(!report.ok)
+    }
 }

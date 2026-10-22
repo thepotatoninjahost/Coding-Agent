@@ -210,6 +210,16 @@ class AutonomousAgent(
                 )
                 events += warning
                 onEvent(warning)
+                val task = failedTask(
+                    taskId,
+                    normalized,
+                    AgentPlan(normalized, emptyList(), emptyList()),
+                    warning.detail,
+                    emptyList()
+                )
+                val failed = AutonomousAgentEvent.Failed(task, warning.detail)
+                events += failed
+                onEvent(failed)
                 cancel("Personal log write failed; stopped to preserve auditability")
                 return
             }
@@ -218,21 +228,7 @@ class AutonomousAgent(
         }
         emit(AutonomousAgentEvent.Started(taskId, normalized))
         emit(AutonomousAgentEvent.Phase("INTAKE", "Reading what you asked and looking at the project."))
-        if (!personalLogHealthy) {
-            val message = (events.lastOrNull() as? AutonomousAgentEvent.Phase)?.detail
-                ?: "I could not save a private note, so I stopped."
-            val task = failedTask(
-                taskId,
-                normalized,
-                AgentPlan(normalized, emptyList(), emptyList()),
-                message,
-                emptyList()
-            )
-            val failed = AutonomousAgentEvent.Failed(task, message)
-            events += failed
-            onEvent(failed)
-            return events
-        }
+        if (!personalLogHealthy) return events
         // Keep the full packaged conversation for deterministic intake. GoalInterpreter
         // extracts the active job and prior owner instructions before the model sees them.
         // The current-turn focus remains the execution-facing request for direct lanes.
@@ -334,10 +330,11 @@ class AutonomousAgent(
             val mode = ResearchModeDetector.detect(focus)
             val session = runCatching {
                 research.deepResearch(focus, 8, mode) { progress ->
-                    if (isCancelled()) return@deepResearch
+                    if (isCancelled() || !personalLogHealthy) return@deepResearch
                     emit(AutonomousAgentEvent.Phase("RESEARCH", "Looking things up: ${progress.completed} of ${progress.total}. Found ${progress.successful}. Could not use ${progress.failed}."))
                 }
             }.getOrNull()
+            if (!personalLogHealthy) return events
             if (isCancelled()) return stopNow(taskId, normalized, plan, events) { emit(it) }
             val brief = session?.takeIf { it.sources.isNotEmpty() }?.let(ResearchBriefBuilder::build)
             if (brief != null && brief.sourceCount > 0 && brief.evidence.isNotBlank()) {
@@ -394,6 +391,7 @@ class AutonomousAgent(
         )
 
         for (turn in 0 until config.maxTurns) {
+            if (!personalLogHealthy) return events
             if (isCancelled()) return stopNow(taskId, normalized, plan, events) { emit(it) }
             emit(AutonomousAgentEvent.Phase("MODEL", "Thinking about the next step (${turn + 1} of ${config.maxTurns})."))
             val decision = LoopControl.decide(
@@ -587,6 +585,19 @@ class AutonomousAgent(
                     }
                 }
             }
+        }
+        val changeStillOpen = (
+            intake.intent == TaskIntent.CHANGE ||
+                intake.intent == TaskIntent.CREATE ||
+                intake.intent == TaskIntent.REFACTOR ||
+                intake.intent == TaskIntent.DEBUG
+            ) && !state.mutationOccurred
+        if (changeStillOpen) {
+            val msg = "I looked at the project but did not prepare the change you asked for. Nothing was saved. Say what you want again, and name the file if you know it."
+            val task = failedTask(taskId, normalized, plan, msg, changeSets.flatMap { it.changes })
+            recordTask(task)
+            emit(AutonomousAgentEvent.Failed(task, msg))
+            return events
         }
         val report = workspace.verify()
         val usableEvidence = state.lastEvidence.isNotBlank() && !state.lastEvidence.startsWith("ERROR:")

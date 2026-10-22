@@ -1,5 +1,6 @@
 package com.codingagent.workspace
 
+import java.nio.file.Files
 import java.util.UUID
 import java.io.File
 import com.codingagent.agent.AgentAction
@@ -820,6 +821,8 @@ class MutationCoordinator(
         var after = 0
         for (record in changeSet.changes) {
             val file = try {
+                val raw = workspace.projectRoot().resolve(record.path)
+                if (Files.isSymbolicLink(raw.toPath())) return DiskState.MIXED
                 val candidate = rootSafeFile(record.path)
                 val rootPath = workspace.projectRoot().canonicalFile.toPath()
                 val canonical = candidate.canonicalFile.toPath()

@@ -189,6 +189,13 @@ class ProjectWorkspace(private val root: File) {
         return try {
             records.forEach { record ->
                 val current = diskContent(record.path)
+                if (checksum(current) != record.afterChecksum) {
+                    applied.asReversed().forEach { (done, previous) ->
+                        if (previous == null) requireSafePath(done.path).delete()
+                        else writeAtomically(requireSafePath(done.path), previous)
+                    }
+                    return RollbackResult.Rejected("Current content changed after transaction: ${record.path}")
+                }
                 applyRecord(record)
                 applied += record to current
             }
@@ -249,6 +256,24 @@ class ProjectWorkspace(private val root: File) {
         AtomicFileWriter.write(file, lines.joinToString("\n") + "\n")
     }
 
+    /**
+     * Verification must not follow a symlink out of the project. Indexing skips
+     * links, but a path can be replaced with one before this read.
+     */
+    private fun readForVerify(path: String): String? {
+        return try {
+            val raw = root.resolve(path)
+            if (Files.isSymbolicLink(raw.toPath())) return null
+            val canonicalRoot = root.canonicalFile.toPath()
+            val canonical = raw.canonicalFile
+            if (!canonical.toPath().startsWith(canonicalRoot)) return null
+            if (!canonical.isFile || Files.isSymbolicLink(canonical.toPath())) return null
+            canonical.readText(Charsets.UTF_8)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     fun verify(): VerificationReport {
         val issues = mutableListOf<VerificationIssue>()
         for (metadata in indexer.index(root)) {
@@ -260,10 +285,13 @@ class ProjectWorkspace(private val root: File) {
             if (path.endsWith(".md") || path.endsWith(".markdown") || path.endsWith(".txt")) {
                 continue
             }
-            val file = root.resolve(path)
-            val text = file.readText()
+            val text = readForVerify(path)
+            if (text == null) {
+                issues += VerificationIssue(path, 0, "Refusing to verify a symbolic link or a path outside the project")
+                continue
+            }
             issues += FileIntegrity.inspect(path, text, metadata.checksum)
-            file.readLines().forEachIndexed { index, line ->
+            text.lines().forEachIndexed { index, line ->
                 val marker = unfinishedMarkerMessage(line)
                 if (marker != null) issues += VerificationIssue(path, index + 1, marker)
             }
@@ -314,7 +342,7 @@ class ProjectWorkspace(private val root: File) {
             search = idx + len
         }
 
-        for (marker in arrayOf(TODO_MARKER, FIXME_MARKER)) {
+        for (marker in arrayOf(TODO_MARKER, FIXME_MARKER, STUB_MARKER)) {
             var startIdx = 0
             while (true) {
                 val hit = trimmed.indexOf(marker, startIdx, ignoreCase = true)
@@ -327,7 +355,8 @@ class ProjectWorkspace(private val root: File) {
             }
         }
 
-        if (trimmed.contains(STUB_MARKER)) return "$STUB_MARKER marker remains"
+        // IMPLEMENT_ME in a comment or a call is already handled above.
+        // A bare substring match flagged the words inside ordinary sentences.
         if (trimmed.contains(listOf("throw", "Not" + "ImplementedError").joinToString(" "))) {
             return "unimplemented code remains"
         }
