@@ -14,6 +14,13 @@ import com.codingagent.agent.ChatWorkspace
 import com.codingagent.agent.ModelFailure
 import com.codingagent.agent.RiskyChange
 import com.codingagent.core.LocalStore
+import com.codingagent.github.GitHubChangeFiles
+import com.codingagent.github.GitHubFile
+import com.codingagent.github.GitHubPushClient
+import com.codingagent.github.GitHubPushFingerprint
+import com.codingagent.github.GitHubPushRequest
+import com.codingagent.github.GitHubPushResult
+import com.codingagent.github.UrlConnectionGitHubTransport
 import com.codingagent.intake.OperationKind
 import com.codingagent.intake.TaskOperation
 import com.codingagent.knowledge.KnowledgeBase
@@ -26,6 +33,7 @@ import com.codingagent.model.ProbeResult
 import com.codingagent.research.CompositeWebResearchProvider
 import com.codingagent.research.DurableDeepResearchProvider
 import com.codingagent.research.ResearchDisplayState
+import com.codingagent.workspace.ChangeSet
 import com.codingagent.workspace.EditorDocument
 import com.codingagent.workspace.MutationApprovalResult
 import com.codingagent.workspace.MutationCoordinator
@@ -67,11 +75,14 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
     private var activeJob: Job? = null
     private var approvalJob: Job? = null
     private var researchJob: Job? = null
+    private var lastApplied: ChangeSet? = null
+    private var pendingGitHubFiles: List<GitHubFile> = emptyList()
     private val progressEpoch = AtomicInteger(0)
 
     init {
         val loadedSettings = runCatching { store.loadModelSettings() }.getOrDefault(ModelSettings())
         applyModelSettings(loadedSettings)
+        _ui.update { it.copy(draftGithubToken = store.loadGitHubToken().orEmpty()) }
         if (!loadedSettings.isRemoteConfigured()) {
             _ui.update {
                 it.copy(
@@ -125,6 +136,8 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
                 draftExtraHeaders = normalized.extraHeaders,
                 draftSystemPrompt = normalized.systemPrompt,
                 draftMemoryRetention = normalized.memoryRetention,
+                draftGithubRepo = normalized.githubRepo,
+                draftGithubBranch = normalized.githubBranch,
                 modelStatus = normalized.statusSummary(),
                 modelLoadError = if (gateway == null)
                     normalized.validationErrors().joinToString("; ").ifBlank { "The secret password is missing." }
@@ -147,6 +160,9 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
     fun updateDraftExtraHeaders(value: String) = _ui.update { it.copy(draftExtraHeaders = value) }
     fun updateDraftSystemPrompt(value: String) = _ui.update { it.copy(draftSystemPrompt = value) }
     fun updateDraftMemoryRetention(value: String) = _ui.update { it.copy(draftMemoryRetention = value) }
+    fun updateDraftGithubRepo(value: String) = _ui.update { it.copy(draftGithubRepo = value) }
+    fun updateDraftGithubBranch(value: String) = _ui.update { it.copy(draftGithubBranch = value) }
+    fun updateDraftGithubToken(value: String) = _ui.update { it.copy(draftGithubToken = value) }
     fun setShowModelSettings(show: Boolean) = _ui.update { it.copy(showModelSettings = show) }
 
     fun probeModelConnection() {
@@ -188,9 +204,12 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
                 systemPrompt = s.draftSystemPrompt,
                 extraHeaders = s.draftExtraHeaders,
                 onboarded = true,
-                memoryRetention = s.draftMemoryRetention
+                memoryRetention = s.draftMemoryRetention,
+                githubRepo = s.draftGithubRepo,
+                githubBranch = s.draftGithubBranch
             )
         )
+        store.saveGitHubToken(s.draftGithubToken)
         _ui.update {
             it.copy(
                 showModelSettings = false,
@@ -492,6 +511,7 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
                     "\nYou asked: ${result.proposal.request}\n$verificationSummary"
             )
         )
+        lastApplied = result.changeSet
         _ui.update {
             it.copy(
                 chatMessages = store.recentChatMessages(Int.MAX_VALUE).asReversed(),
@@ -500,9 +520,60 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
                 pendingProposal = null,
                 pendingProposalId = null,
                 pendingPhoneLock = false,
+                lastSavedSummary = paths.joinToString(),
                 status = AgentStatus.READY,
                 detail = "Saved ${paths.size} file(s): ${paths.joinToString()}. $verificationSummary"
             )
+        }
+    }
+
+    fun prepareGitHubPush(): String? {
+        val applied = lastApplied
+        val root = _ui.value.workspace?.projectRoot()
+        if (applied == null || root == null) {
+            setStatus(AgentStatus.FAILED, "Nothing saved is waiting to send.")
+            return null
+        }
+        if (store.loadGitHubToken().isNullOrBlank()) {
+            setStatus(AgentStatus.FAILED, "Paste a GitHub token in Setup first. It stays on this phone.")
+            return null
+        }
+        val prepared = GitHubChangeFiles.fromChanges(root, applied.changes)
+        if (prepared is GitHubPushResult.Failed) {
+            setStatus(AgentStatus.FAILED, prepared.reason)
+            return null
+        }
+        val files = (prepared as GitHubPushResult.Ready).files
+        pendingGitHubFiles = files
+        return GitHubPushFingerprint.of(files)
+    }
+
+    fun pushApprovedGitHub(fingerprint: String) {
+        val files = pendingGitHubFiles
+        if (files.isEmpty() || GitHubPushFingerprint.of(files) != fingerprint) {
+            setStatus(AgentStatus.FAILED, "The files changed after you confirmed. Nothing was sent.")
+            return
+        }
+        val settings = _ui.value.modelSettings
+        val request = GitHubPushRequest(
+            repo = settings.githubRepo,
+            branch = settings.githubBranch,
+            message = "Update from the phone",
+            files = files
+        )
+        viewModelScope.launch(Dispatchers.IO) {
+            val token = store.loadGitHubToken().orEmpty()
+            val result = GitHubPushClient(UrlConnectionGitHubTransport()).push(request, token)
+            withContext(Dispatchers.Main) {
+                when (result) {
+                    is GitHubPushResult.Pushed -> {
+                        pendingGitHubFiles = emptyList()
+                        setStatus(AgentStatus.READY, "Sent to GitHub. Commit ${result.sha.take(7)}.")
+                    }
+                    is GitHubPushResult.Failed -> setStatus(AgentStatus.FAILED, result.reason)
+                    is GitHubPushResult.Ready -> setStatus(AgentStatus.FAILED, "The send did not finish.")
+                }
+            }
         }
     }
 
@@ -721,6 +792,7 @@ data class WorkbenchUiState(
     val approvalCount: Int = 0,
     val pendingReason: String = "The helper wants to change your project. Read the note, then say yes twice if you agree.",
     val pendingPhoneLock: Boolean = false,
+    val lastSavedSummary: String = "",
     val pendingProposalId: String? = null,
     val pendingProposal: PendingChangeProposal? = null,
     val modelSettings: ModelSettings = ModelSettings(),
@@ -735,6 +807,9 @@ data class WorkbenchUiState(
     val draftExtraHeaders: String = "",
     val draftSystemPrompt: String = "",
     val draftMemoryRetention: String = ModelSettings.MEMORY_KEEP_CAPPED,
+    val draftGithubRepo: String = ModelSettings.DEFAULT_GITHUB_REPO,
+    val draftGithubBranch: String = "main",
+    val draftGithubToken: String = "",
     val probeMessage: String? = null,
     val agentBusy: Boolean = false
 )

@@ -63,6 +63,7 @@ internal interface OwnerApprovalHost {
     fun onAwaitingSecond(proposal: PendingChangeProposal)
     fun onRepairRequired(proposal: PendingChangeProposal, newDetail: String)
     fun onApplied(result: MutationApprovalResult.Applied)
+    fun onGitHubApproved(fingerprint: String)
     fun onRejected(reason: String)
     fun onFailed(message: String)
     fun onPassphrasesEnrolled(newDetail: String)
@@ -104,6 +105,7 @@ internal class OwnerApprovalController(
         private set
 
     private var recognizer: SpeechRecognizer? = null
+    private var githubFingerprint: String? = null
     private var biometricPrompt: BiometricPrompt? = null
 
     fun beginApprovalForPendingProposal() {
@@ -116,10 +118,38 @@ internal class OwnerApprovalController(
             host?.onFailed("Still working. Wait until it finishes, then say yes.")
             return
         }
+        githubFingerprint = null
         val proposal = coordinatorProvider()?.get(id)
         val kinds = if (proposal == null) emptySet() else RiskyChange.kinds(proposal.changeSet.changes, proposal.request)
         phoneLock = kinds.isNotEmpty()
         riskNote = RiskyChange.plainSummary(kinds)
+        error = null
+        speechVerified = false
+        spokenPhrase = ""
+        typedPhrase = ""
+        typedPhraseConfirm = ""
+        setupMode = !store.ownerApprovalPhrasesConfigured()
+        speechChallenge = if (setupMode) "" else freshSpeechChallenge()
+        speechStatus = if (setupMode) {
+            "Say the words you want to save, or type them in the box below."
+        } else {
+            "Say the words you saved, then these words: $speechChallenge"
+        }
+        showDialog = true
+    }
+
+    fun beginGitHubPush(fingerprint: String) {
+        if (!fingerprint.matches(Regex("[a-f0-9]{64}"))) {
+            host?.onFailed("I could not lock this send to the exact files. Nothing left the phone.")
+            return
+        }
+        if (host?.isBusy() == true) {
+            host?.onFailed("Still working. Wait until it finishes, then try the send again.")
+            return
+        }
+        githubFingerprint = fingerprint
+        phoneLock = true
+        riskNote = RiskyChange.plainSummary(setOf(RiskyChange.Kind.LEAVES_PHONE))
         error = null
         speechVerified = false
         spokenPhrase = ""
@@ -235,6 +265,12 @@ internal class OwnerApprovalController(
             return
         }
 
+        val githubTarget = githubFingerprint
+        if (githubTarget != null) {
+            submitGitHubPush(githubTarget)
+            return
+        }
+
         val proposalId = pendingProposalIdProvider()
         if (proposalId.isNullOrBlank()) {
             error = "That change is no longer waiting."
@@ -291,6 +327,47 @@ internal class OwnerApprovalController(
                     is MutationApprovalResult.Rejected ->
                         host?.onRejected(result.reason)
                 }
+            } catch (cancelled: CancellationException) {
+                showDialog = false
+                throw cancelled
+            } catch (t: Throwable) {
+                error = plainApprovalError(t)
+                host?.onFailed(error ?: "The phone could not confirm it is you.")
+            } finally {
+                biometricPrompt = null
+                host?.setActiveJob(null)
+            }
+        }
+        host?.setActiveJob(job)
+    }
+
+    private fun submitGitHubPush(fingerprint: String) {
+        val activity = activityProvider()
+        val job = scope.launch(Dispatchers.Main) {
+            try {
+                val now = System.currentTimeMillis()
+                val signingChallenge = withContext(Dispatchers.IO) {
+                    OwnerApprovalKey.prepare("github-push", 1, now, fingerprint)
+                }
+                val unlocked = awaitDeviceSignature(
+                    activity,
+                    signingChallenge.signature,
+                    "Confirm with phone lock",
+                    "This sends your work off this phone. Use your fingerprint, face, or screen lock."
+                )
+                val token = withContext(Dispatchers.IO) {
+                    OwnerApprovalKey.complete(signingChallenge, unlocked)
+                }
+                val accepted = withContext(Dispatchers.IO) {
+                    token.consume("github-push", 1, fingerprint, now)
+                }
+                if (!accepted) {
+                    error = "The phone lock did not match this send. Nothing left the phone."
+                    return@launch
+                }
+                showDialog = false
+                githubFingerprint = null
+                host?.onGitHubApproved(fingerprint)
             } catch (cancelled: CancellationException) {
                 showDialog = false
                 throw cancelled

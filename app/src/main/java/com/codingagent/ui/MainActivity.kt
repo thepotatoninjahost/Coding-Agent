@@ -119,6 +119,9 @@ private fun CodingAgentApp(
         override fun onApplied(result: MutationApprovalResult.Applied) {
             vm.onChangeApplied(result)
         }
+        override fun onGitHubApproved(fingerprint: String) {
+            vm.pushApprovedGitHub(fingerprint)
+        }
         override fun onRejected(reason: String) {
             vm.clearPendingApproval()
             vm.setStatus(AgentStatus.STOPPED, reason)
@@ -212,7 +215,12 @@ private fun CodingAgentApp(
                         approvals = ui.approvalCount,
                         reason = ui.pendingReason,
                         phoneLock = ui.pendingPhoneLock,
+                        canSendToGitHub = ui.lastSavedSummary.isNotBlank(),
                         onApprove = { ownerApproval.beginApprovalForPendingProposal() },
+                        onSendToGitHub = {
+                            val fingerprint = vm.prepareGitHubPush()
+                            if (fingerprint != null) ownerApproval.beginGitHubPush(fingerprint)
+                        },
                         onReject = {
                             ui.pendingProposalId?.let { vm.mutationCoordinator()?.reject(it) }
                             vm.clearPendingApproval()
@@ -366,6 +374,34 @@ private fun CodingAgentApp(
                             )
                         }
                         Text("I keep what you tell me, and I drop old unimportant notes after about six months. Strong rules stay.", color = SoftGreen, fontSize = 10.sp)
+                        Text("Send my own changes to GitHub", color = NeonGreen, fontSize = 14.sp)
+                        OutlinedTextField(
+                            value = ui.draftGithubRepo,
+                            onValueChange = vm::updateDraftGithubRepo,
+                            modifier = Modifier.fillMaxWidth(),
+                            label = { Text("GitHub project (owner/name)", color = SoftGreen) },
+                            singleLine = true,
+                            colors = fieldColors()
+                        )
+                        OutlinedTextField(
+                            value = ui.draftGithubBranch,
+                            onValueChange = vm::updateDraftGithubBranch,
+                            modifier = Modifier.fillMaxWidth(),
+                            label = { Text("Branch", color = SoftGreen) },
+                            singleLine = true,
+                            colors = fieldColors()
+                        )
+                        OutlinedTextField(
+                            value = ui.draftGithubToken,
+                            onValueChange = vm::updateDraftGithubToken,
+                            modifier = Modifier.fillMaxWidth(),
+                            label = { Text("GitHub token (optional)", color = SoftGreen) },
+                            singleLine = true,
+                            visualTransformation = PasswordVisualTransformation(),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                            colors = fieldColors()
+                        )
+                        Text("The token stays on this phone. Sending still needs the phone lock.", color = SoftGreen, fontSize = 10.sp)
                         TextButton(onClick = { vm.updateDraftMemoryRetention(ModelSettings.MEMORY_KEEP_FOREVER) }) {
                             Text(
                                 if (ui.draftMemoryRetention == ModelSettings.MEMORY_KEEP_FOREVER) "Selected: keep everything I remember"

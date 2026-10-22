@@ -98,6 +98,7 @@ internal class KeystoreSecretStore(context: Context) {
         const val LAST_RESEARCH = "last_research_query"
         const val MODEL_SETTINGS = "model_settings_v1"
         const val USER_MEMORY = "user_memory_v1"
+        const val GITHUB_TOKEN = "github_token_v1"
         private const val NOTES_AAD = "notes-at-rest"
     }
 }

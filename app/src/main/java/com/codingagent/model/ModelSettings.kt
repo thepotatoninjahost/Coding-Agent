@@ -114,7 +114,9 @@ data class ModelSettings(
     val extraHeaders: String = "",
     val onboarded: Boolean = false,
     /** "capped" drops old low-importance memories. "forever" keeps them. */
-    val memoryRetention: String = MEMORY_KEEP_CAPPED
+    val memoryRetention: String = MEMORY_KEEP_CAPPED,
+    val githubRepo: String = DEFAULT_GITHUB_REPO,
+    val githubBranch: String = "main"
 ) {
     fun normalized(): ModelSettings = copy(
         backend = ModelBackend.REMOTE,
@@ -130,7 +132,9 @@ data class ModelSettings(
             MEMORY_KEEP_FOREVER
         } else {
             MEMORY_KEEP_CAPPED
-        }
+        },
+        githubRepo = githubRepo.trim().ifBlank { DEFAULT_GITHUB_REPO },
+        githubBranch = githubBranch.trim().ifBlank { "main" }
     )
 
     /** Primary model plus distinct fallbacks, order preserved. */
@@ -278,6 +282,7 @@ data class ModelSettings(
             "poolside/laguna-s-2.1:free, google/gemma-4-31b-it:free, nvidia/nemotron-3-super-120b-a12b:free"
         const val MEMORY_KEEP_CAPPED = "capped"
         const val MEMORY_KEEP_FOREVER = "forever"
+        const val DEFAULT_GITHUB_REPO = "thepotatoninjahost/Coding-Agent"
 
         data class FreeHelperChoice(val plainName: String, val modelId: String, val plainDetail: String)
 
@@ -322,7 +327,9 @@ data class ModelSettings(
                     systemPrompt = o.optString("systemPrompt", ""),
                     extraHeaders = o.optString("extraHeaders", ""),
                     onboarded = o.optBoolean("onboarded", false),
-                    memoryRetention = o.optString("memoryRetention", MEMORY_KEEP_CAPPED)
+                    memoryRetention = o.optString("memoryRetention", MEMORY_KEEP_CAPPED),
+                    githubRepo = o.optString("githubRepo", DEFAULT_GITHUB_REPO),
+                    githubBranch = o.optString("githubBranch", "main")
                 ).normalized().withOpenRouterDefaults()
             }.getOrDefault(ModelSettings().withOpenRouterDefaults())
         }
@@ -339,6 +346,8 @@ data class ModelSettings(
                 .put("extraHeaders", s.extraHeaders)
                 .put("onboarded", s.onboarded)
                 .put("memoryRetention", s.memoryRetention)
+                .put("githubRepo", s.githubRepo)
+                .put("githubBranch", s.githubBranch)
                 .toString()
         }
     }

@@ -54,6 +54,14 @@ class LocalStore(context: Context) : ChatMessageStore {
 
     fun loadModelSettings(): ModelSettings = ModelSettings.fromJson(securePrefs.getString(KeystoreSecretStore.MODEL_SETTINGS))
 
+    fun saveGitHubToken(token: String?) {
+        val clean = token?.filterNot { it.isWhitespace() }?.ifBlank { null }
+        securePrefs.putString(KeystoreSecretStore.GITHUB_TOKEN, clean)
+    }
+
+    fun loadGitHubToken(): String? =
+        securePrefs.getString(KeystoreSecretStore.GITHUB_TOKEN)?.takeIf { it.isNotBlank() }
+
     /** True only when both owner-created approval phrases have been enrolled. */
     fun ownerApprovalPhrasesConfigured(): Boolean = ownerApprovalPhrases.isConfigured()
 

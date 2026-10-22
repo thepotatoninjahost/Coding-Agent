@@ -335,7 +335,9 @@ internal fun ReviewSurface(
     approvals: Int,
     reason: String,
     phoneLock: Boolean = false,
+    canSendToGitHub: Boolean = false,
     onApprove: () -> Unit,
+    onSendToGitHub: () -> Unit = {},
     onReject: () -> Unit
 ) {
     Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -350,6 +352,12 @@ internal fun ReviewSurface(
                     Text(if (phoneLock) "Confirm with phone lock" else "Say yes")
                 }
                 TextButton(onClick = onReject) { Text("Reject", color = Danger) }
+            }
+        }
+        if (canSendToGitHub && !pending) {
+            Text("The last saved change can be sent to GitHub. The phone lock has to approve it first.", color = SoftGreen, fontSize = 13.sp)
+            Button(onClick = onSendToGitHub, colors = ButtonDefaults.buttonColors(containerColor = NeonGreen, contentColor = DarkPurple)) {
+                Text("Send the saved changes to GitHub")
             }
         }
     }
