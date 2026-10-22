@@ -49,7 +49,7 @@ class ProviderRotatingGateway(
                 return response
             }
             if (response.message == "Cancelled") return response
-            val safe = redact(response.message, endpoint.apiKey)
+            val safe = redact(response.message, endpoint)
             quota.noteFailure(endpoint.providerId, endpoint.modelId, safe, clock())
             last = ModelResponse.Failure(safe)
         }
@@ -118,9 +118,11 @@ class ProviderRotatingGateway(
         }
     }
 
-    private fun redact(text: String, secret: String): String {
-        if (secret.isBlank()) return text
-        return text.replace(secret, "[redacted]")
+    private fun redact(text: String, endpoint: ProviderEndpoint): String {
+        var safe = text
+        if (endpoint.apiKey.isNotBlank()) safe = safe.replace(endpoint.apiKey, "[redacted]")
+        safe = safe.replace(Regex("""/accounts/[a-fA-F0-9]{32}"""), "/accounts/[account]")
+        return safe
     }
 
     companion object {

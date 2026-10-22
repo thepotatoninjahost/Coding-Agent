@@ -160,6 +160,10 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
                 draftMistralApiKey = normalized.mistralApiKey,
                 draftCerebrasApiKey = normalized.cerebrasApiKey,
                 draftSambanovaApiKey = normalized.sambanovaApiKey,
+                draftRequestyApiKey = normalized.requestyApiKey,
+                draftAimlApiKey = normalized.aimlApiKey,
+                draftCloudflareApiToken = normalized.cloudflareApiToken,
+                draftCloudflareAccountId = normalized.cloudflareAccountId,
                 modelStatus = normalized.statusSummary(),
                 modelLoadError = if (gateway == null)
                     normalized.validationErrors().joinToString("; ").ifBlank { "The secret password is missing." }
@@ -190,6 +194,10 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
     fun updateDraftMistralApiKey(value: String) = _ui.update { it.copy(draftMistralApiKey = value) }
     fun updateDraftCerebrasApiKey(value: String) = _ui.update { it.copy(draftCerebrasApiKey = value) }
     fun updateDraftSambanovaApiKey(value: String) = _ui.update { it.copy(draftSambanovaApiKey = value) }
+    fun updateDraftRequestyApiKey(value: String) = _ui.update { it.copy(draftRequestyApiKey = value) }
+    fun updateDraftAimlApiKey(value: String) = _ui.update { it.copy(draftAimlApiKey = value) }
+    fun updateDraftCloudflareApiToken(value: String) = _ui.update { it.copy(draftCloudflareApiToken = value) }
+    fun updateDraftCloudflareAccountId(value: String) = _ui.update { it.copy(draftCloudflareAccountId = value) }
     fun setShowMoreHelpers(show: Boolean) = _ui.update { it.copy(showMoreHelpers = show) }
     fun updateDraftBaseUrl(value: String) = _ui.update { it.copy(draftBaseUrl = value) }
     fun updateDraftExtraHeaders(value: String) = _ui.update { it.copy(draftExtraHeaders = value) }
@@ -206,7 +214,16 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
                 modelName = s.draftModelName,
                 systemPrompt = s.draftSystemPrompt,
                 extraHeaders = s.draftExtraHeaders,
-                onboarded = true
+                onboarded = true,
+                groqApiKey = s.draftGroqApiKey,
+                geminiApiKey = s.draftGeminiApiKey,
+                mistralApiKey = s.draftMistralApiKey,
+                cerebrasApiKey = s.draftCerebrasApiKey,
+                sambanovaApiKey = s.draftSambanovaApiKey,
+                requestyApiKey = s.draftRequestyApiKey,
+                aimlApiKey = s.draftAimlApiKey,
+                cloudflareApiToken = s.draftCloudflareApiToken,
+                cloudflareAccountId = s.draftCloudflareAccountId
             )
             val result = ModelConnectionProbe.probe(candidate)
             withContext(Dispatchers.Main) {
@@ -242,7 +259,11 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
                 geminiApiKey = s.draftGeminiApiKey,
                 mistralApiKey = s.draftMistralApiKey,
                 cerebrasApiKey = s.draftCerebrasApiKey,
-                sambanovaApiKey = s.draftSambanovaApiKey
+                sambanovaApiKey = s.draftSambanovaApiKey,
+                requestyApiKey = s.draftRequestyApiKey,
+                aimlApiKey = s.draftAimlApiKey,
+                cloudflareApiToken = s.draftCloudflareApiToken,
+                cloudflareAccountId = s.draftCloudflareAccountId
             )
         )
         store.saveGitHubToken(s.draftGithubToken)
@@ -852,6 +873,10 @@ data class WorkbenchUiState(
     val draftMistralApiKey: String = "",
     val draftCerebrasApiKey: String = "",
     val draftSambanovaApiKey: String = "",
+    val draftRequestyApiKey: String = "",
+    val draftAimlApiKey: String = "",
+    val draftCloudflareApiToken: String = "",
+    val draftCloudflareAccountId: String = "",
     val showMoreHelpers: Boolean = false,
     val probeMessage: String? = null,
     val agentBusy: Boolean = false

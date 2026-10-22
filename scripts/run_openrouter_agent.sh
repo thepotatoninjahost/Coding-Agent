@@ -21,8 +21,11 @@ Waiting for you to say yes is not a successful run. The script stops and says so
 On the phone, open Setup. The web address and one free helper are already filled in.
 Paste the same key into Secret password. It stays on the phone.
 This script uses the same step limit and the same backup helpers as the phone.
-Optional extra keys, if you have them, are GROQ_API_KEY, GEMINI_API_KEY,
+Optional extra keys, if you have them, are GROQ_API_KEY, REQUESTY_API_KEY,
+AIML_API_KEY, CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, GEMINI_API_KEY,
 MISTRAL_API_KEY, CEREBRAS_API_KEY, and SAMBANOVA_API_KEY. They are not printed.
+Cloudflare needs both the token and the account id. The account id is the long
+code on your Cloudflare account page, not the token.
 
 The key is not saved in this repository. This script does not print it.
 EOF

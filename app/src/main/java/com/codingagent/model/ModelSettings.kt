@@ -123,7 +123,11 @@ data class ModelSettings(
     val geminiApiKey: String = "",
     val mistralApiKey: String = "",
     val cerebrasApiKey: String = "",
-    val sambanovaApiKey: String = ""
+    val sambanovaApiKey: String = "",
+    val requestyApiKey: String = "",
+    val aimlApiKey: String = "",
+    val cloudflareApiToken: String = "",
+    val cloudflareAccountId: String = ""
 ) {
     fun normalized(): ModelSettings = copy(
         backend = ModelBackend.REMOTE,
@@ -147,13 +151,32 @@ data class ModelSettings(
         geminiApiKey = geminiApiKey.filterNot { it.isWhitespace() },
         mistralApiKey = mistralApiKey.filterNot { it.isWhitespace() },
         cerebrasApiKey = cerebrasApiKey.filterNot { it.isWhitespace() },
-        sambanovaApiKey = sambanovaApiKey.filterNot { it.isWhitespace() }
+        sambanovaApiKey = sambanovaApiKey.filterNot { it.isWhitespace() },
+        requestyApiKey = requestyApiKey.filterNot { it.isWhitespace() },
+        aimlApiKey = aimlApiKey.filterNot { it.isWhitespace() },
+        cloudflareApiToken = cloudflareApiToken.filterNot { it.isWhitespace() },
+        cloudflareAccountId = cloudflareAccountId.filterNot { it.isWhitespace() }.lowercase()
     )
 
     fun hasAnyProviderKey(): Boolean {
         val s = normalized()
         return s.apiKey.isNotBlank() || s.groqApiKey.isNotBlank() || s.geminiApiKey.isNotBlank() ||
-            s.mistralApiKey.isNotBlank() || s.cerebrasApiKey.isNotBlank() || s.sambanovaApiKey.isNotBlank()
+            s.mistralApiKey.isNotBlank() || s.cerebrasApiKey.isNotBlank() || s.sambanovaApiKey.isNotBlank() ||
+            s.requestyApiKey.isNotBlank() || s.aimlApiKey.isNotBlank() || s.cloudflareApiToken.isNotBlank() ||
+            s.cloudflareAccountId.isNotBlank()
+    }
+
+    /** Plain sentence when Cloudflare was started but the address cannot be built. Blank when it is unused or ready. */
+    fun cloudflareSetupNote(): String {
+        val s = normalized()
+        val token = s.cloudflareApiToken.isNotBlank()
+        val ready = ProviderCatalog.cloudflareBaseUrl(s.cloudflareAccountId) != null
+        return when {
+            !token && s.cloudflareAccountId.isBlank() -> ""
+            !token -> "Cloudflare still needs the token. It stays on this phone."
+            !ready -> "Cloudflare still needs the account id. It is the long code on your Cloudflare account page, not the token."
+            else -> ""
+        }
     }
 
     /** Primary model plus distinct fallbacks, order preserved. */
@@ -216,6 +239,8 @@ data class ModelSettings(
                     "The secret password is missing. Paste the key from openrouter.ai/keys. It stays on this phone and is not written into the app."
                 )
             }
+            val cloudflare = s.cloudflareSetupNote()
+            if (cloudflare.isNotBlank() && ProviderCatalog.endpoints(s).isEmpty()) add(cloudflare)
         }
     }
 
@@ -256,9 +281,10 @@ data class ModelSettings(
         return when {
             !s.isRemoteConfigured() && s.baseUrl.contains("openrouter.ai") && !s.hasAnyProviderKey() ->
                 "Helper not connected yet. Free OpenRouter helper is selected. Paste the secret password in Setup."
-            !s.isRemoteConfigured() -> "Helper not connected yet"
-            names.size <= 1 -> "Helper ready: ${names.firstOrNull() ?: "one helper"}. I use the best one that is still available."
-            else -> "Helpers ready: ${names.joinToString(", ")}. I use the best one that is still available."
+            !s.isRemoteConfigured() -> "Helper not connected yet. ${s.cloudflareSetupNote()}".trim()
+            names.isEmpty() -> "Helper not connected yet. ${s.cloudflareSetupNote()}".trim()
+            names.size == 1 -> "Helper ready: ${names.first()}. I use the best one that is still available. ${s.cloudflareSetupNote()}".trim()
+            else -> "Helpers ready: ${names.joinToString(", ")}. I use the best one that is still available. ${s.cloudflareSetupNote()}".trim()
         }
     }
 
@@ -352,7 +378,11 @@ data class ModelSettings(
                     geminiApiKey = o.optString("geminiApiKey", ""),
                     mistralApiKey = o.optString("mistralApiKey", ""),
                     cerebrasApiKey = o.optString("cerebrasApiKey", ""),
-                    sambanovaApiKey = o.optString("sambanovaApiKey", "")
+                    sambanovaApiKey = o.optString("sambanovaApiKey", ""),
+                    requestyApiKey = o.optString("requestyApiKey", ""),
+                    aimlApiKey = o.optString("aimlApiKey", ""),
+                    cloudflareApiToken = o.optString("cloudflareApiToken", ""),
+                    cloudflareAccountId = o.optString("cloudflareAccountId", "")
                 ).normalized().withOpenRouterDefaults()
             }.getOrDefault(ModelSettings().withOpenRouterDefaults())
         }
@@ -377,6 +407,10 @@ data class ModelSettings(
                 .put("mistralApiKey", s.mistralApiKey)
                 .put("cerebrasApiKey", s.cerebrasApiKey)
                 .put("sambanovaApiKey", s.sambanovaApiKey)
+                .put("requestyApiKey", s.requestyApiKey)
+                .put("aimlApiKey", s.aimlApiKey)
+                .put("cloudflareApiToken", s.cloudflareApiToken)
+                .put("cloudflareAccountId", s.cloudflareAccountId)
                 .toString()
         }
     }

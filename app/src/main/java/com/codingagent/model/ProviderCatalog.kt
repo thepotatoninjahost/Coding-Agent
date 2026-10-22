@@ -21,6 +21,17 @@ object ProviderCatalog {
     const val MISTRAL_URL = "https://api.mistral.ai/v1"
     const val SAMBANOVA_URL = "https://api.sambanova.ai/v1"
     const val CEREBRAS_URL = "https://api.cerebras.ai/v1"
+    const val REQUESTY_URL = "https://router.requesty.ai/v1"
+    const val AIML_URL = "https://api.aimlapi.com/v1"
+    const val AIML_MODEL = "stealth/union-alpha"
+    private val CLOUDFLARE_ACCOUNT_ID = Regex("^[a-f0-9]{32}$")
+
+    /** The account id is the 32-character code from the Cloudflare account page, not the token. */
+    fun cloudflareBaseUrl(accountId: String): String? {
+        val id = accountId.trim().lowercase()
+        if (!CLOUDFLARE_ACCOUNT_ID.matches(id)) return null
+        return "https://api.cloudflare.com/client/v4/accounts/$id/ai/v1"
+    }
 
     data class RankedModel(
         val providerId: String,
@@ -35,6 +46,12 @@ object ProviderCatalog {
             "openai/gpt-oss-120b",
             "Groq large code helper",
             "LiveCodeBench in October 2026 listed gpt-oss-120b at 87.8 percent. Groq's free plan allows about 1,000 requests a day for this model."
+        ),
+        RankedModel(
+            "cloudflare",
+            "@cf/openai/gpt-oss-120b",
+            "Cloudflare code helper",
+            "Same open model as the Groq helper. Cloudflare's chat endpoint documents this id, and the address is built from the account id."
         ),
         RankedModel(
             "gemini",
@@ -53,6 +70,18 @@ object ProviderCatalog {
             "qwen/qwen3.8-27b",
             "Groq Qwen helper",
             "BenchLM's coding board on 20 October 2026 scored Qwen3.8 27B at 46.5. Groq serves it on the free plan."
+        ),
+        RankedModel(
+            "requesty",
+            "anthropic/claude-fable-5",
+            "Requesty code helper",
+            "Requesty's own coding setup on 12 October 2026 names this model id. No separate public coding percentage was found for it."
+        ),
+        RankedModel(
+            "aiml",
+            "stealth/union-alpha",
+            "AI/ML API helper",
+            "This is the helper used on AI/ML API. Their page shows the id stealth/union-alpha at api.aimlapi.com."
         ),
         RankedModel(
             "openrouter",
@@ -148,6 +177,11 @@ object ProviderCatalog {
         add("mistral", s.mistralApiKey, MISTRAL_URL)
         add("sambanova", s.sambanovaApiKey, SAMBANOVA_URL)
         add("cerebras", s.cerebrasApiKey, CEREBRAS_URL)
+        add("requesty", s.requestyApiKey, REQUESTY_URL)
+        add("aiml", s.aimlApiKey, AIML_URL)
+        cloudflareBaseUrl(s.cloudflareAccountId)?.let { url ->
+            add("cloudflare", s.cloudflareApiToken, url)
+        }
         return out.distinctBy { it.providerId + "\n" + it.modelId }
     }
 
@@ -161,6 +195,9 @@ object ProviderCatalog {
                 "mistral" -> "Mistral"
                 "sambanova" -> "SambaNova"
                 "cerebras" -> "Cerebras"
+                "requesty" -> "Requesty"
+                "aiml" -> "AI/ML API"
+                "cloudflare" -> "Cloudflare"
                 else -> "Your helper"
             }
         }

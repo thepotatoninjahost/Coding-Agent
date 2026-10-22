@@ -149,6 +149,11 @@ object ModelFailure {
             .joinToString("\n")
             .trim()
             .ifBlank { message }
+            .let(::hideAccountAndPassword)
+
+    private fun hideAccountAndPassword(text: String): String =
+        text.replace(Regex("""Bearer\s+\S+""", RegexOption.IGNORE_CASE), "Bearer [redacted]")
+            .replace(Regex("""/accounts/[a-fA-F0-9]{32}"""), "/accounts/[account]")
 
     private fun resetPhrase(message: String): String {
         val epoch = com.codingagent.model.QuotaHeaders.resetFromMessage(message, System.currentTimeMillis())

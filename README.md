@@ -45,9 +45,17 @@ OpenRouter is the default. Setup already shows:
 - Helper name: `cohere/north-mini-code:free` (one free code helper). Setup lets you pick another free helper in plain English. The old name `openrouter/free` is not used, because it picked a different model on every step.
 - Secret password: paste it from [openrouter.ai/keys](https://openrouter.ai/keys). Leave this blank in the repository. Do not commit a key.
 
-A missing password, a rejected password, and a used-up daily limit are explained in plain English. Setup can also hold a Groq key, a Google Gemini key, a Mistral key, a SambaNova key, and an optional Cerebras trial key. The phone starts with the best helper that still has room. If one is rate-limited, out of quota, or failing, the same job continues on the next helper. A helper is used again only after its reset time. The owner is told only when every helper is used up, including when work will resume. The ranking is refreshed from free web research about once a week. GitHub's free model service closed in July 2026, so there is no key for it. Another company's web address still works if you type it in Setup.
+A missing password, a rejected password, and a used-up daily limit are explained in plain English. Setup has a separate password box for each helper you use:
 
-The computer script uses the same step limit and the same backup helpers as the phone. Optional keys `GROQ_API_KEY`, `GEMINI_API_KEY`, `MISTRAL_API_KEY`, `CEREBRAS_API_KEY`, and `SAMBANOVA_API_KEY` are read from the environment and are not printed.
+- OpenRouter, at `https://openrouter.ai/api/v1`. That password is the Secret password on the main Setup screen.
+- Groq, at `https://api.groq.com/openai/v1`.
+- Requesty, at `https://router.requesty.ai/v1`.
+- AI/ML API, at `https://api.aimlapi.com/v1`, using the helper named `stealth/union-alpha`.
+- Cloudflare. This one needs two boxes. The account id is the long code of letters and numbers on your Cloudflare account page. The token is the secret Cloudflare gives you. The phone puts the account id into the address `https://api.cloudflare.com/client/v4/accounts/{account id}/ai/v1` and sends the token with the request. Both stay on the phone.
+
+Setup can also hold a Google Gemini key, a Mistral key, a SambaNova key, and an optional Cerebras trial key. The phone starts with the best helper that still has room. If one is rate-limited, out of quota, or failing, the same job continues on the next helper. A helper is used again only after its reset time. The owner is told only when every helper is used up, including when work will resume. The ranking is refreshed from free web research about once a week. GitHub's free model service closed in July 2026, so there is no key for it. Another company's web address still works if you type it in Setup. Do not commit any of these passwords.
+
+The computer script uses the same step limit and the same backup helpers as the phone. Optional keys `GROQ_API_KEY`, `REQUESTY_API_KEY`, `AIML_API_KEY`, `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `GEMINI_API_KEY`, `MISTRAL_API_KEY`, `CEREBRAS_API_KEY`, and `SAMBANOVA_API_KEY` are read from the environment and are not printed. Cloudflare needs both the token and the account id.
 
 On a computer, the same loop can be run with your own key. The script reads `OPENROUTER_API_KEY` from the environment and does not print it:
 

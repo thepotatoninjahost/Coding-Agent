@@ -32,7 +32,11 @@ class OpenRouterAgentRunner {
             geminiApiKey = envKey("GEMINI_API_KEY"),
             mistralApiKey = envKey("MISTRAL_API_KEY"),
             cerebrasApiKey = envKey("CEREBRAS_API_KEY"),
-            sambanovaApiKey = envKey("SAMBANOVA_API_KEY")
+            sambanovaApiKey = envKey("SAMBANOVA_API_KEY"),
+            requestyApiKey = envKey("REQUESTY_API_KEY"),
+            aimlApiKey = envKey("AIML_API_KEY"),
+            cloudflareApiToken = envKey("CLOUDFLARE_API_TOKEN"),
+            cloudflareAccountId = envKey("CLOUDFLARE_ACCOUNT_ID")
         ).withOpenRouterDefaults()
         check(!settings.apiKey.isBlank())
         check(settings.baseUrl == ModelSettings.OPENROUTER_BASE_URL)
@@ -109,7 +113,11 @@ class OpenRouterAgentRunner {
             settings.geminiApiKey,
             settings.mistralApiKey,
             settings.cerebrasApiKey,
-            settings.sambanovaApiKey
+            settings.sambanovaApiKey,
+            settings.requestyApiKey,
+            settings.aimlApiKey,
+            settings.cloudflareApiToken,
+            settings.cloudflareAccountId
         )
         var safe = text
         secrets.filter { it.isNotBlank() }.forEach { safe = safe.replace(it, "[redacted]") }

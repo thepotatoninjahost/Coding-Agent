@@ -340,6 +340,11 @@ private fun CodingAgentApp(
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                             colors = fieldColors()
                         )
+                        Text(
+                            "This password is for OpenRouter. Leave the address as https://openrouter.ai/api/v1. It stays on this phone.",
+                            color = SoftGreen,
+                            fontSize = 10.sp
+                        )
                         Spacer(Modifier.height(8.dp))
                         OutlinedTextField(
                             value = ui.draftSystemPrompt,
@@ -414,7 +419,26 @@ private fun CodingAgentApp(
                             )
                         }
                         helperPassword("Groq password (optional)", ui.draftGroqApiKey, vm::updateDraftGroqApiKey)
-                        Text("Groq is free. About 1,000 requests a day. No card.", color = SoftGreen, fontSize = 10.sp)
+                        Text("Groq is free. About 1,000 requests a day. No card. The address is api.groq.com.", color = SoftGreen, fontSize = 10.sp)
+                        helperPassword("Requesty password (optional)", ui.draftRequestyApiKey, vm::updateDraftRequestyApiKey)
+                        Text("Requesty uses router.requesty.ai. The password stays on this phone.", color = SoftGreen, fontSize = 10.sp)
+                        helperPassword("AI/ML API password (optional)", ui.draftAimlApiKey, vm::updateDraftAimlApiKey)
+                        Text("AI/ML API uses api.aimlapi.com and the helper named stealth/union-alpha. The password stays on this phone.", color = SoftGreen, fontSize = 10.sp)
+                        Spacer(Modifier.height(8.dp))
+                        OutlinedTextField(
+                            value = ui.draftCloudflareAccountId,
+                            onValueChange = vm::updateDraftCloudflareAccountId,
+                            modifier = Modifier.fillMaxWidth(),
+                            label = { Text("Cloudflare account id (optional)", color = SoftGreen) },
+                            singleLine = true,
+                            colors = fieldColors()
+                        )
+                        helperPassword("Cloudflare token (optional)", ui.draftCloudflareApiToken, vm::updateDraftCloudflareApiToken)
+                        Text(
+                            "Cloudflare needs both boxes. The account id is the long code of letters and numbers on your Cloudflare account page. The token is the secret Cloudflare gives you. I put the account id into the address and send the token with the request. Both stay on this phone.",
+                            color = SoftGreen,
+                            fontSize = 10.sp
+                        )
                         helperPassword("Google Gemini password (optional)", ui.draftGeminiApiKey, vm::updateDraftGeminiApiKey)
                         Text("Google's free Gemini key. From aistudio.google.com.", color = SoftGreen, fontSize = 10.sp)
                         helperPassword("Mistral password (optional)", ui.draftMistralApiKey, vm::updateDraftMistralApiKey)
