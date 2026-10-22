@@ -80,6 +80,10 @@ class ProviderQuotaBook(private val file: File? = null) {
                     val model = models.getOrPut(key(providerId, modelId)) { Gate() }
                     model.exhaustedUntil = maxOf(model.exhaustedUntil, now + MODEL_PARK_MS)
                 }
+                ModelFailure.isUnavailableModel(message) -> {
+                    val model = models.getOrPut(key(providerId, modelId)) { Gate() }
+                    model.exhaustedUntil = maxOf(model.exhaustedUntil, now + ERROR_COOLDOWN_MS)
+                }
                 ModelFailure.isBadTurnOrder(message) -> {
                     val model = models.getOrPut(key(providerId, modelId)) { Gate() }
                     model.exhaustedUntil = maxOf(model.exhaustedUntil, now + ERROR_COOLDOWN_MS)

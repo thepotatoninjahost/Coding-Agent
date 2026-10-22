@@ -57,6 +57,17 @@ object ModelFailure {
             ("otpm" in lower && ("output" in lower || "limit" in lower))
     }
 
+    /**
+     * A 404, a retired free helper, or a launch period that has ended is one helper
+     * to skip. It is not a reason to stop Setup or the whole task.
+     */
+    fun isUnavailableModel(message: String): Boolean {
+        val lower = message.lowercase()
+        val raw = "model http" in lower || lower.trim().startsWith("{")
+        if (!raw && "404" !in lower) return false
+        return "404" in lower || "retired" in lower || "launch period" in lower
+    }
+
     fun isRejectedModel(message: String): Boolean {
         val lower = message.lowercase()
         return "invalid model" in lower ||
@@ -76,7 +87,7 @@ object ModelFailure {
     }
 
     fun isNetwork(message: String): Boolean {
-        if (isRejectedKey(message) || isRequestTooLarge(message) || isRejectedModel(message) || isBadTurnOrder(message)) {
+        if (isRejectedKey(message) || isRequestTooLarge(message) || isRejectedModel(message) || isUnavailableModel(message) || isBadTurnOrder(message)) {
             return false
         }
         val lower = message.lowercase()
@@ -106,7 +117,7 @@ object ModelFailure {
     }
 
     fun isRateLimit(message: String): Boolean {
-        if (isRequestTooLarge(message) || isOutOfFunds(message) || isRejectedModel(message) || isBadTurnOrder(message) || isNetwork(message)) {
+        if (isRequestTooLarge(message) || isOutOfFunds(message) || isRejectedModel(message) || isUnavailableModel(message) || isBadTurnOrder(message) || isNetwork(message)) {
             return false
         }
         val lower = message.lowercase()
@@ -139,7 +150,7 @@ object ModelFailure {
     fun isRetryable(message: String): Boolean {
         if (isDailyFreeLimit(message) || isAllProvidersExhausted(message) || isCapacity(message)) return false
         if (isRequestTooLarge(message) || isOutOfFunds(message) || isRejectedKey(message)) return false
-        if (isRejectedModel(message) || isBadTurnOrder(message) || isNetwork(message)) return false
+        if (isRejectedModel(message) || isUnavailableModel(message) || isBadTurnOrder(message) || isNetwork(message)) return false
         return isEmpty(message) || isShortRateLimit(message)
     }
 
@@ -198,6 +209,8 @@ object ModelFailure {
                 "I shortened the request and it is still too big. I stopped. Ask for something smaller."
             isRequestTooLarge(message) ->
                 "This request is too big for that helper."
+            isUnavailableModel(message) ->
+                "That free helper is no longer available. I skipped it."
             isRejectedModel(message) ->
                 "That helper name was rejected. I will try a different helper."
             isBadTurnOrder(message) ->

@@ -291,7 +291,7 @@ private fun CodingAgentApp(
                     Column(Modifier.padding(16.dp).verticalScroll(rememberScrollState())) {
                         Text("Connect a code helper", color = NeonGreen, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                         Text(
-                            "Writing new code needs a helper on the internet. One free helper is already chosen, and I stay with that same helper for the whole job. I switch to another free helper only if the first one is busy or fails. Paste the secret password from openrouter.ai/keys. It stays on this phone and is not written into the app. Looking things up on the Research tab does not need this.",
+                            "Writing new code needs a helper on the internet. Paste the OpenRouter password from openrouter.ai/keys. Groq and the other boxes are optional. If one helper is retired or does not answer, I skip it and try the next. Try connection succeeds when any helper answers. Passwords stay on this phone. Looking things up on the Research tab does not need this.",
                             color = SoftGreen,
                             fontSize = 12.sp
                         )
@@ -348,6 +348,41 @@ private fun CodingAgentApp(
                             fontSize = 10.sp
                         )
                         Spacer(Modifier.height(8.dp))
+                        Text("Other free helpers (optional)", color = NeonGreen, fontSize = 14.sp)
+                        Text(
+                            "Paste any you have. I use the best one that still answers. A retired free helper is skipped.",
+                            color = SoftGreen,
+                            fontSize = 10.sp
+                        )
+                        helperPassword("Groq password (optional)", ui.draftGroqApiKey, vm::updateDraftGroqApiKey)
+                        Text("Groq is free. About 1,000 requests a day. No card. The address is api.groq.com.", color = SoftGreen, fontSize = 10.sp)
+                        helperPassword("Requesty password (optional)", ui.draftRequestyApiKey, vm::updateDraftRequestyApiKey)
+                        Text("Requesty uses router.requesty.ai. The password stays on this phone.", color = SoftGreen, fontSize = 10.sp)
+                        helperPassword("Google Gemini password (optional)", ui.draftGeminiApiKey, vm::updateDraftGeminiApiKey)
+                        Text("Google's free Gemini key. From aistudio.google.com.", color = SoftGreen, fontSize = 10.sp)
+                        helperPassword("Mistral password (optional)", ui.draftMistralApiKey, vm::updateDraftMistralApiKey)
+                        Text("Mistral gives monthly credit and does not need a card.", color = SoftGreen, fontSize = 10.sp)
+                        helperPassword("SambaNova password (optional)", ui.draftSambanovaApiKey, vm::updateDraftSambanovaApiKey)
+                        Text("SambaNova's free plan is about 20 requests a day.", color = SoftGreen, fontSize = 10.sp)
+                        helperPassword("AI/ML API password (optional)", ui.draftAimlApiKey, vm::updateDraftAimlApiKey)
+                        Text("AI/ML API uses api.aimlapi.com. The password stays on this phone.", color = SoftGreen, fontSize = 10.sp)
+                        OutlinedTextField(
+                            value = ui.draftCloudflareAccountId,
+                            onValueChange = vm::updateDraftCloudflareAccountId,
+                            modifier = Modifier.fillMaxWidth(),
+                            label = { Text("Cloudflare account id (optional)", color = SoftGreen) },
+                            singleLine = true,
+                            colors = fieldColors()
+                        )
+                        helperPassword("Cloudflare token (optional)", ui.draftCloudflareApiToken, vm::updateDraftCloudflareApiToken)
+                        Text(
+                            "Cloudflare needs both boxes. The account id is the long code on your Cloudflare account page. The token is the secret. Both stay on this phone.",
+                            color = SoftGreen,
+                            fontSize = 10.sp
+                        )
+                        helperPassword("Cerebras trial password (optional)", ui.draftCerebrasApiKey, vm::updateDraftCerebrasApiKey)
+                        Text("Cerebras is a short trial and needs a card. Leave this blank if you do not have one.", color = SoftGreen, fontSize = 10.sp)
+                        Spacer(Modifier.height(8.dp))
                         OutlinedTextField(
                             value = ui.draftSystemPrompt,
                             onValueChange = vm::updateDraftSystemPrompt,
@@ -378,7 +413,7 @@ private fun CodingAgentApp(
                         }
                         Spacer(Modifier.height(8.dp))
                         TextButton(onClick = { vm.setShowMoreHelpers(true) }, modifier = Modifier.fillMaxWidth()) {
-                            Text("More free helpers, memory, and GitHub", color = FluoroOrange, fontSize = 12.sp)
+                            Text("Memory and GitHub", color = FluoroOrange, fontSize = 12.sp)
                         }
                         Spacer(Modifier.height(8.dp))
                         TextButton(onClick = { vm.probeModelConnection() }, modifier = Modifier.fillMaxWidth()) {
@@ -408,9 +443,9 @@ private fun CodingAgentApp(
                         .border(1.dp, NeonGreen.copy(alpha = 0.4f), RoundedCornerShape(12.dp))
                 ) {
                     Column(Modifier.padding(16.dp).verticalScroll(rememberScrollState())) {
-                        Text("More free helpers", color = NeonGreen, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                        Text("Memory and GitHub", color = NeonGreen, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                         Text(
-                            "I start with the best helper that still has room. Paste any passwords you have. Each one stays on this phone. If one helper is used up, I switch to the next and keep going. I only stop when every helper is used up, and then I start again when the first one resets.",
+                            "Passwords for Groq and the other helpers are on the previous screen. If one helper is retired, I skip it.",
                             color = SoftGreen,
                             fontSize = 12.sp
                         )
@@ -422,36 +457,6 @@ private fun CodingAgentApp(
                                 fontSize = 12.sp
                             )
                         }
-                        helperPassword("Groq password (optional)", ui.draftGroqApiKey, vm::updateDraftGroqApiKey)
-                        Text("Groq is free. About 1,000 requests a day. No card. The address is api.groq.com.", color = SoftGreen, fontSize = 10.sp)
-                        helperPassword("Requesty password (optional)", ui.draftRequestyApiKey, vm::updateDraftRequestyApiKey)
-                        Text("Requesty uses router.requesty.ai. The password stays on this phone.", color = SoftGreen, fontSize = 10.sp)
-                        helperPassword("AI/ML API password (optional)", ui.draftAimlApiKey, vm::updateDraftAimlApiKey)
-                        Text("AI/ML API uses api.aimlapi.com and the helper named stealth/union-alpha. The password stays on this phone.", color = SoftGreen, fontSize = 10.sp)
-                        Spacer(Modifier.height(8.dp))
-                        OutlinedTextField(
-                            value = ui.draftCloudflareAccountId,
-                            onValueChange = vm::updateDraftCloudflareAccountId,
-                            modifier = Modifier.fillMaxWidth(),
-                            label = { Text("Cloudflare account id (optional)", color = SoftGreen) },
-                            singleLine = true,
-                            colors = fieldColors()
-                        )
-                        helperPassword("Cloudflare token (optional)", ui.draftCloudflareApiToken, vm::updateDraftCloudflareApiToken)
-                        Text(
-                            "Cloudflare needs both boxes. The account id is the long code of letters and numbers on your Cloudflare account page. The token is the secret Cloudflare gives you. I put the account id into the address and send the token with the request. Both stay on this phone.",
-                            color = SoftGreen,
-                            fontSize = 10.sp
-                        )
-                        helperPassword("Google Gemini password (optional)", ui.draftGeminiApiKey, vm::updateDraftGeminiApiKey)
-                        Text("Google's free Gemini key. From aistudio.google.com.", color = SoftGreen, fontSize = 10.sp)
-                        helperPassword("Mistral password (optional)", ui.draftMistralApiKey, vm::updateDraftMistralApiKey)
-                        Text("Mistral gives monthly credit and does not need a card.", color = SoftGreen, fontSize = 10.sp)
-                        helperPassword("SambaNova password (optional)", ui.draftSambanovaApiKey, vm::updateDraftSambanovaApiKey)
-                        Text("SambaNova's free plan is about 20 requests a day.", color = SoftGreen, fontSize = 10.sp)
-                        helperPassword("Cerebras trial password (optional)", ui.draftCerebrasApiKey, vm::updateDraftCerebrasApiKey)
-                        Text("Cerebras is a short trial and needs a card. Leave this blank if you do not have one.", color = SoftGreen, fontSize = 10.sp)
-                        Text("GitHub's free model service closed in July 2026, so there is no box for it.", color = SoftGreen, fontSize = 10.sp)
                         Spacer(Modifier.height(8.dp))
                         Text("What I remember", color = NeonGreen, fontSize = 14.sp)
                         TextButton(onClick = { vm.updateDraftMemoryRetention(ModelSettings.MEMORY_KEEP_CAPPED) }) {

@@ -152,7 +152,8 @@ class ProviderRotatingGateway(
             val connect: (String) -> HttpURLConnection = { url ->
                 if (connectionFactory != null) connectionFactory(url) else java.net.URL(url).openConnection() as HttpURLConnection
             }
-            val endpoints = ModelIdCheck.filter(ProviderCatalog.endpoints(settings), connect = connect)
+            val expanded = OpenRouterFreeModels.apply(ProviderCatalog.endpoints(settings), connect, clock())
+            val endpoints = ModelIdCheck.filter(expanded, connect = connect)
             if (endpoints.isEmpty()) return null
             if (endpoints.size == 1 && endpoints.single().providerId == "custom") {
                 val endpoint = endpoints.single()
@@ -162,7 +163,8 @@ class ProviderRotatingGateway(
                     RemoteHttpGateway(endpoint.baseUrl, endpoint.apiKey, endpoint.modelId, timeoutMillis = timeoutMillis, extraHeaders = extraHeaders)
                 }
             }
-            val ranked = ProviderRotatingGateway(
+            // Setup and ordinary work both try every helper. probe no longer stops after the first one.
+            val rotation = ProviderRotatingGateway(
                 endpoints = endpoints,
                 quota = ProviderQuotaBook(quotaFile),
                 ranking = { ModelRanking.load(rankingDirectory) },
@@ -172,14 +174,7 @@ class ProviderRotatingGateway(
                 timeoutMillis = timeoutMillis,
                 extraHeaders = extraHeaders
             )
-            if (!probe) return ranked
-            val first = ranked.modelIds().firstOrNull() ?: return null
-            val endpoint = endpoints.first { it.modelId == first }
-            return if (connectionFactory != null) {
-                RemoteHttpGateway(endpoint.baseUrl, endpoint.apiKey, endpoint.modelId, timeoutMillis, connectionFactory)
-            } else {
-                RemoteHttpGateway(endpoint.baseUrl, endpoint.apiKey, endpoint.modelId, timeoutMillis = timeoutMillis)
-            }
+            return if (probe) rotation else rotation
         }
     }
 }

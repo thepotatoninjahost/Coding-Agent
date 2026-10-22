@@ -231,7 +231,14 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
                     it.copy(
                         probeMessage = when (result) {
                             is ProbeResult.Ok -> result.detail
-                            is ProbeResult.Failed -> "Could not connect: ${ModelFailure.humanize(result.reason)}"
+                            is ProbeResult.Failed -> {
+                                val plain = ModelFailure.humanize(result.reason)
+                                if (plain.contains("Model HTTP", ignoreCase = true) || plain.trim().startsWith("{")) {
+                                    "I could not connect. That helper did not answer, so I tried the next one."
+                                } else {
+                                    plain
+                                }
+                            }
                         }
                     )
                 }

@@ -12,8 +12,8 @@ package com.codingagent.model
  * - Gemini 3.8 Flash: BenchLM coding, 20 October 2026, 60.9.
  * - Gemini 3.6 Flash: BenchLM coding, 20 October 2026, 51.0.
  * - Qwen3.8 27B: BenchLM coding, 20 October 2026, 46.5.
- * MiniMax M3.1 Flash's published 61.3 is for the paid id. The free OpenRouter id is the same family,
- * so it follows the models whose score is for the exact free id.
+ * MiniMax M3.1 Flash :free was retired on 22 October 2026, so it is not listed.
+ * Live OpenRouter ids with a zero price replace this OpenRouter list when the model list can be read.
  */
 object ProviderCatalog {
     const val GROQ_URL = "https://api.groq.com/openai/v1"
@@ -91,12 +91,6 @@ object ProviderCatalog {
         ),
         RankedModel(
             "openrouter",
-            "minimax/minimax-m3.1-flash:free",
-            "MiniMax Flash",
-            "The paid MiniMax M3.1 Flash was rank 17 on BenchLM coding (20 October 2026). This is the free OpenRouter id. The published score is for the paid id."
-        ),
-        RankedModel(
-            "openrouter",
             "nvidia/nemotron-3-ultra-550b-a55b:free",
             "NVIDIA Nemotron Ultra",
             "Largest free NVIDIA model listed on OpenRouter on 22 October 2026. No separate public coding score was found for this free id."
@@ -161,10 +155,10 @@ object ProviderCatalog {
         val s = settings.normalized()
         val out = mutableListOf<ProviderEndpoint>()
         if (s.apiKey.isNotBlank() && s.baseUrl.contains("openrouter.ai")) {
-            bundled.filter { it.providerId == "openrouter" }.forEach { model ->
+            bundled.filter { it.providerId == "openrouter" && !OpenRouterFreeModels.isRetired(it.modelId) }.forEach { model ->
                 out += ProviderEndpoint("openrouter", model.plainName, model.modelId, s.baseUrl, s.apiKey)
             }
-            if (s.modelName.isNotBlank() && out.none { it.modelId == s.modelName }) {
+            if (s.modelName.isNotBlank() && !OpenRouterFreeModels.isRetired(s.modelName) && out.none { it.modelId == s.modelName }) {
                 out += ProviderEndpoint("openrouter", "Chosen helper", s.modelName, s.baseUrl, s.apiKey)
             }
         } else if (s.baseUrl.isNotBlank() && s.modelName.isNotBlank() &&
@@ -174,7 +168,7 @@ object ProviderCatalog {
         }
         fun add(providerId: String, key: String, baseUrl: String) {
             if (key.isBlank()) return
-            bundled.filter { it.providerId == providerId }.forEach { model ->
+            bundled.filter { it.providerId == providerId && !OpenRouterFreeModels.isRetired(it.modelId) }.forEach { model ->
                 out += ProviderEndpoint(providerId, model.plainName, model.modelId, baseUrl, key)
             }
         }

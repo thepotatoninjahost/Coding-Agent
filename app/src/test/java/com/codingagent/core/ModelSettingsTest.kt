@@ -5,15 +5,28 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import com.codingagent.agent.ModelFailure
 import com.codingagent.model.ModelBackend
 import com.codingagent.model.ModelConnectionProbe
 import com.codingagent.model.ModelGateway
 import com.codingagent.model.ModelRequest
 import com.codingagent.model.ModelResponse
 import com.codingagent.model.ModelSettings
+import com.codingagent.model.OpenRouterFreeModels
 import com.codingagent.model.ProbeResult
+import com.codingagent.model.ProviderCatalog
+import java.net.HttpURLConnection
+import java.util.concurrent.atomic.AtomicInteger
 
 class ModelSettingsTest {
+    private val FREE_MODELS_JSON = """
+        {"data":[
+          {"id":"minimax/minimax-m3.1-flash:free","pricing":{"prompt":"0","completion":"0"},"supported_parameters":["tools"],"context_length":2000000},
+          {"id":"nvidia/nemotron-3-ultra-550b-a55b:free","pricing":{"prompt":"0","completion":"0"},"supported_parameters":["tools"],"context_length":128000},
+          {"id":"cohere/north-mini-code:free","pricing":{"prompt":"0","completion":"0"},"supported_parameters":["tools"],"context_length":256000}
+        ]}
+    """.trimIndent()
+
     @Test
     fun remoteRequiresUrlModelAndKeyUnlessLocalhost() {
         val incomplete = ModelSettings(
@@ -251,12 +264,114 @@ class ModelSettingsTest {
     }
 
     @Test
+    fun retiredMiniMaxIsNotADefaultAndASavedChoiceIsReplaced() {
+        assertTrue(ProviderCatalog.bundled.none { it.modelId.contains("minimax") })
+        val saved = ModelSettings.fromJson(
+            """{"baseUrl":"https://openrouter.ai/api/v1","apiKey":"test-key","modelName":"minimax/minimax-m3.1-flash:free","preferredModel":"minimax/minimax-m3.1-flash:free","rotationModels":"minimax/minimax-m3.1-flash:free, cohere/north-mini-code:free"}"""
+        )
+        assertFalse(saved.modelName.contains("minimax"))
+        assertFalse(saved.preferredModel.contains("minimax"))
+        assertFalse(saved.rotationModels.contains("minimax"))
+        assertEquals(ModelSettings.OPENROUTER_FREE_MODEL, saved.modelName)
+    }
+
+    @Test
+    fun freeOpenRouterModelsComeFromTheLiveListAndSkipARetiredOne() {
+        val ranked = OpenRouterFreeModels.rankJson(
+            """
+            {"data":[
+              {"id":"paid/model","pricing":{"prompt":"0.15","completion":"0"},"supported_parameters":["tools"],"context_length":99999},
+              {"id":"minimax/minimax-m3.1-flash:free","pricing":{"prompt":"0","completion":"0"},"supported_parameters":["tools"],"context_length":2000000},
+              {"id":"no-tools/free","pricing":{"prompt":"0","completion":"0"},"context_length":900000},
+              {"id":"cohere/north-mini-code:free","pricing":{"prompt":"0","completion":"0"},"supported_parameters":["tools"],"context_length":1000},
+              {"id":"big/tools:free","pricing":{"prompt":"0","completion":"0"},"supported_parameters":["tools"],"context_length":800000}
+            ]}
+            """.trimIndent(),
+            listOf("cohere/north-mini-code:free")
+        )
+        assertEquals("cohere/north-mini-code:free", ranked[0])
+        assertEquals("big/tools:free", ranked[1])
+        assertTrue(ranked.contains("no-tools/free"))
+        assertTrue(ranked.indexOf("no-tools/free") > ranked.indexOf("big/tools:free"))
+        assertFalse(ranked.any { it.contains("minimax") || it.startsWith("paid/") })
+    }
+
+    @Test
+    fun setupSkipsTheRetiredMiniMax404AndStillConnects() {
+        OpenRouterFreeModels.clearCache()
+        val chats = AtomicInteger()
+        val exact = "The free launch period for MiniMax M3.1 Flash ended on Oct 22, 2026. " +
+            "The ':free' variant has been retired; use 'minimax/minimax-m3.1-flash' " +
+            "(list price: \$0.15/M input, \$0.60/M output) instead."
+        val plain = ModelFailure.humanize("Model HTTP 404: $exact")
+        assertFalse(plain.contains("Model HTTP"))
+        assertFalse(plain.contains("404"))
+        assertFalse(plain.contains("0.15"))
+        assertTrue(plain.contains("no longer available"))
+
+        val settings = ModelSettings(
+            baseUrl = "https://openrouter.ai/api/v1",
+            apiKey = "test-key",
+            modelName = "cohere/north-mini-code:free"
+        )
+        val result = ModelConnectionProbe.probe(settings) { candidate ->
+            candidate.remoteGateway(
+                timeoutMillis = 5_000,
+                quotaFile = java.io.File.createTempFile("quota", ".json"),
+                probe = true,
+                connectionFactory = { url ->
+                    if (url.endsWith("/models")) {
+                        scriptedConnection(200, FREE_MODELS_JSON)
+                    } else {
+                        if (chats.incrementAndGet() == 1) {
+                            scriptedConnection(404, """{"error":{"message":${org.json.JSONObject.quote(exact)},"code":404}}""")
+                        } else {
+                            scriptedConnection(
+                                200,
+                                "data: {\"choices\":[{\"delta\":{\"content\":\"pong\"}}]}\n\n" +
+                                    "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
+                                    "data: [DONE]\n\n"
+                            )
+                        }
+                    }
+                }
+            )
+        }
+        assertTrue(chats.get() >= 2)
+        assertTrue(result is ProbeResult.Ok)
+        val detail = (result as ProbeResult.Ok).detail
+        assertTrue(detail.contains("Connected"))
+        assertFalse(detail.contains("Model HTTP"))
+        assertFalse(detail.contains("404"))
+        assertFalse(detail.contains("MiniMax"))
+        assertFalse(detail.contains("0.15"))
+    }
+
+    @Test
     fun modelConnectionProbeAcceptsNonBlankTextResponse() {
         assertEquals(
-            ProbeResult.Ok("Reached model (pong)"),
+            ProbeResult.Ok("Connected. A helper answered."),
             probeResponse(ModelResponse.Text("  pong  "))
         )
     }
+
+    private fun scriptedConnection(code: Int, body: String): HttpURLConnection =
+        object : HttpURLConnection(java.net.URL("https://openrouter.ai/api/v1/chat/completions")) {
+            override fun connect() = Unit
+            override fun disconnect() = Unit
+            override fun usingProxy() = false
+            override fun getResponseCode() = code
+            override fun getInputStream() = body.byteInputStream()
+            override fun getErrorStream() = if (code in 200..299) null else body.byteInputStream()
+            override fun getOutputStream(): java.io.OutputStream = java.io.ByteArrayOutputStream()
+            override fun getHeaderField(name: String?): String? = null
+            override fun getPermission() = null
+            override fun getContent() = null
+            override fun getContentLength() = -1
+            override fun getResponseMessage() = if (code == 404) "Not Found" else "OK"
+            override fun getRequestMethod() = "POST"
+            override fun setRequestMethod(method: String?) = Unit
+        }
 
     private fun probeResponse(response: ModelResponse): ProbeResult =
         ModelConnectionProbe.probe(

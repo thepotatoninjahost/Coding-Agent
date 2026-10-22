@@ -258,20 +258,37 @@ data class ModelSettings(
         } else {
             s
         }
-        if (!base.baseUrl.contains("openrouter.ai")) return base
-        val usingRouter = base.modelName.isBlank() || base.modelName.equals(OPENROUTER_FREE_ROUTER, ignoreCase = true)
+        if (!base.baseUrl.contains("openrouter.ai")) return dropRetired(base)
+        val usingRouter = base.modelName.isBlank() ||
+            base.modelName.equals(OPENROUTER_FREE_ROUTER, ignoreCase = true) ||
+            OpenRouterFreeModels.isRetired(base.modelName)
         val modelName = if (usingRouter) OPENROUTER_FREE_MODEL else base.modelName
         val rotation = when {
-            base.rotationModels.isNotBlank() -> base.rotationModels
+            base.rotationModels.isNotBlank() -> withoutRetiredIds(base.rotationModels)
             usingRouter || modelName == OPENROUTER_FREE_MODEL -> OPENROUTER_FREE_FALLBACKS
             else -> ""
         }
-        return if (modelName == base.modelName && rotation == base.rotationModels) {
+        val preferred = if (OpenRouterFreeModels.isRetired(base.preferredModel)) "" else base.preferredModel
+        return if (modelName == base.modelName && rotation == base.rotationModels && preferred == base.preferredModel) {
             base
         } else {
-            base.copy(modelName = modelName, rotationModels = rotation)
+            base.copy(modelName = modelName, rotationModels = rotation, preferredModel = preferred)
         }
     }
+
+    private fun dropRetired(settings: ModelSettings): ModelSettings {
+        if (!OpenRouterFreeModels.isRetired(settings.modelName) && !OpenRouterFreeModels.isRetired(settings.preferredModel)) {
+            return settings
+        }
+        return settings.copy(
+            modelName = if (OpenRouterFreeModels.isRetired(settings.modelName)) "" else settings.modelName,
+            preferredModel = if (OpenRouterFreeModels.isRetired(settings.preferredModel)) "" else settings.preferredModel,
+            rotationModels = withoutRetiredIds(settings.rotationModels)
+        )
+    }
+
+    private fun withoutRetiredIds(raw: String): String =
+        raw.split(",").map { it.trim() }.filter { it.isNotEmpty() && !OpenRouterFreeModels.isRetired(it) }.joinToString(", ")
 
     fun isRemoteConfigured(): Boolean = validationErrors().isEmpty()
 
@@ -441,13 +458,19 @@ object ModelConnectionProbe {
                     if (content.isEmpty()) {
                         ProbeResult.Failed("Model returned no usable message content")
                     } else {
-                        ProbeResult.Ok("Reached model (${content})")
+                        ProbeResult.Ok("Connected. A helper answered.")
                     }
                 }
-                is ModelResponse.ToolCall -> ProbeResult.Ok("Reached model (tool call path)")
-                is ModelResponse.Failure -> ProbeResult.Failed(
-                    ModelFailure.humanize(explainProviderError(settings.modelName, response.message))
-                )
+                is ModelResponse.ToolCall -> ProbeResult.Ok("Connected. A helper answered.")
+                is ModelResponse.Failure -> {
+                    val raw = explainProviderError(settings.modelName, response.message)
+                    val plain = if (ModelFailure.isUnavailableModel(raw)) {
+                        "I could not connect. The free helpers I tried are no longer available. Paste a Groq password as well, then try again."
+                    } else {
+                        ModelFailure.humanize(raw)
+                    }
+                    ProbeResult.Failed(plain)
+                }
             }
         } catch (error: Exception) {
             ProbeResult.Failed(
