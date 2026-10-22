@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -283,10 +284,11 @@ private fun CodingAgentApp(
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier
                         .fillMaxWidth()
+                        .heightIn(max = 560.dp)
                         .border(1.dp, NeonGreen.copy(alpha = 0.4f), RoundedCornerShape(12.dp))
                         .padding(4.dp)
                 ) {
-                    Column(Modifier.padding(16.dp)) {
+                    Column(Modifier.padding(16.dp).verticalScroll(rememberScrollState())) {
                         Text("Connect a code helper", color = NeonGreen, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                         Text(
                             "Writing new code needs a helper on the internet. One free helper is already chosen, and I stay with that same helper for the whole job. I switch to another free helper only if the first one is busy or fails. Paste the secret password from openrouter.ai/keys. It stays on this phone and is not written into the app. Looking things up on the Research tab does not need this.",
@@ -379,15 +381,14 @@ private fun CodingAgentApp(
                             Text("More free helpers, memory, and GitHub", color = FluoroOrange, fontSize = 12.sp)
                         }
                         Spacer(Modifier.height(8.dp))
-                        Row {
-                            TextButton(onClick = { vm.probeModelConnection() }) {
-                                Text("Try connection", color = FluoroOrange)
-                            }
-                            Spacer(Modifier.weight(1f))
-                            TextButton(onClick = { vm.setShowModelSettings(false) }) {
+                        TextButton(onClick = { vm.probeModelConnection() }, modifier = Modifier.fillMaxWidth()) {
+                            Text("Try connection", color = FluoroOrange)
+                        }
+                        Row(Modifier.fillMaxWidth()) {
+                            TextButton(onClick = { vm.setShowModelSettings(false) }, modifier = Modifier.weight(1f)) {
                                 Text("Cancel", color = SoftGreen)
                             }
-                            TextButton(onClick = { vm.saveDraftModelSettings() }) {
+                            TextButton(onClick = { vm.saveDraftModelSettings() }, modifier = Modifier.weight(1f)) {
                                 Text("Save", color = NeonGreen, fontWeight = FontWeight.Bold)
                             }
                         }
@@ -401,7 +402,10 @@ private fun CodingAgentApp(
                 Surface(
                     color = Panel,
                     shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.fillMaxWidth().border(1.dp, NeonGreen.copy(alpha = 0.4f), RoundedCornerShape(12.dp))
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 560.dp)
+                        .border(1.dp, NeonGreen.copy(alpha = 0.4f), RoundedCornerShape(12.dp))
                 ) {
                     Column(Modifier.padding(16.dp).verticalScroll(rememberScrollState())) {
                         Text("More free helpers", color = NeonGreen, fontWeight = FontWeight.Bold, fontSize = 16.sp)

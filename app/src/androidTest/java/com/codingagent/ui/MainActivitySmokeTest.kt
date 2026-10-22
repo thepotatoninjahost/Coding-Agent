@@ -5,6 +5,7 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -31,7 +32,7 @@ class MainActivitySmokeTest {
     private fun dismissModelSettingsIfPresent() {
         val cancelNodes = composeRule.onAllNodesWithText("Cancel").fetchSemanticsNodes()
         if (cancelNodes.isNotEmpty()) {
-            composeRule.onNodeWithText("Cancel").performClick()
+            composeRule.onNodeWithText("Cancel").performScrollTo().performClick()
             composeRule.waitForIdle()
         }
     }
@@ -69,8 +70,8 @@ class MainActivitySmokeTest {
         // Model Settings dialog is open. No dismiss is performed here.
         composeRule.onNodeWithText("Connect a code helper").assertIsDisplayed()
         composeRule.onNodeWithText("Web address").assertIsDisplayed()
-        composeRule.onNodeWithText("Secret password").assertIsDisplayed()
-        composeRule.onNodeWithText("Save").assertIsDisplayed()
-        composeRule.onNodeWithText("Cancel").assertIsDisplayed()
+        composeRule.onNodeWithText("Secret password").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("Save").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("Cancel").performScrollTo().assertIsDisplayed()
     }
 }
