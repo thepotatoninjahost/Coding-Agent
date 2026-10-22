@@ -44,7 +44,7 @@ object ModelCallWithRetry {
                 break
             }
             if (waitMillis > 0L) {
-                onPhase(ModelFailure.humanize(response.message))
+                onPhase(ModelFailure.humanize(response.message + "\nresume-scheduled"))
                 if (!waitCancellable(waitMillis, isCancelled)) return null
             } else if (!response.message.contains("resume-at-ms:")) {
                 break

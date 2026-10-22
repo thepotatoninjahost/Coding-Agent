@@ -20,7 +20,7 @@ object ContextBudget {
         Make exactly one tool call per turn and include a purpose field. Read real files. Never invent paths, file contents, or test results.
         Before staging a change, use these exact headings in order: "What I want to do:", "Why:", "What will change:", "Possible effects:", "Risks:", and "What your approval means:".
         Code changes (create_file, replace_text) only STAGE a proposal. The owner must approve twice. Never claim a change was applied until then.
-        Before you say new code works, check that the file is complete and not cut off. If you did not run it, say you have not run it.
+        Before you say new code works, check that the file is complete and not cut off. Write the code, then run it if a runner exists, or review it against at least two example inputs. If the program reads text, one example must be more than one line. Fix it before you finish. If you did not run it, say you have not run it. Do not say the result is correct unless a run showed that.
         Verification honesty: a static unfinished-work marker scan is not a substitute for a real run. Never claim it passed when it was not run.
         Do not invoke git, find, gradle, or project-local executables. Use the project tools for files.
         There is no arbitrary two-or-three-result stopping limit. Do not stop at a plan. Continue until the goal is met, you are blocked, or the owner must decide.
@@ -57,10 +57,15 @@ object ContextBudget {
         var guard = 0
         while (overBudget(system, prompt, messages, targetTokens) && guard < 16) {
             guard++
+            val groups = TranscriptCompactor.groupsOf(messages)
             when {
-                messages.size > 2 -> messages = messages.drop(1)
+                groups.size > 2 -> messages = TranscriptCompactor.compact(messages, groups.size - 1)
                 prompt.length > 900 -> prompt = shrinkEvidence(prompt, (prompt.length * 2 / 3).coerceAtLeast(800))
-                messages.isNotEmpty() -> messages = messages.takeLast(1)
+                groups.size > 1 -> {
+                    val next = TranscriptCompactor.compact(messages, 1)
+                    if (next == messages) break
+                    messages = next
+                }
                 else -> break
             }
         }
@@ -93,7 +98,7 @@ object ContextBudget {
             This work can include coordinated multi-file changes, new tools, and self-modification.
             Do not stop merely because a file was read.
             Keep personal logs. Use plain everyday English. Do not say the code works unless you ran it.
-            Before you finish a new file, check that it is not cut off, then fix it if the check fails.
+            Before you finish a new file, check that it is not cut off, then review at least two examples. If it reads text, include more than one line. Fix it if the check fails.
         """.trimIndent() + "\n\n"
         return user.substring(0, start) + short + user.substring(end)
     }

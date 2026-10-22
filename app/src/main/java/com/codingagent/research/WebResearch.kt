@@ -439,7 +439,7 @@ class WikipediaResearchProvider(
     override fun search(query: String, limit: Int): ResearchResult {
         val normalized = query.trim()
         if (normalized.isBlank()) return ResearchResult(query, emptyList(), "A research query is required")
-        val encoded = URLEncoder.encode(normalized, StandardCharsets.UTF_8.toString())
+        val encoded = URLEncoder.encode(SourceQuality.searchKeywords(normalized), StandardCharsets.UTF_8.toString())
         val cap = limit.coerceIn(1, 8)
         val url = "https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=$encoded&utf8=1&format=json&srlimit=$cap"
         return fetchHits(query, url) { json ->

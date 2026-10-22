@@ -297,6 +297,10 @@ class RemoteHttpGateway(
 
     private fun requestBody(request: ModelRequest): JSONObject {
         val messages = JSONArray().put(JSONObject().put("role", "system").put("content", request.system))
+        // The owner's turn comes before any tool call. A function-call turn has to follow
+        // a user turn, or a function-response turn. Putting the user text last made the
+        // first tool call follow the system text, and Gemma rejected that.
+        messages.put(JSONObject().put("role", "user").put("content", request.user))
         request.transcript.forEach { message ->
             val serialized = JSONObject().put("role", message.role)
             // Same fallback for both branches below: an assistant tool_calls[].id and the
@@ -328,11 +332,11 @@ class RemoteHttpGateway(
             }
             messages.put(serialized)
         }
-        messages.put(JSONObject().put("role", "user").put("content", request.user))
         val body = JSONObject()
             .put("model", modelForRequest())
             .put("messages", messages)
             .put("temperature", 0.1)
+            .put("max_tokens", OutputBudget.forModel(modelForRequest()))
             .put("stream", false)
         if (request.tools.isNotEmpty()) {
             // The agent executes one tool per turn. Prevent OpenAI-compatible models
@@ -520,7 +524,7 @@ class RemoteHttpGateway(
         }
 
     companion object {
-        private const val USER_AGENT =
+        internal const val USER_AGENT =
             "Coding-Agent/1.0 (Android; https://github.com/thepotatoninjahost/Coding-Agent)"
         private const val MAX_RESPONSE_BYTES = 4_000_000
         private const val ERROR_BODY_BYTES = 16_384

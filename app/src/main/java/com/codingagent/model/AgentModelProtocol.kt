@@ -21,7 +21,7 @@ You investigate the real project, then work toward completing the owner's object
 7. Verify meaningful milestones before relying on them. After changes, run the strongest relevant checks available: targeted tests, broader tests, static checks, build/compile, and integration checks as appropriate. Know what each check does and does not prove.
 8. If a check fails, stop building on the unverified result. Inspect the failure, identify a cause, make a targeted correction or change approach, and rerun the relevant check. Preserve failed attempts and results in personal logs.
 9. Learn from outcomes. Reuse verified discoveries and prior lessons, and revise incorrect lessons when new evidence contradicts them.
-10. Report the actual result, supporting evidence, checks performed, and unresolved limitations. Never claim success merely because a tool call or file write succeeded. Before you say new code works, check that the file is complete and not cut off, and run it or a real test when you can. If you did not run it, say you have not run it.
+10. Report the actual result, supporting evidence, checks performed, and unresolved limitations. Never claim success merely because a tool call or file write succeeded. Before you say new code works, check that the file is complete and not cut off, and run it or a real test when you can. If no runner exists, call review_examples with at least two example inputs, and include more than one line when the program reads text. Fix failures before you finish. If you did not run it, say you have not run it. Do not say the result is correct unless a run showed that.
 
 ## Hard rules
 - Evidence first. If the owner names a file, read it before analyzing or changing it.
@@ -57,7 +57,7 @@ You investigate the real project, then work toward completing the owner's object
 - For analysis, use Problem → Evidence → Conclusion where it improves clarity.
 
 ## Available tools
-list_files, read_file, continue_result, read_chat_history, search_chat_history, read_user_memory, search_user_memory, search_project, search_knowledge, research_web, replace_text, create_file, run_command, verify
+list_files, read_file, continue_result, read_chat_history, search_chat_history, read_user_memory, search_user_memory, search_project, search_knowledge, research_web, replace_text, create_file, review_examples, run_command, verify
 """.trimIndent()
 
     val SYSTEM: String get() = DEFAULT_SYSTEM
@@ -124,6 +124,11 @@ list_files, read_file, continue_result, read_chat_history, search_chat_history, 
             """{"type":"object","properties":{"path":{"type":"string","description":"The new project file path."},"content":{"type":"string","description":"The complete proposed file contents."},"reason":{"type":"string","description":"Required plain-English explanation with these exact headings in order: What I want to do:, Why:, What will change:, Possible effects:, Risks:, What your approval means:. Use everyday words, name files, explain jargon, and state unknowns honestly."},"purpose":{"type":"string","description":"Short evidence-based reason for this tool call."}},"required":["path","content","reason"]}"""
         ),
         ModelToolDefinition(
+            "review_examples",
+            "Check staged code against at least two example inputs before the owner is asked to approve it. If the program reads text, one example must contain more than one line. Say whether a real run matched. Do not claim the result is correct unless a run showed that.",
+            """{"type":"object","properties":{"path":{"type":"string","description":"Project-relative file to check."},"examples":{"type":"string","description":"One example per line, written as INPUT => EXPECTED. Use || for a newline inside the input or the expected output."},"notes":{"type":"string","description":"What you checked, in plain English."},"purpose":{"type":"string","description":"Short evidence-based reason for this tool call."}},"required":["path","examples"]}"""
+        ),
+        ModelToolDefinition(
             "run_command",
             "Run a restricted project inspection or verification command. Model commands cannot delete files, chain shell commands, redirect output, access parent/absolute paths, use network tools, or change global Gradle configuration.",
             """{"type":"object","properties":{"command":{"type":"string"},"purpose":{"type":"string","description":"Short evidence-based reason for this tool call."}},"required":["command"]}"""
@@ -141,7 +146,7 @@ list_files, read_file, continue_result, read_chat_history, search_chat_history, 
             TaskIntent.INSPECT, TaskIntent.EXPLAIN, TaskIntent.UNKNOWN ->
                 listOf("list_files", "read_file", "continue_result", "read_chat_history", "search_chat_history", "read_user_memory", "search_user_memory", "search_project", "search_knowledge", "research_web", "run_command", "verify")
             TaskIntent.CHANGE, TaskIntent.CREATE, TaskIntent.REFACTOR, TaskIntent.DEBUG ->
-                listOf("list_files", "read_file", "continue_result", "read_chat_history", "search_chat_history", "read_user_memory", "search_user_memory", "search_project", "search_knowledge", "research_web", "replace_text", "create_file", "verify", "run_command")
+                listOf("list_files", "read_file", "continue_result", "read_chat_history", "search_chat_history", "read_user_memory", "search_user_memory", "search_project", "search_knowledge", "research_web", "replace_text", "create_file", "review_examples", "verify", "run_command")
             TaskIntent.TEST ->
                 listOf("list_files", "read_file", "continue_result", "read_chat_history", "search_chat_history", "read_user_memory", "search_user_memory", "run_command", "verify", "search_project")
         }

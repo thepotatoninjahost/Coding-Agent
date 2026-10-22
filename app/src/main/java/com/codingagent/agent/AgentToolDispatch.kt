@@ -1,6 +1,9 @@
 package com.codingagent.agent
 
 import org.json.JSONObject
+import java.io.File
+import java.nio.file.Files
+import java.util.concurrent.TimeUnit
 import com.codingagent.intake.OperationKind
 import com.codingagent.intake.TaskOperation
 import com.codingagent.research.DeepResearchProvider
@@ -72,6 +75,7 @@ class AgentToolDispatch(
                 "search_user_memory" -> searchUserMemory(arguments)
                 "replace_text" -> replaceText(arguments)
                 "create_file" -> createFile(arguments)
+                "review_examples" -> reviewExamples(arguments)
                 "run_command" -> runCommand(arguments)
                 "verify" -> {
                     val report = workspace.verify()
@@ -293,6 +297,79 @@ class AgentToolDispatch(
                     "I checked that the file is not cut off. I have not run it. Do not say it works."
             is MutationProposeResult.Rejected ->
                 "ERROR: create_file proposal rejected — ${result.reason}"
+        }
+    }
+
+    private fun reviewExamples(arguments: JSONObject): String {
+        val path = arguments.optString("path").trim()
+        val examples = arguments.optString("examples")
+        val cases = examples.lines().map { it.trim() }.filter { it.contains("=>") }.map { line ->
+            val input = line.substringBefore("=>").trim().replace("||", "\n")
+            val expected = line.substringAfter("=>").trim().replace("||", "\n")
+            input to expected
+        }
+        if (cases.size < 2) {
+            return "ERROR: Give at least two example inputs, written as INPUT => EXPECTED. If the program reads text, one example must be more than one line. Use || for a newline."
+        }
+        val content = stagedOrSaved(path)
+        val readsText = content?.lowercase()?.let { body ->
+            "readlines" in body || "splitlines" in body || "sys.stdin" in body || "for line" in body || "input(" in body
+        } == true
+        if (readsText && cases.none { it.first.contains("\n") }) {
+            return "ERROR: This program reads text. Include one example that is more than one line. Use || between the lines."
+        }
+        val ran = if (path.endsWith(".py") && content != null) runPython(content, cases) else null
+        return when {
+            ran == null ->
+                "CHECKED examples=${cases.size} ran=false matched=false\n" +
+                    "I could not run this file here. A review of ${cases.size} examples was recorded. Do not say it prints the correct result."
+            ran.all { it } ->
+                "CHECKED examples=${cases.size} ran=true matched=true\n" +
+                    "RUN_EVIDENCE: the examples matched."
+            else ->
+                "CHECKED examples=${cases.size} ran=true matched=false\n" +
+                    "The run did not match the examples. Fix the file before finishing. Do not say it prints the correct result."
+        }
+    }
+
+    private fun stagedOrSaved(path: String): String? {
+        val staged = mutations.pending().firstOrNull()?.changeSet?.changes?.firstOrNull { change ->
+            change.path.trim().trimStart('/') == path.trim().trimStart('/')
+        }?.after
+        if (!staged.isNullOrBlank()) return staged
+        return runCatching { files.read(path).content }.getOrNull()
+    }
+
+    private fun runPython(content: String, cases: List<Pair<String, String>>): List<Boolean>? {
+        val python = listOf("python3", "python").firstOrNull { name ->
+            runCatching {
+                val probe = ProcessBuilder(name, "--version").redirectErrorStream(true).start()
+                probe.waitFor(2, TimeUnit.SECONDS) && probe.exitValue() == 0
+            }.getOrDefault(false)
+        } ?: return null
+        val dir = Files.createTempDirectory("code-check").toFile()
+        return try {
+            val file = File(dir, "check.py")
+            file.writeText(content)
+            cases.map { (input, expected) ->
+                val process = ProcessBuilder(python, file.absolutePath).directory(dir).redirectErrorStream(true).start()
+                process.outputStream.bufferedWriter().use { writer ->
+                    writer.write(input)
+                    if (!input.endsWith("\n")) writer.write("\n")
+                }
+                val finished = process.waitFor(3, TimeUnit.SECONDS)
+                if (!finished) {
+                    process.destroyForcibly()
+                    false
+                } else {
+                    val output = process.inputStream.bufferedReader().readText().trim()
+                    process.exitValue() == 0 && output == expected.trim()
+                }
+            }
+        } catch (_: Exception) {
+            null
+        } finally {
+            dir.deleteRecursively()
         }
     }
 

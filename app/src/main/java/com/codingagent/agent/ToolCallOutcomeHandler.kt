@@ -41,6 +41,11 @@ class ToolTurnState {
     var successfulGathers = 0
     var writeNowRefusals = 0
     var plainEnglishNudges = 0
+    var codeChecked = false
+    var runMatched = false
+    var pendingProposalId: String? = null
+    var codeCheckNudges = 0
+    var researchRewrites = 0
 }
 
 /** ONE JOB: Tell AutonomousAgent.run() whether to loop again or stop (events already emitted). */
@@ -72,7 +77,8 @@ class ToolCallOutcomeHandler(
     private val synthesizeFromEvidence: (String, String, VerificationReport) -> String,
     private val recordTask: (AgentTask) -> Unit,
     private val emit: (AutonomousAgentEvent) -> Unit,
-    private val isCancelled: () -> Boolean
+    private val isCancelled: () -> Boolean,
+    private val rotateModel: () -> Unit = {}
 ) {
     fun handle(
         response: ModelResponse.ToolCall,
@@ -164,6 +170,10 @@ class ToolCallOutcomeHandler(
             state.lastToolSignature = ""
             state.identicalRepeats = 0
             state.mutationOccurred = true
+        }
+
+        if (isIdenticalCall && !isMutation && state.sameSignatureCalls == 3) {
+            rotateModel()
         }
 
         if (isIdenticalCall && !isMutation && state.sameSignatureCalls >= config.maxIdenticalToolRepeats) {
@@ -313,6 +323,33 @@ class ToolCallOutcomeHandler(
         emit(AutonomousAgentEvent.ToolFinished(response.name, toolResult, success))
         if (isCancelled()) return ToolTurnOutcome.Stop
 
+        if (isIdenticalCall && !isMutation && state.sameSignatureCalls in 2 until config.maxIdenticalToolRepeats) {
+            transcript += com.codingagent.model.ModelMessage(
+                "user",
+                "SYSTEM: You already called ${response.name} with the same arguments ${state.sameSignatureCalls} times. " +
+                    "Do not call it again. Read a file you still need, or write the code. Do not list the same folder again."
+            )
+        }
+
+        if (response.name == "review_examples" && success) {
+            val ran = "ran=true" in toolResult
+            val matched = "matched=true" in toolResult
+            if (ran && !matched) {
+                transcript += com.codingagent.model.ModelMessage(
+                    "user",
+                    "SYSTEM: The examples did not match. Fix the file with replace_text or create_file, then call review_examples again. " +
+                        "Do not say the result is correct."
+                )
+                return ToolTurnOutcome.Continue
+            }
+            state.codeChecked = true
+            state.runMatched = ran && matched
+            val pendingId = state.pendingProposalId
+            if (pendingId != null) {
+                return surfaceApproval(pendingId, state, taskId, normalized, plan, changes)
+            }
+        }
+
         if (success) {
             state.consecutiveFailures = 0
             if (response.name == "read_file") {
@@ -367,21 +404,43 @@ class ToolCallOutcomeHandler(
         }
 
         val proposalId = toolResult.substringAfter("PROPOSAL_READY id=", "").substringBefore(' ').takeIf { it.isNotBlank() }
+        if (proposalId != null && !state.codeChecked) {
+            state.pendingProposalId = proposalId
+            transcript += com.codingagent.model.ModelMessage(
+                "user",
+                "SYSTEM: The file is staged, but do not finish yet. Call review_examples with at least two example inputs. " +
+                    "If the program reads text, one example must be more than one line. Use || for a newline inside an example. " +
+                    "Fix the file if a run does not match. Do not say the result is correct unless a run showed that."
+            )
+            return ToolTurnOutcome.Continue
+        }
         if (proposalId != null) {
-            val proposal = mutations.get(proposalId)
-            if (proposal == null) {
-                val task = AgentTaskBuilders.failed(taskId, normalized, plan, "The mutation proposal disappeared before approval: $proposalId", changes())
-                emit(AutonomousAgentEvent.Failed(task, task.summary))
-                recordTask(task)
-            } else {
-                val task = AgentTaskBuilders.approval(taskId, normalized, plan, proposal)
-                emit(AutonomousAgentEvent.ApprovalRequired(task, proposal))
-                recordTask(task)
-            }
-            return ToolTurnOutcome.Stop
+            return surfaceApproval(proposalId, state, taskId, normalized, plan, changes)
         }
 
         return ToolTurnOutcome.Continue
+    }
+
+    private fun surfaceApproval(
+        proposalId: String,
+        state: ToolTurnState,
+        taskId: String,
+        normalized: String,
+        plan: AgentPlan,
+        changes: () -> List<ChangeRecord>
+    ): ToolTurnOutcome {
+        val proposal = mutations.get(proposalId)
+        if (proposal == null) {
+            val task = AgentTaskBuilders.failed(taskId, normalized, plan, "The mutation proposal disappeared before approval: $proposalId", changes())
+            emit(AutonomousAgentEvent.Failed(task, task.summary))
+            recordTask(task)
+            return ToolTurnOutcome.Stop
+        }
+        val task = AgentTaskBuilders.approval(taskId, normalized, plan, proposal)
+            .copy(summary = com.codingagent.workspace.ChangeDiff.approvalCard(proposal, state.runMatched))
+        emit(AutonomousAgentEvent.ApprovalRequired(task, proposal))
+        recordTask(task)
+        return ToolTurnOutcome.Stop
     }
 
     /**

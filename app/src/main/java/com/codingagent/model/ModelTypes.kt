@@ -7,6 +7,9 @@ interface ModelGateway {
     fun complete(request: ModelRequest): ModelResponse
     fun stream(request: ModelRequest, onDelta: (String) -> Unit): ModelResponse = complete(request)
     fun cancel() {}
+
+    /** Skip the helper that just answered, once, so a repeated tool call can move on. */
+    fun preferDifferentModel() {}
 }
 
 data class ModelRequest(

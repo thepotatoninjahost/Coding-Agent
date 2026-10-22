@@ -218,6 +218,8 @@ object ChangeDiff {
         text = Regex("""(?:[A-Za-z0-9_.-]+[/\\])+[A-Za-z0-9_.-]+""").replace(text, ::hide)
         text = Regex("""\b[A-Za-z0-9_][A-Za-z0-9_.-]*\.[A-Za-z0-9]{1,8}\b""").replace(text, ::hide)
         val replacements = listOf(
+            Regex("(?i)prints the correct result") to "has not been run",
+            Regex("(?i)the correct result") to "a result that has not been checked",
             Regex("(?i)\\b((?:it|this|everything|the \\w+) (?:is |are )?(?:working|works)|works correctly|tests passed|all tests pass|i ran it|i tested it)\\b") to "has not been run",
             Regex("(?i)recursive[- ]descent parsers?") to "reader that walks through the text from the top, one piece at a time",
             Regex("(?i)abstract syntax trees?") to "outline of the program",
@@ -242,6 +244,11 @@ object ChangeDiff {
         return text
     }
 
+    fun approvalCard(proposal: PendingChangeProposal, runMatched: Boolean): String {
+        val text = ownerReviewText(proposal)
+        return if (runMatched) text.replace("I have not run this yet.", "I ran the examples and they matched.") else text
+    }
+
     fun everydaySummary(proposal: PendingChangeProposal): String {
         val files = proposal.changeSet.changes.map { it.path }.distinct()
         val fileWords = if (files.isEmpty()) "the files listed below" else files.joinToString(", ")
@@ -251,7 +258,9 @@ object ChangeDiff {
             proposal.changeSet.changes.any { it.operation == ChangeOperation.REMOVE } -> "I prepared a change that removes something"
             else -> "I prepared a change"
         }
-        return "$action: $fileWords. This is what you asked for. I have not run this yet. Nothing is saved until you say yes on this phone."
+        val ran = proposal.changeSet.reason.contains("RUN_EVIDENCE")
+        val checked = if (ran) "I ran the examples and they matched." else "I have not run this yet."
+        return "$action: $fileWords. This is what you asked for. $checked Nothing is saved until you say yes on this phone."
     }
 
     private fun StringBuilder.appendCompleteContent(content: String) {

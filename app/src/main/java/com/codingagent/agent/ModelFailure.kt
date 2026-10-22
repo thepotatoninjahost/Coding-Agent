@@ -33,6 +33,10 @@ object ModelFailure {
 
     fun gaveUpResume(message: String): Boolean = "resume-gave-up" in message.lowercase()
 
+    fun isResumeScheduled(message: String): Boolean = "resume-scheduled" in message.lowercase()
+
+    fun shrinkGaveUp(message: String): Boolean = "shrink-exhausted" in message.lowercase()
+
     fun isRejectedKey(message: String): Boolean {
         val lower = message.lowercase()
         return "401" in lower ||
@@ -49,7 +53,46 @@ object ModelFailure {
             "context_length_exceeded" in lower ||
             "context length" in lower ||
             "maximum context" in lower ||
-            "reduce the length" in lower
+            "reduce the length" in lower ||
+            ("otpm" in lower && ("output" in lower || "limit" in lower))
+    }
+
+    fun isRejectedModel(message: String): Boolean {
+        val lower = message.lowercase()
+        return "invalid model" in lower ||
+            "model parameters" in lower ||
+            "unknown model" in lower ||
+            "model not found" in lower ||
+            "no such model" in lower ||
+            "not a valid model" in lower ||
+            ("model" in lower && "does not exist" in lower && ("400" in lower || "404" in lower))
+    }
+
+    fun isBadTurnOrder(message: String): Boolean {
+        val lower = message.lowercase()
+        return "function call turn" in lower ||
+            "function response turn" in lower ||
+            ("function call" in lower && "user turn" in lower)
+    }
+
+    fun isNetwork(message: String): Boolean {
+        if (isRejectedKey(message) || isRequestTooLarge(message) || isRejectedModel(message) || isBadTurnOrder(message)) {
+            return false
+        }
+        val lower = message.lowercase()
+        if ("429" in lower || "rate_limit" in lower || "rate limit" in lower) return false
+        return "unknownhost" in lower ||
+            "unknown host" in lower ||
+            "unreachable" in lower ||
+            "timed out" in lower ||
+            "timeout" in lower ||
+            "failed to connect" in lower ||
+            "connection refused" in lower ||
+            "no route" in lower ||
+            "198.18.0.1" in lower ||
+            "model request failed" in lower ||
+            "socket" in lower ||
+            ("connection" in lower && "model http" !in lower)
     }
 
     fun isOutOfFunds(message: String): Boolean {
@@ -63,7 +106,9 @@ object ModelFailure {
     }
 
     fun isRateLimit(message: String): Boolean {
-        if (isRequestTooLarge(message) || isOutOfFunds(message)) return false
+        if (isRequestTooLarge(message) || isOutOfFunds(message) || isRejectedModel(message) || isBadTurnOrder(message) || isNetwork(message)) {
+            return false
+        }
         val lower = message.lowercase()
         return isCapacity(message) ||
             isDailyFreeLimit(message) ||
@@ -94,6 +139,7 @@ object ModelFailure {
     fun isRetryable(message: String): Boolean {
         if (isDailyFreeLimit(message) || isAllProvidersExhausted(message) || isCapacity(message)) return false
         if (isRequestTooLarge(message) || isOutOfFunds(message) || isRejectedKey(message)) return false
+        if (isRejectedModel(message) || isBadTurnOrder(message) || isNetwork(message)) return false
         return isEmpty(message) || isShortRateLimit(message)
     }
 
@@ -136,15 +182,28 @@ object ModelFailure {
                 val credit = creditNote(message)
                 "Every helper is used up until $whenText. I stopped this task. Send the request again then.$credit"
             }
-            isAllProvidersExhausted(message) -> {
+            isAllProvidersExhausted(message) && isResumeScheduled(message) -> {
                 val whenText = resumePhrase(message)
                 val credit = creditNote(message)
                 "Every helper is used up for now. I will start again $whenText. You can leave this open. You do not need to send the request again.$credit"
             }
+            isAllProvidersExhausted(message) -> {
+                val whenText = resumePhrase(message)
+                val credit = creditNote(message)
+                "Every helper is used up until $whenText. I stopped this task. Send the request again then.$credit"
+            }
             isOutOfFunds(message) ->
                 "This helper is out of funds. I will skip it until tomorrow and use another helper if one is connected."
+            isRequestTooLarge(message) && shrinkGaveUp(message) ->
+                "I shortened the request and it is still too big. I stopped. Ask for something smaller."
             isRequestTooLarge(message) ->
-                "This request is too big for that helper. I will shorten it, or try a helper that can take more."
+                "This request is too big for that helper."
+            isRejectedModel(message) ->
+                "That helper name was rejected. I will try a different helper."
+            isBadTurnOrder(message) ->
+                "That helper rejected the conversation order. I will try a different helper."
+            isNetwork(message) ->
+                "I could not reach the helper. Check that the phone has internet."
             isDailyFreeLimit(message) -> {
                 val whenText = resetPhrase(message)
                 val credit = if ("openrouter" in message.lowercase() || "free-models-per-day" in message.lowercase() || "openrouter_free_tier_daily" in message.lowercase()) {
@@ -173,11 +232,14 @@ object ModelFailure {
                     "For OpenRouter, get the key at openrouter.ai/keys. It stays on this phone."
             "403" in lower || "forbidden" in lower ->
                 "The helper refused this request. The secret password or the helper name may be wrong. Check Setup."
-            "timeout" in lower || "timed out" in lower ->
-                "The helper took too long to answer. Try once more. If it keeps happening, ask for something smaller or pick a different helper in Setup."
-            "connection" in lower || "unreachable" in lower || "unknownhost" in lower ->
-                "I could not reach the helper. Check that the phone has internet, then try again."
-            else -> ownerText(message)
+            else -> {
+                val text = ownerText(message)
+                if (looksTechnical(text)) {
+                    "The helper could not do this step, so I stopped. Send the request again if you want me to try a different helper."
+                } else {
+                    text
+                }
+            }
         }
     }
 
@@ -191,12 +253,20 @@ object ModelFailure {
                     trimmed == "ALL_HELPERS_EXHAUSTED" ||
                     trimmed == "no-auto-resume" ||
                     trimmed == "resume-gave-up" ||
+                    trimmed == "resume-scheduled" ||
+                    trimmed == "shrink-exhausted" ||
                     trimmed == "openrouter"
             }
             .joinToString("\n")
             .trim()
             .ifBlank { message }
             .let(::hideAccountAndPassword)
+
+    private fun looksTechnical(text: String): Boolean {
+        val trimmed = text.trim()
+        val lower = trimmed.lowercase()
+        return "model http" in lower || trimmed.startsWith("{") || "\"error\"" in lower
+    }
 
     private fun hideAccountAndPassword(text: String): String =
         text.replace(Regex("""Bearer\s+\S+""", RegexOption.IGNORE_CASE), "Bearer [redacted]")

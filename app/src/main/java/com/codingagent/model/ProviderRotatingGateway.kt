@@ -23,6 +23,8 @@ class ProviderRotatingGateway(
 ) : ModelGateway {
     private val cancelGeneration = AtomicLong(0L)
     private val gateways = ConcurrentHashMap<String, RemoteHttpGateway>()
+    private val avoidModelId = java.util.concurrent.atomic.AtomicReference<String?>(null)
+    private val lastTriedModelId = java.util.concurrent.atomic.AtomicReference<String?>(null)
 
     init {
         require(endpoints.isNotEmpty()) { "At least one helper is required" }
@@ -32,16 +34,27 @@ class ProviderRotatingGateway(
 
     override fun complete(request: ModelRequest): ModelResponse = stream(request) {}
 
+    override fun preferDifferentModel() {
+        avoidModelId.set(lastTriedModelId.get())
+    }
+
     override fun stream(request: ModelRequest, onDelta: (String) -> Unit): ModelResponse {
         val generation = cancelGeneration.get()
         val now = clock()
         val order = ordered()
         val available = order.filter { quota.isAvailable(it.providerId, it.modelId, now) }
         if (available.isEmpty()) return exhausted(order, now)
+        val skip = avoidModelId.getAndSet(null)
+        val candidates = if (skip.isNullOrBlank()) {
+            available
+        } else {
+            available.filter { it.modelId != skip }.ifEmpty { available }
+        }
         var last: ModelResponse.Failure? = null
-        for (endpoint in available) {
+        for (endpoint in candidates) {
             if (cancelGeneration.get() != generation) return ModelResponse.Failure("Cancelled")
             if (!quota.isAvailable(endpoint.providerId, endpoint.modelId, clock())) continue
+            lastTriedModelId.set(endpoint.modelId)
             val response = gatewayFor(endpoint).stream(request, onDelta)
             if (cancelGeneration.get() != generation) return ModelResponse.Failure("Cancelled")
             if (response !is ModelResponse.Failure) {
@@ -136,7 +149,10 @@ class ProviderRotatingGateway(
             probe: Boolean = false,
             extraHeaders: Map<String, String> = emptyMap()
         ): ModelGateway? {
-            val endpoints = ProviderCatalog.endpoints(settings)
+            val connect: (String) -> HttpURLConnection = { url ->
+                if (connectionFactory != null) connectionFactory(url) else java.net.URL(url).openConnection() as HttpURLConnection
+            }
+            val endpoints = ModelIdCheck.filter(ProviderCatalog.endpoints(settings), connect = connect)
             if (endpoints.isEmpty()) return null
             if (endpoints.size == 1 && endpoints.single().providerId == "custom") {
                 val endpoint = endpoints.single()

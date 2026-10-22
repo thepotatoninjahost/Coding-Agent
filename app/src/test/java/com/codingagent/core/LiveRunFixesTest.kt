@@ -112,6 +112,50 @@ class LiveRunFixesTest {
         assertFalse(quota.isAvailable("aiml", "another-model", now + 60_000))
         assertTrue(quota.isAvailable("groq", "openai/gpt-oss-120b", now + 60_000))
         assertTrue(quota.isAvailable("aiml", "stealth/union-alpha", now + ProviderQuotaBook.FUNDS_WAIT_MS + 1))
+        quota.noteFailure("groq", "qwen/qwen3.8-27b", "Model HTTP 413: Request too large. OTPM limit 1000", now)
+        assertTrue(quota.isAvailable("groq", "qwen/qwen3.8-27b", now + 1_000))
+        quota.noteFailure("groq", "qwen/qwen3.8-27b", "Model HTTP 413: Request too large. OTPM limit 1000", now)
+        assertFalse(quota.isAvailable("groq", "qwen/qwen3.8-27b", now + 1_000))
+        quota.noteFailure("groq", "openai/gpt-oss-120b", "UnknownHostException: 198.18.0.1", now)
+        assertTrue(quota.isAvailable("groq", "openai/gpt-oss-120b", now + 1_000))
+        val network = ModelFailure.humanize("UnknownHostException: 198.18.0.1")
+        assertTrue(network.contains("internet"))
+        assertFalse(network.contains("used up"))
+    }
+
+    @Test
+    fun aScheduledResumeRunsAndAStoppedTaskDoesNotPromiseOne() {
+        val phases = mutableListOf<String>()
+        val resumeAt = System.currentTimeMillis() + 200
+        val calls = AtomicInteger()
+        val gateway = object : ModelGateway {
+            override fun complete(request: ModelRequest) = stream(request) {}
+            override fun stream(request: ModelRequest, onDelta: (String) -> Unit): ModelResponse {
+                return if (calls.incrementAndGet() == 1) {
+                    ModelResponse.Failure("ALL_HELPERS_EXHAUSTED\nresume-at-ms:$resumeAt\nopenrouter")
+                } else {
+                    ModelResponse.Text("back to work")
+                }
+            }
+        }
+        val response = ModelCallWithRetry.call(
+            gateway,
+            { ModelRequest("s", "u", emptyList()) },
+            { false },
+            { phases += it }
+        )
+        assertTrue(response is ModelResponse.Text)
+        assertEquals(2, calls.get())
+        assertTrue(phases.any { it.contains("I will start again") && it.contains("do not need to send", ignoreCase = true) })
+        val stopped = ModelFailure.humanize("ALL_HELPERS_EXHAUSTED\nresume-at-ms:$resumeAt\nopenrouter")
+        assertFalse(stopped.contains("do not need to send", ignoreCase = true))
+        assertTrue(stopped.contains("Send the request again"))
+        val shrunk = ModelFailure.humanize("Model HTTP 413: Request too large\nshrink-exhausted")
+        assertFalse(shrunk.contains("I will shorten"))
+        assertTrue(shrunk.contains("stopped", ignoreCase = true))
+        val rawHttp = ModelFailure.humanize("Model HTTP 400: {\"error\":{\"message\":\"Invalid model parameters\"}}")
+        assertFalse(rawHttp.contains("Model HTTP"))
+        assertFalse(rawHttp.contains("{"))
     }
 
     @Test
@@ -173,14 +217,26 @@ class LiveRunFixesTest {
 
     @Test
     fun wikipediaAndHackerNewsParsersKeepAHit() {
-        val wiki = WikipediaResearchProvider { _ ->
+        var wikiUrl = ""
+        val wiki = WikipediaResearchProvider { url ->
+            wikiUrl = url
             jsonConnection(
                 """{"query":{"search":[{"title":"Compiler","snippet":"A compiler turns text into a program."}]}}"""
             )
         }
-        val wikiHit = wiki.search("compiler", 2).hits.single()
+        val wikiHit = wiki.search("What is the latest stable version of the Kotlin language?", 2).hits.single()
         assertEquals("https://en.wikipedia.org/wiki/Compiler", wikiHit.url)
         assertTrue(wikiHit.excerpt.contains("compiler"))
+        assertFalse(wikiUrl.contains("What+is+the+latest"))
+        assertTrue(wikiUrl.lowercase().contains("kotlin"))
+        assertFalse(
+            com.codingagent.research.SourceQuality.isAcceptable(
+                "https://developer.mozilla.org/en-US/docs/Web/Security/Attacks/Threat_model",
+                "Threat model",
+                "A long page about security threats"
+            )
+        )
+        assertTrue(com.codingagent.research.SourceQuality.rankBoost("https://github.com/JetBrains/kotlin/releases/tag/v2.4.21") >= 14)
 
         val news = HackerNewsResearchProvider { _ ->
             jsonConnection(

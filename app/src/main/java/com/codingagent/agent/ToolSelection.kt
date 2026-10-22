@@ -102,7 +102,7 @@ object ToolKindMapper {
         "continue_result", "read_chat_history", "search_chat_history", "read_user_memory", "search_user_memory",
         "search_knowledge", "research_web" -> ToolKind.SEARCH_KNOWLEDGE
         "replace_text", "create_file" -> ToolKind.APPLY_CHANGES
-        "run_command" -> ToolKind.RUN_CHECKS
+        "run_command", "review_examples" -> ToolKind.RUN_CHECKS
         "verify" -> ToolKind.VERIFY
         else -> null
     }

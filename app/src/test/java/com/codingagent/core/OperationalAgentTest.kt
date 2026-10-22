@@ -156,6 +156,10 @@ class OperationalAgentTest {
                 name = "replace_text",
                 arguments = """{"path":"src/Main.kt","oldText":"fun main() = 1\n","newText":"fun main() = 2\n","reason":"What I want to do: Change src/Main.kt so main returns 2.\\nWhy: This carries out your request.\\nWhat will change: Replace the current main function with one that returns 2.\\nPossible effects: The program will return 2 instead of 1.\\nRisks: A change to program behavior could affect anything that depends on the old result.\\nWhat your approval means: Nothing is written until you complete both owner approvals."}"""
             ))
+            add(ModelResponse.ToolCall(
+                name = "review_examples",
+                arguments = """{"path":"src/Main.kt","examples":"first call => 2\nsecond call => 2","notes":"Two examples. This file does not read several lines of text."}"""
+            ))
         }
         val gateway = object : ModelGateway {
             override fun complete(request: ModelRequest): ModelResponse =

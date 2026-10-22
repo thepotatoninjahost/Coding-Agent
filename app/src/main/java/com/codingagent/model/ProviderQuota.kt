@@ -20,6 +20,7 @@ class ProviderQuotaBook(private val file: File? = null) {
         var remaining: Int? = null
         var exhaustedUntil: Long = 0L
         var keyRejected: Boolean = false
+        var tooLargeStrikes: Int = 0
     }
 
     init {
@@ -47,7 +48,10 @@ class ProviderQuotaBook(private val file: File? = null) {
 
     fun noteSuccess(providerId: String, modelId: String) {
         synchronized(lock) {
-            models[key(providerId, modelId)]?.exhaustedUntil = 0L
+            models[key(providerId, modelId)]?.let { gate ->
+                gate.exhaustedUntil = 0L
+                gate.tooLargeStrikes = 0
+            }
             save()
         }
     }
@@ -71,7 +75,22 @@ class ProviderQuotaBook(private val file: File? = null) {
                 ModelFailure.isOutOfFunds(message) -> {
                     providers.getOrPut(providerId) { Gate() }.exhaustedUntil = now + FUNDS_WAIT_MS
                 }
-                ModelFailure.isRequestTooLarge(message) -> Unit
+                ModelFailure.isNetwork(message) -> Unit
+                ModelFailure.isRejectedModel(message) -> {
+                    val model = models.getOrPut(key(providerId, modelId)) { Gate() }
+                    model.exhaustedUntil = maxOf(model.exhaustedUntil, now + MODEL_PARK_MS)
+                }
+                ModelFailure.isBadTurnOrder(message) -> {
+                    val model = models.getOrPut(key(providerId, modelId)) { Gate() }
+                    model.exhaustedUntil = maxOf(model.exhaustedUntil, now + ERROR_COOLDOWN_MS)
+                }
+                ModelFailure.isRequestTooLarge(message) -> {
+                    val model = models.getOrPut(key(providerId, modelId)) { Gate() }
+                    model.tooLargeStrikes += 1
+                    if (model.tooLargeStrikes >= 2) {
+                        model.exhaustedUntil = maxOf(model.exhaustedUntil, now + MODEL_PARK_MS)
+                    }
+                }
                 ModelFailure.isRejectedKey(message) -> {
                     providers.getOrPut(providerId) { Gate() }.keyRejected = true
                 }
@@ -88,8 +107,10 @@ class ProviderQuotaBook(private val file: File? = null) {
                     model.exhaustedUntil = maxOf(model.exhaustedUntil, until)
                 }
                 else -> {
-                    val model = models.getOrPut(key(providerId, modelId)) { Gate() }
-                    model.exhaustedUntil = maxOf(model.exhaustedUntil, now + ERROR_COOLDOWN_MS)
+                    if (message.contains("Model HTTP")) {
+                        val model = models.getOrPut(key(providerId, modelId)) { Gate() }
+                        model.exhaustedUntil = maxOf(model.exhaustedUntil, now + ERROR_COOLDOWN_MS)
+                    }
                 }
             }
             save()
@@ -150,6 +171,7 @@ class ProviderQuotaBook(private val file: File? = null) {
                 remaining = if (item.has("remaining")) item.optInt("remaining") else null
                 exhaustedUntil = item.optLong("exhaustedUntil", 0L)
                 keyRejected = item.optBoolean("keyRejected", false)
+                tooLargeStrikes = item.optInt("tooLargeStrikes", 0)
             }
         }
     }
@@ -173,6 +195,7 @@ class ProviderQuotaBook(private val file: File? = null) {
                 .put("exhaustedUntil", gate.exhaustedUntil)
                 .put("keyRejected", gate.keyRejected)
             if (gate.remaining != null) item.put("remaining", gate.remaining)
+            if (gate.tooLargeStrikes > 0) item.put("tooLargeStrikes", gate.tooLargeStrikes)
             array.put(item)
         }
         return array
@@ -182,6 +205,7 @@ class ProviderQuotaBook(private val file: File? = null) {
         const val UNKNOWN_DAILY_WAIT_MS = 6L * 60L * 60L * 1000L
         const val ERROR_COOLDOWN_MS = 60_000L
         const val FUNDS_WAIT_MS = 24L * 60L * 60L * 1000L
+        const val MODEL_PARK_MS = 6L * 60L * 60L * 1000L
     }
 }
 

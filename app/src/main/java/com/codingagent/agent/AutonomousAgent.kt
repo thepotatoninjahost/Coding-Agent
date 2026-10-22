@@ -397,7 +397,8 @@ class AutonomousAgent(
             synthesizeFromEvidence = ::synthesizeFromEvidence,
             recordTask = ::recordTask,
             emit = { emit(it) },
-            isCancelled = { isCancelled() }
+            isCancelled = { isCancelled() },
+            rotateModel = { activeGateway.preferDifferentModel() }
         )
 
         for (turn in 0 until config.maxTurns) {
@@ -420,7 +421,7 @@ class AutonomousAgent(
             val toolsThisTurn = when {
                 decision.toolsOpen -> AgentModelProtocol.toolsForIntent(intake.intent)
                 changeWork && writeNow -> AgentModelProtocol.tools().filter { tool ->
-                    tool.name in setOf("replace_text", "create_file", "verify")
+                    tool.name in setOf("replace_text", "create_file", "verify", "review_examples", "run_command")
                 }
                 else -> emptyList()
             }
@@ -475,7 +476,9 @@ class AutonomousAgent(
                     state.lastEvidence,
                     (state.lastEvidence.length / 2).coerceAtLeast(300)
                 )
-                while (transcript.size > 2) transcript.removeAt(0)
+                val kept = TranscriptCompactor.compact(transcript.toList(), keepRecentGroups = 2)
+                transcript.clear()
+                transcript.addAll(kept)
                 response = ModelCallWithRetry.call(
                     gateway = activeGateway,
                     request = { modelRequest() },
@@ -497,7 +500,15 @@ class AutonomousAgent(
             }
             when (response) {
                 is ModelResponse.Failure -> {
-                    val friendly = ModelFailure.humanize(response.message)
+                    val raw = if (ModelFailure.isRequestTooLarge(response.message) && shrinks >= 2) {
+                        response.message + "\nshrink-exhausted"
+                    } else {
+                        response.message
+                    }
+                    var friendly = ModelFailure.humanize(raw)
+                    if (friendly.contains("Model HTTP") || friendly.trim().startsWith("{")) {
+                        friendly = "The helper could not do this step, so I stopped. Send the request again if you want me to try a different helper."
+                    }
                     val named = extractInspectTarget(normalized) ?: extractExplicitReadPath(normalized)
                     val localExtra = named?.let { buildLocalFileReport(it) }
                         ?.asUserText(includePolicy = true, includeStructure = true)
@@ -582,7 +593,41 @@ class AutonomousAgent(
                         state.lastEvidence = missing + "\n\n" + state.lastEvidence
                         continue
                     }
-                    if (state.plainEnglishNudges < 1 && PlainEnglish.hasJargon(response.content)) {
+                    if (state.pendingProposalId != null && !state.codeChecked) {
+                        if (state.codeCheckNudges < 2 && turn < config.maxTurns - 1) {
+                            state.codeCheckNudges++
+                            transcript += com.codingagent.model.ModelMessage("assistant", response.content)
+                            transcript += com.codingagent.model.ModelMessage(
+                                "user",
+                                "SYSTEM: The file is staged, but do not finish yet. Call review_examples with at least two example inputs. " +
+                                    "If the program reads text, one example must be more than one line. Fix the file if a run does not match."
+                            )
+                            continue
+                        }
+                        val proposal = state.pendingProposalId?.let { mutations.get(it) }
+                        if (proposal != null) {
+                            val task = AgentTaskBuilders.approval(taskId, normalized, plan, proposal)
+                                .copy(summary = com.codingagent.workspace.ChangeDiff.approvalCard(proposal, state.runMatched))
+                            recordTask(task)
+                            emit(AutonomousAgentEvent.ApprovalRequired(task, proposal))
+                            return events
+                        }
+                    }
+                    var answer = response.content
+                    if (wantsResearch && com.codingagent.research.ResearchBriefBuilder.looksLikeRawPage(answer)) {
+                        if (state.researchRewrites < 1 && turn < config.maxTurns - 1) {
+                            state.researchRewrites++
+                            transcript += com.codingagent.model.ModelMessage("assistant", answer)
+                            transcript += com.codingagent.model.ModelMessage(
+                                "user",
+                                "SYSTEM: Write a short answer in plain English from the best source already fetched. " +
+                                    "Do not paste the page. Name the fact and where it came from."
+                            )
+                            continue
+                        }
+                        answer = com.codingagent.research.ResearchBriefBuilder.plainAnswer(researchEvidence)
+                    }
+                    if (state.plainEnglishNudges < 1 && PlainEnglish.hasJargon(answer)) {
                         state.plainEnglishNudges++
                         transcript += com.codingagent.model.ModelMessage("assistant", response.content)
                         transcript += com.codingagent.model.ModelMessage(
@@ -598,17 +643,17 @@ class AutonomousAgent(
                         state.searchedProject &&
                         state.lastEvidence.isNotBlank() &&
                         !state.lastEvidence.startsWith("ERROR:")
-                    emit(AutonomousAgentEvent.ModelMessage(PlainEnglish.soften(response.content)))
+                    emit(AutonomousAgentEvent.ModelMessage(PlainEnglish.soften(answer)))
                     val summary = PlainEnglish.soften(
                         if (useListingEvidence) {
                             formatListingSummary(state.lastEvidence, report, isSourceFileListRequest(currentRequestFocus(normalized)))
                         } else {
-                            sanitizeModelText(response.content, report)
+                            sanitizeModelText(answer, report)
                         }
                     )
                     val status = when {
                         useListingEvidence -> "completed"
-                        isDegenerate(response.content) -> "completed-with-warning"
+                        isDegenerate(answer) -> "completed-with-warning"
                         !report.passed -> "completed-with-issues"
                         else -> "completed"
                     }

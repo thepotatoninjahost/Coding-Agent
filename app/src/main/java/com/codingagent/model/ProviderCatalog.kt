@@ -73,21 +73,15 @@ object ProviderCatalog {
         ),
         RankedModel(
             "requesty",
-            "nvidia/nemotron-3-ultra-550b-a55b:free",
+            "nvidia/nemotron-3-ultra-550b-a55b",
             "Requesty free helper",
-            "Requesty answers free models and refuses paid ones. The :free id is tried first."
+            "This id works on Requesty's free balance. Requesty has no :free suffix, and cohere/north-mini-code is not on that service."
         ),
         RankedModel(
             "requesty",
-            "cohere/north-mini-code:free",
-            "Requesty code helper",
-            "Another free Requesty model. Paid Requesty models are refused, so they are not listed."
-        ),
-        RankedModel(
-            "requesty",
-            "google/gemma-4-31b-it:free",
+            "google/gemma-4-31b-it",
             "Requesty Gemma helper",
-            "A free Requesty model used when the first one is busy."
+            "A second Requesty id that works on the free balance. Paid Requesty models are refused, so they are not listed."
         ),
         RankedModel(
             "aiml",

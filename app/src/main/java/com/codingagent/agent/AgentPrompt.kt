@@ -83,7 +83,7 @@ object AgentPrompt {
             appendLine("14. This is a whole-project review. Gather enough evidence to make a useful assessment, then write concrete improvements and their evidence. Do not stop after a token sample.")
         }
         if (intake.intent in setOf(TaskIntent.CHANGE, TaskIntent.CREATE, TaskIntent.REFACTOR, TaskIntent.DEBUG)) {
-            appendLine("15. This is change work. A review alone is not the work. After understanding the target and relevant dependencies, stage the actual change. Use run_command when a shell check beats guessing.")
+            appendLine("15. This is change work. A review alone is not the work. After understanding the target and relevant dependencies, stage the actual change. Use run_command when a shell check beats guessing. Before you finish, run the new code if a runner exists, or call review_examples with at least two example inputs. If the program reads text, one example must be more than one line. Fix failures before you finish. Do not say the result is correct unless a run showed that.")
         }
         if (lessons.isNotBlank()) {
             appendLine()

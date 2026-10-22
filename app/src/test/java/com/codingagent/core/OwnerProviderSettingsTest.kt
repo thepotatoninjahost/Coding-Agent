@@ -43,7 +43,10 @@ class OwnerProviderSettingsTest {
         val requesty = endpoints.filter { it.providerId == "requesty" }
         assertTrue(requesty.size >= 2)
         assertTrue(requesty.all { it.baseUrl == "https://router.requesty.ai/v1" })
-        assertTrue(requesty.first().modelId.endsWith(":free"))
+        assertTrue(requesty.any { it.modelId == "nvidia/nemotron-3-ultra-550b-a55b" })
+        assertTrue(requesty.any { it.modelId == "google/gemma-4-31b-it" })
+        assertTrue(requesty.none { it.modelId.endsWith(":free") })
+        assertTrue(requesty.none { it.modelId.contains("cohere") })
         assertTrue(requesty.none { it.modelId == "anthropic/claude-fable-5" })
         assertTrue(requesty.all { it.apiKey == requestyKey })
 
