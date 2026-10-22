@@ -36,9 +36,33 @@ android {
     }
 
     // Debug builds use Android's standard local debug signing.
-    // No private signing key is stored in the repository or reconstructed during builds.
+    // Release signing is optional and reads a keystore that is not in this repository.
+    val releaseKeystorePath = System.getenv("CODING_AGENT_KEYSTORE")
+    val releaseStorePassword = System.getenv("CODING_AGENT_KEYSTORE_PASSWORD")
+    val releaseKeyAlias = System.getenv("CODING_AGENT_KEY_ALIAS")
+    val releaseKeyPassword = System.getenv("CODING_AGENT_KEY_PASSWORD")
+    val releaseSigningReady = !releaseKeystorePath.isNullOrBlank() &&
+        !releaseStorePassword.isNullOrBlank() &&
+        !releaseKeyAlias.isNullOrBlank() &&
+        !releaseKeyPassword.isNullOrBlank() &&
+        file(releaseKeystorePath).isFile
+
+    if (releaseSigningReady) {
+        signingConfigs {
+            create("release") {
+                storeFile = file(releaseKeystorePath!!)
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
+    }
+
     buildTypes {
         release {
+            if (releaseSigningReady) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(

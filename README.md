@@ -176,6 +176,17 @@ app/build/outputs/apk/debug/app-debug.apk
 
 `local.properties`, `.gradle/`, and `app/build/` are machine-local or generated state. They must not be committed.
 
+## Release signing
+
+Debug builds keep using the normal Android debug key. A release build is signed only when all four of these are set and the keystore file is really there:
+
+- `CODING_AGENT_KEYSTORE` — path to the keystore file
+- `CODING_AGENT_KEYSTORE_PASSWORD` — keystore password
+- `CODING_AGENT_KEY_ALIAS` — key name inside the keystore
+- `CODING_AGENT_KEY_PASSWORD` — that key's password
+
+If any of them is missing, the release build still compiles and stays unsigned. Do not commit the keystore. Files named `*.keystore` and `*.jks` are ignored.
+
 ## Verification coverage
 
 The project currently verifies:
