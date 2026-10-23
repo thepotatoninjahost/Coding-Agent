@@ -16,3 +16,8 @@
 -keep class com.google.crypto.tink.** { *; }
 -dontwarn com.google.crypto.tink.**
 -keep class org.mozilla.javascript.** { *; }
+# Rhino's desktop debugger mentions AWT and Swing. The phone only runs the engine.
+-dontwarn java.awt.**
+-dontwarn javax.swing.**
+-dontwarn java.beans.**
+-dontwarn org.mozilla.javascript.tools.**
