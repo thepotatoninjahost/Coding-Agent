@@ -35,7 +35,7 @@ fun interface AgentProgressListener {
 
 class ChatWorkspace(
     private val store: ChatMessageStore,
-    private val unavailableMessageProvider: () -> String = { "Model unavailable. Finish model setup before sending coding requests." },
+    private val unavailableMessageProvider: () -> String = { "I am not ready yet. Open a project, and tap Setup if you want me to write new code." },
     private val progressListener: AgentProgressListener? = null,
     private val memoryStore: UserMemoryStore? = null,
     private val runtimeProvider: () -> AutonomousAgent?
@@ -125,11 +125,15 @@ class ChatWorkspace(
             agent?.let { PendingWorkResume.tryResume(it, trimmed, lastAgent) }
         }
         if (resumed != null) {
-            progressListener?.onProgress("RESUME", "Local pending work / rate-limit gate")
+            progressListener?.onProgress("RESUME", "Picking up the work that was already waiting.")
             return persist(result = resumed)
         }
-        progressListener?.onProgress("PLANNING", "Starting request")
-        val executionRequest = if (resumeOpenJob) openJob!!.goal else trimmed
+        progressListener?.onProgress("PLANNING", "Starting.")
+        val executionRequest = if (resumeOpenJob) {
+            openJob?.goal ?: trimmed
+        } else {
+            trimmed
+        }
         val packaged = packageWithMemory(executionRequest)
         val workLog = mutableListOf<String>()
         val result = if (agent == null) {
@@ -148,15 +152,15 @@ class ChatWorkspace(
                     }
                     is AutonomousAgentEvent.ToolFinished -> progressListener?.onProgress(
                         "TOOL",
-                        if (event.success) "${event.name} ok" else "${event.name} failed"
+                        if (event.success) "That check finished." else "That check did not finish."
                     )
-                    is AutonomousAgentEvent.ModelDelta -> progressListener?.onProgress("MODEL", "Streaming… ${event.text}")
-                    is AutonomousAgentEvent.ModelMessage -> progressListener?.onProgress("MODEL", "Writing reply")
-                    is AutonomousAgentEvent.Started -> progressListener?.onProgress("STARTED", event.request)
-                    is AutonomousAgentEvent.Completed -> progressListener?.onProgress("DONE", "Completed")
+                    is AutonomousAgentEvent.ModelDelta -> progressListener?.onProgress("MODEL", "The helper is writing a reply.")
+                    is AutonomousAgentEvent.ModelMessage -> progressListener?.onProgress("MODEL", "Writing a reply.")
+                    is AutonomousAgentEvent.Started -> progressListener?.onProgress("STARTED", "Working on what you asked.")
+                    is AutonomousAgentEvent.Completed -> progressListener?.onProgress("DONE", "Done.")
                     is AutonomousAgentEvent.Failed -> progressListener?.onProgress("FAILED", event.message)
                     is AutonomousAgentEvent.Stopped -> progressListener?.onProgress("STOPPED", event.message)
-                    is AutonomousAgentEvent.ApprovalRequired -> progressListener?.onProgress("APPROVAL", "Waiting for owner approval")
+                    is AutonomousAgentEvent.ApprovalRequired -> progressListener?.onProgress("APPROVAL", "Waiting for you to say yes.")
                 }
             }
             when (val terminal = events.lastOrNull()) {
@@ -306,7 +310,7 @@ class ChatWorkspace(
                         append(entry.optString("details")).append("\n\n")
                     }
                 }
-                append("Entries are shortened in this chat view when necessary; the stored JSONL records retain the full event payloads.")
+                append("This view shows the full saved notes. They stay on this phone, in this project.")
             }
         }
         val message = ChatMessage(role = ChatRole.AGENT, content = response)

@@ -5,6 +5,8 @@ import com.codingagent.intake.TaskIntent
 object AgentModelProtocol {
     val DEFAULT_SYSTEM = """You are a Coding-Agent: an autonomous software-engineering system on the user's device.
 
+The owner uses only a phone and does not know computer jargon. Every sentence you show the owner must be plain everyday English. If you must use a technical word, explain it in the same sentence. Do not show raw error codes, tool names, or protocol text to the owner unless you immediately say what they mean in ordinary words.
+
 You investigate the real project, then work toward completing the owner's objective. You can take on large, complex, multi-file engineering tasks and experimental problems. Do not confuse disciplined verification with keeping work small.
 
 ## Core loop
@@ -19,13 +21,13 @@ You investigate the real project, then work toward completing the owner's object
 7. Verify meaningful milestones before relying on them. After changes, run the strongest relevant checks available: targeted tests, broader tests, static checks, build/compile, and integration checks as appropriate. Know what each check does and does not prove.
 8. If a check fails, stop building on the unverified result. Inspect the failure, identify a cause, make a targeted correction or change approach, and rerun the relevant check. Preserve failed attempts and results in personal logs.
 9. Learn from outcomes. Reuse verified discoveries and prior lessons, and revise incorrect lessons when new evidence contradicts them.
-10. Report the actual result, supporting evidence, checks performed, and unresolved limitations. Never claim success merely because a tool call or file write succeeded.
+10. Report the actual result, supporting evidence, checks performed, and unresolved limitations. Never claim success merely because a tool call or file write succeeded. Before you say new code works, check that the file is complete and not cut off, and run it or a real test when you can. If no runner exists, call review_examples with at least two example inputs, and include more than one line when the program reads text. Fix failures before you finish. If you did not run it, say you have not run it. Do not say the result is correct unless a run showed that.
 
 ## Hard rules
 - Evidence first. If the owner names a file, read it before analyzing or changing it.
 - Exactly one tool call per turn; inspect the complete result before the next call.
 - Include a short, evidence-based purpose in each tool call's optional purpose field so the decision can be reconstructed from personal logs.
-- Before staging any code change, explain the proposed change to the owner in plain everyday English. The owner must be able to understand it without technical knowledge. Do not use unexplained jargon; explain unavoidable technical terms in ordinary words.
+- Before staging any code change, explain the proposed change to the owner in plain everyday English. The owner must be able to understand it without technical knowledge. Do not use unexplained jargon. Do not use specialist words such as parser, lexer, tokenizer, AST, bytecode, recursive-descent, grammar, or semantic analysis. Say what the program does in everyday words, for example "a small program that reads simple instructions and runs them."
 - Every code-change proposal's reason must contain these exact headings, in this order, with complete plain-English sentences under each: "What I want to do:", "Why:", "What will change:", "Possible effects:", "Risks:", and "What your approval means:". State when something is unknown instead of guessing. Name every file that will change. Explain the practical effect and realistic risks, not just the technical steps. Say that nothing is written until the owner completes both required approvals.
 - Code changes (create_file, replace_text) only STAGE a proposal. The model cannot approve its own proposal. The owner must approve twice through the authenticated Review flow. Never claim a change was applied until an owner-controlled action returns APPLIED.
 - Owner constraints and the twelve constitution rules are binding. Do not invent additional rules from personal preferences or risk judgments. Offer candid advice, explain evidence and trade-offs, then follow the owner's decision unless it conflicts with one of the twelve rules or is technically impossible. If blocked, identify the exact rule or limitation.
@@ -42,7 +44,7 @@ You investigate the real project, then work toward completing the owner's object
 - Never continue blindly to appear productive. If blocked by missing evidence or a technical limitation, say what is missing and what is needed next.
 
 ## Communication
-- Use plain, everyday language. Avoid jargon unless necessary and explain technical terms the first time.
+- Use plain, everyday language. Avoid jargon. Do not use specialist words in anything the owner reads. Say what you made in ordinary words. Never use the words agentic, agentic loop, checksum, or checksum-backed rollback in anything the owner reads.
 - Be direct. Lead with the result, then give the evidence and necessary explanation.
 - Do not expose hidden chain-of-thought. Provide a useful decision summary, assumptions, alternatives, and evidence; log the available rationale for later inspection.
 - Ask a focused clarification only when essential information is missing.
@@ -55,7 +57,7 @@ You investigate the real project, then work toward completing the owner's object
 - For analysis, use Problem → Evidence → Conclusion where it improves clarity.
 
 ## Available tools
-list_files, read_file, continue_result, read_chat_history, search_chat_history, read_user_memory, search_user_memory, search_project, search_knowledge, research_web, replace_text, create_file, run_command, verify
+list_files, read_file, continue_result, read_chat_history, search_chat_history, read_user_memory, search_user_memory, search_project, search_knowledge, research_web, replace_text, create_file, review_examples, run_command, verify
 """.trimIndent()
 
     val SYSTEM: String get() = DEFAULT_SYSTEM
@@ -113,13 +115,38 @@ list_files, read_file, continue_result, read_chat_history, search_chat_history, 
         ),
         ModelToolDefinition(
             "replace_text",
-            "Stage an exact text replacement. Before staging, write the complete plain-English proposal explanation in the required six-part format. Dual owner approval is required before it is applied.",
-            """{"type":"object","properties":{"path":{"type":"string","description":"The project file to change."},"oldText":{"type":"string","description":"The exact existing text to replace."},"newText":{"type":"string","description":"The replacement text."},"reason":{"type":"string","description":"Required plain-English explanation with these exact headings in order: What I want to do:, Why:, What will change:, Possible effects:, Risks:, What your approval means:. Use everyday words, name files, explain jargon, and state unknowns honestly."},"purpose":{"type":"string","description":"Short evidence-based reason for this tool call."}},"required":["path","oldText","newText","reason"]}"""
+            "Stage an exact text replacement. Nothing is saved until the owner says yes twice. Do not put an explanation in this call.",
+            """{"type":"object","properties":{"path":{"type":"string"},"oldText":{"type":"string","description":"Exact existing text. At most 6000 characters."},"newText":{"type":"string","description":"Replacement text. At most 6000 characters."},"purpose":{"type":"string"}},"required":["path","oldText","newText"]}"""
+        ),
+        ModelToolDefinition(
+            "edit",
+            "Stage one exact edit. old_text must match once. For a large change, use several calls. Nothing is saved until the owner says yes twice.",
+            """{"type":"object","properties":{"path":{"type":"string"},"old_text":{"type":"string"},"new_text":{"type":"string"},"purpose":{"type":"string"}},"required":["path","old_text","new_text"]}"""
         ),
         ModelToolDefinition(
             "create_file",
-            "Stage a new file. Before staging, write the complete plain-English proposal explanation in the required six-part format. Dual owner approval is required before it is written.",
-            """{"type":"object","properties":{"path":{"type":"string","description":"The new project file path."},"content":{"type":"string","description":"The complete proposed file contents."},"reason":{"type":"string","description":"Required plain-English explanation with these exact headings in order: What I want to do:, Why:, What will change:, Possible effects:, Risks:, What your approval means:. Use everyday words, name files, explain jargon, and state unknowns honestly."},"purpose":{"type":"string","description":"Short evidence-based reason for this tool call."}},"required":["path","content","reason"]}"""
+            "Stage a new file under about 150 lines. Bigger files are created, then extended with append_chunk. Nothing is saved until the owner says yes twice.",
+            """{"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"},"purpose":{"type":"string"}},"required":["path","content"]}"""
+        ),
+        ModelToolDefinition(
+            "append_chunk",
+            "Add a piece of at most 6000 characters to the end of a staged or saved file.",
+            """{"type":"object","properties":{"path":{"type":"string"},"text":{"type":"string"},"purpose":{"type":"string"}},"required":["path","text"]}"""
+        ),
+        ModelToolDefinition(
+            "run_program",
+            "Run a JavaScript program on this phone. Pass the file path or the code, optional args, and optional stdin. The result is the real exit code and output.",
+            """{"type":"object","properties":{"language":{"type":"string"},"path":{"type":"string"},"code":{"type":"string"},"stdin":{"type":"string"},"args":{"type":"array","items":{"type":"string"}},"expected":{"type":"string"},"purpose":{"type":"string"}},"required":[]}"""
+        ),
+        ModelToolDefinition(
+            "submit",
+            "Finish the task. Use status could_not_fix when a run still fails and say why in plain English.",
+            """{"type":"object","properties":{"status":{"type":"string"},"answer":{"type":"string"}},"required":["answer"]}"""
+        ),
+        ModelToolDefinition(
+            "review_examples",
+            "Check staged code against at least two example inputs before the owner is asked to approve it. If the program reads text, one example must contain more than one line. Say whether a real run matched. Do not claim the result is correct unless a run showed that.",
+            """{"type":"object","properties":{"path":{"type":"string","description":"Project-relative file to check."},"examples":{"type":"string","description":"One example per line, written as INPUT => EXPECTED. Use || for a newline inside the input or the expected output."},"notes":{"type":"string","description":"What you checked, in plain English."},"purpose":{"type":"string","description":"Short evidence-based reason for this tool call."}},"required":["path","examples"]}"""
         ),
         ModelToolDefinition(
             "run_command",
@@ -139,7 +166,7 @@ list_files, read_file, continue_result, read_chat_history, search_chat_history, 
             TaskIntent.INSPECT, TaskIntent.EXPLAIN, TaskIntent.UNKNOWN ->
                 listOf("list_files", "read_file", "continue_result", "read_chat_history", "search_chat_history", "read_user_memory", "search_user_memory", "search_project", "search_knowledge", "research_web", "run_command", "verify")
             TaskIntent.CHANGE, TaskIntent.CREATE, TaskIntent.REFACTOR, TaskIntent.DEBUG ->
-                listOf("list_files", "read_file", "continue_result", "read_chat_history", "search_chat_history", "read_user_memory", "search_user_memory", "search_project", "search_knowledge", "research_web", "replace_text", "create_file", "verify", "run_command")
+                listOf("list_files", "read_file", "continue_result", "read_chat_history", "search_chat_history", "read_user_memory", "search_user_memory", "search_project", "search_knowledge", "research_web", "replace_text", "edit", "create_file", "append_chunk", "run_program", "review_examples", "submit", "verify", "run_command")
             TaskIntent.TEST ->
                 listOf("list_files", "read_file", "continue_result", "read_chat_history", "search_chat_history", "read_user_memory", "search_user_memory", "run_command", "verify", "search_project")
         }

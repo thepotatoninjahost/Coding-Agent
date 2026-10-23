@@ -1,5 +1,6 @@
 package com.codingagent.workspace
 
+import java.nio.file.Files
 import java.util.UUID
 import java.io.File
 import com.codingagent.agent.AgentAction
@@ -249,7 +250,7 @@ class MutationCoordinator(
         val timestamp = now()
         if (timestamp > proposal.expiresAt) {
             return MutationApprovalResult.Rejected(
-                "Change proposal approval window expired. Open Review, reject, and the agent will restage the same files."
+                "This change expired before it was saved. Nothing was written. Say no, then ask again if you still want it."
             )
         }
         val proposalFingerprint = OwnerApprovalKey.fingerprint(proposal.id, proposal.changeSet.changes)
@@ -258,6 +259,13 @@ class MutationCoordinator(
         }
         // Production tokens must carry spoken + typed + device-auth modalities.
         // JVM test-only tokens may omit modalities so unit tests stay focused on coordinator logic.
+        val riskyRefusal = com.codingagent.agent.RiskyChange.deviceLockRefusal(
+            ownerApproval.isTestCapability,
+            proposal.changeSet.changes,
+            proposal.request,
+            modalities
+        )
+        if (riskyRefusal != null) return MutationApprovalResult.Rejected(riskyRefusal)
         if (!ownerApproval.isTestCapability) {
             val required = AgentConstitution.REQUIRED_PRODUCTION_MODALITIES
             if (!modalities.containsAll(required)) {
@@ -820,6 +828,8 @@ class MutationCoordinator(
         var after = 0
         for (record in changeSet.changes) {
             val file = try {
+                val raw = workspace.projectRoot().resolve(record.path)
+                if (Files.isSymbolicLink(raw.toPath())) return DiskState.MIXED
                 val candidate = rootSafeFile(record.path)
                 val rootPath = workspace.projectRoot().canonicalFile.toPath()
                 val canonical = candidate.canonicalFile.toPath()

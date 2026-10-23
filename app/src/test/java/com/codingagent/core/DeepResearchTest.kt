@@ -4,11 +4,13 @@ import java.net.HttpURLConnection
 import java.net.InetAddress
 import java.nio.file.Files
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import com.codingagent.research.ArticleExtractor
 import com.codingagent.research.ResearchUrlSafety
 import com.codingagent.research.DurableDeepResearchProvider
+import com.codingagent.research.GitHubResearchProvider
 import com.codingagent.research.PersonalResearchProvider
 import com.codingagent.research.QueryLanes
 import com.codingagent.workspace.ResearchHit
@@ -195,6 +197,60 @@ class DeepResearchTest {
         assertTrue(session.sources.none { it.url.contains("chemistry") })
     }
 
+    @Test fun pageFetchFollowsAPublicRedirectAndRefusesAPrivateOne() {
+        val ok = ArticleExtractor.fetch(
+            "https://example.com/start",
+            connectionFactory = { url ->
+                if (url.contains("/start")) {
+                    redirectConnection("https://example.com/landed")
+                } else {
+                    fakeConnectionWithBody("<main><p>landed page about kotlin networking</p></main>")
+                }
+            }
+        )
+        assertEquals("landed page about kotlin networking", ok?.text?.trim())
+
+        val blocked = ArticleExtractor.fetchDetailed(
+            "https://example.com/start",
+            connectionFactory = { redirectConnection("http://169.254.169.254/latest/meta-data") }
+        )
+        assertEquals(null, blocked.page)
+        assertTrue(blocked.error.orEmpty().isNotBlank())
+        assertFalse(blocked.error.orEmpty().contains("meta-data"))
+    }
+
+    @Test fun githubRateLimitIsVisibleInsteadOfABlankFailure() {
+        val provider = GitHubResearchProvider { _ ->
+            object : HttpURLConnection(java.net.URL("https://api.github.com/search/repositories")) {
+                override fun connect() = Unit
+                override fun disconnect() = Unit
+                override fun usingProxy() = false
+                override fun getResponseCode() = 403
+                override fun getErrorStream() =
+                    """{"message":"API rate limit exceeded for this address."}""".byteInputStream()
+                override fun getInputStream() = "{}".byteInputStream()
+            }
+        }
+        val result = provider.search("kotlin compiler", 2)
+        assertTrue(result.hits.isEmpty())
+        assertTrue(result.error.orEmpty().contains("rate limit"))
+    }
+
+    @Test fun emptyPersonalResearchKeepsTheSearchError() {
+        val root = Files.createTempDirectory("personal-research-error").toFile()
+        val search = object : WebResearchProvider {
+            override fun search(query: String, limit: Int): ResearchResult =
+                ResearchResult(query, emptyList(), "Searx returned a web page instead of search results")
+        }
+        val session = PersonalResearchProvider(
+            researchRoot = root,
+            searchProvider = search,
+            connectionFactory = { fakeConnection(it) }
+        ).deepResearch("kotlin compiler pipeline", 2, ResearchMode.BROAD)
+        assertTrue(session.sources.isEmpty())
+        assertTrue(session.errors.joinToString().contains("web page instead of search results"))
+    }
+
     @Test fun shortExperimentalQueryDoesNotSurfaceTradeoffLanes() {
         val lanes = QueryLanes.expand("ch experimental code involvi", ResearchMode.EXPERIMENTAL)
         assertTrue(lanes.none { it.name.contains("criticism") || it.name.contains("alternatives") })
@@ -207,6 +263,16 @@ class DeepResearchTest {
             "<main><p>${"kotlin networking learned source content ".repeat(30)}</p>" +
                 "<pre>val answer = 42</pre></main>"
         )
+
+    private fun redirectConnection(location: String): HttpURLConnection =
+        object : HttpURLConnection(java.net.URL("https://example.com/start")) {
+            override fun connect() = Unit
+            override fun disconnect() = Unit
+            override fun usingProxy() = false
+            override fun getResponseCode() = 302
+            override fun getHeaderField(name: String?) = if (name.equals("Location", ignoreCase = true)) location else null
+            override fun getInputStream() = "".byteInputStream()
+        }
 
     private fun fakeConnectionWithBody(body: String): HttpURLConnection =
         object : HttpURLConnection(java.net.URL("https://example.com/mock")) {

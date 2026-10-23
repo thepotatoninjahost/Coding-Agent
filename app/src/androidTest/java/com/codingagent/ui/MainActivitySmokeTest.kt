@@ -5,6 +5,7 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -31,7 +32,7 @@ class MainActivitySmokeTest {
     private fun dismissModelSettingsIfPresent() {
         val cancelNodes = composeRule.onAllNodesWithText("Cancel").fetchSemanticsNodes()
         if (cancelNodes.isNotEmpty()) {
-            composeRule.onNodeWithText("Cancel").performClick()
+            composeRule.onNodeWithText("Cancel").performScrollTo().performClick()
             composeRule.waitForIdle()
         }
     }
@@ -56,21 +57,21 @@ class MainActivitySmokeTest {
         composeRule.onNodeWithText("New").performClick()
         // Project creation runs on a background thread; wait until the status text appears.
         composeRule.waitUntil(timeoutMillis = 15_000) {
-            composeRule.onAllNodesWithText("project mounted", substring = true)
+            composeRule.onAllNodesWithText("Your new project is ready.", substring = true)
                 .fetchSemanticsNodes()
                 .isNotEmpty()
         }
-        composeRule.onNodeWithText("project mounted", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithText("Your new project is ready.", substring = true).assertIsDisplayed()
     }
 
     @Test
     fun modelSettingsExposeProviderConfigurationAndSaveAction() {
         // With Orchestrator + clearPackageData every method starts first-run, so the
         // Model Settings dialog is open. No dismiss is performed here.
-        composeRule.onNodeWithText("Remote model API").assertIsDisplayed()
-        composeRule.onNodeWithText("Base URL").assertIsDisplayed()
-        composeRule.onNodeWithText("API key").assertIsDisplayed()
-        composeRule.onNodeWithText("Save").assertIsDisplayed()
-        composeRule.onNodeWithText("Cancel").assertIsDisplayed()
+        composeRule.onNodeWithText("Connect a code helper").assertIsDisplayed()
+        composeRule.onNodeWithText("Web address").assertIsDisplayed()
+        composeRule.onNodeWithText("Secret password").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("Save").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("Cancel").performScrollTo().assertIsDisplayed()
     }
 }

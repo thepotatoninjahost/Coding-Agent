@@ -3,6 +3,7 @@ package com.codingagent.core
 import com.codingagent.agent.AgentPrompt
 import com.codingagent.model.AgentModelProtocol
 import com.codingagent.intake.TaskIntakeParser
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.nio.file.Files
@@ -52,10 +53,10 @@ class AgentPromptTest {
 
         val replaceTool = AgentModelProtocol.tools().single { it.name == "replace_text" }
         val createTool = AgentModelProtocol.tools().single { it.name == "create_file" }
-        assertTrue(replaceTool.inputSchema.contains("\"reason\""))
-        assertTrue(createTool.inputSchema.contains("\"reason\""))
-        assertTrue(replaceTool.inputSchema.contains("\"required\":[\"path\",\"oldText\",\"newText\",\"reason\"]"))
-        assertTrue(createTool.inputSchema.contains("\"required\":[\"path\",\"content\",\"reason\"]"))
+        assertFalse(replaceTool.inputSchema.contains("\"reason\""))
+        assertFalse(createTool.inputSchema.contains("\"reason\""))
+        assertTrue(replaceTool.inputSchema.contains("\"required\":[\"path\",\"oldText\",\"newText\"]"))
+        assertTrue(createTool.inputSchema.contains("\"required\":[\"path\",\"content\"]"))
     }
 
     @Test fun promptAllowsAmbitiousWorkAndRequiresMilestoneVerification() {

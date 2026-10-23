@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - cursor/audit-fixes-ce5c
     paths-ignore:
       - '**/*.md'
       - 'LICENSE'
@@ -27,7 +28,7 @@ permissions:
 jobs:
   build:
     name: Build and test Coding Agent
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-24.04
     timeout-minutes: 120
     defaults:
       run:
@@ -54,9 +55,18 @@ jobs:
       - name: Install Android SDK packages
         run: |
           set -euo pipefail
-          # setup-android already accepts licenses; re-run sdkmanager licenses without
-          # swallowing failures (|| true would hide a real license/tooling break).
+          # setup-android already accepts licenses. Asking again is still useful if a
+          # package license was missed, but "yes | sdkmanager" must not use pipefail:
+          # sdkmanager closes the pipe when it finishes, yes then exits 1 ("Broken pipe"),
+          # and the step stops before any package is installed.
+          set +o pipefail
           yes | sdkmanager --licenses >/dev/null
+          license_status=${PIPESTATUS[1]}
+          set -o pipefail
+          if [[ "$license_status" -ne 0 ]]; then
+            echo "Could not accept the Android SDK licenses (status ${license_status})."
+            exit "$license_status"
+          fi
           sdkmanager --install \
             "platform-tools" \
             "platforms;android-35" \
@@ -194,14 +204,17 @@ jobs:
           sudo udevadm trigger --name-match=kvm
 
       # Instrumentation must pass — one attempt, no retry that could hide a real test failure.
-      # Runner is ubuntu-24.04-arm; emulator arch arm64-v8a matches S25-class ABI.
+      # The runner is x86_64. Android Gradle Plugin 8.7's resource packager is an x86_64
+      # program, so an ARM runner stops before any install file exists. This app has no
+      # native code, so the phone install is the same file. The emulator uses x86_64,
+      # which this runner can boot.
       # -no-snapshot + disable-spellchecker reduce non-deterministic UI flake.
       - name: Run Android instrumentation tests on emulator
         uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         with:
           api-level: 35
           target: google_apis
-          arch: arm64-v8a
+          arch: x86_64
           profile: pixel_7
           emulator-boot-timeout: 600
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
@@ -219,3 +232,49 @@ jobs:
             app/build/outputs/androidTest-results/
           if-no-files-found: warn
           retention-days: 5
+
+  publish-debug-apk:
+    name: Publish latest debug APK
+    needs: build
+    if: >-
+      always() &&
+      github.event_name == 'push' &&
+      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/cursor/audit-fixes-ce5c') &&
+      needs.build.result != 'cancelled'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - name: Check out source
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 1
+
+      - name: Download the debug APK from this run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh run download "${{ github.run_id }}" --name coding-agent-debug-apk --dir apk
+          find apk -name '*.apk' -print
+
+      - name: Update the latest-debug prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          src="$(find apk -name '*.apk' -print -quit)"
+          test -n "$src"
+          cp "$src" coding-agent-debug.apk
+          notes='Debug build you can install on your phone. It is replaced whenever the app is updated. This is a test build, not a store release.'
+          if gh release view latest-debug >/dev/null 2>&1; then
+            gh release upload latest-debug coding-agent-debug.apk --clobber
+          else
+            gh release create latest-debug coding-agent-debug.apk \
+              --prerelease \
+              --title "Latest debug install" \
+              --notes "$notes"
+          fi

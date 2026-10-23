@@ -6,6 +6,8 @@ import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.border
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -13,6 +15,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -91,12 +94,15 @@ private fun CodingAgentApp(
             store = vm.store,
             scope = scope,
             coordinatorProvider = { vm.mutationCoordinator() },
-            pendingProposalIdProvider = { vm.ui.value.pendingProposalId }
+            pendingProposalIdProvider = { vm.ui.value.pendingProposalId },
+            activityProvider = { context as FragmentActivity }
         )
     }
     ownerApproval.host = object : OwnerApprovalHost {
         override fun isBusy(): Boolean = vm.isBusy()
-        override fun setActiveJob(job: Job?) {}
+        override fun setActiveJob(job: Job?) {
+            vm.attachApprovalJob(job)
+        }
         override fun setStatus(newStatus: AgentStatus, newDetail: String) {
             vm.setStatus(newStatus, newDetail)
         }
@@ -107,7 +113,7 @@ private fun CodingAgentApp(
         override fun onAwaitingSecond(proposal: PendingChangeProposal) {
             vm.setStatus(
                 AgentStatus.APPROVAL,
-                "Authenticated approval ${proposal.approvalCount}/2 recorded; transaction remains unapplied"
+                "Yes ${proposal.approvalCount} of 2 is saved. Nothing is written until you say yes a second time."
             )
         }
         override fun onRepairRequired(proposal: PendingChangeProposal, newDetail: String) {
@@ -115,6 +121,9 @@ private fun CodingAgentApp(
         }
         override fun onApplied(result: MutationApprovalResult.Applied) {
             vm.onChangeApplied(result)
+        }
+        override fun onGitHubApproved(fingerprint: String) {
+            vm.pushApprovedGitHub(fingerprint)
         }
         override fun onRejected(reason: String) {
             vm.clearPendingApproval()
@@ -188,6 +197,7 @@ private fun CodingAgentApp(
                         pendingApproval = ui.pendingApproval,
                         approvalCount = ui.approvalCount,
                         reason = ui.pendingReason,
+                        phoneLock = ui.pendingPhoneLock,
                         onApprove = { ownerApproval.beginApprovalForPendingProposal() }
                     )
                     SurfaceTab.FILES -> FilesSurface(
@@ -195,23 +205,29 @@ private fun CodingAgentApp(
                         query = ui.projectQuery,
                         onQuery = vm::setProjectQuery,
                         path = ui.editorPath,
-                        onPath = vm::setEditorPath,
+                        onOpen = vm::openEditorFile,
                         content = ui.editorContent,
                         onContent = vm::setEditorContent,
                         document = ui.editorDocument,
                         tools = vm.tools(),
                         mutationCoordinator = vm.mutationCoordinator(),
-                        onStatus = { pair -> vm.setStatus(pair.first, pair.second) }
+                        onSave = { vm.saveEditor() }
                     )
                     SurfaceTab.REVIEW -> ReviewSurface(
                         pending = ui.pendingApproval,
                         approvals = ui.approvalCount,
                         reason = ui.pendingReason,
+                        phoneLock = ui.pendingPhoneLock,
+                        canSendToGitHub = ui.lastSavedSummary.isNotBlank(),
                         onApprove = { ownerApproval.beginApprovalForPendingProposal() },
+                        onSendToGitHub = {
+                            val fingerprint = vm.prepareGitHubPush()
+                            if (fingerprint != null) ownerApproval.beginGitHubPush(fingerprint)
+                        },
                         onReject = {
                             ui.pendingProposalId?.let { vm.mutationCoordinator()?.reject(it) }
                             vm.clearPendingApproval()
-                            vm.setStatus(AgentStatus.STOPPED, "Proposed changes rejected")
+                            vm.setStatus(AgentStatus.STOPPED, "You said no. Nothing was saved.")
                         }
                     )
                     SurfaceTab.TERMINAL -> TerminalSurface(
@@ -226,7 +242,7 @@ private fun CodingAgentApp(
                         enabled = vm.tools() != null,
                         onRun = { command -> vm.runTerminal(command) },
                         onStop = { vm.stopAgent() },
-                        onClear = { }
+                        onClear = { vm.clearTerminal() }
                     )
                     SurfaceTab.RESEARCH -> ResearchSurface(
                         query = ui.researchQuery,
@@ -234,7 +250,7 @@ private fun CodingAgentApp(
                         hits = ui.researchHits,
                         error = ui.researchError,
                         state = ui.researchState,
-                        onSearch = { query -> vm.setResearchQuery(query) }
+                        onSearch = { query -> vm.searchResearch(query) }
                     )
                 }
             }
@@ -250,6 +266,8 @@ private fun CodingAgentApp(
                 speechStatus = ownerApproval.speechStatus,
                 speechVerified = ownerApproval.speechVerified,
                 error = ownerApproval.error,
+                phoneLock = ownerApproval.phoneLock,
+                riskNote = ownerApproval.riskNote,
                 onTypedChange = ownerApproval::onTypedChange,
                 onTypedConfirmChange = ownerApproval::onTypedConfirmChange,
                 onSpokenChange = ownerApproval::onSpokenChange,
@@ -266,22 +284,41 @@ private fun CodingAgentApp(
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier
                         .fillMaxWidth()
+                        .heightIn(max = 560.dp)
                         .border(1.dp, NeonGreen.copy(alpha = 0.4f), RoundedCornerShape(12.dp))
                         .padding(4.dp)
                 ) {
-                    Column(Modifier.padding(16.dp)) {
-                        Text("Remote model API", color = NeonGreen, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    Column(Modifier.padding(16.dp).verticalScroll(rememberScrollState())) {
+                        Text("Connect a code helper", color = NeonGreen, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                         Text(
-                            "Remote API endpoint. Enter the base URL, model name, and API key for the provider you are using.",
+                            "Writing new code needs a helper on the internet. Paste the OpenRouter password from openrouter.ai/keys. Groq and the other boxes are optional. If one helper is retired or does not answer, I skip it and try the next. Try connection succeeds when any helper answers. Passwords stay on this phone. Looking things up on the Research tab does not need this.",
                             color = SoftGreen,
-                            fontSize = 11.sp
+                            fontSize = 12.sp
                         )
+                        Spacer(Modifier.height(8.dp))
+                        Text("Which free helper?", color = SoftGreen, fontSize = 12.sp)
+                        ModelSettings.freeHelperChoices().forEach { choice ->
+                            TextButton(
+                                onClick = { vm.chooseFreeHelper(choice.modelId) },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    if (ui.draftModelName == choice.modelId) {
+                                        "Selected: ${choice.plainName}. ${choice.plainDetail}"
+                                    } else {
+                                        "${choice.plainName}. ${choice.plainDetail}"
+                                    },
+                                    color = if (ui.draftModelName == choice.modelId) NeonGreen else SoftGreen,
+                                    fontSize = 12.sp
+                                )
+                            }
+                        }
                         Spacer(Modifier.height(12.dp))
                         OutlinedTextField(
                             value = ui.draftBaseUrl,
                             onValueChange = vm::updateDraftBaseUrl,
                             modifier = Modifier.fillMaxWidth(),
-                            label = { Text("Base URL", color = SoftGreen) },
+                            label = { Text("Web address", color = SoftGreen) },
                             singleLine = true,
                             colors = fieldColors()
                         )
@@ -290,7 +327,7 @@ private fun CodingAgentApp(
                             value = ui.draftModelName,
                             onValueChange = vm::updateDraftModelName,
                             modifier = Modifier.fillMaxWidth(),
-                            label = { Text("Model", color = SoftGreen) },
+                            label = { Text("Helper name", color = SoftGreen) },
                             singleLine = true,
                             colors = fieldColors()
                         )
@@ -299,24 +336,64 @@ private fun CodingAgentApp(
                             value = ui.draftApiKey,
                             onValueChange = vm::updateDraftApiKey,
                             modifier = Modifier.fillMaxWidth(),
-                            label = { Text("API key", color = SoftGreen) },
+                            label = { Text("Secret password", color = SoftGreen) },
                             singleLine = true,
                             visualTransformation = PasswordVisualTransformation(),
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                             colors = fieldColors()
                         )
+                        Text(
+                            "This password is for OpenRouter. Leave the address as https://openrouter.ai/api/v1. It stays on this phone.",
+                            color = SoftGreen,
+                            fontSize = 10.sp
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Text("Other free helpers (optional)", color = NeonGreen, fontSize = 14.sp)
+                        Text(
+                            "Paste any you have. I use the best one that still answers. A retired free helper is skipped.",
+                            color = SoftGreen,
+                            fontSize = 10.sp
+                        )
+                        helperPassword("Groq password (optional)", ui.draftGroqApiKey, vm::updateDraftGroqApiKey)
+                        Text("Groq is free. About 1,000 requests a day. No card. The address is api.groq.com.", color = SoftGreen, fontSize = 10.sp)
+                        helperPassword("Requesty password (optional)", ui.draftRequestyApiKey, vm::updateDraftRequestyApiKey)
+                        Text("Requesty uses router.requesty.ai. The password stays on this phone.", color = SoftGreen, fontSize = 10.sp)
+                        helperPassword("Google Gemini password (optional)", ui.draftGeminiApiKey, vm::updateDraftGeminiApiKey)
+                        Text("Google's free Gemini key. From aistudio.google.com.", color = SoftGreen, fontSize = 10.sp)
+                        helperPassword("Mistral password (optional)", ui.draftMistralApiKey, vm::updateDraftMistralApiKey)
+                        Text("Mistral gives monthly credit and does not need a card.", color = SoftGreen, fontSize = 10.sp)
+                        helperPassword("SambaNova password (optional)", ui.draftSambanovaApiKey, vm::updateDraftSambanovaApiKey)
+                        Text("SambaNova's free plan is about 20 requests a day.", color = SoftGreen, fontSize = 10.sp)
+                        helperPassword("AI/ML API password (optional)", ui.draftAimlApiKey, vm::updateDraftAimlApiKey)
+                        Text("AI/ML API uses api.aimlapi.com. The password stays on this phone.", color = SoftGreen, fontSize = 10.sp)
+                        OutlinedTextField(
+                            value = ui.draftCloudflareAccountId,
+                            onValueChange = vm::updateDraftCloudflareAccountId,
+                            modifier = Modifier.fillMaxWidth(),
+                            label = { Text("Cloudflare account id (optional)", color = SoftGreen) },
+                            singleLine = true,
+                            colors = fieldColors()
+                        )
+                        helperPassword("Cloudflare token (optional)", ui.draftCloudflareApiToken, vm::updateDraftCloudflareApiToken)
+                        Text(
+                            "Cloudflare needs both boxes. The account id is the long code on your Cloudflare account page. The token is the secret. Both stay on this phone.",
+                            color = SoftGreen,
+                            fontSize = 10.sp
+                        )
+                        helperPassword("Cerebras trial password (optional)", ui.draftCerebrasApiKey, vm::updateDraftCerebrasApiKey)
+                        Text("Cerebras is a short trial and needs a card. Leave this blank if you do not have one.", color = SoftGreen, fontSize = 10.sp)
                         Spacer(Modifier.height(8.dp))
                         OutlinedTextField(
                             value = ui.draftSystemPrompt,
                             onValueChange = vm::updateDraftSystemPrompt,
                             modifier = Modifier.fillMaxWidth(),
-                            label = { Text("Additional system instructions (optional)", color = SoftGreen) },
+                            label = { Text("Extra rules for the helper (optional)", color = SoftGreen) },
                             minLines = 3,
                             maxLines = 8,
                             colors = fieldColors()
                         )
                         Text(
-                            "Added to the built-in instructions; safety, evidence, and approval rules remain in force.",
+                            "These are added to the built-in rules. The helper still has to ask you before it changes your files.",
                             color = SoftGreen,
                             fontSize = 10.sp
                         )
@@ -325,7 +402,7 @@ private fun CodingAgentApp(
                             value = ui.draftExtraHeaders,
                             onValueChange = vm::updateDraftExtraHeaders,
                             modifier = Modifier.fillMaxWidth(),
-                            label = { Text("Extra headers (optional)", color = SoftGreen) },
+                            label = { Text("Extra connection lines (optional)", color = SoftGreen) },
                             minLines = 2,
                             maxLines = 4,
                             colors = fieldColors()
@@ -334,16 +411,22 @@ private fun CodingAgentApp(
                             Spacer(Modifier.height(8.dp))
                             Text(it, color = SoftGreen, fontSize = 12.sp)
                         }
-                        Spacer(Modifier.height(12.dp))
-                        Row {
-                            TextButton(onClick = { vm.probeModelConnection() }) {
-                                Text("Test", color = FluoroOrange)
-                            }
-                            Spacer(Modifier.weight(1f))
-                            TextButton(onClick = { vm.setShowModelSettings(false) }) {
+                        Spacer(Modifier.height(8.dp))
+                        TextButton(onClick = { vm.setShowMoreHelpers(true) }, modifier = Modifier.fillMaxWidth()) {
+                            Text("Memory and GitHub", color = FluoroOrange, fontSize = 12.sp)
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        TextButton(onClick = { vm.probeModelConnection() }, modifier = Modifier.fillMaxWidth()) {
+                            Text("Try connection", color = FluoroOrange)
+                        }
+                        TextButton(onClick = { vm.testModels() }, modifier = Modifier.fillMaxWidth()) {
+                            Text("Test models", color = FluoroOrange)
+                        }
+                        Row(Modifier.fillMaxWidth()) {
+                            TextButton(onClick = { vm.setShowModelSettings(false) }, modifier = Modifier.weight(1f)) {
                                 Text("Cancel", color = SoftGreen)
                             }
-                            TextButton(onClick = { vm.saveDraftModelSettings() }) {
+                            TextButton(onClick = { vm.saveDraftModelSettings() }, modifier = Modifier.weight(1f)) {
                                 Text("Save", color = NeonGreen, fontWeight = FontWeight.Bold)
                             }
                         }
@@ -351,5 +434,98 @@ private fun CodingAgentApp(
                 }
             }
         }
+
+        if (ui.showMoreHelpers) {
+            Dialog(onDismissRequest = { vm.setShowMoreHelpers(false) }) {
+                Surface(
+                    color = Panel,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 560.dp)
+                        .border(1.dp, NeonGreen.copy(alpha = 0.4f), RoundedCornerShape(12.dp))
+                ) {
+                    Column(Modifier.padding(16.dp).verticalScroll(rememberScrollState())) {
+                        Text("Memory and GitHub", color = NeonGreen, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                        Text(
+                            "Passwords for Groq and the other helpers are on the previous screen. If one helper is retired, I skip it.",
+                            color = SoftGreen,
+                            fontSize = 12.sp
+                        )
+                        TextButton(onClick = { vm.chooseAutomaticHelper() }) {
+                            Text(
+                                if (ui.draftPreferredModel.isBlank()) "Selected: use the best helper that is free right now"
+                                else "Use the best helper that is free right now",
+                                color = NeonGreen,
+                                fontSize = 12.sp
+                            )
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        Text("What I remember", color = NeonGreen, fontSize = 14.sp)
+                        TextButton(onClick = { vm.updateDraftMemoryRetention(ModelSettings.MEMORY_KEEP_CAPPED) }) {
+                            Text(
+                                if (ui.draftMemoryRetention == ModelSettings.MEMORY_KEEP_CAPPED) "Selected: clean up old memories"
+                                else "Clean up old memories",
+                                color = SoftGreen,
+                                fontSize = 12.sp
+                            )
+                        }
+                        Text("I keep what you tell me, and I drop old unimportant notes after about six months. Strong rules stay.", color = SoftGreen, fontSize = 10.sp)
+                        TextButton(onClick = { vm.updateDraftMemoryRetention(ModelSettings.MEMORY_KEEP_FOREVER) }) {
+                            Text(
+                                if (ui.draftMemoryRetention == ModelSettings.MEMORY_KEEP_FOREVER) "Selected: keep everything I remember"
+                                else "Keep everything I remember",
+                                color = SoftGreen,
+                                fontSize = 12.sp
+                            )
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        Text("Send my own changes to GitHub", color = NeonGreen, fontSize = 14.sp)
+                        OutlinedTextField(
+                            value = ui.draftGithubRepo,
+                            onValueChange = vm::updateDraftGithubRepo,
+                            modifier = Modifier.fillMaxWidth(),
+                            label = { Text("GitHub project (owner/name)", color = SoftGreen) },
+                            singleLine = true,
+                            colors = fieldColors()
+                        )
+                        OutlinedTextField(
+                            value = ui.draftGithubBranch,
+                            onValueChange = vm::updateDraftGithubBranch,
+                            modifier = Modifier.fillMaxWidth(),
+                            label = { Text("Branch", color = SoftGreen) },
+                            singleLine = true,
+                            colors = fieldColors()
+                        )
+                        helperPassword("GitHub token (optional)", ui.draftGithubToken, vm::updateDraftGithubToken)
+                        Text("The token stays on this phone. Sending still needs the phone lock.", color = SoftGreen, fontSize = 10.sp)
+                        Spacer(Modifier.height(12.dp))
+                        Row {
+                            Spacer(Modifier.weight(1f))
+                            TextButton(onClick = { vm.setShowMoreHelpers(false) }) { Text("Close", color = SoftGreen) }
+                            TextButton(onClick = {
+                                vm.saveDraftModelSettings()
+                                vm.setShowMoreHelpers(false)
+                            }) { Text("Save", color = NeonGreen, fontWeight = FontWeight.Bold) }
+                        }
+                    }
+                }
+            }
+        }
     }
+}
+
+@Composable
+private fun helperPassword(label: String, value: String, onChange: (String) -> Unit) {
+    Spacer(Modifier.height(8.dp))
+    OutlinedTextField(
+        value = value,
+        onValueChange = onChange,
+        modifier = Modifier.fillMaxWidth(),
+        label = { Text(label, color = SoftGreen) },
+        singleLine = true,
+        visualTransformation = PasswordVisualTransformation(),
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+        colors = fieldColors()
+    )
 }

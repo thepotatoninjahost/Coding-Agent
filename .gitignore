@@ -10,3 +10,5 @@ local.properties
 *.aab
 app/debug.keystore
 app/debug-signing.keystore.b64
+*.keystore
+*.jks

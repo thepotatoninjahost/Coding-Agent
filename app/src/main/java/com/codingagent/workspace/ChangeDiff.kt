@@ -150,7 +150,7 @@ object ChangeDiff {
      * Human-readable review body. Proposed files are not on disk until dual approval,
      * so this text is the only way the owner can see what they are confirming.
      */
-    fun ownerReviewText(proposal: PendingChangeProposal): String = buildString {
+    fun ownerReviewText(proposal: PendingChangeProposal, run: RunReport? = null): String = buildString {
         appendLine("PROPOSED CHANGES — nothing is written until you confirm twice.")
         appendLine("Read the plain-English explanation before deciding. If it does not clearly explain the change or its risks, reject it and ask the agent to explain.")
         appendLine("Proposal ${shortId(proposal.id)} · ${proposal.changeSet.changes.size} file(s) · ${expiryLabel(proposal.expiresAt)}")
@@ -158,8 +158,11 @@ object ChangeDiff {
         appendLine("WHAT YOU ASKED FOR (complete):")
         appendCompleteContent(proposal.request)
         appendLine()
+        appendLine("IN EVERYDAY WORDS:")
+        appendLine(everydaySummary(proposal, run))
+        appendLine()
         appendLine("THE AGENT'S PLAIN-ENGLISH EXPLANATION (complete):")
-        appendCompleteContent(proposal.changeSet.reason)
+        appendCompleteContent(ownerFacingReason(proposal.changeSet.reason))
         if (!hasCompletePlainEnglishExplanation(proposal.changeSet.reason)) {
             appendLine("WARNING: This proposal does not contain all six required explanation sections. Do not approve it until the agent provides a complete explanation.")
         }
@@ -179,7 +182,7 @@ object ChangeDiff {
             appendLine("=== $operationLabel: ${record.path} ===")
             if (record.reason != proposal.changeSet.reason) {
                 appendLine("Additional file-specific reason (complete):")
-                appendCompleteContent(record.reason)
+                appendCompleteContent(ownerFacingReason(record.reason))
             } else {
                 appendLine("Reason: see the complete plain-English explanation above.")
             }
@@ -197,6 +200,62 @@ object ChangeDiff {
         appendLine()
         appendLine("END OF COMPLETE PROPOSAL REVIEW.")
         appendLine("Open the Review tab to confirm or reject. Files tab only lists files already on disk.")
+    }
+
+    /**
+     * The approval card is what the owner reads. The model's own words stay.
+     * A claim that the program already works is replaced with the real run result.
+     */
+    fun ownerFacingReason(reason: String): String {
+        val hidden = mutableListOf<String>()
+        fun hide(match: MatchResult): String {
+            hidden += match.value
+            return "\u0001${hidden.lastIndex}\u0001"
+        }
+        var text = reason
+        text = Regex("```[\\s\\S]*?```").replace(text, ::hide)
+        text = Regex("`[^`\\n]+`").replace(text, ::hide)
+        text = Regex("""(?:[A-Za-z0-9_.-]+[/\\])+[A-Za-z0-9_.-]+""").replace(text, ::hide)
+        text = Regex("""\b[A-Za-z0-9_][A-Za-z0-9_.-]*\.[A-Za-z0-9]{1,8}\b""").replace(text, ::hide)
+        val replacements = listOf(
+            Regex("(?i)prints the correct result") to "has not been run",
+            Regex("(?i)\\b((?:it|this|everything|the \\w+) (?:is |are )?(?:working|works)|works correctly|tests passed|all tests pass|i ran it|i tested it)\\b") to "has not been run"
+        )
+        replacements.forEach { (pattern, replacement) ->
+            text = text.replace(pattern, replacement)
+        }
+        hidden.forEachIndexed { index, original ->
+            text = text.replace("\u0001$index\u0001", original)
+        }
+        return text
+    }
+
+    fun approvalCard(proposal: PendingChangeProposal, runMatched: Boolean): String =
+        approvalCard(proposal, if (runMatched) RunReport("recorded", 0, "", "", false, listOf(CaseResult("example", "ok", "ok", true))) else null)
+
+    fun approvalCard(proposal: PendingChangeProposal, run: RunReport?): String {
+        return ownerReviewText(proposal, run)
+    }
+
+    fun runSentence(run: RunReport?): String = when {
+        run == null || !run.ran -> "I have not run this yet."
+        run.timedOut -> "I started a run and it took too long, so I stopped it."
+        run.passed -> "I ran the examples and they matched."
+        else -> "I ran the examples and they did not match. I did not save the file."
+    }
+
+    fun everydaySummary(proposal: PendingChangeProposal, run: RunReport? = null): String {
+        val files = proposal.changeSet.changes.map { it.path }.distinct()
+        val fileWords = if (files.isEmpty()) "the files listed below" else files.joinToString(", ")
+        val action = when {
+            proposal.changeSet.changes.isEmpty() -> "I prepared a change"
+            proposal.changeSet.changes.all { it.operation == ChangeOperation.CREATE } -> "I prepared new files"
+            proposal.changeSet.changes.any { it.operation == ChangeOperation.REMOVE } -> "I prepared a change that removes something"
+            else -> "I prepared a change"
+        }
+        val fromReason = proposal.changeSet.reason.contains("RUN_EVIDENCE")
+        val checked = if (run != null) runSentence(run) else if (fromReason) "I ran the examples and they matched." else "I have not run this yet."
+        return "$action: $fileWords. This is what you asked for. $checked Nothing is saved until you say yes on this phone."
     }
 
     private fun StringBuilder.appendCompleteContent(content: String) {

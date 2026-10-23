@@ -7,6 +7,14 @@ internal class ToolResultPager(pageCharacters: Int) {
     private val results = linkedMapOf<String, StoredResult>()
     private var nextId = 1
 
+    private fun remember(id: String, stored: StoredResult) {
+        results[id] = stored
+        while (results.size > KEPT_RESULTS) {
+            val oldest = results.keys.firstOrNull() ?: break
+            results.remove(oldest)
+        }
+    }
+
     @Synchronized fun clear() { results.clear(); nextId = 1 }
 
     @Synchronized
@@ -14,13 +22,17 @@ internal class ToolResultPager(pageCharacters: Int) {
         if (text.length <= pageSize) return text
         val id = "tool-result-${nextId++}"
         val stored = StoredResult(label, text, 0)
-        results[id] = stored
+        remember(id, stored)
         return render(id, 0, stored)
     }
 
     @Synchronized
     fun continueResult(id: String, startCharacter: Int): String {
-        val stored = results[id] ?: return "ERROR: Complete tool output '$id' is not available in this run. Repeat the original tool call."
+        val stored = results[id]
+            ?: return "ERROR: The saved result is gone. Call the tool again. Do not guess what it said."
+        if (startCharacter >= stored.text.length && stored.nextOffset >= stored.text.length) {
+            return "This result is already complete. There is nothing more to read. Do not guess extra text."
+        }
         if (startCharacter != stored.nextOffset) return "ERROR: This result must be read in order. The next startCharacter is ${stored.nextOffset}."
         return render(id, startCharacter, stored)
     }
@@ -31,8 +43,11 @@ internal class ToolResultPager(pageCharacters: Int) {
         if (end == start) end = minOf(start + 2, stored.text.length)
         val chunk = stored.text.substring(start, end)
         val more = end < stored.text.length
-        stored.nextOffset = end
-        if (!more) results.remove(id)
+        stored.nextOffset = if (more) end else stored.text.length
         return "RESULT_ID=$id\nRESULT_LABEL=${stored.label}\nSTART_CHARACTER=$start\nNEXT_START_CHARACTER=$end\nTOTAL_CHARACTERS=${stored.text.length}\nMORE=$more\nCONTENT_START\n$chunk\nCONTENT_END"
+    }
+
+    private companion object {
+        const val KEPT_RESULTS = 12
     }
 }

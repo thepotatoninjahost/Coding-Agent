@@ -30,6 +30,10 @@ internal class KeystoreSecretStore(context: Context) {
         return decrypt(key, encoded)
     }
 
+    fun sealNotes(plain: String): String = encrypt(NOTES_AAD, plain)
+
+    fun openNotes(sealed: String): String = decrypt(NOTES_AAD, sealed)
+
     @Synchronized
     fun putString(key: String, value: String?) {
         val editor = prefs.edit()
@@ -94,6 +98,8 @@ internal class KeystoreSecretStore(context: Context) {
         const val LAST_RESEARCH = "last_research_query"
         const val MODEL_SETTINGS = "model_settings_v1"
         const val USER_MEMORY = "user_memory_v1"
+        const val GITHUB_TOKEN = "github_token_v1"
+        private const val NOTES_AAD = "notes-at-rest"
     }
 }
 

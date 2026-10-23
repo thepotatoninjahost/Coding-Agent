@@ -27,24 +27,25 @@ enum class SurfaceTab(val label: String) { CHAT("Chat"), FILES("Files"), REVIEW(
 enum class AgentStatus(val label: String, val color: Color) {
     READY("Ready", Accent),
     PLANNING("Planning", Blue),
-    RESEARCHING("Researching", Blue),
+    RESEARCHING("Looking things up", Blue),
     WORKING("Working", Blue),
-    MODEL("Model", Blue),
-    TOOL("Tool", Amber),
+    MODEL("Asking the helper", Blue),
+    TOOL("Checking the project", Amber),
     EDITING("Editing", Amber),
-    APPROVAL("Waiting for approval", Amber),
-    RUNNING("Verifying", Blue),
-    FAILED("Failed", Danger),
+    APPROVAL("Waiting for you", Amber),
+    RUNNING("Checking the result", Blue),
+    FAILED("Something went wrong", Danger),
     STOPPED("Stopped", Danger)
 }
 
 fun mapAgentPhase(phase: String): AgentStatus = when (phase.uppercase()) {
-    "STARTED", "INTAKE", "PLAN", "PLANNING" -> AgentStatus.PLANNING
+    "STARTED", "INTAKE", "PLAN", "PLANNING", "RESUME" -> AgentStatus.PLANNING
     "RESEARCH" -> AgentStatus.RESEARCHING
     "MODEL" -> AgentStatus.MODEL
-    "TOOL" -> AgentStatus.TOOL
+    "TOOL", "TOOLS" -> AgentStatus.TOOL
     "APPROVAL" -> AgentStatus.APPROVAL
     "DONE", "COMPLETED" -> AgentStatus.READY
-    "FAILED" -> AgentStatus.FAILED
+    "FAILED", "ERROR" -> AgentStatus.FAILED
+    "STOPPED" -> AgentStatus.STOPPED
     else -> AgentStatus.WORKING
 }

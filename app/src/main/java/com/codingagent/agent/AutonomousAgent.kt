@@ -45,7 +45,8 @@ class AutonomousAgent(
     gateway: ModelGateway? = null,
     private val config: AutonomousAgentConfig = AutonomousAgentConfig(),
     private val research: DeepResearchProvider = DurableDeepResearchProvider(root.resolve(".coding-agent/research")),
-    private val mutations: MutationCoordinator = MutationCoordinator(ProjectWorkspace(root))
+    private val mutations: MutationCoordinator = MutationCoordinator(ProjectWorkspace(root)),
+    private val sourceConnect: (String) -> java.net.HttpURLConnection = { java.net.URL(it).openConnection() as java.net.HttpURLConnection }
 ) : CodingAgentExecutor {
     /**
      * The active model gateway. Mutable so the UI can swap the gateway (e.g. after the user
@@ -90,6 +91,7 @@ class AutonomousAgent(
         mutations = mutations,
         terminal = terminal,
         maxOutputCharacters = config.maxOutputCharacters,
+        sourceConnect = sourceConnect,
         onResearchProgress = { lastResearchProgress = it }
     )
     private val running = AtomicBoolean(false)
@@ -149,11 +151,24 @@ class AutonomousAgent(
     override fun execute(request: String): AgentRuntimeResult {
         val events = run(request)
         return when (val terminalEvent = events.lastOrNull()) {
-            is AutonomousAgentEvent.ApprovalRequired -> AgentRuntimeResult.NeedsApproval(terminalEvent.task, "Review proposal ${terminalEvent.proposal.id} and confirm twice before applying any code change.", terminalEvent.proposal.id)
+            is AutonomousAgentEvent.ApprovalRequired -> AgentRuntimeResult.NeedsApproval(terminalEvent.task, "Please read this change and say yes twice before anything is saved.", terminalEvent.proposal.id)
             is AutonomousAgentEvent.Completed -> AgentRuntimeResult.Completed(terminalEvent.task)
             is AutonomousAgentEvent.Failed -> terminalEvent.task?.let { AgentRuntimeResult.Failed(it) } ?: error(terminalEvent.message)
             is AutonomousAgentEvent.Stopped -> AgentRuntimeResult.Failed(terminalEvent.task)
-            else -> error("Autonomous agent ended without a terminal result")
+            else -> {
+                val detail = events.filterIsInstance<AutonomousAgentEvent.Phase>()
+                    .lastOrNull { it.name == "PERSONAL_LOG_ERROR" }
+                    ?.detail
+                if (detail != null) {
+                    val taskId = events.filterIsInstance<AutonomousAgentEvent.Started>().firstOrNull()?.taskId
+                        ?: UUID.randomUUID().toString()
+                    AgentRuntimeResult.Failed(
+                        failedTask(taskId, request, AgentPlan(request, emptyList(), emptyList()), detail, emptyList())
+                    )
+                } else {
+                    error("Autonomous agent ended without a terminal result")
+                }
+            }
         }
     }
 
@@ -193,10 +208,20 @@ class AutonomousAgent(
                 val detail = logFailure.message ?: logFailure.javaClass.simpleName
                 val warning = AutonomousAgentEvent.Phase(
                     "PERSONAL_LOG_ERROR",
-                    "Could not persist an audit event: $detail. The agent is stopping to preserve auditability."
+                    "I could not save a private note about what I just did: $detail. I stopped so I do not keep working without a record."
                 )
                 events += warning
                 onEvent(warning)
+                val task = failedTask(
+                    taskId,
+                    normalized,
+                    AgentPlan(normalized, emptyList(), emptyList()),
+                    warning.detail,
+                    emptyList()
+                )
+                val failed = AutonomousAgentEvent.Failed(task, warning.detail)
+                events += failed
+                onEvent(failed)
                 cancel("Personal log write failed; stopped to preserve auditability")
                 return
             }
@@ -204,7 +229,7 @@ class AutonomousAgent(
             onEvent(event)
         }
         emit(AutonomousAgentEvent.Started(taskId, normalized))
-        emit(AutonomousAgentEvent.Phase("INTAKE", "Inspecting the request and repository"))
+        emit(AutonomousAgentEvent.Phase("INTAKE", "Reading what you asked and looking at the project."))
         if (!personalLogHealthy) return events
         // Keep the full packaged conversation for deterministic intake. GoalInterpreter
         // extracts the active job and prior owner instructions before the model sees them.
@@ -236,7 +261,7 @@ class AutonomousAgent(
         planningLoop.completePhase("intake", "request parsed")
         planningLoop.completePhase("understand", "repository summary established")
         toolSelectionLoop.completeKind(ToolKind.INDEX_REPOSITORY, "repository summary established")
-        emit(AutonomousAgentEvent.Phase("PLAN", plan.steps.joinToString(" → ") { it.phase }))
+        emit(AutonomousAgentEvent.Phase("PLAN", "Making a plan for what you asked."))
 
         // Direct lanes: do not force the full tool loop for social / status / explicit read.
         lanes.respond(taskId, focus, intake, plan)?.let { task ->
@@ -284,9 +309,10 @@ class AutonomousAgent(
         val activeGateway = gateway
         if (activeGateway == null) {
             val msg =
-                "Model is not configured. Local commands still work: hello, list files, status, read <path>, " +
-                    "and explicit replace/create when the operation is fully specified. " +
-                    "Open Model settings (base URL, model name, API key) for autonomous coding and research."
+                "The code helper is not connected yet, so I cannot write new code from this request. " +
+                    "You can still say hello, ask me to list files, ask for status, or ask me to read a file you name. " +
+                    "Tap Setup. The free OpenRouter helper is already filled in. Paste the secret password from openrouter.ai/keys. " +
+                    "It stays on this phone and is not written into the app."
             val task = AgentTask(
                 taskId, focus, "needs-input", plan, emptyList(),
                 VerificationReport(false, emptyList()),
@@ -298,290 +324,20 @@ class AutonomousAgent(
             return events
         }
 
-        var researchEvidence = ""
-        val wantsResearch = shouldResearch(focus, intake)
-        if (wantsResearch) {
-            if (isCancelled()) return stopNow(taskId, normalized, plan, events) { emit(it) }
-            emit(AutonomousAgentEvent.Phase("RESEARCH", "Looking up external sources"))
-            val mode = ResearchModeDetector.detect(focus)
-            val session = runCatching {
-                research.deepResearch(focus, 8, mode) { progress ->
-                    if (isCancelled()) return@deepResearch
-                    emit(AutonomousAgentEvent.Phase("RESEARCH", "${progress.stage}: ${progress.completed}/${progress.total}; learned ${progress.successful}, failed ${progress.failed}"))
-                }
-            }.getOrNull()
-            if (isCancelled()) return stopNow(taskId, normalized, plan, events) { emit(it) }
-            val brief = session?.takeIf { it.sources.isNotEmpty() }?.let(ResearchBriefBuilder::build)
-            if (brief != null && brief.sourceCount > 0 && brief.evidence.isNotBlank()) {
-                researchEvidence = "\n\nResearch brief:\n${brief.evidence}"
-                emit(AutonomousAgentEvent.Phase("RESEARCH", "Learned ${brief.sourceCount} sources (${brief.wordCount} words)"))
-            } else {
-                researchEvidence =
-                    "\n\nResearch ran but returned no usable sources. Do not invent external docs or APIs. " +
-                        "Prefer local project evidence, or call research_web with a tighter technical query."
-                emit(AutonomousAgentEvent.Phase("RESEARCH", "No usable sources — model must not invent external facts"))
-                if (ResearchGate.requiresUsableEvidence(focus, intake)) {
-                    val message =
-                        "Research was required for this request, but no usable external sources were retrieved. " +
-                            "I will not present unsupported current documentation or web research as verified. " +
-                            "Retry with a narrower query or configure a working research provider."
-                    val task = failedTask(taskId, focus, plan, message, emptyList())
-                    recordTask(task)
-                    emit(AutonomousAgentEvent.Failed(task, message))
-                    return events
-                }
-            }
-        } else {
-            emit(AutonomousAgentEvent.Phase("RESEARCH", "Skipped — local project is enough for this request"))
-        }
-
-        val transcript = mutableListOf<com.codingagent.model.ModelMessage>()
-        val state = ToolTurnState()
-        val completeInitialEvidence = buildString {
-            append(repoMapSummary())
-            append("\nCall list_files or search_project before read_file. Do not invent paths.")
-            append(researchEvidence)
-        }
-        // Keep the full evidence available for ordered retrieval without forcing all of it
-        // into the first model request, whose token window depends on the configured model.
-        state.lastEvidence = tools.presentEvidence("initial repository and research evidence", completeInitialEvidence)
-        var evidenceRefusals = 0
-        var writeNowAnnounced = false
-        val reviewJob = isWholeProjectReview(focus)
-        val toolCallHandler = ToolCallOutcomeHandler(
+        emit(AutonomousAgentEvent.Phase("RESEARCH", "I will look things up only if this task needs a page from the internet."))
+        return ActObserveLoop(
             config = config,
-            workspace = workspace,
+            gateway = activeGateway,
+            tools = tools,
             mutations = mutations,
-            planningLoop = planningLoop,
-            toolSelectionLoop = toolSelectionLoop,
-            executeTool = ::executeTool,
-            isListingRequest = ::isListingRequest,
-            isSourceFileListRequest = ::isSourceFileListRequest,
-            currentRequestFocus = ::currentRequestFocus,
-            extractExplicitReadPath = ::extractExplicitReadPath,
-            formatListingSummary = ::formatListingSummary,
-            synthesizeFromEvidence = ::synthesizeFromEvidence,
+            systemPrompt = { configuredSystemPrompt },
+            repoMap = { repoMapSummary() },
+            isCancelled = { isCancelled() },
+            emit = { event -> emit(event) },
             recordTask = ::recordTask,
-            emit = { emit(it) },
-            isCancelled = { isCancelled() }
-        )
+            changes = { changeSets.flatMap { it.changes } }
+        ).run(taskId, normalized, intake, plan, events)
 
-        for (turn in 0 until config.maxTurns) {
-            if (isCancelled()) return stopNow(taskId, normalized, plan, events) { emit(it) }
-            emit(AutonomousAgentEvent.Phase("MODEL", "Decision turn ${turn + 1}/${config.maxTurns}"))
-            val decision = LoopControl.decide(
-                turn = turn,
-                maxTurns = config.maxTurns,
-                usefulGathers = state.successfulGathers,
-                writeRefusals = state.writeNowRefusals,
-                intent = intake.intent,
-                wholeProjectReview = reviewJob
-            )
-            val writeNow = decision.demandWrite
-            val changeWork = intake.intent == TaskIntent.CHANGE ||
-                intake.intent == TaskIntent.CREATE ||
-                intake.intent == TaskIntent.REFACTOR ||
-                intake.intent == TaskIntent.DEBUG
-            val toolsThisTurn = when {
-                decision.toolsOpen -> AgentModelProtocol.toolsForIntent(intake.intent)
-                changeWork && writeNow -> AgentModelProtocol.tools().filter { tool ->
-                    tool.name in setOf("replace_text", "create_file", "verify")
-                }
-                else -> emptyList()
-            }
-            if (writeNow && !writeNowAnnounced) {
-                writeNowAnnounced = true
-                transcript += com.codingagent.model.ModelMessage(
-                    "user",
-                    if (changeWork) {
-                        "SYSTEM: Gathering is done. Stage replace_text or create_file now. " +
-                            "Do not list or search again. Do not write a review instead of the change."
-                    } else {
-                        "SYSTEM: You already have project evidence. Do NOT call gather tools. " +
-                            "Write the answer now from evidence already gathered."
-                    }
-                )
-            }
-            var response: ModelResponse = ModelCallWithRetry.call(
-                gateway = activeGateway,
-                request = {
-                    ModelRequest(
-                        configuredSystemPrompt,
-                        buildPrompt(normalized, intake, state.lastEvidence),
-                        toolsThisTurn,
-                        transcript.toList(),
-                        researchRequired = false
-                    )
-                },
-                isCancelled = { isCancelled() },
-                onPhase = { emit(AutonomousAgentEvent.Phase("MODEL", it)) }
-            ) ?: return stopNow(taskId, normalized, plan, events) { emit(it) }
-            if (isCancelled()) return stopNow(taskId, normalized, plan, events) { emit(it) }
-            // Some providers (NVIDIA NIM and others) never populate structured tool_calls and
-            // instead emit the tool call as XML inside the text body. Recover that BEFORE the
-            // dispatch below so it goes through the exact same ToolCall handling (proposal
-            // surfacing, loop/failure limits, early-completion shortcuts) as a native tool call,
-            // instead of a second, partial copy of that logic.
-            if (response is ModelResponse.Text) {
-                val recovered = JsonModelResponseParser().parse(response.content)
-                if (recovered is ModelResponse.ToolCall) {
-                    response = recovered
-                }
-            }
-            when (response) {
-                is ModelResponse.Failure -> {
-                    val friendly = ModelFailure.humanize(response.message)
-                    val named = extractInspectTarget(normalized) ?: extractExplicitReadPath(normalized)
-                    val localExtra = named?.let { buildLocalFileReport(it) }
-                        ?.asUserText(includePolicy = true, includeStructure = true)
-                    val summary = if (localExtra != null) {
-                        "$friendly\n\nLocal evidence gathered before model failure:\n$localExtra"
-                    } else {
-                        friendly
-                    }
-                    val task = failedTask(taskId, normalized, plan, summary, changeSets.flatMap { it.changes })
-                    emit(AutonomousAgentEvent.Failed(task, summary))
-                    recordTask(task)
-                    return events
-                }
-                is ModelResponse.Text -> {
-                    // Raw tool markup that isn't parseable into a real call (bad XML, unknown
-                    // tag shape, etc.) is a dump, not an answer — nudge instead of accepting it.
-                    if (looksLikeRawToolMarkup(response.content)) {
-                        transcript += com.codingagent.model.ModelMessage("assistant", response.content)
-                        transcript += com.codingagent.model.ModelMessage(
-                            "user",
-                            "SYSTEM: That was a raw tool dump, not an answer. " +
-                                "Write the review in plain English from evidence already gathered. No XML. No tool tags."
-                        )
-                        continue
-                    }
-                    emit(AutonomousAgentEvent.ModelMessage(response.content))
-                    // A change/debug/create/refactor task is not complete merely because the
-                    // model produced prose. Once the loop has reached its write gate, a textual
-                    // response before any mutation is a refusal to act, not task completion.
-                    // Keep the execution spine alive long enough for the model to produce the
-                    // required staged mutation, then fail closed if it repeatedly refuses.
-                    if (writeNow && changeWork && !state.mutationOccurred) {
-                        state.writeNowRefusals++
-                        if (state.writeNowRefusals >= 2) {
-                            val msg = "The model reached the execution gate twice without staging the requested change. No code was written."
-                            val task = failedTask(taskId, normalized, plan, msg, changeSets.flatMap { it.changes })
-                            emit(AutonomousAgentEvent.Failed(task, msg))
-                            recordTask(task)
-                            return events
-                        }
-                        transcript += com.codingagent.model.ModelMessage(
-                            "assistant",
-                            response.content
-                        )
-                        transcript += com.codingagent.model.ModelMessage(
-                            "user",
-                            "SYSTEM: This is a change task and no mutation has been staged yet. " +
-                                "Do not report completion. Call replace_text or create_file now using the evidence already gathered."
-                        )
-                        continue
-                    }
-                    val missing = missingEvidenceMessage(intake, state.readPaths, state.searchedProject)
-                    if (missing != null) {
-                        evidenceRefusals++
-                        emit(AutonomousAgentEvent.Phase("EVIDENCE", missing))
-                        if (evidenceRefusals > config.maxEvidenceRefusals) {
-                            val msg = "Refused to complete without reading the target file(s). $missing"
-                            val task = failedTask(taskId, normalized, plan, msg, changeSets.flatMap { it.changes })
-                            emit(AutonomousAgentEvent.Failed(task, msg))
-                            recordTask(task)
-                            return events
-                        }
-                        transcript += com.codingagent.model.ModelMessage("assistant", response.content)
-                        transcript += com.codingagent.model.ModelMessage(
-                            "user",
-                            "SYSTEM CONSTRAINT: $missing You must call the read_file tool on the target path before any final report. Do not invent file contents."
-                        )
-                        state.lastEvidence = missing + "\n\n" + state.lastEvidence
-                        continue
-                    }
-                    val report = workspace.verify()
-                    // Listing requests: prefer real tool evidence over model prose (which is often spam).
-                    val useListingEvidence = isListingRequest(currentRequestFocus(normalized)) &&
-                        state.searchedProject &&
-                        state.lastEvidence.isNotBlank() &&
-                        !state.lastEvidence.startsWith("ERROR:")
-                    val summary = if (useListingEvidence) {
-                        formatListingSummary(state.lastEvidence, report, isSourceFileListRequest(currentRequestFocus(normalized)))
-                    } else {
-                        sanitizeModelText(response.content, report)
-                    }
-                    val status = when {
-                        useListingEvidence -> "completed"
-                        isDegenerate(response.content) -> "completed-with-warning"
-                        !report.passed -> "completed-with-issues"
-                        else -> "completed"
-                    }
-                    val evidenceLabel = buildString {
-                        if (state.readPaths.isNotEmpty()) append("read=").append(state.readPaths.joinToString())
-                        if (state.searchedProject) {
-                            if (isNotEmpty()) append("; ")
-                            append("searched=true")
-                        }
-                        if (isEmpty()) append("none")
-                    }
-                    val eventNote = if (useListingEvidence) {
-                        "${Instant.now()}: answered listing from tool evidence (model text ignored); evidence=$evidenceLabel"
-                    } else {
-                        "${Instant.now()}: model reply (${response.content.length} chars); evidence=$evidenceLabel; verify_issues=${report.issues.size}"
-                    }
-                    val task = AgentTask(
-                        taskId, normalized, status, plan,
-                        changeSets.flatMap { it.changes }, report,
-                        listOf(eventNote),
-                        summary
-                    )
-                    recordTask(task)
-                    emit(AutonomousAgentEvent.Completed(task))
-                    return events
-                }
-                is ModelResponse.ToolCall -> {
-                    val outcome = toolCallHandler.handle(
-                        response = response,
-                        state = state,
-                        writeNow = writeNow,
-                        changeWork = changeWork,
-                        decision = decision,
-                        taskId = taskId,
-                        normalized = normalized,
-                        plan = plan,
-                        transcript = transcript,
-                        changes = { changeSets.flatMap { it.changes } }
-                    )
-                    when (outcome) {
-                        ToolTurnOutcome.Continue -> continue
-                        ToolTurnOutcome.Stop -> return events
-                    }
-                }
-            }
-        }
-        val report = workspace.verify()
-        val usableEvidence = state.lastEvidence.isNotBlank() && !state.lastEvidence.startsWith("ERROR:")
-        val summary = if (usableEvidence) {
-            synthesizeFromEvidence(normalized, state.lastEvidence, report)
-        } else {
-            "The model used ${config.maxTurns} turns without producing a final answer or usable tool evidence. " +
-                "Retry with a narrower request (one file or one question), or switch model in Model settings."
-        }
-        val task = AgentTask(
-            taskId, normalized, if (usableEvidence) "completed-with-warning" else "failed", plan,
-            changeSets.flatMap { it.changes }, report,
-            listOf("${Instant.now()}: turn budget exhausted; evidence=${if (usableEvidence) "yes" else "no"}"),
-            summary
-        )
-        recordTask(task)
-        if (usableEvidence) {
-            emit(AutonomousAgentEvent.Completed(task))
-        } else {
-            emit(AutonomousAgentEvent.Failed(task, summary))
-        }
-        return events
     }
 
     private fun stopNow(
@@ -642,6 +398,31 @@ class AutonomousAgent(
     private fun shouldResearch(request: String, intake: TaskIntake): Boolean =
         ResearchGate.shouldAutoResearch(request, intake)
 
+    private fun asksOwnerBeforeDoingTheWork(text: String): Boolean {
+        val lower = text.lowercase()
+        val phrases = listOf(
+            "would you like me to",
+            "would you like me",
+            "shall i ",
+            "do you want me to",
+            "want me to go ahead",
+            "should i go ahead",
+            "should i proceed",
+            "if you'd like me to",
+            "if you would like me to",
+            "let me know if you want",
+            "before i start",
+            "before i begin",
+            "before i make",
+            "before i write",
+            "ready for me to",
+            "want me to start",
+            "want me to build",
+            "go ahead?"
+        )
+        return phrases.any { it in lower }
+    }
+
     /**
      * Compact repo map for the model (Aider-style). Paths only — not full file bodies.
      * Extension-filtered index; honest about that limit.
@@ -675,7 +456,7 @@ class AutonomousAgent(
             gateway = model,
             request = {
                 ModelRequest(
-                    configuredSystemPrompt,
+                    ContextBudget.systemForRequest(configuredSystemPrompt),
                     "You are repairing a failed approved code change. $evidence\n" +
                         "Return exactly one replace_text or create_file tool call that fixes the diagnosed failure. " +
                         "Do not explain. Do not use any other tool. Never weaken tests or safety controls.",
@@ -727,8 +508,8 @@ class AutonomousAgent(
             return text
         }
         return buildString {
-            append("The model produced garbled or incoherent output instead of a coherent report. ")
-            append("Static verification found ")
+            append("The helper's answer was garbled, so I am not treating it as a result. ")
+            append("A simple text check found ")
             append(report.issues.size)
             append(" issue(s)")
             if (report.issues.isEmpty()) {
@@ -826,8 +607,7 @@ class AutonomousAgent(
         val all = workspace.verify().issues
         val policy = all.filter { issue ->
             val ip = issue.path.replace('\\', '/')
-            ip == resolved || ip.endsWith("/$resolved") ||
-                java.io.File(ip).name.equals(java.io.File(resolved).name, ignoreCase = true)
+            ip == resolved || ip.endsWith("/$resolved")
         }
         val notes = structureHeuristics(content)
         return LocalFileReport(

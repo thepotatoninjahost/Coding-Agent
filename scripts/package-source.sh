@@ -36,6 +36,7 @@ for path in root.rglob("*"):
     if has_silent_dir:
         continue
     if has_forbidden_dir or has_forbidden_file:
+        forbidden.append(rel.as_posix())
         continue
     if not path.is_file():
         continue

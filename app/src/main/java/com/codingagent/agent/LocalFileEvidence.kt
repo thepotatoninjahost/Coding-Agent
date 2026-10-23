@@ -80,8 +80,7 @@ object LocalFileEvidence {
         val all = workspace.verify().issues
         val policy = all.filter { issue ->
             val ip = issue.path.replace('\\', '/')
-            ip == resolved || ip.endsWith("/$resolved") ||
-                java.io.File(ip).name.equals(java.io.File(resolved).name, ignoreCase = true)
+            ip == resolved || ip.endsWith("/$resolved")
         }
         return Report(
             path = resolved,

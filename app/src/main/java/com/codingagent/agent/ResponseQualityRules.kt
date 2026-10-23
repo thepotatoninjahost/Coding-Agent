@@ -19,7 +19,7 @@ object ResponseQualityRules {
 - Every claim about the project must come from a tool result or quoted file content.
 - Never invent class names, method signatures, or file paths.
 - If you are not certain, say so and call a tool.
-- A passing verify() result is the only acceptable definition of "done" for code changes.
+- verify() is only a simple text check for unfinished-work notes. It is not proof the program runs. Say that plainly. Never call the work done from verify() alone.
 
 ## Self-correction
 - After every replace_text or create_file, call verify() before reporting done.

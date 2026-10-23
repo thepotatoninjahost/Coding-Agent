@@ -53,7 +53,8 @@ class SelfEvolution(private val root: File) {
         val id = UUID.randomUUID().toString()
         val destination = versionsRoot.resolve(id).apply { mkdirs() }.resolve(source.name)
         source.copyTo(destination)
-        destination.parentFile.resolve(".target-path").writeText(inferTargetPath(source).orEmpty())
+        val parent = destination.parentFile ?: error("Evolution snapshot has no parent directory")
+        parent.resolve(".target-path").writeText(inferTargetPath(source).orEmpty())
         return destination
     }
 
@@ -163,7 +164,8 @@ class SelfEvolution(private val root: File) {
 
     private fun readStagedTargetPath(staged: File): String? {
         val managed = managedSnapshot(staged) ?: return null
-        val metadata = managed.parentFile.resolve(".target-path")
+        val parent = managed.parentFile ?: return null
+        val metadata = parent.resolve(".target-path")
         if (!metadata.isFile) return null
         return metadata.readText().trim().takeIf { isSafeRelativePath(it) }
     }
@@ -200,8 +202,9 @@ class SelfEvolution(private val root: File) {
     }
 
     private fun writeTextAtomically(destination: File, text: String) {
-        destination.parentFile?.mkdirs()
-        val temporary = Files.createTempFile(destination.parentFile.toPath(), ".evolution-state-", ".tmp").toFile()
+        val parent = destination.parentFile ?: error("Evolution destination has no parent directory")
+        parent.mkdirs()
+        val temporary = Files.createTempFile(parent.toPath(), ".evolution-state-", ".tmp").toFile()
         try {
             temporary.writeText(text)
             moveReplacing(temporary, destination)

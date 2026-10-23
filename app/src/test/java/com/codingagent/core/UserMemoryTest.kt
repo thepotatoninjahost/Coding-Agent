@@ -3,6 +3,7 @@ package com.codingagent.core
 import com.codingagent.agent.UserMemory
 import com.codingagent.agent.UserMemoryExtractor
 import com.codingagent.agent.UserMemoryIndex
+import com.codingagent.model.ModelSettings
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertFalse
@@ -77,7 +78,39 @@ class UserMemoryTest {
 
         memories = index.remember(memories, "I use Kotlin for Android work", UserMemory.Kind.FACT, 50, 3)
         memories = index.remember(memories, "My favorite color is blue", UserMemory.Kind.FACT, 50, 4)
+        assertEquals(2, memories.size)
+        assertTrue(memories.any { it.text == "I prefer concise answers" })
+        assertTrue(memories.any { it.text == "I prefer concise explanations" })
+    }
+
+    @Test
+    fun memoryChoiceIsSavedAndUnknownValuesStayCapped() {
+        val forever = ModelSettings(memoryRetention = "Forever")
+        val restored = ModelSettings.fromJson(ModelSettings.toJson(forever))
+        assertEquals(ModelSettings.MEMORY_KEEP_FOREVER, restored.memoryRetention)
+        assertEquals(ModelSettings.MEMORY_KEEP_CAPPED, ModelSettings(memoryRetention = "keep-all").normalized().memoryRetention)
+    }
+
+    @Test
+    fun foreverRetentionKeepsOlderMemories() {
+        val index = UserMemoryIndex(maxEntries = 2)
+        var memories = emptyList<UserMemory>()
+        memories = index.remember(memories, "I prefer concise explanations", UserMemory.Kind.WORKFLOW, 60, 1, UserMemoryIndex.KEEP_FOREVER)
+        memories = index.remember(memories, "I prefer concise answers", UserMemory.Kind.WORKFLOW, 80, 2, UserMemoryIndex.KEEP_FOREVER)
+        memories = index.remember(memories, "I use Kotlin for Android work", UserMemory.Kind.FACT, 50, 3, UserMemoryIndex.KEEP_FOREVER)
+        memories = index.remember(memories, "My favorite color is blue", UserMemory.Kind.FACT, 50, 4, UserMemoryIndex.KEEP_FOREVER)
         assertEquals(4, memories.size)
+    }
+
+    @Test
+    fun oldLowImportanceMemoryIsDroppedWhenCapped() {
+        val index = UserMemoryIndex(maxEntries = 64)
+        val now = 1_000_000_000_000L
+        val old = now - 181L * 24L * 60L * 60L * 1000L
+        var memories = index.remember(emptyList(), "I like short notes", UserMemory.Kind.FACT, 50, old)
+        memories = index.remember(memories, "I prefer dark screens", UserMemory.Kind.PREFERENCE, 50, now)
+        assertEquals(1, memories.size)
+        assertEquals("I prefer dark screens", memories.single().text)
     }
 
     @Test

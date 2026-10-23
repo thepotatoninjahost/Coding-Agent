@@ -12,6 +12,8 @@ import com.codingagent.workspace.VerificationReport
 object AgentPrompt {
     fun repoMap(files: ProjectFileService, workspace: ProjectWorkspace, maxPaths: Int = 100): String {
         val paths = files.listSourceFilePaths()
+        val limit = maxPaths.coerceAtLeast(1)
+        val shown = paths.take(limit)
         val summary = workspace.summary()
         return buildString {
             append("Repo map — indexed sources: ${paths.size}")
@@ -21,12 +23,15 @@ object AgentPrompt {
                 append(summary.languages.entries.sortedByDescending { it.value }.joinToString { "${it.key}=${it.value}" })
             }
             append('\n')
-            if (paths.isEmpty()) {
+            if (shown.isEmpty()) {
                 append("(no indexed source files)\n")
             } else {
-                paths.forEach { path ->
+                shown.forEach { path ->
                     append(path)
                     append('\n')
+                }
+                if (paths.size > shown.size) {
+                    append("Showing ${shown.size} of ${paths.size} indexed source files. The rest are still in the project; list files to see them.\n")
                 }
             }
         }
@@ -78,7 +83,7 @@ object AgentPrompt {
             appendLine("14. This is a whole-project review. Gather enough evidence to make a useful assessment, then write concrete improvements and their evidence. Do not stop after a token sample.")
         }
         if (intake.intent in setOf(TaskIntent.CHANGE, TaskIntent.CREATE, TaskIntent.REFACTOR, TaskIntent.DEBUG)) {
-            appendLine("15. This is change work. A review alone is not the work. After understanding the target and relevant dependencies, stage the actual change. Use run_command when a shell check beats guessing.")
+            appendLine("15. This is change work. A review alone is not the work. After understanding the target and relevant dependencies, stage the actual change. Use run_command when a shell check beats guessing. Before you finish, run the new code if a runner exists, or call review_examples with at least two example inputs. If the program reads text, one example must be more than one line. Fix failures before you finish. Do not say the result is correct unless a run showed that.")
         }
         if (lessons.isNotBlank()) {
             appendLine()
@@ -87,6 +92,8 @@ object AgentPrompt {
         }
         appendLine()
         appendLine("Evidence so far:")
+        // maxEvidenceChars is retained so callers can pass a budget, but the prompt keeps
+        // the full evidence. Cutting it hid owner and tool evidence from the model.
         append(evidence)
     }
 

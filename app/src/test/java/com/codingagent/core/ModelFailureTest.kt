@@ -14,20 +14,39 @@ class ModelFailureTest {
         """{"id":"gen-1","error":{"message":"Upstream error from Nvidia: ResourceExhausted: Worker local total request limit reached (16/16)"}}"""
 
     @Test
-    fun nvidiaWorkerCapIsCapacityAndRetryable() {
+    fun nvidiaWorkerCapSwitchesHelpersInsteadOfRetrying() {
         assertTrue(ModelFailure.isCapacity(nvidia503))
         assertTrue(ModelFailure.isRateLimit(nvidia503))
-        assertTrue(ModelFailure.isRetryable(nvidia503))
+        assertFalse(ModelFailure.isRetryable(nvidia503))
         assertTrue(ModelFailure.isCapacity(upstream))
-        assertTrue(ModelFailure.isRetryable(upstream))
+        assertFalse(ModelFailure.isRetryable(upstream))
     }
 
     @Test
     fun humanizeDoesNotDumpRawJsonForWorkerCap() {
         val line = ModelFailure.humanize(nvidia503)
-        assertTrue(line.contains("worker pool", ignoreCase = true) || line.contains("ResourceExhausted"))
+        assertTrue(line.contains("too busy", ignoreCase = true))
         assertFalse(line.contains("\"origin\""))
-        assertTrue(line.contains("Model settings"))
+        assertFalse(line.contains("16/16"))
+        assertTrue(line.contains("Setup"))
+    }
+
+    @Test
+    fun rejectedKeyAndRateLimitArePlainEnglish() {
+        val rejected = ModelFailure.humanize(
+            """Model HTTP 401: {"error":{"message":"Invalid API key"}}"""
+        )
+        assertTrue(rejected.contains("secret password", ignoreCase = true))
+        assertTrue(rejected.contains("openrouter.ai/keys"))
+        assertFalse(rejected.contains("{"))
+
+        val limited = ModelFailure.humanize(
+            """Model HTTP 429: {"error":{"message":"Rate limit exceeded"}}"""
+        )
+        assertTrue(ModelFailure.isRateLimit(limited).not())
+        assertTrue(ModelFailure.isRateLimit("""Model HTTP 429: {"error":{"message":"Rate limit exceeded"}}"""))
+        assertTrue(limited.contains("slow down", ignoreCase = true))
+        assertFalse(limited.contains("{"))
     }
 
     @Test

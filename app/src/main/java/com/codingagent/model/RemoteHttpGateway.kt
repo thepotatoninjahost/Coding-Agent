@@ -20,8 +20,14 @@ class RemoteHttpGateway(
     private val connectionFactory: (String) -> HttpURLConnection = { URL(it).openConnection() as HttpURLConnection },
     private val extraHeaders: Map<String, String> = emptyMap(),
     private val activeConnection: AtomicReference<HttpURLConnection?> = AtomicReference(null),
-    private val cancellationGeneration: AtomicLong = AtomicLong(0L)
+    private val cancellationGeneration: AtomicLong = AtomicLong(0L),
+    private val onQuota: ((Int, Int?, Long?) -> Unit)? = null
 ) : ModelGateway {
+    /**
+     * openrouter/free picks a different free model on every request. After the first
+     * capable model answers, later steps in this task stay on that same model.
+     */
+    private val pinnedModel = AtomicReference<String?>(null)
     override fun cancel() {
         cancellationGeneration.incrementAndGet()
         activeConnection.getAndSet(null)?.disconnect()
@@ -29,29 +35,44 @@ class RemoteHttpGateway(
     override fun stream(request: ModelRequest, onDelta: (String) -> Unit): ModelResponse {
         val generation = cancellationGeneration.get()
         if (isCancelled(generation)) return ModelResponse.Failure("Cancelled")
-        val first = streamOnce(request, onDelta, generation)
-        if (isCancelled(generation)) return ModelResponse.Failure("Cancelled")
-        if (first is ModelResponse.Failure && isEmptyContentFailure(first.message) && request.tools.isNotEmpty()) {
-            return streamOnce(request.copy(tools = emptyList()), onDelta, generation)
+        return continueCutOff(request, generation) { current ->
+            val first = streamOnce(current, onDelta, generation)
+            if (isCancelled(generation)) return@continueCutOff ModelResponse.Failure("Cancelled")
+            if (first is ModelResponse.Failure && isEmptyContentFailure(first.message) && current.tools.isNotEmpty()) {
+                streamOnce(current.copy(tools = emptyList()), onDelta, generation)
+            } else {
+                first
+            }
         }
-        return first
     }
 
     private fun streamOnce(request: ModelRequest, onDelta: (String) -> Unit, generation: Long): ModelResponse {
         if (isCancelled(generation)) return ModelResponse.Failure("Cancelled")
-        val connection = openConnection(generation) ?: return if (isCancelled(generation)) ModelResponse.Failure("Cancelled") else ModelResponse.Failure("Model gateway configuration is incomplete")
+        messageOrderFailure(request)?.let { return it }
+        val connection = try {
+            openConnection(generation)
+        } catch (error: IOException) {
+            return ModelResponse.Failure(
+                "Model request failed: ${ModelConnectionProbe.sanitizeProbeError(error.message.orEmpty().ifBlank { error.javaClass.simpleName })}"
+            )
+        } ?: return if (isCancelled(generation)) ModelResponse.Failure("Cancelled") else ModelResponse.Failure("The code helper is not fully set up.")
         return try {
             configure(connection)
             val body = requestBody(request)
             body.put("stream", true)
             connection.outputStream.use { it.write(body.toString().toByteArray(StandardCharsets.UTF_8)) }
             if (isCancelled(generation)) return ModelResponse.Failure("Cancelled")
-            if (connection.responseCode !in 200..299) return failure(connection)
-            parseStreamedBody(connection.inputStream, onDelta, generation)
+            val code = connection.responseCode
+            notifyQuota(connection, code)
+            if (code in 300..399) {
+                return ModelResponse.Failure("The helper tried to send me to a different web address. I stopped so your secret password was not sent there.")
+            }
+            if (code !in 200..299) return failure(connection)
+            parseStreamedBody(bounded(connection.inputStream), onDelta, generation)
         } catch (error: IOException) {
-            ModelResponse.Failure("Model request failed: ${error.message.orEmpty().ifBlank { error.javaClass.simpleName }}")
+            ModelResponse.Failure("Model request failed: ${ModelConnectionProbe.sanitizeProbeError(error.message.orEmpty().ifBlank { error.javaClass.simpleName })}")
         } catch (error: Exception) {
-            ModelResponse.Failure("Model response could not be processed: ${error.message.orEmpty().ifBlank { error.javaClass.simpleName }}")
+            ModelResponse.Failure("Model response could not be processed: ${ModelConnectionProbe.sanitizeProbeError(error.message.orEmpty().ifBlank { error.javaClass.simpleName })}")
         } finally {
             activeConnection.compareAndSet(connection, null)
             connection.disconnect()
@@ -99,6 +120,7 @@ class RemoteHttpGateway(
                     malformedPayload = true
                     break
                 }
+                noteServedModel(chunk.optString("model"))
                 val choice = chunk.optJSONArray("choices")?.optJSONObject(0) ?: continue
                 choice.optString("finish_reason").takeIf { it.isNotBlank() && it != "null" }?.let { finishReason = it }
                 val delta = choice.optJSONObject("delta") ?: continue
@@ -114,8 +136,8 @@ class RemoteHttpGateway(
                     for (i in 0 until calls.length()) {
                         val call = calls.optJSONObject(i) ?: continue
                         if (call.optInt("index", 0) != 0) {
-                            // This protocol executes exactly one tool per turn. Never silently
-                            // discard additional calls: reject the whole streamed response.
+                            // One tool runs this turn. Extra calls stay visible in the reply
+                            // so the task can continue with the next call instead of failing.
                             sawMultipleToolCalls = true
                             continue
                         }
@@ -133,12 +155,19 @@ class RemoteHttpGateway(
         if (malformedPayload) {
             return ModelResponse.Failure("Model stream contained a malformed event; partial content was rejected.")
         }
-        if (finishReason.isTruncatedFinishReason()) return truncatedResponseFailure(finishReason!!)
+        if (finishReason.isTruncatedFinishReason()) {
+            return if (sawToolCall) toolCutOff() else textCutOff(mergedContent.toString())
+        }
         if (!sawDone && finishReason.isNullOrBlank()) {
-            return ModelResponse.Failure("Model stream ended without a completion marker; partial content was rejected.")
+            return if (mergedContent.isEmpty() && !sawToolCall) {
+                ModelResponse.Failure("The reply stopped before it finished. output-truncated")
+            } else {
+                textCutOff(mergedContent.toString())
+            }
         }
         if (sawMultipleToolCalls) {
-            return ModelResponse.Failure("Model returned multiple tool calls; only one tool call is accepted per turn")
+            if (mergedContent.isNotEmpty()) mergedContent.append('\n')
+            mergedContent.append(EXTRA_TOOL_CALL_NOTE)
         }
 
         val merged = JSONObject().put("role", "assistant")
@@ -159,27 +188,42 @@ class RemoteHttpGateway(
     override fun complete(request: ModelRequest): ModelResponse {
         val generation = cancellationGeneration.get()
         if (isCancelled(generation)) return ModelResponse.Failure("Cancelled")
-        val first = completeOnce(request, generation)
-        if (isCancelled(generation)) return ModelResponse.Failure("Cancelled")
-        if (first is ModelResponse.Failure && isEmptyContentFailure(first.message) && request.tools.isNotEmpty()) {
-            return completeOnce(request.copy(tools = emptyList()), generation)
+        return continueCutOff(request, generation) { current ->
+            val first = completeOnce(current, generation)
+            if (isCancelled(generation)) return@continueCutOff ModelResponse.Failure("Cancelled")
+            if (first is ModelResponse.Failure && isEmptyContentFailure(first.message) && current.tools.isNotEmpty()) {
+                completeOnce(current.copy(tools = emptyList()), generation)
+            } else {
+                first
+            }
         }
-        return first
     }
 
     private fun completeOnce(request: ModelRequest, generation: Long): ModelResponse {
         if (isCancelled(generation)) return ModelResponse.Failure("Cancelled")
-        val connection = openConnection(generation) ?: return if (isCancelled(generation)) ModelResponse.Failure("Cancelled") else ModelResponse.Failure("Model gateway configuration is incomplete")
+        messageOrderFailure(request)?.let { return it }
+        val connection = try {
+            openConnection(generation)
+        } catch (error: IOException) {
+            return ModelResponse.Failure(
+                "Model request failed: ${ModelConnectionProbe.sanitizeProbeError(error.message.orEmpty().ifBlank { error.javaClass.simpleName })}"
+            )
+        } ?: return if (isCancelled(generation)) ModelResponse.Failure("Cancelled") else ModelResponse.Failure("The code helper is not fully set up.")
         return try {
             configure(connection)
             connection.outputStream.use { it.write(requestBody(request).toString().toByteArray(StandardCharsets.UTF_8)) }
             if (isCancelled(generation)) return ModelResponse.Failure("Cancelled")
-            if (connection.responseCode !in 200..299) return failure(connection)
-            parseCompletionBody(connection.inputStream.bufferedReader().use { it.readText() })
+            val code = connection.responseCode
+            notifyQuota(connection, code)
+            if (code in 300..399) {
+                return ModelResponse.Failure("The helper tried to send me to a different web address. I stopped so your secret password was not sent there.")
+            }
+            if (code !in 200..299) return failure(connection)
+            parseCompletionBody(bounded(connection.inputStream).bufferedReader().use { it.readText() })
         } catch (error: IOException) {
-            ModelResponse.Failure("Model request failed: ${error.message.orEmpty().ifBlank { error.javaClass.simpleName }}")
+            ModelResponse.Failure("Model request failed: ${ModelConnectionProbe.sanitizeProbeError(error.message.orEmpty().ifBlank { error.javaClass.simpleName })}")
         } catch (error: Exception) {
-            ModelResponse.Failure("Model response could not be processed: ${error.message.orEmpty().ifBlank { error.javaClass.simpleName }}")
+            ModelResponse.Failure("Model response could not be processed: ${ModelConnectionProbe.sanitizeProbeError(error.message.orEmpty().ifBlank { error.javaClass.simpleName })}")
         } finally {
             activeConnection.compareAndSet(connection, null)
             connection.disconnect()
@@ -191,10 +235,15 @@ class RemoteHttpGateway(
         if (trimmed.isEmpty()) return ModelResponse.Failure("Model returned an empty response")
         val json = runCatching { JSONObject(trimmed) }.getOrNull()
             ?: return JsonModelResponseParser().parse(trimmed)
+        noteServedModel(json.optString("model"))
         val choice = json.optJSONArray("choices")?.optJSONObject(0)
-        val finishReason = choice?.optString("finish_reason")
-        if (finishReason.isTruncatedFinishReason()) return truncatedResponseFailure(finishReason!!)
         val message = choice?.optJSONObject("message") ?: choice?.optJSONObject("delta")
+        val finishReason = choice?.optString("finish_reason")
+        if (finishReason.isTruncatedFinishReason()) {
+            val partial = message?.let { extractMessageText(it) }.orEmpty()
+            val hasTool = message?.optJSONArray("tool_calls") != null || message?.optJSONObject("function_call") != null
+            return if (hasTool) toolCutOff() else textCutOff(partial)
+        }
         if (message != null) return responseFromChatMessage(message)
         val textField = choice?.optString("text").orEmpty()
         if (textField.isNotBlank()) return JsonModelResponseParser().parse(textField)
@@ -206,11 +255,50 @@ class RemoteHttpGateway(
         return normalized in setOf("length", "max_tokens", "max_output_tokens", "token_limit")
     }
 
-    private fun truncatedResponseFailure(reason: String): ModelResponse.Failure =
+    private fun textCutOff(partial: String): ModelResponse.Failure =
+        ModelResponse.Failure("CUTOFF_PARTIAL:\n$partial")
+
+    private fun toolCutOff(): ModelResponse.Failure =
         ModelResponse.Failure(
-            "Model response ended at a provider token limit (finish_reason=$reason); partial content was rejected. " +
-                "Check the configured model's output/context limits or split the input into smaller parts."
+            "Your previous response reached the output limit before the action was complete. " +
+                "Send one smaller action. output-truncated"
         )
+
+    private fun continueCutOff(
+        request: ModelRequest,
+        generation: Long,
+        once: (ModelRequest) -> ModelResponse
+    ): ModelResponse {
+        var current = request
+        var stitched = ""
+        var continuations = 0
+        while (true) {
+            if (isCancelled(generation)) return ModelResponse.Failure("Cancelled")
+            val response = once(current)
+            if (response !is ModelResponse.Failure || !response.message.startsWith("CUTOFF_PARTIAL:")) {
+                if (stitched.isNotEmpty() && response is ModelResponse.Text) {
+                    return ModelResponse.Text(stitched + response.content)
+                }
+                if (response is ModelResponse.Failure && response.message.startsWith("CUTOFF_PARTIAL:")) {
+                    return ModelResponse.Failure("The reply was cut off before it finished. output-truncated")
+                }
+                return response
+            }
+            ModelCaps.noteCutOff(modelForRequest())
+            val partial = response.message.removePrefix("CUTOFF_PARTIAL:\n")
+            stitched += partial
+            continuations++
+            if (continuations >= 3) {
+                return ModelResponse.Failure("The reply was cut off before it finished. output-truncated")
+            }
+            current = request.copy(
+                transcript = request.transcript + listOf(
+                    ModelMessage("assistant", stitched),
+                    ModelMessage("user", "Continue exactly where you stopped. Do not repeat.")
+                )
+            )
+        }
+    }
 
     private fun isEmptyContentFailure(message: String): Boolean {
         val lower = message.lowercase()
@@ -226,6 +314,9 @@ class RemoteHttpGateway(
         if (endpoint.isBlank() || model.isBlank()) return null
         if (ModelEndpointPolicy.validate(endpoint) != null) return null
         if (apiKey.isBlank() && !ModelEndpointPolicy.isLocalEndpoint(endpoint)) return null
+        ModelEndpointPolicy.refuseResolvedDestination(endpoint)?.let { reason ->
+            throw java.io.IOException(reason)
+        }
         val connection = connectionFactory(endpoint.trimEnd('/') + "/chat/completions")
         if (isCancelled(generation)) {
             connection.disconnect()
@@ -240,6 +331,7 @@ class RemoteHttpGateway(
     }
 
     private fun configure(connection: HttpURLConnection) {
+        connection.instanceFollowRedirects = false
         connection.connectTimeout = timeoutMillis
         connection.readTimeout = timeoutMillis
         connection.requestMethod = "POST"
@@ -260,49 +352,29 @@ class RemoteHttpGateway(
         }
     }
 
+    private fun messageOrderFailure(request: ModelRequest): ModelResponse.Failure? {
+        val problem = MessageAssembler.problem(MessageAssembler.messages(request)) ?: return null
+        return ModelResponse.Failure("I could not send that step. $problem")
+    }
+
     private fun requestBody(request: ModelRequest): JSONObject {
-        val messages = JSONArray().put(JSONObject().put("role", "system").put("content", request.system))
-        request.transcript.forEach { message ->
-            val serialized = JSONObject().put("role", message.role)
-            // Same fallback for both branches below: an assistant tool_calls[].id and the
-            // following tool message's tool_call_id MUST be byte-identical or a strict
-            // OpenAI-compatible provider rejects the request on the very next turn. The old
-            // code derived them independently ("call_$toolName" here, "" on the tool message),
-            // which silently broke every turn after the first tool call whenever
-            // message.toolCallId was null (recovered XML calls, providers that omit ids, etc.).
-            // A tool-role ModelMessage never carries toolName, so the fallback can't be
-            // reconstructed per-message — it must be a fixed sentinel shared by both sides.
-            val resolvedToolCallId = message.toolCallId?.takeIf { it.isNotBlank() } ?: "call_unmatched"
-            if (message.role == "assistant" && message.toolName != null) {
-                serialized.put("content", JSONObject.NULL)
-                serialized.put(
-                    "tool_calls",
-                    JSONArray().put(
-                        JSONObject()
-                            .put("id", resolvedToolCallId)
-                            .put("type", "function")
-                            .put(
-                                "function",
-                                JSONObject().put("name", message.toolName).put("arguments", message.toolArguments ?: "{}")
-                            )
-                    )
-                )
-            } else {
-                serialized.put("content", message.content)
-                if (message.role == "tool") serialized.put("tool_call_id", resolvedToolCallId)
-            }
-            messages.put(serialized)
+        val messages = MessageAssembler.messages(request)
+        val writing = OutputBudget.writesFile(request.tools.map { it.name })
+        val promptTokens = (request.system.length + request.user.length + request.transcript.sumOf { it.content.length }) / 4
+        var maxTokens = OutputBudget.forRequest(modelForRequest(), writing, promptTokens = promptTokens)
+        val left = ModelCaps.tokensLeft(modelForRequest())
+        if (left != null && left in 1 until maxTokens) {
+            maxTokens = left.coerceAtLeast(if (writing) 1_500 else 256)
         }
-        messages.put(JSONObject().put("role", "user").put("content", request.user))
         val body = JSONObject()
-            .put("model", model)
+            .put("model", modelForRequest())
             .put("messages", messages)
             .put("temperature", 0.1)
+            .put("max_tokens", maxTokens)
             .put("stream", false)
         if (request.tools.isNotEmpty()) {
             // The agent executes one tool per turn. Prevent OpenAI-compatible models
             // from returning parallel calls that this single-call protocol would drop.
-            body.put("parallel_tool_calls", false)
             body.put("tool_choice", "auto")
             body.put("tools", JSONArray().apply {
                 request.tools.forEach { tool ->
@@ -321,18 +393,23 @@ class RemoteHttpGateway(
 
     private fun responseFromChatMessage(message: JSONObject): ModelResponse {
         val calls = message.optJSONArray("tool_calls")
-        if (calls != null && calls.length() > 1) {
-            return ModelResponse.Failure("Model returned multiple tool calls; only one tool call is accepted per turn")
-        }
         if (calls != null && calls.length() > 0) {
             val first = calls.optJSONObject(0)
             val function = first?.optJSONObject("function") ?: first
             val name = function?.optString("name").orEmpty()
             if (name.isBlank()) return ModelResponse.Failure("Model returned a tool call without a function name")
+            val extra = calls.length() - 1
+            val thought = buildString {
+                append(extractMessageText(message))
+                if (extra > 0) {
+                    if (isNotEmpty()) append('\n')
+                    append(EXTRA_TOOL_CALL_NOTE)
+                }
+            }
             return ModelResponse.ToolCall(
                 name,
                 function?.optString("arguments", "{}") ?: "{}",
-                extractMessageText(message),
+                thought,
                 first?.optString("id")
             )
         }
@@ -395,14 +472,113 @@ class RemoteHttpGateway(
     }
 
     private fun failure(connection: HttpURLConnection): ModelResponse.Failure {
-        val body = connection.errorStream?.bufferedReader()?.use { it.readText() }.orEmpty()
-            .ifBlank { connection.inputStream?.bufferedReader()?.use { it.readText() }.orEmpty() }
-        val snippet = body
-        return ModelResponse.Failure("Model HTTP ${connection.responseCode}: ${snippet.ifBlank { "(empty body)" }}")
+        val body = readErrorBody(connection)
+        val readable = readableError(body)
+        val snippet = readable.take(ERROR_SNIPPET_CHARS)
+        val suffix = if (readable.length > ERROR_SNIPPET_CHARS) "…" else ""
+        val quota = quotaSuffix(connection, body)
+        // Keep the status code in the text. Retry and the plain-English rewrite both look for it.
+        return ModelResponse.Failure("Model HTTP ${connection.responseCode}: ${snippet.ifBlank { "(empty body)" }}$suffix$quota")
     }
 
+    private fun notifyQuota(connection: HttpURLConnection, code: Int) {
+        val listener = onQuota ?: return
+        val remaining = headerInt(connection, "X-RateLimit-Remaining")
+            ?: headerInt(connection, "x-ratelimit-remaining-requests")
+        val tokenRemaining = headerInt(connection, "x-ratelimit-remaining-tokens")
+        val now = System.currentTimeMillis()
+        val reset = QuotaHeaders.parseReset(connection.getHeaderField("X-RateLimit-Reset"), now)
+            ?: QuotaHeaders.parseReset(connection.getHeaderField("x-ratelimit-reset-tokens"), now)
+            ?: retryAfterMillis(connection, now)
+        ModelCaps.noteTokens(modelForRequest(), tokenRemaining, reset)
+        listener(code, remaining, reset)
+    }
+
+    private fun headerInt(connection: HttpURLConnection, name: String): Int? =
+        runCatching { connection.getHeaderField(name)?.trim()?.substringBefore('.')?.toIntOrNull() }.getOrNull()
+
+    private fun retryAfterMillis(connection: HttpURLConnection, now: Long): Long? {
+        val raw = connection.getHeaderField("Retry-After")?.trim().orEmpty()
+        val seconds = raw.toLongOrNull() ?: return null
+        return now + seconds * 1000L
+    }
+
+    private fun quotaSuffix(connection: HttpURLConnection, body: String): String {
+        val lines = mutableListOf<String>()
+        val remaining = runCatching { connection.getHeaderField("X-RateLimit-Remaining") }.getOrNull()
+        val reset = runCatching { connection.getHeaderField("X-RateLimit-Reset") }.getOrNull()
+            ?: resetFromBody(body)
+        val retry = runCatching { connection.getHeaderField("Retry-After") }.getOrNull()
+        if (!remaining.isNullOrBlank()) lines += "X-RateLimit-Remaining: ${remaining.trim()}"
+        if (!reset.isNullOrBlank()) lines += "X-RateLimit-Reset: ${reset.trim()}"
+        if (!retry.isNullOrBlank()) lines += "Retry-After: ${retry.trim()}"
+        return if (lines.isEmpty()) "" else "\n" + lines.joinToString("\n")
+    }
+
+    private fun resetFromBody(body: String): String? {
+        val json = runCatching { JSONObject(body) }.getOrNull() ?: return null
+        val headers = json.optJSONObject("error")?.optJSONObject("metadata")?.optJSONObject("headers") ?: return null
+        return headers.optString("X-RateLimit-Reset").ifBlank {
+            headers.optString("x-ratelimit-reset")
+        }.ifBlank { null }
+    }
+
+    private fun readableError(body: String): String {
+        val sanitized = ModelConnectionProbe.sanitizeProbeError(body).trim()
+        val json = runCatching { JSONObject(sanitized) }.getOrNull() ?: return sanitized
+        val nested = json.optJSONObject("error")?.optString("message").orEmpty()
+        val top = json.optString("message")
+        val message = nested.ifBlank { top }.trim()
+        return ModelConnectionProbe.sanitizeProbeError(message).ifBlank { sanitized }
+    }
+
+    private fun readErrorBody(connection: HttpURLConnection): String {
+        val stream = connection.errorStream ?: connection.inputStream ?: return ""
+        return runCatching { bounded(stream, ERROR_BODY_BYTES).bufferedReader().use { it.readText() } }.getOrDefault("")
+    }
+
+    private fun modelForRequest(): String = pinnedModel.get()?.takeIf { it.isNotBlank() } ?: model
+
+    private fun noteServedModel(served: String?) {
+        val name = served?.trim().orEmpty()
+        if (name.isBlank() || name.equals("openrouter/free", ignoreCase = true)) return
+        if (!model.equals("openrouter/free", ignoreCase = true)) return
+        if (name in WEAK_FREE_MODELS) return
+        pinnedModel.compareAndSet(null, name)
+    }
+
+    private fun bounded(input: java.io.InputStream, maxBytes: Int = MAX_RESPONSE_BYTES): java.io.InputStream =
+        object : java.io.FilterInputStream(input) {
+            private var total = 0
+            override fun read(): Int {
+                val value = super.read()
+                if (value >= 0) addBytes(1)
+                return value
+            }
+            override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
+                val readCount = super.read(buffer, offset, length)
+                if (readCount > 0) addBytes(readCount)
+                return readCount
+            }
+            private fun addBytes(readCount: Int) {
+                total += readCount
+                if (total > maxBytes) {
+                    throw IOException("Model response exceeded $maxBytes bytes and was rejected")
+                }
+            }
+        }
+
     companion object {
-        private const val USER_AGENT =
+        internal const val USER_AGENT =
             "Coding-Agent/1.0 (Android; https://github.com/thepotatoninjahost/Coding-Agent)"
+        private const val MAX_RESPONSE_BYTES = 4_000_000
+        private const val ERROR_BODY_BYTES = 16_384
+        private const val ERROR_SNIPPET_CHARS = 2_000
+        private const val EXTRA_TOOL_CALL_NOTE =
+            "Only the first tool call is being run. Send any other tool call on the next turn."
+        private val WEAK_FREE_MODELS = setOf(
+            "liquid/lfm-2.5-2.6b:free",
+            "nvidia/nemotron-3.5-content-safety:free"
+        )
     }
 }
