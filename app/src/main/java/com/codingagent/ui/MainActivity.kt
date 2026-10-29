@@ -217,7 +217,7 @@ private fun CodingAgentApp(
                         onSave = { vm.saveEditor() }
                     )
                     SurfaceTab.REVIEW -> ReviewSurface(
-                        pending = ui.pendingApproval,
+                        pending = ui.pendingProposal != null,
                         approvals = ui.approvalCount,
                         reason = ui.pendingReason,
                         phoneLock = ui.pendingPhoneLock,

@@ -405,6 +405,33 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
             it.copy(terminalHistory = tools?.terminalHistory() ?: emptyList())
         }
         store.saveProjectPath(ws.projectRoot().absolutePath)
+        recoverInterruptedDraft()
+    }
+
+    private fun recoverInterruptedDraft() {
+        val proposal = mutationCoordinator?.pending()?.lastOrNull() ?: return
+        val code = proposal.changeSet.changes.firstOrNull { it.path.endsWith(".js") && !it.after.isNullOrBlank() }?.after
+        val run = code?.let { com.codingagent.workspace.JsExampleGate.check(it, proposal.request) }
+        if (run?.passed == true) mutationCoordinator?.noteChecks(proposal.id, true)
+        val card = ChangeDiff.phoneCard(proposal, run)
+        store.recordChatMessage(
+            com.codingagent.agent.ChatMessage(
+                role = com.codingagent.agent.ChatRole.AGENT,
+                content = "I found a draft from an interrupted run.\n\n$card"
+            )
+        )
+        _ui.update {
+            it.copy(
+                chatMessages = store.recentChatMessages(Int.MAX_VALUE).asReversed(),
+                pendingProposal = proposal,
+                pendingProposalId = proposal.id,
+                pendingApproval = run?.passed == true,
+                pendingReason = card,
+                approvalCount = proposal.approvalCount,
+                status = if (run?.passed == true) AgentStatus.APPROVAL else AgentStatus.READY,
+                detail = if (run?.passed == true) "One yes saves this file." else "The draft is in Review. The checks did not match."
+            )
+        }
     }
 
     private fun rebuildAgentIfNeeded() {
@@ -583,20 +610,22 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
                 withContext(Dispatchers.Main) {
                     progressEpoch.incrementAndGet()
                     val stored = runCatching { store.recentChatMessages(Int.MAX_VALUE).asReversed() }.getOrDefault(emptyList())
+                    val kept = agent?.pendingProposals()?.lastOrNull()
                     val proposal = when (result) {
                         is AgentRuntimeResult.NeedsApproval ->
-                            agent?.pendingProposals()?.firstOrNull { it.id == result.proposalId }
-                        else -> null
+                            agent?.pendingProposals()?.firstOrNull { it.id == result.proposalId } ?: kept
+                        else -> kept
                     }
                     _ui.update {
                         it.copy(
                             chatMessages = com.codingagent.agent.ChatVisibility.merge(it.chatMessages, stored, trimmed),
-                            pendingApproval = proposal != null,
+                            pendingApproval = result is AgentRuntimeResult.NeedsApproval,
                             pendingProposal = proposal,
                             pendingProposalId = proposal?.id,
                             approvalCount = proposal?.approvalCount ?: 0,
                             pendingReason = when (result) {
                                 is AgentRuntimeResult.NeedsApproval -> result.question
+                                is AgentRuntimeResult.NeedsInput -> result.question
                                 else -> proposal?.let { ChangeDiff.phoneCard(it) }
                                     ?: "The helper wants to change your project. Read the file, then say yes if you agree."
                             },

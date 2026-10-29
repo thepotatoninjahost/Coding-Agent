@@ -1,7 +1,17 @@
 package com.codingagent.workspace
 
+import org.mozilla.javascript.BaseFunction
+import org.mozilla.javascript.ClassShutter
 import org.mozilla.javascript.Context
 import org.mozilla.javascript.ContextFactory
+import org.mozilla.javascript.JavaScriptException
+import org.mozilla.javascript.Scriptable
+import org.mozilla.javascript.ScriptableObject
+import org.mozilla.javascript.Undefined
+import org.mozilla.javascript.WrappedException
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -49,6 +59,7 @@ object PhoneJavaScript {
     fun rules(): String = """
         This phone runs JavaScript in Rhino at ES6. You may use var, let, const, function, arrow functions, template strings, for-of with var or let, destructuring, rest parameters, and **.
         Do not use class, for (const ... of ...), the spread operator, default parameters, async, await, import, export, optional chaining (?.), nullish coalescing (??), or private fields (#). async fails with "missing ; before statement".
+        Do not use Java, java.lang, or System.exit. process.exit(code) stops only this program and records the exit code.
         console.log prints a line. process.argv[2] is the text to compile. require("fs").readFileSync() returns that same text. Write the whole program in one create_file. A later create_file replaces the draft.
     """.trimIndent()
 }
@@ -65,9 +76,8 @@ object DeviceCodeRunner : CodeRunner {
                 timedOut = false
             )
         }
-        val script = wrap(request)
-        val timeout = request.timeoutMillis.coerceIn(1_000, 20_000)
-        return runRhino(script, timeout)
+        val timeout = request.timeoutMillis.coerceIn(200, 20_000)
+        return runSandboxed(request, timeout)
     }
 
     fun cases(code: String, examples: List<Pair<String, String>>, argsFor: (String) -> List<String> = { emptyList() }, stdinFor: (String) -> String = { it }): RunReport {
@@ -96,53 +106,34 @@ object DeviceCodeRunner : CodeRunner {
         )
     }
 
-    private fun wrap(request: ProgramRequest): String {
-        val files = request.files.entries.joinToString(",") { (name, body) ->
-            "${jsString(name)}:${jsString(body)}"
+    private class ScriptExit(val code: Int) : RuntimeException("exit $code")
+    private class OutputCap : RuntimeException("The program printed too much and was stopped.")
+
+    private fun runSandboxed(request: ProgramRequest, timeoutMillis: Long): RunReport {
+        val executor = Executors.newSingleThreadExecutor { runnable ->
+            Thread(runnable, "coding-agent-js").apply { isDaemon = true }
         }
-        val args = request.args.joinToString(",") { jsString(it) }
-        return """
-            var __out = [];
-            var console = { log: function(){ __out.push(Array.prototype.join.call(arguments, " ")); }, error: function(){ __out.push(Array.prototype.join.call(arguments, " ")); } };
-            var __files = { $files };
-            function readFile(name) { return Object.prototype.hasOwnProperty.call(__files, name) ? __files[name] : ""; }
-            var __args = [$args];
-            var __stdin = ${jsString(request.stdin)};
-            var process = { argv: ["javascript", "program.js"].concat(__args), env: {} };
-            var fs = { readFileSync: function(){ return __stdin; }, writeFileSync: function(){} };
-            var module = { exports: {} };
-            var exports = module.exports;
-            function require(name) {
-              if (name === "fs") return fs;
-              if (Object.prototype.hasOwnProperty.call(__files, name)) return __files[name];
-              return {};
-            }
-            ${request.code}
-            __out.join("\n");
-        """.trimIndent()
+        val future = executor.submit<RunReport> { runOnWorker(request, timeoutMillis) }
+        return try {
+            future.get(timeoutMillis + 400L, TimeUnit.MILLISECONDS)
+        } catch (_: TimeoutException) {
+            future.cancel(true)
+            RunReport("rhino", 124, "", "The program ran too long and was stopped.", true)
+        } catch (error: java.util.concurrent.ExecutionException) {
+            val cause = error.cause ?: error
+            RunReport("rhino", 1, "", cause.message?.lineSequence()?.firstOrNull().orEmpty().ifBlank { "The program stopped with an error." }, false)
+        } finally {
+            executor.shutdownNow()
+        }
     }
 
-    private fun jsString(value: String): String = buildString {
-        append('"')
-        value.forEach { char ->
-            when (char) {
-                '\\' -> append("\\\\")
-                '"' -> append("\\\"")
-                '\n' -> append("\\n")
-                '\r' -> append("\\r")
-                '\t' -> append("\\t")
-                else -> append(char)
-            }
-        }
-        append('"')
-    }
-
-    private fun runRhino(script: String, timeoutMillis: Long): RunReport {
+    private fun runOnWorker(request: ProgramRequest, timeoutMillis: Long): RunReport {
         val start = System.currentTimeMillis()
         val timedOut = AtomicBoolean(false)
+        val printed = StringBuilder()
         val factory = object : ContextFactory() {
             override fun observeInstructionCount(cx: Context, instructionCount: Int) {
-                if (System.currentTimeMillis() - start > timeoutMillis) {
+                if (Thread.currentThread().isInterrupted || System.currentTimeMillis() - start > timeoutMillis) {
                     timedOut.set(true)
                     throw RuntimeException("timed out")
                 }
@@ -154,19 +145,108 @@ object DeviceCodeRunner : CodeRunner {
                 cx.optimizationLevel = -1
                 cx.languageVersion = Context.VERSION_ES6
                 cx.instructionObserverThreshold = 10_000
-                val scope = cx.initStandardObjects()
-                val value = cx.evaluateString(scope, script, "program.js", 1, null)
-                RunReport("rhino", 0, Context.toString(value).orEmpty(), "", false)
+                cx.setClassShutter(ClassShutter { false })
+                val scope = cx.initSafeStandardObjects()
+                installHost(cx, scope, request, printed)
+                cx.evaluateString(scope, request.code, "program.js", 1, null)
+                RunReport("rhino", 0, printed.toString(), "", false)
             } finally {
                 Context.exit()
             }
         } catch (error: Throwable) {
-            if (timedOut.get() || error.message?.contains("timed out") == true) {
-                RunReport("rhino", 124, "", "The program ran too long and was stopped.", true)
-            } else {
-                val message = error.message?.lineSequence()?.firstOrNull().orEmpty().ifBlank { "The program stopped with an error." }
-                RunReport("rhino", 1, "", message, false)
+            val cause = unwrap(error)
+            when {
+                cause is ScriptExit -> RunReport("rhino", cause.code, printed.toString(), "", false)
+                cause is OutputCap -> RunReport("rhino", 1, printed.toString().take(OUTPUT_CAP), cause.message.orEmpty(), false)
+                timedOut.get() || cause.message?.contains("timed out") == true ->
+                    RunReport("rhino", 124, printed.toString().take(OUTPUT_CAP), "The program ran too long and was stopped.", true)
+                else -> {
+                    val detail = cause.message?.lineSequence()?.firstOrNull().orEmpty()
+                        .ifBlank { "The program stopped with an error." }
+                    RunReport("rhino", 1, printed.toString().take(OUTPUT_CAP), detail, false)
+                }
             }
         }
     }
+
+    private fun unwrap(error: Throwable): Throwable {
+        var current = error
+        repeat(8) {
+            val next = when (current) {
+                is WrappedException -> current.wrappedException ?: current.cause
+                is JavaScriptException -> current.cause
+                else -> current.cause
+            } ?: return current
+            current = next
+        }
+        return current
+    }
+
+    private fun installHost(cx: Context, scope: Scriptable, request: ProgramRequest, printed: StringBuilder) {
+        val console = cx.newObject(scope)
+        val log = LogFunction(printed)
+        ScriptableObject.putProperty(console, "log", log)
+        ScriptableObject.putProperty(console, "error", log)
+        ScriptableObject.putProperty(scope, "console", console)
+
+        val elements = Array<Any?>(request.args.size + 2) { index ->
+            when (index) {
+                0 -> "javascript"
+                1 -> "program.js"
+                else -> request.args[index - 2]
+            }
+        }
+        val argv = cx.newArray(scope, elements)
+        val process = cx.newObject(scope)
+        ScriptableObject.putProperty(process, "argv", argv)
+        ScriptableObject.putProperty(process, "exit", ExitFunction())
+        ScriptableObject.putProperty(process, "env", cx.newObject(scope))
+        ScriptableObject.putProperty(scope, "process", process)
+
+        val fs = cx.newObject(scope)
+        ScriptableObject.putProperty(fs, "readFileSync", ReadFunction(request.stdin))
+        ScriptableObject.putProperty(fs, "writeFileSync", object : BaseFunction() {
+            override fun call(cx: Context, scope: Scriptable, thisObj: Scriptable, args: Array<Any?>): Any = Undefined.instance
+        })
+        ScriptableObject.putProperty(scope, "require", RequireFunction(fs, request.files))
+        ScriptableObject.putProperty(scope, "__stdin", request.stdin)
+        val blocked = cx.newObject(scope)
+        listOf("java", "Packages", "JavaAdapter", "JavaImporter").forEach { name ->
+            ScriptableObject.putProperty(scope, name, blocked)
+        }
+    }
+
+    private class LogFunction(private val printed: StringBuilder) : BaseFunction() {
+        override fun call(cx: Context, scope: Scriptable, thisObj: Scriptable, args: Array<Any?>): Any {
+            val line = args.joinToString(" ") { Context.toString(it) }
+            if (printed.length > OUTPUT_CAP) throw OutputCap()
+            if (printed.isNotEmpty()) printed.append('\n')
+            printed.append(line.take(OUTPUT_CAP))
+            if (printed.length > OUTPUT_CAP) throw OutputCap()
+            return Undefined.instance
+        }
+    }
+
+    private class ExitFunction : BaseFunction() {
+        override fun call(cx: Context, scope: Scriptable, thisObj: Scriptable, args: Array<Any?>): Any {
+            val code = args.firstOrNull()?.let { Context.toNumber(it).toInt() } ?: 0
+            throw ScriptExit(code)
+        }
+    }
+
+    private class ReadFunction(private val stdin: String) : BaseFunction() {
+        override fun call(cx: Context, scope: Scriptable, thisObj: Scriptable, args: Array<Any?>): Any = stdin
+    }
+
+    private class RequireFunction(private val fs: Scriptable, private val files: Map<String, String>) : BaseFunction() {
+        override fun call(cx: Context, scope: Scriptable, thisObj: Scriptable, args: Array<Any?>): Any {
+            val name = args.firstOrNull()?.let { Context.toString(it) }.orEmpty()
+            if (name == "fs") return fs
+            val text = files[name] ?: return cx.newObject(scope)
+            return text
+        }
+    }
+
 }
+
+private const val OUTPUT_CAP = 8_000

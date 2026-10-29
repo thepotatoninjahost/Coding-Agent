@@ -190,20 +190,7 @@ class Round6FixesTest {
             var expr = String(process.argv[2] || "");
             console.log("PUSH " + expr);
         """.trimIndent()
-        val fixed = """
-            var expr = String(process.argv[2] || "");
-            function bad(s) {
-              if (!s) return true;
-              if (/[+\-*/]$/.test(s)) return true;
-              if (s.indexOf("++") >= 0) return true;
-              if (/[^0-9+\-*/().\s]/.test(s)) return true;
-              return false;
-            }
-            if (bad(expr)) console.log("error");
-            else if (expr === "(1+2)*3") console.log("PUSH 1\nPUSH 2\nADD\nPUSH 3\nMUL");
-            else if (expr === "-3+1") console.log("PUSH -3\nPUSH 1\nADD");
-            else console.log("PUSH 0");
-        """.trimIndent()
+        val fixed = EVALUATOR
         var calls = 0
         val gateway = object : ModelGateway {
             override fun complete(request: ModelRequest): ModelResponse {
@@ -417,7 +404,7 @@ class Round6FixesTest {
         val report = com.codingagent.workspace.DeviceCodeRunner.run(
             com.codingagent.workspace.ProgramRequest("javascript", code, args = listOf("4", "5"), stdin = "hello")
         )
-        assertEquals(0, report.exitCode)
+        assertEquals(report.stderr + " | " + report.stdout, 0, report.exitCode)
         assertTrue(report.stdout.contains("sum 3"))
         assertTrue(report.stdout.contains("9"))
         assertTrue(report.stdout.contains("hello"))
@@ -441,6 +428,42 @@ class Round6FixesTest {
         )
         assertTrue(async.exitCode != 0)
         assertTrue(async.stderr.contains("missing ;"))
+    }
+
+    @Test
+    fun aJavaExitCannotKillTheRunnerAndChecksMustMatchTheRequest() {
+        val exit = com.codingagent.workspace.DeviceCodeRunner.run(
+            com.codingagent.workspace.ProgramRequest("javascript", "java.lang.System.exit(0);\nconsole.log('still here');")
+        )
+        assertTrue(exit.exitCode != 0 || exit.stderr.isNotBlank() || !exit.stdout.contains("still here"))
+        assertFalse(exit.stdout.contains("still here") && exit.exitCode == 0 && exit.stderr.isBlank())
+        val stopped = com.codingagent.workspace.DeviceCodeRunner.run(
+            com.codingagent.workspace.ProgramRequest("javascript", "console.log('bye');\nprocess.exit(3);\nconsole.log('no');")
+        )
+        assertEquals(stopped.stderr + " | " + stopped.stdout, 3, stopped.exitCode)
+        assertTrue(stopped.stdout.contains("bye"))
+        assertFalse(stopped.stdout.contains("no"))
+        val loop = com.codingagent.workspace.DeviceCodeRunner.run(
+            com.codingagent.workspace.ProgramRequest("javascript", "while (true) {}", timeoutMillis = 400)
+        )
+        assertTrue(loop.timedOut || loop.exitCode == 124)
+        val huge = com.codingagent.workspace.DeviceCodeRunner.run(
+            com.codingagent.workspace.ProgramRequest("javascript", "var i = 0; while (i < 100000) { console.log('abcdefghij'); i = i + 1; }")
+        )
+        assertTrue(huge.stderr.contains("too much") || huge.stdout.length <= 8_000)
+        val file = com.codingagent.workspace.DeviceCodeRunner.run(
+            com.codingagent.workspace.ProgramRequest("javascript", "var f = new java.io.File('/etc/passwd'); console.log(String(f));")
+        )
+        assertFalse(file.stdout.contains("root:"))
+        assertTrue(file.exitCode != 0)
+        val checks = com.codingagent.workspace.JsExampleGate.check(
+            EVALUATOR,
+            "Write a tiny compiler in JavaScript that turns arithmetic like (1+2)*3 into stack-machine instructions, run it, and test it on a few examples including a bad input"
+        )
+        assertTrue(checks.passed)
+        assertTrue(checks.cases.any { it.label == "(1+2)*3" && it.expected == "9" && it.passed })
+        assertTrue(checks.cases.any { it.label == "-3+1" && it.expected == "-2" && it.passed })
+        assertTrue(checks.cases.any { it.label == "1/0" && it.expected == "error" && it.passed })
     }
 
     @Test
@@ -479,7 +502,7 @@ class Round6FixesTest {
         """.trimIndent()
         val nemotronCall = com.codingagent.model.JsonModelResponseParser().parse(nemotron) as com.codingagent.model.ModelResponse.ToolCall
         assertEquals("create_file", nemotronCall.name)
-        assertTrue(nemotronCall.arguments.contains("PUSH"))
+        assertTrue(nemotronCall.arguments.contains("console.log"))
 
         val wrapped = "<tool_call>\n" + JSONObject()
             .put("name", "create_file")
@@ -493,20 +516,60 @@ class Round6FixesTest {
         override fun search(query: String, limit: Int): List<KnowledgeHit> = emptyList()
     }
 
-    private val PASSING_COMPILER = """
-        var expr = String(process.argv[2] || "");
-        function bad(s) {
-          if (!s) return true;
-          if (/[+\-*/]$/.test(s)) return true;
-          if (s.indexOf("++") >= 0) return true;
-          if (/[^0-9+\-*/().\s]/.test(s)) return true;
-          return false;
+    private val EVALUATOR = """
+        var src = String(process.argv[2] || "");
+        function parse(s) {
+          var i = 0;
+          function skip() { while (i < s.length && s.charAt(i) === " ") i++; }
+          function expr() {
+            var value = term();
+            if (value === null) return null;
+            while (true) {
+              skip();
+              var op = s.charAt(i);
+              if (op !== "+" && op !== "-") break;
+              i++;
+              var right = term();
+              if (right === null) return null;
+              value = op === "+" ? value + right : value - right;
+            }
+            return value;
+          }
+          function term() {
+            var value = factor();
+            if (value === null) return null;
+            while (true) {
+              skip();
+              var op = s.charAt(i);
+              if (op !== "*" && op !== "/") break;
+              i++;
+              var right = factor();
+              if (right === null) return null;
+              if (op === "/" && right === 0) return null;
+              value = op === "*" ? value * right : value / right;
+            }
+            return value;
+          }
+          function factor() {
+            skip();
+            if (s.charAt(i) === "-") { i++; var inner = factor(); return inner === null ? null : -inner; }
+            if (s.charAt(i) === "(") { i++; var inner = expr(); skip(); if (s.charAt(i) !== ")") return null; i++; return inner; }
+            if (i >= s.length || s.charAt(i) < "0" || s.charAt(i) > "9") return null;
+            var number = 0;
+            while (i < s.length && s.charAt(i) >= "0" && s.charAt(i) <= "9") { number = number * 10 + (s.charCodeAt(i) - 48); i++; }
+            return number;
+          }
+          var value = expr();
+          skip();
+          if (value === null || i !== s.length) return null;
+          return value;
         }
-        if (bad(expr)) console.log("error");
-        else if (expr === "(1+2)*3") console.log("PUSH 1\nPUSH 2\nADD\nPUSH 3\nMUL");
-        else if (expr === "-3+1") console.log("PUSH -3\nPUSH 1\nADD");
-        else console.log("PUSH 0");
+        var result = parse(src);
+        if (result === null) console.log("error");
+        else console.log(String(result));
     """.trimIndent()
+
+    private val PASSING_COMPILER = EVALUATOR
 
     private fun json(body: String): HttpURLConnection =
         object : HttpURLConnection(java.net.URL("https://endoflife.date/api/kotlin.json")) {

@@ -108,17 +108,26 @@ class MutationCoordinator(
 
         if (changeSet.changes.isEmpty()) return MutationProposeResult.Rejected("Mutation proposal contains no changes")
 
-        val verification = runCatching { workspace.verifyProposal(changeSet) }
+        val staticVerification = runCatching { workspace.verifyProposal(changeSet) }
             .getOrElse { ex ->
                 return MutationProposeResult.Rejected(
                     "Verification failed: ${ex.message.orEmpty().ifBlank { ex.javaClass.simpleName }}"
                 )
             }
 
-        if (!verification.passed) {
+        if (!staticVerification.passed) {
             return MutationProposeResult.Rejected(
-                "Mutation proposal failed verification: ${verification.issues.joinToString { it.message }}"
+                "Mutation proposal failed verification: ${staticVerification.issues.joinToString { it.message }}"
             )
+        }
+        val runsOnPhone = changeSet.changes.any { it.path.endsWith(".js") || it.path.endsWith(".py") }
+        val verification = if (runsOnPhone) {
+            VerificationReport(
+                false,
+                listOf(VerificationIssue(changeSet.changes.first().path, 0, "The phone has not finished the checks."))
+            )
+        } else {
+            staticVerification
         }
 
         val timestamp = now()
@@ -533,6 +542,18 @@ class MutationCoordinator(
             }
             MutationApprovalResult.Rejected("Approved change could not be safely completed: ${error.message.orEmpty()}")
         }
+    }
+
+    @Synchronized
+    fun noteChecks(id: String, passed: Boolean) {
+        val current = pending[id] ?: return
+        val verification = if (passed) {
+            VerificationReport(true, emptyList())
+        } else {
+            VerificationReport(false, listOf(VerificationIssue("run", 0, "The checks did not match.")))
+        }
+        pending[id] = current.copy(verification = verification)
+        persist()
     }
 
     @Synchronized

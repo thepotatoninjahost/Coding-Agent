@@ -139,10 +139,15 @@ object ChangeDiff {
             appendLine("The listed files may behave differently after the changes are applied.")
             appendLine()
             appendLine("Risks:")
-            appendLine("The changes could introduce errors or break existing behavior. No more specific risk assessment was provided in plain English. Review all current and proposed file contents below.")
+            val dangers = operations.mapNotNull { it.text }.flatMap { codeDangers(it) }
+            if (dangers.isEmpty()) {
+                appendLine("The changes could introduce errors or break existing behavior. No more specific risk assessment was provided in plain English. Review all current and proposed file contents below.")
+            } else {
+                dangers.forEach { appendLine(it) }
+            }
             appendLine()
             appendLine("What your approval means:")
-            appendLine("Nothing is written until you complete both required owner approvals. After both approvals, these exact listed changes can be applied.")
+            appendLine("One yes saves this file. Nothing is written until you do.")
         }
     }
 
@@ -151,7 +156,7 @@ object ChangeDiff {
      * so this text is the only way the owner can see what they are confirming.
      */
     fun ownerReviewText(proposal: PendingChangeProposal, run: RunReport? = null): String = buildString {
-        appendLine("PROPOSED CHANGES — nothing is written until you confirm twice.")
+        appendLine("PROPOSED CHANGES — one yes saves this file. Nothing is written until you do.")
         appendLine("Read the plain-English explanation before deciding. If it does not clearly explain the change or its risks, reject it and ask the agent to explain.")
         appendLine("Proposal ${shortId(proposal.id)} · ${proposal.changeSet.changes.size} file(s) · ${expiryLabel(proposal.expiresAt)}")
         appendLine()
@@ -263,6 +268,24 @@ object ChangeDiff {
             if (files.isNotBlank()) {
                 append("\n\n")
                 append(files)
+            }
+            val dangers = proposal.changeSet.changes.mapNotNull { it.after }.flatMap { codeDangers(it) }.distinct()
+            if (dangers.isNotEmpty()) {
+                append("\n\nRisks:\n")
+                append(dangers.joinToString("\n") { "- $it" })
+            }
+        }
+    }
+
+    fun codeDangers(text: String): List<String> {
+        val lower = text.lowercase()
+        return buildList {
+            if ("system.exit" in lower || "java.lang" in lower || "packages." in lower || "javaadapter" in lower) {
+                add("This file tries to use Java or stop the whole app.")
+            }
+            if ("process.exit" in lower) add("This file stops the program with an exit call.")
+            if (Regex("""\b(unlink|rmdir|deletefile|removedir)\b""").containsMatchIn(lower) || "fs.unlink" in lower || "fs.rm" in lower) {
+                add("This file may delete files.")
             }
         }
     }

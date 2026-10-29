@@ -81,6 +81,30 @@ class ChatWorkspace(
         // awaiting owner action. A new goal must not orphan that proposal or cause its eventual
         // apply/markApplied transition to be recorded against the wrong job.
         if (agent != null && looksLikeNewGoal(trimmed) && agent.pendingProposals().isNotEmpty()) {
+            val proposal = agent.pendingProposals().first()
+            val code = proposal.changeSet.changes.firstOrNull { it.path.endsWith(".js") && !it.after.isNullOrBlank() }?.after
+            if (code != null) {
+                val run = com.codingagent.workspace.JsExampleGate.check(code, proposal.request)
+                if (run.passed) agent.noteDraftChecks(proposal.id, true)
+                val card = com.codingagent.workspace.ChangeDiff.phoneCard(proposal, run)
+                val task = com.codingagent.workspace.AgentTask(
+                    id = UUID.randomUUID().toString(),
+                    request = trimmed,
+                    status = if (run.passed) "needs-approval" else "needs-input",
+                    plan = com.codingagent.workspace.AgentPlan(trimmed, emptyList(), emptyList()),
+                    changes = proposal.changeSet.changes,
+                    verification = proposal.verification,
+                    events = listOf("checked the saved draft again"),
+                    summary = card
+                )
+                val result = if (run.passed) {
+                    AgentRuntimeResult.NeedsApproval(task, card, proposal.id)
+                } else {
+                    AgentRuntimeResult.NeedsInput(task, card)
+                }
+                progressListener?.onProgress("RESUME", "Checking the draft that was already waiting.")
+                return persist(result = result)
+            }
             val pending = PendingWorkResume.tryResume(agent, "review proposal", recentAgentText = null)
             if (pending != null) {
                 progressListener?.onProgress("RESUME", "Pending proposal must be resolved before starting a new coding goal")

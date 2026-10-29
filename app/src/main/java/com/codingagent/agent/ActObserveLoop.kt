@@ -451,6 +451,7 @@ class ActObserveLoop(
     ): List<AutonomousAgentEvent> {
         val proposal = mutations.pending().firstOrNull()
             ?: return complete(taskId, request, plan, events, "Nothing is waiting for approval.", "needs-input")
+        if (lastRun?.passed == true && lastRun.cases.isNotEmpty()) mutations.noteChecks(proposal.id, true)
         val card = ChangeDiff.approvalCard(proposal, lastRun)
         val task = AgentTaskBuilders.approval(taskId, request, plan, proposal).copy(summary = card)
         emit(AutonomousAgentEvent.ApprovalRequired(task, proposal))
@@ -471,7 +472,10 @@ class ActObserveLoop(
         val draft = stagedFile()
         return buildString {
             appendLine("The phone ran the program and it did not match.")
-            appendLine(report.stdout.take(800))
+            report.cases.take(8).forEach { case ->
+                appendLine("${case.label} => ${case.actual} (expected ${case.expected})")
+            }
+            if (report.cases.isEmpty()) appendLine(report.stdout.take(800))
             if (report.stderr.isNotBlank()) appendLine(report.stderr.take(400))
             if (draft != null) {
                 appendLine("Current file ${draft.first}:")

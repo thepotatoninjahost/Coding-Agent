@@ -245,7 +245,7 @@ class ChangeDiffTest {
         assertTrue(ChangeDiff.hasCompletePlainEnglishExplanation(explanation))
         assertTrue(explanation.contains("Create the file src/Helper.kt"))
         assertTrue(explanation.contains("No more specific risk assessment was provided"))
-        assertTrue(explanation.contains("both required owner approvals"))
+        assertTrue(explanation.contains("One yes saves this file"))
     }
 
     @Test

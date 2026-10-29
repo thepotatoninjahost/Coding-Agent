@@ -560,18 +560,56 @@ private class GroqReplayServer(
 
     companion object {
         private val PASSING_COMPILER = """
-            var expr = String(process.argv[2] || "");
-            function bad(s) {
-              if (!s) return true;
-              if (/[+\-*/]$/.test(s)) return true;
-              if (s.indexOf("++") >= 0) return true;
-              if (/[^0-9+\-*/().\s]/.test(s)) return true;
-              return false;
+            var src = String(process.argv[2] || "");
+            function parse(s) {
+              var i = 0;
+              function skip() { while (i < s.length && s.charAt(i) === " ") i++; }
+              function expr() {
+                var value = term();
+                if (value === null) return null;
+                while (true) {
+                  skip();
+                  var op = s.charAt(i);
+                  if (op !== "+" && op !== "-") break;
+                  i++;
+                  var right = term();
+                  if (right === null) return null;
+                  value = op === "+" ? value + right : value - right;
+                }
+                return value;
+              }
+              function term() {
+                var value = factor();
+                if (value === null) return null;
+                while (true) {
+                  skip();
+                  var op = s.charAt(i);
+                  if (op !== "*" && op !== "/") break;
+                  i++;
+                  var right = factor();
+                  if (right === null) return null;
+                  if (op === "/" && right === 0) return null;
+                  value = op === "*" ? value * right : value / right;
+                }
+                return value;
+              }
+              function factor() {
+                skip();
+                if (s.charAt(i) === "-") { i++; var inner = factor(); return inner === null ? null : -inner; }
+                if (s.charAt(i) === "(") { i++; var inner = expr(); skip(); if (s.charAt(i) !== ")") return null; i++; return inner; }
+                if (i >= s.length || s.charAt(i) < "0" || s.charAt(i) > "9") return null;
+                var number = 0;
+                while (i < s.length && s.charAt(i) >= "0" && s.charAt(i) <= "9") { number = number * 10 + (s.charCodeAt(i) - 48); i++; }
+                return number;
+              }
+              var value = expr();
+              skip();
+              if (value === null || i !== s.length) return null;
+              return value;
             }
-            if (bad(expr)) console.log("error");
-            else if (expr === "(1+2)*3") console.log("PUSH 1\nPUSH 2\nADD\nPUSH 3\nMUL");
-            else if (expr === "-3+1") console.log("PUSH -3\nPUSH 1\nADD");
-            else console.log("PUSH 0");
+            var result = parse(src);
+            if (result === null) console.log("error");
+            else console.log(String(result));
         """.trimIndent()
     }
 }
