@@ -40,12 +40,15 @@ class ActObserveLoop(
         events: MutableList<AutonomousAgentEvent>
     ): List<AutonomousAgentEvent> {
         val changeWork = intake.intent in setOf(TaskIntent.CHANGE, TaskIntent.CREATE, TaskIntent.REFACTOR, TaskIntent.DEBUG)
+        val title = OwnerWords.title(request)
         val transcript = mutableListOf<ModelMessage>()
         val steps = mutableListOf<StuckDetector.Step>()
         var formatErrors = 0
         var cutOffs = 0
         var lastRun: RunReport? = null
         var condensed = false
+        var askedToWrite = false
+        var learnedCeiling: Int? = null
         val dailyRemaining = com.codingagent.model.OpenRouterDailyBudget.remaining()
         val maxSteps = TaskBudget.callsFor(config.maxTurns, dailyRemaining, changeWork)
         TaskBudget.warning(dailyRemaining, maxSteps)?.let { emit(AutonomousAgentEvent.Phase("MODEL", it)) }
@@ -56,30 +59,38 @@ class ActObserveLoop(
             appendLine(repoMap())
             appendLine("Do one thing each turn: a tool, a SEARCH/REPLACE block, or submit.")
             appendLine("When the phone must run the program, write JavaScript.")
+            if (changeWork) {
+                appendLine("Start by writing the whole program with create_file. Do not spend the turn exploring.")
+                appendLine("After it is written, the phone runs it. If it does not match, fix the file and write it again.")
+            }
             appendLine("Answer the owner in plain everyday English.")
             if (request.contains("one short paragraph", ignoreCase = true)) {
                 appendLine("Use one short paragraph. Do not use markdown.")
             }
         }
         for (step in 0 until maxSteps) {
-            if (isCancelled()) return stop(taskId, request, plan, events)
+            if (isCancelled()) return stop(taskId, title, plan, events)
             emit(AutonomousAgentEvent.Phase("MODEL", "Thinking about the next step (${step + 1} of $maxSteps)."))
             val system = ContextBudget.systemForRequest(systemPrompt())
-            val fitted = ContextBudget.fit(system, user, transcript.toList(), ContextBudget.inputTarget())
+            val writingOnly = changeWork || learnedCeiling != null
+            val toolList = com.codingagent.model.AgentModelProtocol.toolsForIntent(intake.intent, writingOnly = writingOnly)
+            val ceiling = learnedCeiling ?: if (changeWork) ContextBudget.CHANGE_REQUEST_TOKENS else ContextBudget.inputTarget()
+            val room = (ceiling - ContextBudget.toolTokens(toolList) - ContextBudget.estimateTokens(system)).coerceAtLeast(600)
+            val fitted = ContextBudget.fit(system, user, transcript.toList(), room)
             val response = ModelCallWithRetry.call(
                 gateway = gateway,
                 request = {
                     ModelRequest(
                         fitted.system,
                         fitted.user,
-                        com.codingagent.model.AgentModelProtocol.toolsForIntent(intake.intent),
+                        toolList,
                         fitted.transcript
                     )
                 },
                 isCancelled = isCancelled,
                 onPhase = { emit(AutonomousAgentEvent.Phase("MODEL", it)) }
-            ) ?: return stop(taskId, request, plan, events)
-            if (isCancelled()) return stop(taskId, request, plan, events)
+            ) ?: return stop(taskId, title, plan, events)
+            if (isCancelled()) return stop(taskId, title, plan, events)
             val action = if (response is ModelResponse.Text) {
                 val recovered = JsonModelResponseParser().parse(response.content)
                 if (recovered is ModelResponse.ToolCall) recovered else response
@@ -91,6 +102,12 @@ class ActObserveLoop(
                     if (ModelFailure.isRequestTooLarge(action.message)) {
                         cutOffs++
                         gateway.preferDifferentModel()
+                        val limit = ModelFailure.minuteTokenLimit(action.message)
+                        learnedCeiling = if (limit != null) {
+                            (limit - 2_000).coerceAtLeast(1_200)
+                        } else {
+                            ((learnedCeiling ?: ContextBudget.CHANGE_REQUEST_TOKENS) * 2 / 3).coerceAtLeast(1_200)
+                        }
                         val kept = ContextBudget.condense(transcript.toList())
                         transcript.clear()
                         transcript.addAll(kept)
@@ -100,7 +117,7 @@ class ActObserveLoop(
                         )
                         if (cutOffs >= 3) {
                             val summary = "This is unfinished. The request was too big for the helpers I tried. Nothing was saved."
-                            return complete(taskId, request, plan, events, summary, "needs-input")
+                            return complete(taskId, title, plan, events, summary, "needs-input")
                         }
                         continue
                     }
@@ -118,7 +135,7 @@ class ActObserveLoop(
                     } else {
                         friendly
                     }
-                    val task = AgentTaskBuilders.failed(taskId, request, plan, summary, changes())
+                    val task = AgentTaskBuilders.failed(taskId, title, plan, summary, changes())
                     emit(AutonomousAgentEvent.Failed(task, summary))
                     recordTask(task)
                     return events
@@ -127,7 +144,7 @@ class ActObserveLoop(
                     formatErrors = 0
                     val key = StuckDetector.actionKey(action.name, action.arguments)
                     if (action.name == "submit") {
-                        val done = finishSubmit(action.arguments, changeWork, lastRun, taskId, request, plan, events)
+                        val done = finishSubmit(action.arguments, changeWork, lastRun, taskId, title, plan, events)
                         if (done != null) return done
                         val note = "The work is not ready to finish. Run the program, or say what is still wrong."
                         transcript += ModelMessage("assistant", action.thought.ifBlank { "submit" }, action.callId, action.name, action.arguments)
@@ -153,11 +170,11 @@ class ActObserveLoop(
                                     "The phone ran the program and it did not match.\n${gated.stdout}\n${gated.stderr}\nFix the file, then write it again. A bad input must print the word error."
                                 )
                             } else if (readyToShow(lastRun)) {
-                                return showApproval(lastRun, taskId, request, plan, events)
+                                return showApproval(lastRun, taskId, title, plan, events)
                             }
                         }
                         if (action.name == "review_examples" || action.name == "run_program") {
-                            val ready = approvalIfChecked(outcome, lastRun, taskId, request, plan, events)
+                            val ready = approvalIfChecked(outcome, lastRun, taskId, title, plan, events)
                             if (ready != null) return ready
                             if (outcome.report != null && outcome.report.ran && !outcome.report.passed) {
                                 transcript += ModelMessage(
@@ -169,11 +186,11 @@ class ActObserveLoop(
                         if (!changeWork && action.name == "research_web") {
                             sourcedFact(outcome.text)?.let { fact ->
                                 emit(AutonomousAgentEvent.ModelMessage(fact))
-                                return complete(taskId, request, plan, events, fact, "completed")
+                                return complete(taskId, title, plan, events, fact, "completed")
                             }
                         }
                         if (isListing(request) && action.name == "list_files" && !outcome.text.startsWith("ERROR:")) {
-                            return complete(taskId, request, plan, events, outcome.text.ifBlank { "There are no files yet." }, "completed")
+                            return complete(taskId, title, plan, events, outcome.text.ifBlank { "There are no files yet." }, "completed")
                         }
                     }
                 }
@@ -195,11 +212,11 @@ class ActObserveLoop(
                                     "The phone ran the program and it did not match.\n${gated.stdout}\nFix the file."
                                 )
                             } else if (readyToShow(lastRun)) {
-                                return showApproval(lastRun, taskId, request, plan, events)
+                                return showApproval(lastRun, taskId, title, plan, events)
                             }
                         }
                     } else if (mutations.pending().isNotEmpty()) {
-                        if (readyToShow(lastRun)) return showApproval(lastRun, taskId, request, plan, events)
+                        if (readyToShow(lastRun)) return showApproval(lastRun, taskId, title, plan, events)
                         formatErrors++
                         transcript += ModelMessage("assistant", action.content)
                         transcript += ModelMessage(
@@ -207,7 +224,7 @@ class ActObserveLoop(
                             "The file is only staged. Call review_examples now with at least two examples. One must be a bad input that expects the word error. If the run fails, fix the file and run it again. Do not describe the file."
                         )
                         steps += StuckDetector.Step("text", action.content.take(120), error = false, textOnly = true)
-                        if (formatErrors >= 3) return unfinished(taskId, request, plan, events)
+                        if (formatErrors >= 3) return unfinished(taskId, title, plan, events)
                     } else if (!changeWork) {
                         val fact = transcript.mapNotNull { sourcedFact(it.content) }.lastOrNull()
                         val version = fact?.let { Regex("""\d+\.\d+\.\d+""").find(it)?.value }
@@ -220,7 +237,7 @@ class ActObserveLoop(
                             )
                         }
                         emit(AutonomousAgentEvent.ModelMessage(answer))
-                        return complete(taskId, request, plan, events, answer, if (isDegenerate(answer)) "completed-with-warning" else "completed")
+                        return complete(taskId, title, plan, events, answer, if (isDegenerate(answer)) "completed-with-warning" else "completed")
                     } else {
                         formatErrors++
                         transcript += ModelMessage("assistant", action.content)
@@ -231,20 +248,20 @@ class ActObserveLoop(
                         steps += StuckDetector.Step("text", action.content.take(120), error = false, textOnly = true)
                         if (formatErrors >= 3) {
                             if (mutations.pending().isNotEmpty()) {
-                                return if (readyToShow(lastRun)) showApproval(lastRun, taskId, request, plan, events)
-                                else unfinished(taskId, request, plan, events)
+                                return if (readyToShow(lastRun)) showApproval(lastRun, taskId, title, plan, events)
+                                else unfinished(taskId, title, plan, events)
                             }
                             val summary = "I have not built anything yet. Nothing was saved. " +
                                 "The helper only described a plan and asked whether to continue. " +
                                 "Tell me to go ahead if you want the files written."
-                            return complete(taskId, request, plan, events, summary, "needs-input")
+                            return complete(taskId, title, plan, events, summary, "needs-input")
                         }
                     }
                 }
             }
             val stuck = StuckDetector.check(steps)
             if (stuck != null) {
-                val pendingAnswer = bestEnding(taskId, request, plan, events, lastRun)
+                val pendingAnswer = bestEnding(taskId, title, plan, events, lastRun)
                 if (pendingAnswer != null) return pendingAnswer
                 val hardStop = stuck.contains("same result") || stuck.contains("same file")
                 if (!condensed && !hardStop) {
@@ -257,20 +274,27 @@ class ActObserveLoop(
                     continue
                 }
                 val fact = bestFact(transcript)
-                if (fact != null) return complete(taskId, request, plan, events, fact, "completed")
+                if (fact != null) return complete(taskId, title, plan, events, fact, "completed")
                 val summary = "$stuck I stopped. Nothing new was saved."
-                val task = AgentTaskBuilders.failed(taskId, request, plan, summary, changes())
+                val task = AgentTaskBuilders.failed(taskId, title, plan, summary, changes())
                 emit(AutonomousAgentEvent.Failed(task, summary))
                 recordTask(task)
                 return events
             }
+            if (changeWork && mutations.pending().isEmpty() && !askedToWrite && steps.isNotEmpty()) {
+                askedToWrite = true
+                transcript += ModelMessage(
+                    "user",
+                    "Write the JavaScript file now with create_file. Put the whole program in that one call. Do not explore any more. The phone will run it and tell you what to fix."
+                )
+            }
         }
-        bestEnding(taskId, request, plan, events, lastRun)?.let { return it }
+        bestEnding(taskId, title, plan, events, lastRun)?.let { return it }
         if (changeWork && mutations.pending().isNotEmpty() && !readyToShow(lastRun)) {
-            return unfinished(taskId, request, plan, events)
+            return unfinished(taskId, title, plan, events)
         }
         val fact = bestFact(transcript)
-        if (fact != null) return complete(taskId, request, plan, events, fact, "completed")
+        if (fact != null) return complete(taskId, title, plan, events, fact, "completed")
         val summary = if (changeWork && mutations.pending().isEmpty()) {
             "I used every step I am allowed and did not finish the change. Nothing was saved."
         } else if (changeWork) {
@@ -278,7 +302,7 @@ class ActObserveLoop(
         } else {
             "I used every step I am allowed. This is as far as I got."
         }
-        return complete(taskId, request, plan, events, summary, "completed-with-warning")
+        return complete(taskId, title, plan, events, summary, "completed-with-warning")
     }
 
     private fun bestEnding(

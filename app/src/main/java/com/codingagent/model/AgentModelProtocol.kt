@@ -160,14 +160,16 @@ list_files, read_file, continue_result, read_chat_history, search_chat_history, 
         )
     )
 
-    fun toolsForIntent(intent: TaskIntent): List<ModelToolDefinition> {
+    fun toolsForIntent(intent: TaskIntent, writingOnly: Boolean = false): List<ModelToolDefinition> {
         val all = tools().associateBy { it.name }
-        val names = when (intent) {
-            TaskIntent.INSPECT, TaskIntent.EXPLAIN, TaskIntent.UNKNOWN ->
+        val names = when {
+            writingOnly && intent in setOf(TaskIntent.CHANGE, TaskIntent.CREATE, TaskIntent.REFACTOR, TaskIntent.DEBUG) ->
+                listOf("list_files", "read_file", "create_file", "replace_text", "run_program", "review_examples", "submit")
+            intent == TaskIntent.INSPECT || intent == TaskIntent.EXPLAIN || intent == TaskIntent.UNKNOWN ->
                 listOf("list_files", "read_file", "continue_result", "read_chat_history", "search_chat_history", "read_user_memory", "search_user_memory", "search_project", "search_knowledge", "research_web", "run_command", "verify")
-            TaskIntent.CHANGE, TaskIntent.CREATE, TaskIntent.REFACTOR, TaskIntent.DEBUG ->
+            intent == TaskIntent.CHANGE || intent == TaskIntent.CREATE || intent == TaskIntent.REFACTOR || intent == TaskIntent.DEBUG ->
                 listOf("list_files", "read_file", "continue_result", "read_chat_history", "search_chat_history", "read_user_memory", "search_user_memory", "search_project", "search_knowledge", "research_web", "replace_text", "edit", "create_file", "append_chunk", "run_program", "review_examples", "submit", "verify", "run_command")
-            TaskIntent.TEST ->
+            else ->
                 listOf("list_files", "read_file", "continue_result", "read_chat_history", "search_chat_history", "read_user_memory", "search_user_memory", "run_command", "verify", "search_project")
         }
         return names.mapNotNull { all[it] }

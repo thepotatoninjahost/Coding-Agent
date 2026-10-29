@@ -140,7 +140,7 @@ class AutonomousAgent(
         journal.record(task)
         runCatching {
             experience.record(
-                task = task.request,
+                task = OwnerWords.title(task.request),
                 operation = task.status,
                 result = task.summary,
                 evidence = task.changes.joinToString(", ") { it.path },
@@ -238,7 +238,7 @@ class AutonomousAgent(
         val focus = currentRequestFocus(normalized)
         // Tool mutations must retain the full packaged conversation so proposal records keep
         // the active job and owner constraints.
-        tools.setRequestContext(normalized)
+        tools.setRequestContext(OwnerWords.title(normalized))
         val intake = TaskIntakeParser(root).parse(normalized)
         val plan = AgentPlanner(workspace).plan(intake)
         // Wired in: was previously dead code. Every call below is defensively wrapped

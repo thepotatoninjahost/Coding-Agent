@@ -10,8 +10,7 @@ object TaskBudget {
     fun callsFor(stepLimit: Int, dailyRemaining: Int?, changeWork: Boolean = false): Int {
         val cap = when {
             dailyRemaining != null && dailyRemaining <= 2 -> 1
-            changeWork && (dailyRemaining == null || dailyRemaining >= 100) ->
-                if (dailyRemaining == null) 16 else BUILD_CAP
+            changeWork && (dailyRemaining == null || dailyRemaining >= 100) -> BUILD_CAP
             changeWork && dailyRemaining != null -> minOf(BUILD_CAP, dailyRemaining, maxOf(6, dailyRemaining / 3))
             dailyRemaining == null -> PER_TASK
             else -> minOf(PER_TASK, maxOf(2, dailyRemaining / 6))

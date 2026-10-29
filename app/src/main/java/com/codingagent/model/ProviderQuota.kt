@@ -93,6 +93,10 @@ class ProviderQuotaBook(private val file: File? = null) {
                     model.tooLargeStrikes += 1
                     if (model.tooLargeStrikes >= 2) {
                         model.exhaustedUntil = maxOf(model.exhaustedUntil, now + MODEL_PARK_MS)
+                    } else {
+                        // A 429 that only says the request is bigger than the minute bucket
+                        // must not park the helper. The caller shortens the request and tries again.
+                        model.exhaustedUntil = 0L
                     }
                 }
                 ModelFailure.isRejectedKey(message) -> {
@@ -215,20 +219,41 @@ class ProviderQuotaBook(private val file: File? = null) {
 
 internal object QuotaHeaders {
     fun resetFromMessage(message: String, now: Long): Long? {
-        val reset = Regex("(?i)X-RateLimit-Reset:\\s*([^\\s]+)").find(message)?.groupValues?.getOrNull(1)
-        val retry = Regex("(?i)Retry-After:\\s*([^\\s]+)").find(message)?.groupValues?.getOrNull(1)
-        return parseReset(reset, now) ?: parseReset(retry, now)
+        val headerNames = listOf(
+            "X-RateLimit-Reset",
+            "x-ratelimit-reset-tokens",
+            "x-ratelimit-reset-requests",
+            "Retry-After"
+        )
+        val headerValues = headerNames.mapNotNull { name ->
+            Regex("(?i)${Regex.escape(name)}:\\s*(\\S+)").find(message)?.groupValues?.getOrNull(1)
+        }
+        val spoken = Regex("(?i)try again in\\s+([0-9]+(?:\\.[0-9]+)?\\s*[smh]?)")
+            .find(message)?.groupValues?.getOrNull(1)?.replace(" ", "")
+        return (headerValues + listOfNotNull(spoken)).mapNotNull { parseReset(it, now) }.maxOrNull()
     }
 
     fun parseReset(raw: String?, now: Long): Long? {
         val trimmed = raw?.trim().orEmpty()
         if (trimmed.isEmpty()) return null
-        val numeric = trimmed.toLongOrNull() ?: return null
+        parseDurationMillis(trimmed)?.let { return now + it }
+        val numeric = trimmed.toLongOrNull() ?: trimmed.substringBefore('.').toLongOrNull() ?: return null
         return when {
             numeric > 10_000_000_000L -> numeric
             numeric > 1_000_000_000L -> numeric * 1000L
             else -> now + numeric * 1000L
         }
+    }
+
+    /** Groq sends durations such as 1s, 7.66s, and 2m59.56s, not a clock time. */
+    fun parseDurationMillis(raw: String): Long? {
+        val match = Regex("""^(?:(\d+(?:\.\d+)?)h)?(?:(\d+(?:\.\d+)?)m)?(?:(\d+(?:\.\d+)?)s)?$""")
+            .matchEntire(raw.trim().lowercase()) ?: return null
+        if (match.groupValues.drop(1).all { it.isEmpty() }) return null
+        val hours = match.groupValues[1].toDoubleOrNull() ?: 0.0
+        val minutes = match.groupValues[2].toDoubleOrNull() ?: 0.0
+        val seconds = match.groupValues[3].toDoubleOrNull() ?: 0.0
+        return ((hours * 3_600.0 + minutes * 60.0 + seconds) * 1_000.0).toLong().takeIf { it >= 0L }
     }
 
     fun nextMidnightPacific(now: Long): Long {

@@ -14,8 +14,13 @@ import java.util.Locale
  */
 object ContextBudget {
     const val TARGET_TOKENS = 2600
+    /** Leave room under Groq's free 8,000 tokens per minute for the reply. */
+    const val CHANGE_REQUEST_TOKENS = 4_500
 
     fun estimateTokens(text: String): Int = (text.length + 3) / 4
+
+    fun toolTokens(tools: List<com.codingagent.model.ModelToolDefinition>): Int =
+        tools.sumOf { estimateTokens(it.name + it.description + it.inputSchema) }
 
     fun todaySentence(today: LocalDate = LocalDate.now()): String {
         val spoken = today.format(DateTimeFormatter.ofPattern("MMMM d, yyyy", Locale.US))

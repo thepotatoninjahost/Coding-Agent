@@ -151,12 +151,59 @@ object ProviderCatalog {
         )
     )
 
+    /** The provider that owns this web address, or null for OpenRouter, a blank address, or a custom one. */
+    fun providerIdForBase(baseUrl: String): String? {
+        val base = baseUrl.lowercase()
+        return when {
+            "groq.com" in base -> "groq"
+            "generativelanguage" in base -> "gemini"
+            "mistral.ai" in base -> "mistral"
+            "sambanova" in base -> "sambanova"
+            "cerebras" in base -> "cerebras"
+            "requesty" in base -> "requesty"
+            "aimlapi" in base -> "aiml"
+            "cloudflare" in base -> "cloudflare"
+            else -> null
+        }
+    }
+
+    /** The password box that belongs to this provider. The main secret-password box is not included. */
+    fun dedicatedKey(settings: ModelSettings, providerId: String): String {
+        val s = settings.normalized()
+        return when (providerId) {
+            "groq" -> s.groqApiKey
+            "gemini" -> s.geminiApiKey
+            "mistral" -> s.mistralApiKey
+            "sambanova" -> s.sambanovaApiKey
+            "cerebras" -> s.cerebrasApiKey
+            "requesty" -> s.requestyApiKey
+            "aiml" -> s.aimlApiKey
+            "cloudflare" -> s.cloudflareApiToken
+            else -> ""
+        }
+    }
+
+    fun canonicalBase(providerId: String, settings: ModelSettings): String {
+        val s = settings.normalized()
+        return when (providerId) {
+            "groq" -> GROQ_URL
+            "gemini" -> GEMINI_URL
+            "mistral" -> MISTRAL_URL
+            "sambanova" -> SAMBANOVA_URL
+            "cerebras" -> CEREBRAS_URL
+            "requesty" -> REQUESTY_URL
+            "aiml" -> AIML_URL
+            "cloudflare" -> cloudflareBaseUrl(s.cloudflareAccountId) ?: s.baseUrl
+            else -> s.baseUrl
+        }
+    }
+
     fun endpoints(settings: ModelSettings): List<ProviderEndpoint> {
         val s = settings.normalized()
         val out = mutableListOf<ProviderEndpoint>()
-        val otherProviderAddress = listOf("groq.com", "generativelanguage", "mistral.ai", "sambanova", "cerebras", "requesty", "aimlapi", "cloudflare")
-            .any { it in s.baseUrl }
-        if (s.apiKey.isNotBlank() && (s.baseUrl.contains("openrouter.ai") || s.baseUrl.isBlank() || otherProviderAddress)) {
+        val known = providerIdForBase(s.baseUrl)
+        val openRouterAddress = s.baseUrl.isBlank() || s.baseUrl.contains("openrouter.ai")
+        if (s.apiKey.isNotBlank() && openRouterAddress) {
             val openRouterBase = if (s.baseUrl.contains("openrouter.ai")) s.baseUrl else ModelSettings.OPENROUTER_BASE_URL
             bundled.filter { it.providerId == "openrouter" && !OpenRouterFreeModels.isRetired(it.modelId) }.forEach { model ->
                 out += ProviderEndpoint("openrouter", model.plainName, model.modelId, openRouterBase, s.apiKey)
@@ -166,28 +213,31 @@ object ProviderCatalog {
             ) {
                 out += ProviderEndpoint("openrouter", "Chosen helper", s.modelName, openRouterBase, s.apiKey)
             }
-        } else if (s.baseUrl.isNotBlank() && s.modelName.isNotBlank() &&
+        } else if (known != null && s.apiKey.isNotBlank() && dedicatedKey(s, known).isBlank()) {
+            addProvider(out, known, s.apiKey, canonicalBase(known, s))
+        } else if (known == null && s.baseUrl.isNotBlank() && s.modelName.isNotBlank() &&
             (s.apiKey.isNotBlank() || ModelEndpointPolicy.isLocalEndpoint(s.baseUrl))
         ) {
             out += ProviderEndpoint("custom", "Your helper", s.modelName, s.baseUrl, s.apiKey)
         }
-        fun add(providerId: String, key: String, baseUrl: String) {
-            if (key.isBlank()) return
-            bundled.filter { it.providerId == providerId && !OpenRouterFreeModels.isRetired(it.modelId) }.forEach { model ->
-                out += ProviderEndpoint(providerId, model.plainName, model.modelId, baseUrl, key)
-            }
-        }
-        add("groq", s.groqApiKey, GROQ_URL)
-        add("gemini", s.geminiApiKey, GEMINI_URL)
-        add("mistral", s.mistralApiKey, MISTRAL_URL)
-        add("sambanova", s.sambanovaApiKey, SAMBANOVA_URL)
-        add("cerebras", s.cerebrasApiKey, CEREBRAS_URL)
-        add("requesty", s.requestyApiKey, REQUESTY_URL)
-        add("aiml", s.aimlApiKey, AIML_URL)
+        addProvider(out, "groq", s.groqApiKey, GROQ_URL)
+        addProvider(out, "gemini", s.geminiApiKey, GEMINI_URL)
+        addProvider(out, "mistral", s.mistralApiKey, MISTRAL_URL)
+        addProvider(out, "sambanova", s.sambanovaApiKey, SAMBANOVA_URL)
+        addProvider(out, "cerebras", s.cerebrasApiKey, CEREBRAS_URL)
+        addProvider(out, "requesty", s.requestyApiKey, REQUESTY_URL)
+        addProvider(out, "aiml", s.aimlApiKey, AIML_URL)
         cloudflareBaseUrl(s.cloudflareAccountId)?.let { url ->
-            add("cloudflare", s.cloudflareApiToken, url)
+            addProvider(out, "cloudflare", s.cloudflareApiToken, url)
         }
         return out.distinctBy { it.providerId + "\n" + it.modelId }
+    }
+
+    private fun addProvider(out: MutableList<ProviderEndpoint>, providerId: String, key: String, baseUrl: String) {
+        if (key.isBlank() || baseUrl.isBlank()) return
+        bundled.filter { it.providerId == providerId && !OpenRouterFreeModels.isRetired(it.modelId) }.forEach { model ->
+            out += ProviderEndpoint(providerId, model.plainName, model.modelId, baseUrl, key)
+        }
     }
 
     fun providerNames(settings: ModelSettings): List<String> {

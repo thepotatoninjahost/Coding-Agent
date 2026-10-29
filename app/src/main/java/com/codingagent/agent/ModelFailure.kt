@@ -54,7 +54,32 @@ object ModelFailure {
             "context length" in lower ||
             "maximum context" in lower ||
             "reduce the length" in lower ||
-            ("otpm" in lower && ("output" in lower || "limit" in lower))
+            ("otpm" in lower && ("output" in lower || "limit" in lower)) ||
+            exceedsMinuteTokenLimit(message)
+    }
+
+    /** The provider's per-minute token cap, when the error names one. */
+    fun minuteTokenLimit(message: String): Int? {
+        if (!isTokensPerMinute(message)) return null
+        return Regex("(?i)limit\\s+(\\d+)").find(message)?.groupValues?.getOrNull(1)?.toIntOrNull()
+    }
+
+    fun requestedTokens(message: String): Int? =
+        Regex("(?i)requested\\s+(\\d+)").find(message)?.groupValues?.getOrNull(1)?.toIntOrNull()
+
+    /**
+     * The request itself is bigger than the per-minute token bucket.
+     * Waiting cannot help until the request is smaller.
+     */
+    fun exceedsMinuteTokenLimit(message: String): Boolean {
+        val limit = minuteTokenLimit(message) ?: return false
+        val requested = requestedTokens(message) ?: return false
+        return requested > limit
+    }
+
+    private fun isTokensPerMinute(message: String): Boolean {
+        val lower = message.lowercase()
+        return "tokens per minute" in lower || "tpm" in lower
     }
 
     /**
@@ -309,10 +334,17 @@ object ModelFailure {
     }
 
     private fun formatWhen(epochMs: Long, now: Long = System.currentTimeMillis()): String {
+        val delta = epochMs - now
+        if (delta <= 0L) return "as soon as a helper is free"
+        if (delta < 60_000L) {
+            val seconds = ((delta + 999L) / 1000L).coerceAtLeast(1L)
+            return if (seconds == 1L) "in 1 second" else "in $seconds seconds"
+        }
         val zone = java.time.ZoneId.systemDefault()
         val moment = java.time.Instant.ofEpochMilli(epochMs).atZone(zone)
         val today = java.time.Instant.ofEpochMilli(now).atZone(zone).toLocalDate()
-        val clock = moment.format(java.time.format.DateTimeFormatter.ofPattern("h:mm a"))
+        val pattern = if (delta < 120_000L) "h:mm:ss a" else "h:mm a"
+        val clock = moment.format(java.time.format.DateTimeFormatter.ofPattern(pattern))
         val day = when (moment.toLocalDate()) {
             today -> "today"
             today.plusDays(1) -> "tomorrow"

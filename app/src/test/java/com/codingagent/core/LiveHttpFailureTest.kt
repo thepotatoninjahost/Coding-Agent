@@ -11,6 +11,7 @@ import com.codingagent.model.ProviderRotatingGateway
 import com.codingagent.workspace.KnowledgeHit
 import org.json.JSONArray
 import org.json.JSONObject
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -93,6 +94,71 @@ class LiveHttpFailureTest {
             assertTrue(server.models.none { it.endsWith(":free") })
             assertTrue(server.models.count { it.contains("qwen") } <= 2)
             assertTrue(server.ordered)
+        }
+    }
+
+    @Test
+    fun groqMinuteLimitWaitsThenTheCompilerReachesAPassingCard() {
+        GroqReplayServer(oversize = false).use { server ->
+            val events = runCompiler(server)
+            val shown = visible(events)
+            assertEquals(429, server.statuses.first())
+            assertTrue(server.statuses.any { it == 200 })
+            assertTrue(shown.contains("second"))
+            assertFalse(shown.contains("today at"))
+            val approval = events.last() as AutonomousAgentEvent.ApprovalRequired
+            assertTrue(approval.task.summary.contains("compiler.js"))
+            assertTrue(approval.task.summary.contains("I ran the examples and they matched."))
+            assertTrue(approval.task.summary.contains("(1+2)*3"))
+            assertFalse(approval.task.summary.contains("I have not run this yet"))
+            assertFalse(approval.task.summary.contains("unfinished"))
+            assertFalse(approval.task.summary.contains("OPEN JOB"))
+            assertFalse(shown.contains("Model HTTP"))
+        }
+    }
+
+    @Test
+    fun aRequestBiggerThanTheMinuteLimitIsShortenedAndStillReachesTheCard() {
+        GroqReplayServer(oversize = true).use { server ->
+            val events = runCompiler(server)
+            val shown = visible(events)
+            assertEquals(429, server.statuses.first())
+            assertTrue(server.statuses.any { it == 200 })
+            assertFalse(shown.contains("used up"))
+            assertFalse(shown.contains("today at"))
+            val approval = events.last() as AutonomousAgentEvent.ApprovalRequired
+            assertTrue(approval.task.summary.contains("I ran the examples and they matched."))
+            assertTrue(approval.task.summary.contains("compiler.js"))
+            assertFalse(approval.task.summary.contains("unfinished"))
+        }
+    }
+
+    private fun runCompiler(server: GroqReplayServer): List<AutonomousAgentEvent> {
+        val base = "http://127.0.0.1:${server.port}/v1"
+        val gateway = ProviderRotatingGateway(
+            endpoints = listOf(
+                ProviderEndpoint("groq", "Groq large code helper", "openai/gpt-oss-120b", base, "test-groq-key")
+            ),
+            quota = ProviderQuotaBook(Files.createTempDirectory("groq-quota").toFile().resolve("quota.json")),
+            ranking = { listOf("openai/gpt-oss-120b") },
+            preferredModel = "openai/gpt-oss-120b",
+            timeoutMillis = 10_000
+        )
+        val root = Files.createTempDirectory("groq-replay").toFile()
+        return AutonomousAgent(root, object : AgentKnowledge {
+            override fun search(query: String, limit: Int): List<KnowledgeHit> = emptyList()
+        }, gateway, AutonomousAgentConfig(maxTurns = 8)).run(
+            "Write a tiny compiler in JavaScript that turns arithmetic like (1+2)*3 into stack-machine instructions, run it, and test it on a few examples including a bad input"
+        )
+    }
+
+    private fun visible(events: List<AutonomousAgentEvent>): String = events.joinToString("\n") { event ->
+        when (event) {
+            is AutonomousAgentEvent.Failed -> event.message
+            is AutonomousAgentEvent.Completed -> event.task.summary
+            is AutonomousAgentEvent.ApprovalRequired -> event.task.summary
+            is AutonomousAgentEvent.Phase -> event.detail
+            else -> ""
         }
     }
 
@@ -324,5 +390,154 @@ private class ScriptedChatServer : AutoCloseable {
             }
             String(__stdin || "").split("\n").forEach(evaluate);
         """.trimIndent() + "\n"
+    }
+}
+
+private class GroqReplayServer(private val oversize: Boolean) : AutoCloseable {
+    val port: Int
+    val statuses = java.util.Collections.synchronizedList(mutableListOf<Int>())
+    private val socket: ServerSocket
+    private val thread: Thread
+    @Volatile private var running = true
+    private val chats = java.util.concurrent.atomic.AtomicInteger()
+
+    init {
+        socket = ServerSocket(0)
+        port = socket.localPort
+        thread = Thread {
+            while (running) {
+                val client = try {
+                    socket.accept()
+                } catch (_: Exception) {
+                    break
+                }
+                Thread { handle(client) }.start()
+            }
+        }
+        thread.isDaemon = true
+        thread.start()
+    }
+
+    override fun close() {
+        running = false
+        runCatching { socket.close() }
+        thread.join(1_000)
+    }
+
+    private fun handle(client: Socket) {
+        client.use { open ->
+            val request = readHttp(open.getInputStream())
+            val response = if (request.method == "POST" && request.path.endsWith("/chat/completions")) chat() else {
+                json(404, """{"error":{"message":"not found"}}""")
+            }
+            open.getOutputStream().write(response)
+            open.getOutputStream().flush()
+        }
+    }
+
+    private fun chat(): ByteArray {
+        val turn = chats.getAndIncrement()
+        if (turn == 0) {
+            statuses += 429
+            val requested = if (oversize) 12_000 else 1_200
+            val used = if (oversize) 0 else 6_800
+            val body = """{"error":{"message":"Rate limit reached for model `openai/gpt-oss-120b` in organization `org_test` service tier `on_demand` on tokens per minute (TPM): Limit 8000, Used $used, Requested $requested. Please try again in 1s.","type":"tokens","code":"rate_limit_exceeded"}}"""
+            return json(
+                429,
+                body,
+                listOf(
+                    "retry-after: 1",
+                    "x-ratelimit-limit-tokens: 8000",
+                    "x-ratelimit-remaining-tokens: ${if (oversize) 0 else 6800}",
+                    "x-ratelimit-reset-tokens: 1s",
+                    "x-ratelimit-reset-requests: 1s"
+                )
+            )
+        }
+        statuses += 200
+        return sse(tool("create_file", createArguments()))
+    }
+
+    private fun createArguments(): String = JSONObject()
+        .put("path", "compiler.js")
+        .put("content", PASSING_COMPILER)
+        .toString()
+
+    private fun tool(name: String, arguments: String): String {
+        val call = JSONObject()
+            .put("index", 0)
+            .put("id", "call_$name")
+            .put("type", "function")
+            .put("function", JSONObject().put("name", name).put("arguments", arguments))
+        val first = JSONObject().put(
+            "choices",
+            JSONArray().put(JSONObject().put("delta", JSONObject().put("tool_calls", JSONArray().put(call))))
+        )
+        val second = JSONObject().put(
+            "choices",
+            JSONArray().put(JSONObject().put("delta", JSONObject()).put("finish_reason", "tool_calls"))
+        )
+        return "data: $first\n\ndata: $second\n\ndata: [DONE]\n\n"
+    }
+
+    private fun sse(payload: String): ByteArray {
+        val bytes = payload.toByteArray(StandardCharsets.UTF_8)
+        val head = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: ${bytes.size}\r\nConnection: close\r\n\r\n"
+        return head.toByteArray(StandardCharsets.UTF_8) + bytes
+    }
+
+    private fun json(code: Int, payload: String, extra: List<String> = emptyList()): ByteArray {
+        val bytes = payload.toByteArray(StandardCharsets.UTF_8)
+        val reason = if (code == 429) "Too Many Requests" else if (code == 404) "Not Found" else "OK"
+        val head = buildString {
+            append("HTTP/1.1 $code $reason\r\nContent-Type: application/json\r\n")
+            extra.forEach { append(it).append("\r\n") }
+            append("Content-Length: ${bytes.size}\r\nConnection: close\r\n\r\n")
+        }
+        return head.toByteArray(StandardCharsets.UTF_8) + bytes
+    }
+
+    private fun readHttp(input: InputStream): HttpRequest {
+        val header = StringBuilder()
+        while (!header.endsWith("\r\n\r\n") && header.length < 64_000) {
+            val next = input.read()
+            if (next < 0) break
+            header.append(next.toChar())
+        }
+        val text = header.toString()
+        val first = text.lineSequence().firstOrNull().orEmpty()
+        val method = first.substringBefore(' ')
+        val path = first.substringAfter(' ').substringBefore(' ')
+        val length = Regex("(?i)Content-Length:\\s*(\\d+)").find(text)?.groupValues?.getOrNull(1)?.toIntOrNull() ?: 0
+        val body = if (length <= 0) "" else {
+            val bytes = ByteArray(length)
+            var read = 0
+            while (read < length) {
+                val count = input.read(bytes, read, length - read)
+                if (count < 0) break
+                read += count
+            }
+            String(bytes, 0, read, StandardCharsets.UTF_8)
+        }
+        return HttpRequest(method, path, body)
+    }
+
+    private data class HttpRequest(val method: String, val path: String, val body: String)
+
+    companion object {
+        private val PASSING_COMPILER = """
+            var expr = String(process.argv[2] || "");
+            function bad(s) {
+              if (!s) return true;
+              if (/[+\-*/]$/.test(s)) return true;
+              if (s.indexOf("++") >= 0) return true;
+              if (/[^0-9+\-*/().\s]/.test(s)) return true;
+              return false;
+            }
+            if (bad(expr)) console.log("error");
+            else if (expr === "(1+2)*3") console.log("PUSH 1\nPUSH 2\nADD\nPUSH 3\nMUL");
+            else if (expr === "-3+1") console.log("PUSH -3\nPUSH 1\nADD");
+            else console.log("PUSH 0");
+        """.trimIndent()
     }
 }

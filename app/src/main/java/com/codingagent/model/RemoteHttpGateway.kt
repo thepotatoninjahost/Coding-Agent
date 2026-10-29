@@ -360,11 +360,19 @@ class RemoteHttpGateway(
     private fun requestBody(request: ModelRequest): JSONObject {
         val messages = MessageAssembler.messages(request)
         val writing = OutputBudget.writesFile(request.tools.map { it.name })
-        val promptTokens = (request.system.length + request.user.length + request.transcript.sumOf { it.content.length }) / 4
+        val toolChars = request.tools.sumOf { it.name.length + it.description.length + it.inputSchema.length }
+        val promptTokens = (
+            request.system.length + request.user.length +
+                request.transcript.sumOf { it.content.length } + toolChars
+            ) / 4
         var maxTokens = OutputBudget.forRequest(modelForRequest(), writing, promptTokens = promptTokens)
         val left = ModelCaps.tokensLeft(modelForRequest())
         if (left != null && left in 1 until maxTokens) {
-            maxTokens = left.coerceAtLeast(if (writing) 1_500 else 256)
+            maxTokens = left.coerceAtLeast(if (writing) 256 else 128)
+        }
+        if ("groq.com" in endpoint.lowercase()) {
+            val room = (8_000 - promptTokens - 200).coerceAtLeast(256)
+            maxTokens = minOf(maxTokens, room)
         }
         val body = JSONObject()
             .put("model", modelForRequest())
@@ -487,9 +495,12 @@ class RemoteHttpGateway(
             ?: headerInt(connection, "x-ratelimit-remaining-requests")
         val tokenRemaining = headerInt(connection, "x-ratelimit-remaining-tokens")
         val now = System.currentTimeMillis()
-        val reset = QuotaHeaders.parseReset(connection.getHeaderField("X-RateLimit-Reset"), now)
-            ?: QuotaHeaders.parseReset(connection.getHeaderField("x-ratelimit-reset-tokens"), now)
-            ?: retryAfterMillis(connection, now)
+        val reset = listOfNotNull(
+            QuotaHeaders.parseReset(connection.getHeaderField("X-RateLimit-Reset"), now),
+            QuotaHeaders.parseReset(connection.getHeaderField("x-ratelimit-reset-tokens"), now),
+            QuotaHeaders.parseReset(connection.getHeaderField("x-ratelimit-reset-requests"), now),
+            retryAfterMillis(connection, now)
+        ).maxOrNull()
         ModelCaps.noteTokens(modelForRequest(), tokenRemaining, reset)
         listener(code, remaining, reset)
     }
@@ -505,13 +516,17 @@ class RemoteHttpGateway(
 
     private fun quotaSuffix(connection: HttpURLConnection, body: String): String {
         val lines = mutableListOf<String>()
-        val remaining = runCatching { connection.getHeaderField("X-RateLimit-Remaining") }.getOrNull()
-        val reset = runCatching { connection.getHeaderField("X-RateLimit-Reset") }.getOrNull()
-            ?: resetFromBody(body)
-        val retry = runCatching { connection.getHeaderField("Retry-After") }.getOrNull()
-        if (!remaining.isNullOrBlank()) lines += "X-RateLimit-Remaining: ${remaining.trim()}"
-        if (!reset.isNullOrBlank()) lines += "X-RateLimit-Reset: ${reset.trim()}"
-        if (!retry.isNullOrBlank()) lines += "Retry-After: ${retry.trim()}"
+        fun add(name: String, value: String?) {
+            val trimmed = value?.trim().orEmpty()
+            if (trimmed.isEmpty()) return
+            if (lines.any { it.startsWith("$name:", ignoreCase = true) }) return
+            lines += "$name: $trimmed"
+        }
+        add("X-RateLimit-Remaining", runCatching { connection.getHeaderField("X-RateLimit-Remaining") }.getOrNull())
+        add("X-RateLimit-Reset", runCatching { connection.getHeaderField("X-RateLimit-Reset") }.getOrNull() ?: resetFromBody(body))
+        add("x-ratelimit-reset-tokens", runCatching { connection.getHeaderField("x-ratelimit-reset-tokens") }.getOrNull())
+        add("x-ratelimit-reset-requests", runCatching { connection.getHeaderField("x-ratelimit-reset-requests") }.getOrNull())
+        add("Retry-After", runCatching { connection.getHeaderField("Retry-After") }.getOrNull())
         return if (lines.isEmpty()) "" else "\n" + lines.joinToString("\n")
     }
 

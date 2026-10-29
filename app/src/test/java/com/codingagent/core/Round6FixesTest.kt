@@ -77,6 +77,7 @@ class Round6FixesTest {
         assertEquals(8, TaskBudget.callsFor(40, 50))
         assertEquals(1, TaskBudget.callsFor(40, 2))
         assertEquals(24, TaskBudget.callsFor(40, 1000, changeWork = true))
+        assertEquals(24, TaskBudget.callsFor(40, null, changeWork = true))
         assertTrue(TaskBudget.callsFor(40, 45, changeWork = true) >= 12)
             val root = Files.createTempDirectory("round6-budget").toFile()
             var calls = 0
@@ -297,9 +298,78 @@ class Round6FixesTest {
         assertTrue(AgentConstitution.check(export).any { it.rule == ConstitutionRule.SAFETY_BOUNDARY })
     }
 
+    @Test
+    fun aCompilerWritesTheFileEarlyAndTheStoredTitleIsTheOwnersWords() {
+        val root = Files.createTempDirectory("round6-early-write").toFile()
+        val requests = mutableListOf<ModelRequest>()
+        var calls = 0
+        val gateway = object : ModelGateway {
+            override fun complete(request: ModelRequest): ModelResponse {
+                calls++
+                requests += request
+                val heard = request.transcript.joinToString("\n") { it.content }
+                return if (heard.contains("Write the JavaScript file now")) {
+                    ModelResponse.ToolCall(
+                        "create_file",
+                        JSONObject().put("path", "compiler.js").put("content", PASSING_COMPILER).toString()
+                    )
+                } else {
+                    ModelResponse.ToolCall("list_files", """{"path":""}""")
+                }
+            }
+        }
+        val packaged = """
+            OPEN JOB (do not claim there is no prior task):
+            - id: job-1
+            - status: open
+            - goal: OPEN JOB (do not claim there is no prior task)
+            Current request:
+            Write a tiny compiler in JavaScript that turns arithmetic like (1+2)*3 into stack-machine instructions, run it, and test it on a few examples including a bad input
+        """.trimIndent()
+        val events = AutonomousAgent(root, emptyKnowledge(), gateway, AutonomousAgentConfig(maxTurns = 6))
+            .run(packaged)
+        assertTrue(calls in 2..6)
+        assertTrue(requests.first().tools.any { it.name == "create_file" })
+        assertTrue(requests.first().tools.none { it.name == "research_web" || it.name == "read_chat_history" })
+        requests.forEach { sent ->
+            val tokens = ContextBudget.estimateTokens(sent.system) +
+                ContextBudget.estimateTokens(sent.user) +
+                sent.transcript.sumOf { ContextBudget.estimateTokens(it.content) } +
+                ContextBudget.toolTokens(sent.tools)
+            assertTrue("request was $tokens tokens", tokens < 8_000)
+        }
+        val approval = events.last() as AutonomousAgentEvent.ApprovalRequired
+        assertTrue(approval.task.summary.contains("compiler.js"))
+        assertTrue(approval.task.summary.contains("I ran the examples and they matched."))
+        assertFalse(approval.task.summary.contains("I have not run this yet"))
+        assertFalse(approval.task.summary.contains("OPEN JOB"))
+        assertFalse(approval.task.request.contains("OPEN JOB"))
+        assertTrue(approval.task.request.contains("stack-machine"))
+        val experience = root.resolve(".coding-agent/experience.tsv").readText()
+        assertTrue(experience.contains("stack-machine"))
+        assertFalse(experience.contains("OPEN JOB"))
+        assertFalse(experience.contains("do not claim"))
+        assertFalse(root.resolve("compiler.js").exists())
+    }
+
     private fun emptyKnowledge() = object : AgentKnowledge {
         override fun search(query: String, limit: Int): List<KnowledgeHit> = emptyList()
     }
+
+    private val PASSING_COMPILER = """
+        var expr = String(process.argv[2] || "");
+        function bad(s) {
+          if (!s) return true;
+          if (/[+\-*/]$/.test(s)) return true;
+          if (s.indexOf("++") >= 0) return true;
+          if (/[^0-9+\-*/().\s]/.test(s)) return true;
+          return false;
+        }
+        if (bad(expr)) console.log("error");
+        else if (expr === "(1+2)*3") console.log("PUSH 1\nPUSH 2\nADD\nPUSH 3\nMUL");
+        else if (expr === "-3+1") console.log("PUSH -3\nPUSH 1\nADD");
+        else console.log("PUSH 0");
+    """.trimIndent()
 
     private fun json(body: String): HttpURLConnection =
         object : HttpURLConnection(java.net.URL("https://endoflife.date/api/kotlin.json")) {

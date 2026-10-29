@@ -121,4 +121,49 @@ class OwnerProviderSettingsTest {
         assertFalse(note.contains(cloudflareToken))
         assertFalse(note.contains("not-an-id"))
     }
+
+    @Test
+    fun groqPasswordAloneConnectsAndIsTheOnlyReadyHelper() {
+        val groqOnly = ModelSettings(
+            baseUrl = ProviderCatalog.GROQ_URL,
+            apiKey = "",
+            modelName = "openai/gpt-oss-120b",
+            groqApiKey = groqKey
+        )
+        assertTrue(groqOnly.validationErrors().isEmpty())
+        assertTrue(groqOnly.isRemoteConfigured())
+        assertNotNull(groqOnly.remoteGateway())
+        val names = ProviderCatalog.providerNames(groqOnly)
+        assertEquals(listOf("Groq"), names)
+        val status = groqOnly.statusSummary()
+        assertTrue(status.contains("Helper ready: Groq"))
+        assertFalse(status.contains("OpenRouter"))
+        assertFalse(status.contains("not connected"))
+        assertFalse(status.contains("openrouter.ai/keys"))
+        val endpoints = ProviderCatalog.endpoints(groqOnly)
+        assertTrue(endpoints.isNotEmpty())
+        assertTrue(endpoints.all { it.providerId == "groq" })
+        assertTrue(endpoints.all { it.baseUrl == ProviderCatalog.GROQ_URL })
+        assertTrue(endpoints.all { it.apiKey == groqKey })
+        assertTrue(endpoints.any { it.modelId == "openai/gpt-oss-120b" })
+    }
+
+    @Test
+    fun aGroqKeyPastedIntoTheMainBoxDoesNotInventOpenRouter() {
+        val duplicated = ModelSettings(
+            baseUrl = ProviderCatalog.GROQ_URL,
+            apiKey = groqKey,
+            modelName = "openai/gpt-oss-120b",
+            groqApiKey = groqKey
+        )
+        assertEquals(listOf("Groq"), ProviderCatalog.providerNames(duplicated))
+        assertFalse(duplicated.statusSummary().contains("OpenRouter"))
+        assertTrue(duplicated.statusSummary().contains("Groq"))
+        assertTrue(ProviderCatalog.endpoints(duplicated).none { it.providerId == "openrouter" })
+
+        val mainBoxOnly = duplicated.copy(groqApiKey = "")
+        assertEquals(listOf("Groq"), ProviderCatalog.providerNames(mainBoxOnly))
+        assertTrue(ProviderCatalog.endpoints(mainBoxOnly).all { it.apiKey == groqKey && it.providerId == "groq" })
+        assertFalse(mainBoxOnly.statusSummary().contains("OpenRouter"))
+    }
 }

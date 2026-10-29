@@ -225,16 +225,21 @@ data class ModelSettings(
     fun validationErrors(): List<String> {
         val s = normalized()
         val local = ModelEndpointPolicy.isLocalEndpoint(s.baseUrl)
-        val custom = s.baseUrl.isNotBlank() && !s.baseUrl.contains("openrouter.ai") && !local
+        val known = ProviderCatalog.providerIdForBase(s.baseUrl)
+        val knownKey = known != null && (ProviderCatalog.dedicatedKey(s, known).isNotBlank() || s.apiKey.isNotBlank())
+        val custom = s.baseUrl.isNotBlank() && !s.baseUrl.contains("openrouter.ai") && !local && known == null
         return buildList {
-            if (s.baseUrl.isBlank() || custom || local || s.apiKey.isNotBlank()) {
+            if (s.baseUrl.isBlank() || custom || local || s.apiKey.isNotBlank() || known != null) {
                 ModelEndpointPolicy.validate(s.baseUrl)?.let(::add)
             }
             if ((s.baseUrl.isBlank() || custom) && s.modelName.isBlank()) add("The helper name is missing.")
             if (custom && s.apiKey.isBlank() && !local) {
                 add("The secret password is missing, unless the helper is on this phone.")
             }
-            if (!custom && !s.hasAnyProviderKey() && !local) {
+            if (known != null && !knownKey && !local) {
+                add("The secret password is missing, unless the helper is on this phone.")
+            }
+            if (known == null && !custom && !s.hasAnyProviderKey() && !local) {
                 add(
                     "The secret password is missing. Paste the key from openrouter.ai/keys. It stays on this phone and is not written into the app."
                 )
