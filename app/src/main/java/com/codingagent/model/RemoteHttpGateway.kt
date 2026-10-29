@@ -60,10 +60,12 @@ class RemoteHttpGateway(
             configure(connection)
             val body = requestBody(request)
             body.put("stream", true)
-            connection.outputStream.use { it.write(body.toString().toByteArray(StandardCharsets.UTF_8)) }
+            val payload = body.toString()
+            connection.outputStream.use { it.write(payload.toByteArray(StandardCharsets.UTF_8)) }
             if (isCancelled(generation)) return ModelResponse.Failure("Cancelled")
             val code = connection.responseCode
             notifyQuota(connection, code)
+            noteHttp(code, payload.length / 4)
             if (code in 300..399) {
                 return ModelResponse.Failure("The helper tried to send me to a different web address. I stopped so your secret password was not sent there.")
             }
@@ -144,8 +146,10 @@ class RemoteHttpGateway(
                         sawToolCall = true
                         call.optString("id").takeIf { it.isNotBlank() }?.let { toolCallId = it }
                         val function = call.optJSONObject("function")
-                        function?.optString("name")?.takeIf { it.isNotBlank() }?.let { toolCallName = it }
-                        function?.optString("arguments")?.let { toolCallArguments.append(it) }
+                        function?.optString("name")?.takeIf { it.isNotBlank() }?.let {
+                            toolCallName = it.removePrefix("functions.")
+                        }
+                        appendArguments(toolCallArguments, function?.opt("arguments"))
                     }
                 }
             }
@@ -211,10 +215,12 @@ class RemoteHttpGateway(
         } ?: return if (isCancelled(generation)) ModelResponse.Failure("Cancelled") else ModelResponse.Failure("The code helper is not fully set up.")
         return try {
             configure(connection)
-            connection.outputStream.use { it.write(requestBody(request).toString().toByteArray(StandardCharsets.UTF_8)) }
+            val payload = requestBody(request).toString()
+            connection.outputStream.use { it.write(payload.toByteArray(StandardCharsets.UTF_8)) }
             if (isCancelled(generation)) return ModelResponse.Failure("Cancelled")
             val code = connection.responseCode
             notifyQuota(connection, code)
+            noteHttp(code, payload.length / 4)
             if (code in 300..399) {
                 return ModelResponse.Failure("The helper tried to send me to a different web address. I stopped so your secret password was not sent there.")
             }
@@ -399,12 +405,44 @@ class RemoteHttpGateway(
         return body
     }
 
+    private fun argumentsText(raw: Any?): String = when (raw) {
+        is JSONObject -> raw.toString()
+        is String -> raw.ifBlank { "{}" }
+        null, JSONObject.NULL -> "{}"
+        else -> raw.toString().ifBlank { "{}" }
+    }
+
+    private fun appendArguments(into: StringBuilder, raw: Any?) {
+        when (raw) {
+            null, JSONObject.NULL -> Unit
+            is JSONObject -> into.append(raw.toString())
+            is String -> if (raw.isNotEmpty()) into.append(raw)
+            else -> into.append(raw.toString())
+        }
+    }
+
+    private fun noteHttp(code: Int, promptTokens: Int) {
+        val connection = activeConnection.get()
+        val headers = listOf(
+            "retry-after",
+            "x-ratelimit-reset-tokens",
+            "x-ratelimit-reset-requests",
+            "x-ratelimit-remaining-tokens",
+            "x-ratelimit-remaining-requests"
+        ).mapNotNull { name ->
+            connection?.getHeaderField(name)?.let { "$name=$it" }
+        }.joinToString(" ")
+        com.codingagent.agent.DebugRunTrace.note(
+            "http model=${modelForRequest()} tokens~$promptTokens status=$code $headers"
+        )
+    }
+
     private fun responseFromChatMessage(message: JSONObject): ModelResponse {
         val calls = message.optJSONArray("tool_calls")
         if (calls != null && calls.length() > 0) {
             val first = calls.optJSONObject(0)
             val function = first?.optJSONObject("function") ?: first
-            val name = function?.optString("name").orEmpty()
+            val name = function?.optString("name").orEmpty().removePrefix("functions.")
             if (name.isBlank()) return ModelResponse.Failure("Model returned a tool call without a function name")
             val extra = calls.length() - 1
             val thought = buildString {
@@ -416,18 +454,18 @@ class RemoteHttpGateway(
             }
             return ModelResponse.ToolCall(
                 name,
-                function?.optString("arguments", "{}") ?: "{}",
+                argumentsText(function?.opt("arguments")),
                 thought,
                 first?.optString("id")
             )
         }
         val legacy = message.optJSONObject("function_call")
         if (legacy != null) {
-            val name = legacy.optString("name")
+            val name = legacy.optString("name").removePrefix("functions.")
             if (name.isNotBlank()) {
                 return ModelResponse.ToolCall(
                     name,
-                    legacy.optString("arguments", "{}"),
+                    argumentsText(legacy.opt("arguments")),
                     extractMessageText(message),
                     message.optString("id").takeIf { it.isNotBlank() }
                 )

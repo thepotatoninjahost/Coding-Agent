@@ -118,6 +118,21 @@ class LiveHttpFailureTest {
     }
 
     @Test
+    fun gptOssHarmonyTextAndNemotronXmlBothReachAPassingCard() {
+        listOf("harmony", "nemotron").forEach { style ->
+            GroqReplayServer(oversize = false, bodyStyle = style).use { server ->
+                val events = runCompiler(server)
+                val approval = events.last() as AutonomousAgentEvent.ApprovalRequired
+                assertTrue(approval.task.summary.contains("I ran the examples and they matched."))
+                assertTrue(approval.task.summary.contains("compiler.js"))
+                assertFalse(approval.task.summary.contains("I have not run this yet"))
+                assertFalse(approval.task.summary.contains("unfinished"))
+                assertEquals(200, server.statuses.single())
+            }
+        }
+    }
+
+    @Test
     fun aRequestBiggerThanTheMinuteLimitIsShortenedAndStillReachesTheCard() {
         GroqReplayServer(oversize = true).use { server ->
             val events = runCompiler(server)
@@ -393,7 +408,10 @@ private class ScriptedChatServer : AutoCloseable {
     }
 }
 
-private class GroqReplayServer(private val oversize: Boolean) : AutoCloseable {
+private class GroqReplayServer(
+    private val oversize: Boolean,
+    private val bodyStyle: String = "tool"
+) : AutoCloseable {
     val port: Int
     val statuses = java.util.Collections.synchronizedList(mutableListOf<Int>())
     private val socket: ServerSocket
@@ -437,6 +455,22 @@ private class GroqReplayServer(private val oversize: Boolean) : AutoCloseable {
 
     private fun chat(): ByteArray {
         val turn = chats.getAndIncrement()
+        if (bodyStyle == "harmony" || bodyStyle == "nemotron") {
+            statuses += 200
+            val text = if (bodyStyle == "harmony") {
+                val payload = org.json.JSONObject().put("path", "compiler.js").put("content", PASSING_COMPILER)
+                "<|channel|>commentary to=functions.create_file <|constrain|>json<|message|>$payload"
+            } else {
+                "<tool_call><function=create_file><parameter=path>compiler.js</parameter><parameter=content>$PASSING_COMPILER</parameter></function></tool_call>"
+            }
+            val chunk = org.json.JSONObject().put(
+                "choices",
+                org.json.JSONArray().put(
+                    org.json.JSONObject().put("delta", org.json.JSONObject().put("content", text))
+                )
+            )
+            return sse("data: $chunk\n\ndata: [DONE]\n\n")
+        }
         if (turn == 0) {
             statuses += 429
             val requested = if (oversize) 12_000 else 1_200

@@ -192,12 +192,14 @@ class AutonomousAgent(
         } finally {
             activeRunGeneration = -1L
             running.set(false)
+            DebugRunTrace.finish("run returned")
         }
     }
 
     private fun runInternal(request: String, onEvent: (AutonomousAgentEvent) -> Unit): List<AutonomousAgentEvent> {
         val normalized = request.trim()
         require(normalized.isNotEmpty()) { "A coding request is required" }
+        DebugRunTrace.start(root, OwnerWords.title(normalized))
         val taskId = UUID.randomUUID().toString()
         val events = mutableListOf<AutonomousAgentEvent>()
         var personalLogHealthy = true

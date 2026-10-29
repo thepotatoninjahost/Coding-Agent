@@ -350,6 +350,57 @@ class Round6FixesTest {
         assertFalse(experience.contains("OPEN JOB"))
         assertFalse(experience.contains("do not claim"))
         assertFalse(root.resolve("compiler.js").exists())
+        val trace = root.resolve(".coding-agent/run-trace.txt").readText()
+        assertTrue(trace.contains("tool create_file"))
+        assertTrue(trace.contains("end:"))
+        assertFalse(trace.contains("OPEN JOB"))
+        assertEquals("[redacted]", com.codingagent.agent.DebugRunTrace.redact("Bearer sk-live-secret").substringAfter("Bearer ").trim())
+    }
+
+    @Test
+    fun aMissingChatReloadStillShowsTheRequestAndTheOutcome() {
+        val onScreen = listOf(
+            com.codingagent.agent.ChatMessage(role = com.codingagent.agent.ChatRole.USER, content = "Write a tiny compiler")
+        )
+        val stored = listOf(
+            com.codingagent.agent.ChatMessage(role = com.codingagent.agent.ChatRole.AGENT, content = "This is unfinished. I have not run it, so nothing was saved.")
+        )
+        val merged = com.codingagent.agent.ChatVisibility.merge(onScreen, stored, "Write a tiny compiler")
+        assertTrue(merged.any { it.role == com.codingagent.agent.ChatRole.USER && it.content == "Write a tiny compiler" })
+        assertTrue(merged.any { it.content.contains("unfinished") })
+    }
+
+    @Test
+    fun gptOssHarmonyAndNemotronToolTextBecomeRealFileWrites() {
+        val compiler = JSONObject().put("path", "compiler.js").put("content", PASSING_COMPILER)
+        val harmony = "<|channel|>analysis<|message|>I will write the program.<|end|>" +
+            "<|channel|>commentary to=functions.create_file <|constrain|>json<|message|>" + compiler.toString()
+        val harmonyCall = com.codingagent.model.JsonModelResponseParser().parse(harmony) as com.codingagent.model.ModelResponse.ToolCall
+        assertEquals("create_file", harmonyCall.name)
+        assertTrue(harmonyCall.arguments.contains("compiler.js"))
+
+        val nemotron = """
+            <tool_call>
+            <function=create_file>
+            <parameter=path>
+            compiler.js
+            </parameter>
+            <parameter=content>
+            $PASSING_COMPILER
+            </parameter>
+            </function>
+            </tool_call>
+        """.trimIndent()
+        val nemotronCall = com.codingagent.model.JsonModelResponseParser().parse(nemotron) as com.codingagent.model.ModelResponse.ToolCall
+        assertEquals("create_file", nemotronCall.name)
+        assertTrue(nemotronCall.arguments.contains("PUSH"))
+
+        val wrapped = "<tool_call>\n" + JSONObject()
+            .put("name", "create_file")
+            .put("arguments", compiler)
+            .toString() + "\n</tool_call>"
+        val wrappedCall = com.codingagent.model.JsonModelResponseParser().parse(wrapped) as com.codingagent.model.ModelResponse.ToolCall
+        assertEquals("create_file", wrappedCall.name)
     }
 
     private fun emptyKnowledge() = object : AgentKnowledge {

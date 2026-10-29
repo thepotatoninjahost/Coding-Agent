@@ -12,7 +12,7 @@ object ToolPurpose {
         val query = args?.optString("query").orEmpty().trim()
         val command = args?.optString("command").orEmpty().trim()
         val explicitPurpose = args?.optString("purpose").orEmpty().trim()
-        if (explicitPurpose.isNotBlank()) return explicitPurpose
+        if (explicitPurpose.isNotBlank() && !isTechnical(explicitPurpose)) return explicitPurpose
         return when (name) {
             "list_files" ->
                 "Checking the project files${if (path.isNotBlank()) " under $path" else ""}."
@@ -38,5 +38,25 @@ object ToolPurpose {
                 "Rejecting the pending change."
             else -> "Working on the request."
         }
+    }
+
+    private fun isTechnical(text: String): Boolean {
+        val lower = text.lowercase()
+        return listOf(
+            "rhino", "console.log", "syntax", "parser", "lexer", "tokenizer",
+            "argv", "stdin", "bytecode", "ast", "command line", "command-line"
+        ).any { it in lower }
+    }
+}
+
+/** A new program the phone can write and run without looking through the project first. */
+object SelfContainedProgram {
+    fun matches(request: String): Boolean {
+        val text = request.lowercase()
+        if ("current request:" in text || "owner:" in text || text.contains("open job")) return false
+        val writing = listOf("write", "build", "create").any { it in text }
+        val program = listOf("javascript", "compiler", "program", "script").any { it in text }
+        val aboutExisting = listOf("this project", "the project", "this file", "the file ").any { it in text }
+        return writing && program && !aboutExisting
     }
 }

@@ -32,6 +32,7 @@ Every path below was read through its last line in this audit. `gradle/wrapper/g
 | `app/src/main/java/com/codingagent/agent/AutonomousAgentEvent.kt` | yes | None. | None. | None. |
 | `app/src/main/java/com/codingagent/agent/ChatApproval.kt` | yes | Approval summaries used protocol wording. | Rewritten in plain English. | None. |
 | `app/src/main/java/com/codingagent/agent/ChatWorkspace.kt` | yes | openJob!! could crash. Status text said Streaming and dumped model tokens, and said a check was 'ok'. Personal-log footer claimed notes were shortened. | Null-safe goal. Status text is plain English and no longer dumps tokens. Footer no longer claims shortening. | send() retries once only when a run has no ending event. |
+| `app/src/main/java/com/codingagent/agent/DebugRunTrace.kt` | yes | read in full: yes. A debug run on the phone left no plain-text log, so a failed compiler could not be diagnosed. | Debug builds append a plain-text trace under the project's .coding-agent/run-trace.txt. It records the request, each tool, the HTTP status and rate-limit headers, and why the run ended. Passwords are redacted. Release builds write nothing. | The trace is not encrypted. It is only written when the debug flag is on. |
 | `app/src/main/java/com/codingagent/agent/DegenerateOutput.kt` | yes | None. | None. | None. |
 | `app/src/main/java/com/codingagent/agent/ExperienceRecorder.kt` | yes | The stored task title was the internal OPEN JOB note. | The saved title is the owner's own sentence. The model can still see the job note. | None. |
 | `app/src/main/java/com/codingagent/agent/LessonContext.kt` | yes | None. | None. | None. |
@@ -218,5 +219,5 @@ Every path below was read through its last line in this audit. `gradle/wrapper/g
 | `app/src/main/java/com/codingagent/workspace/CodeRunner.kt` | yes | Generated programs were not run on the phone, so the card could not say whether they worked. | A printed crash or the word Infinity does not count as a clean error. | QuickJS needs a newer Android build, so JavaScript runs in Rhino. |
 | `app/src/main/java/com/codingagent/workspace/SearchReplace.kt` | yes | Whole files were sent inside JSON, and a small helper often cut them off or escaped them wrong. | An edit can be written as a SEARCH and REPLACE block in plain text. It must match once. Extra spaces are allowed once. A miss names the closest line. | None. |
 | `app/src/test/java/com/codingagent/core/RedesignAcceptanceTest.kt` | yes | The compiler, explain, and research tasks were not locked against a stand-in helper and an on-device run. | A JavaScript program is run for a good sum and a bad input. A Kotlin version question must answer 2.4.21 from October 8, 2026. An explain answer stays plain. A failed run is shown as not matching. | The helper in this test is scripted, not a live key. |
-Files listed: 212.
+Files listed: 213.
 

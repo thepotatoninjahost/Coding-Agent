@@ -134,7 +134,7 @@ class ChatWorkspace(
         } else {
             trimmed
         }
-        val packaged = packageWithMemory(executionRequest)
+        val packaged = if (SelfContainedProgram.matches(executionRequest)) executionRequest else packageWithMemory(executionRequest)
         val workLog = mutableListOf<String>()
         val result = if (agent == null) {
             null
@@ -439,6 +439,22 @@ data class ChatTurn(
     val response: ChatMessage,
     val result: AgentRuntimeResult?
 )
+
+/**
+ * The on-screen chat is a snapshot. A long run must still show the request and the outcome
+ * even when the saved copy cannot be read back.
+ */
+object ChatVisibility {
+    fun merge(onScreen: List<ChatMessage>, stored: List<ChatMessage>, request: String): List<ChatMessage> {
+        if (request.isNotBlank() && stored.any { it.role == ChatRole.USER && it.content == request }) return stored
+        if (stored.isEmpty()) return onScreen
+        val knownIds = stored.map { it.id }.toSet()
+        val extra = onScreen.filter { message ->
+            message.id !in knownIds && stored.none { it.role == message.role && it.content == message.content }
+        }
+        return stored + extra
+    }
+}
 
 
 private sealed class MemoryCommand {

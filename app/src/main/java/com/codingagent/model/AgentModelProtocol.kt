@@ -125,7 +125,7 @@ list_files, read_file, continue_result, read_chat_history, search_chat_history, 
         ),
         ModelToolDefinition(
             "create_file",
-            "Stage a new file under about 150 lines. Bigger files are created, then extended with append_chunk. Nothing is saved until the owner says yes twice.",
+            "Stage one whole new file. Nothing is saved until the owner says yes.",
             """{"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"},"purpose":{"type":"string"}},"required":["path","content"]}"""
         ),
         ModelToolDefinition(

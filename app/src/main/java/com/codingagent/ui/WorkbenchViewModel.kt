@@ -536,9 +536,23 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
             }
             return
         }
-        _ui.update { it.copy(chatInput = "", status = AgentStatus.WORKING, detail = "Working on what you asked.", agentBusy = true) }
+        val shownNow = com.codingagent.agent.ChatMessage(
+            role = com.codingagent.agent.ChatRole.USER,
+            content = trimmed
+        )
+        _ui.update {
+            it.copy(
+                chatMessages = it.chatMessages + shownNow,
+                chatInput = "",
+                status = AgentStatus.WORKING,
+                detail = "Working on what you asked.",
+                agentBusy = true
+            )
+        }
         progressEpoch.incrementAndGet()
         activeJob = viewModelScope.launch(Dispatchers.IO) {
+            var sendResult: com.codingagent.agent.ChatTurn? = null
+            var failed: Throwable? = null
             try {
                 if (_ui.value.workspace == null && asksToStartProject(trimmed)) {
                     val created = createEmptyProject(privateDir, null)
@@ -552,9 +566,23 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
                     rebuildChat()
                     chat ?: error("Chat workspace could not be created")
                 }
-                val sendResult = workspace.send(trimmed)
+                sendResult = workspace.send(trimmed)
+            } catch (t: Throwable) {
+                failed = t
+                runCatching {
+                    store.recordChatMessage(
+                        com.codingagent.agent.ChatMessage(
+                            role = com.codingagent.agent.ChatRole.AGENT,
+                            content = "This request did not finish. ${t.message ?: "Something went wrong."}"
+                        )
+                    )
+                }
+            } finally {
+                val result = sendResult?.result
+                val error = failed
                 withContext(Dispatchers.Main) {
-                    val result = sendResult.result
+                    progressEpoch.incrementAndGet()
+                    val stored = runCatching { store.recentChatMessages(Int.MAX_VALUE).asReversed() }.getOrDefault(emptyList())
                     val proposal = when (result) {
                         is AgentRuntimeResult.NeedsApproval ->
                             agent?.pendingProposals()?.firstOrNull { it.id == result.proposalId }
@@ -562,7 +590,7 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
                     }
                     _ui.update {
                         it.copy(
-                            chatMessages = store.recentChatMessages(Int.MAX_VALUE).asReversed(),
+                            chatMessages = com.codingagent.agent.ChatVisibility.merge(it.chatMessages, stored, trimmed),
                             pendingApproval = proposal != null,
                             pendingProposal = proposal,
                             pendingProposalId = proposal?.id,
@@ -575,38 +603,28 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
                             pendingPhoneLock = proposal?.let { pending ->
                                 RiskyChange.kinds(pending.changeSet.changes, pending.request).isNotEmpty()
                             } ?: false,
-                            status = when (result) {
-                                is AgentRuntimeResult.NeedsApproval -> AgentStatus.APPROVAL
-                                is AgentRuntimeResult.Failed -> AgentStatus.FAILED
+                            status = when {
+                                error != null -> AgentStatus.FAILED
+                                result is AgentRuntimeResult.NeedsApproval -> AgentStatus.APPROVAL
+                                result is AgentRuntimeResult.Failed -> AgentStatus.FAILED
                                 else -> AgentStatus.READY
                             },
-                            detail = when (result) {
-                                is AgentRuntimeResult.NeedsApproval ->
+                            detail = when {
+                                error != null -> error.message ?: "This request did not finish."
+                                result is AgentRuntimeResult.NeedsApproval ->
                                     if (proposal?.let { RiskyChange.kinds(it.changeSet.changes, it.request).isNotEmpty() } == true) {
                                         "Please say yes twice before anything is saved."
                                     } else {
                                         "One yes saves this file."
                                     }
-                                is AgentRuntimeResult.Failed ->
+                                result is AgentRuntimeResult.Failed ->
                                     result.task?.summary ?: "That request did not finish."
                                 else -> "Ready for your next request."
-                            }
+                            },
+                            agentBusy = false
                         )
                     }
-                }
-            } catch (t: Throwable) {
-                withContext(Dispatchers.Main) {
-                    _ui.update {
-                        it.copy(
-                            status = AgentStatus.FAILED,
-                            detail = t.message ?: t.javaClass.simpleName
-                        )
-                    }
-                }
-            } finally {
-                withContext(Dispatchers.Main) {
                     activeJob = null
-                    _ui.update { it.copy(agentBusy = false) }
                     val queue = _ui.value.messageQueue
                     if (queue.isNotEmpty()) {
                         val next = queue.first()

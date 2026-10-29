@@ -62,9 +62,13 @@ class AgentToolDispatch(
     fun applySearchBlocks(request: String, blocks: List<SearchReplace.Block>): String {
         val notes = blocks.map { block ->
             val base = stagedOrSaved(block.path)
-            when (val applied = SearchReplace.apply(base, block.search, block.replace)) {
-                is SearchReplace.ApplyResult.Failed -> "ERROR: ${block.path}: ${applied.reason}"
-                is SearchReplace.ApplyResult.Applied -> stageContent(request, block.path, applied.content)
+            if (base == null && block.replace.isNotBlank()) {
+                stageContent(request, block.path, block.replace)
+            } else {
+                when (val applied = SearchReplace.apply(base, block.search, block.replace)) {
+                    is SearchReplace.ApplyResult.Failed -> "ERROR: ${block.path}: ${applied.reason}"
+                    is SearchReplace.ApplyResult.Applied -> stageContent(request, block.path, applied.content)
+                }
             }
         }
         return notes.joinToString("\n")
@@ -304,8 +308,8 @@ class AgentToolDispatch(
         val path = arguments.getString("path")
         val reason = arguments.optString("reason").trim()
         val content = arguments.getString("content")
-        if (content.lines().size > 150) {
-            return "ERROR: That file is too long for one write. Create the first part, then use append_chunk for the rest."
+        if (content.length > ARG_LIMIT) {
+            return "ERROR: That file is too long for one write. Send the whole program in one shorter file."
         }
         StagedSourceCheck.problem(path, content)?.let { return "ERROR: $it" }
         val pending = mutations.pending().firstOrNull()
@@ -379,6 +383,7 @@ class AgentToolDispatch(
             return "ERROR: That edit is too big for one call. Use several smaller edits."
         }
         val base = stagedOrSaved(path)
+        if (base == null && newText.isNotBlank()) return stageContent(requestContext, path, newText)
         return when (val applied = SearchReplace.apply(base, oldText, newText)) {
             is SearchReplace.ApplyResult.Failed -> "ERROR: ${applied.reason}"
             is SearchReplace.ApplyResult.Applied -> stageContent(requestContext, path, applied.content)
