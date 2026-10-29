@@ -51,7 +51,7 @@ class ActObserveLoop(
         var askedToWrite = false
         var learnedCeiling: Int? = null
         val dailyRemaining = com.codingagent.model.OpenRouterDailyBudget.remaining()
-        val stepLimit = if (focused) 4 else config.maxTurns
+        val stepLimit = if (focused) 8 else config.maxTurns
         val maxSteps = TaskBudget.callsFor(stepLimit, dailyRemaining, changeWork)
         TaskBudget.warning(dailyRemaining, maxSteps)?.let { emit(AutonomousAgentEvent.Phase("MODEL", it)) }
         DebugRunTrace.note("steps=$maxSteps focused=$focused")
@@ -62,8 +62,9 @@ class ActObserveLoop(
             if (!focused) appendLine(repoMap())
             if (focused) {
                 appendLine("Write the whole program in one create_file call. Use JavaScript. Path: compiler.js.")
+                appendLine(com.codingagent.workspace.PhoneJavaScript.rules())
                 appendLine("Do not look around the project. Do not search. After you write it, the phone runs it.")
-                appendLine("If the phone says it did not match, fix that file and write it again.")
+                appendLine("If the phone says it did not match, call create_file again with the whole fixed file. That replaces the draft.")
             } else {
                 appendLine("Do one thing each turn: a tool, a SEARCH/REPLACE block, or submit.")
                 appendLine("When the phone must run the program, write JavaScript.")
@@ -188,10 +189,13 @@ class ActObserveLoop(
                             lastRun = gated
                             emit(AutonomousAgentEvent.Phase("RUN", gated.stdout.take(500)))
                             if (!gated.passed) {
-                                transcript += ModelMessage(
-                                    "user",
-                                    "The phone ran the program and it did not match.\n${gated.stdout}\n${gated.stderr}\nFix the file, then write it again. A bad input must print the word error."
-                                )
+                                val brief = fixBrief(gated)
+                                if (focused) {
+                                    transcript.clear()
+                                    transcript += ModelMessage("user", brief)
+                                } else {
+                                    transcript += ModelMessage("user", brief)
+                                }
                             } else if (readyToShow(lastRun)) {
                                 return showApproval(lastRun, taskId, title, plan, events)
                             }
@@ -358,9 +362,20 @@ class ActObserveLoop(
             DebugRunTrace.finish("approval after a passing run")
             return showApproval(report, taskId, request, plan, events)
         }
-        mutations.pending().firstOrNull()?.let { mutations.reject(it.id) }
+        val draft = stagedFile()
         val summary = if (report != null && report.ran) {
-            "This is unfinished. The phone ran the program and it did not match.\n${report.stdout.take(500)}\nNothing was saved."
+            buildString {
+                append("This is unfinished. The phone ran the program and it did not match.\n")
+                append(report.stdout.take(800))
+                if (draft != null) {
+                    append("\n\nThe draft is still here. Nothing is saved until you say yes.\nFile: ")
+                    append(draft.first)
+                    append('\n')
+                    append(draft.second.take(1500))
+                } else {
+                    append("\nNothing was saved.")
+                }
+            }
         } else {
             "This is unfinished. I have not run it, so nothing was saved."
         }
@@ -445,6 +460,28 @@ class ActObserveLoop(
 
     private fun needsRun(proposal: com.codingagent.workspace.PendingChangeProposal): Boolean =
         proposal.changeSet.changes.any { it.path.endsWith(".js") || it.path.endsWith(".py") }
+
+    private fun stagedFile(): Pair<String, String>? {
+        val change = mutations.pending().firstOrNull()?.changeSet?.changes?.firstOrNull { !it.after.isNullOrBlank() }
+            ?: return null
+        return change.path to change.after.orEmpty()
+    }
+
+    private fun fixBrief(report: RunReport): String {
+        val draft = stagedFile()
+        return buildString {
+            appendLine("The phone ran the program and it did not match.")
+            appendLine(report.stdout.take(800))
+            if (report.stderr.isNotBlank()) appendLine(report.stderr.take(400))
+            if (draft != null) {
+                appendLine("Current file ${draft.first}:")
+                appendLine(draft.second.take(2500))
+            }
+            appendLine("Call create_file again with the whole fixed file. That replaces this draft.")
+            appendLine("A bad input must print the word error.")
+            append(com.codingagent.workspace.PhoneJavaScript.rules())
+        }
+    }
 
     private fun gateStagedJavaScript(request: String): com.codingagent.workspace.RunReport? {
         val proposal = mutations.pending().firstOrNull() ?: return null

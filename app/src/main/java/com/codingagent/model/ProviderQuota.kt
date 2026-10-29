@@ -90,14 +90,10 @@ class ProviderQuotaBook(private val file: File? = null) {
                 }
                 ModelFailure.isRequestTooLarge(message) -> {
                     val model = models.getOrPut(key(providerId, modelId)) { Gate() }
-                    model.tooLargeStrikes += 1
-                    if (model.tooLargeStrikes >= 2) {
-                        model.exhaustedUntil = maxOf(model.exhaustedUntil, now + MODEL_PARK_MS)
-                    } else {
-                        // A 429 that only says the request is bigger than the minute bucket
-                        // must not park the helper. The caller shortens the request and tries again.
-                        model.exhaustedUntil = 0L
-                    }
+                    // A request that is too big is shortened and tried again. It must not
+                    // lock the helper for hours, even after several strikes.
+                    model.tooLargeStrikes = 0
+                    model.exhaustedUntil = 0L
                 }
                 ModelFailure.isRejectedKey(message) -> {
                     providers.getOrPut(providerId) { Gate() }.keyRejected = true
@@ -180,6 +176,13 @@ class ProviderQuotaBook(private val file: File? = null) {
                 exhaustedUntil = item.optLong("exhaustedUntil", 0L)
                 keyRejected = item.optBoolean("keyRejected", false)
                 tooLargeStrikes = item.optInt("tooLargeStrikes", 0)
+                if (tooLargeStrikes > 0) {
+                    tooLargeStrikes = 0
+                    val requestsLeft = remaining
+                    if (requestsLeft == null || requestsLeft > 0 || exhaustedUntil > System.currentTimeMillis() + 120_000L) {
+                        exhaustedUntil = 0L
+                    }
+                }
             }
         }
     }

@@ -285,6 +285,7 @@ class AgentToolDispatch(
             newText
         }
         StagedSourceCheck.problem(path, proposed)?.let { return "ERROR: $it" }
+        replacePendingDraft()
         return when (val result = mutations.propose(
             request = requestContext.ifBlank { "replace_text $path" },
             operations = listOf(
@@ -312,14 +313,7 @@ class AgentToolDispatch(
             return "ERROR: That file is too long for one write. Send the whole program in one shorter file."
         }
         StagedSourceCheck.problem(path, content)?.let { return "ERROR: $it" }
-        val pending = mutations.pending().firstOrNull()
-        if (pending != null) {
-            val sameFile = pending.changeSet.changes.any { it.path.trim().trimStart('/') == path.trim().trimStart('/') }
-            if (!sameFile) {
-                return "ERROR: Another change is waiting for a yes or a no. Finish that one before starting a different file."
-            }
-            mutations.reject(pending.id)
-        }
+        replacePendingDraft()
         return when (val result = mutations.propose(
             request = requestContext.ifBlank { "create_file $path" },
             operations = listOf(
@@ -425,16 +419,13 @@ class AgentToolDispatch(
         return "exit=${report.exitCode} timed_out=${report.timedOut} runner=${report.runner}\n$body\n${report.stderr}\n${ChangeDiff.runSentence(report)}"
     }
 
+    private fun replacePendingDraft() {
+        mutations.pending().toList().forEach { mutations.reject(it.id) }
+    }
+
     private fun stageContent(request: String, path: String, content: String): String {
         StagedSourceCheck.problem(path, content)?.let { return "ERROR: $it" }
-        val pending = mutations.pending().firstOrNull()
-        if (pending != null) {
-            val sameFile = pending.changeSet.changes.any { it.path.trim().trimStart('/') == path.trim().trimStart('/') }
-            if (!sameFile) {
-                return "ERROR: Another change is waiting for a yes or a no. Finish that one before starting a different file."
-            }
-            mutations.reject(pending.id)
-        }
+        replacePendingDraft()
         val onDisk = runCatching { files.read(path).content }.getOrNull()
         val operation = if (onDisk == null) {
             TaskOperation(OperationKind.CREATE_FILE, path, text = content)

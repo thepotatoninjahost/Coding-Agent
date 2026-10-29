@@ -358,6 +358,92 @@ class Round6FixesTest {
     }
 
     @Test
+    fun aFailedDraftIsReplacedAndThePhoneErrorIsSentBack() {
+        val root = Files.createTempDirectory("round6-replace-draft").toFile()
+        val broken = """
+            async function compile(text) {
+              console.log(text);
+            }
+            console.log(process.argv[2]);
+        """.trimIndent()
+        val requests = mutableListOf<ModelRequest>()
+        val gateway = object : ModelGateway {
+            override fun complete(request: ModelRequest): ModelResponse {
+                requests += request
+                val body = if (requests.size == 1) broken else PASSING_COMPILER
+                val path = if (requests.size == 1) "compiler.js" else "program.js"
+                return ModelResponse.ToolCall(
+                    "create_file",
+                    JSONObject().put("path", path).put("content", body).toString()
+                )
+            }
+        }
+        val events = AutonomousAgent(root, emptyKnowledge(), gateway, AutonomousAgentConfig(maxTurns = 6))
+            .run("Write a tiny compiler in JavaScript that turns arithmetic like (1+2)*3 into stack-machine instructions, run it, and test it on a few examples including a bad input")
+        val tools = events.filterIsInstance<AutonomousAgentEvent.ToolFinished>()
+        assertTrue(tools.none { it.result.contains("Another change is waiting") })
+        assertTrue(requests.size >= 2)
+        val heard = requests[1].user + requests[1].transcript.joinToString("\n") { it.content }
+        assertTrue(heard.contains("missing"))
+        assertTrue(heard.contains("async function"))
+        assertTrue(requests[1].transcript.size <= 2)
+        val tokens = ContextBudget.estimateTokens(requests[1].system) +
+            ContextBudget.estimateTokens(requests[1].user) +
+            requests[1].transcript.sumOf { ContextBudget.estimateTokens(it.content) } +
+            ContextBudget.toolTokens(requests[1].tools)
+        assertTrue("second request was $tokens tokens", tokens < 8_000)
+        val approval = events.last() as AutonomousAgentEvent.ApprovalRequired
+        assertTrue(approval.task.summary.contains("I ran the examples and they matched."))
+        assertFalse(approval.task.summary.contains("I have not run this yet"))
+        assertFalse(root.resolve("compiler.js").exists())
+        assertFalse(root.resolve("program.js").exists())
+    }
+
+    @Test
+    fun phoneRunsTypicalGptOssJavaScriptAndRejectsAsync() {
+        val code = """
+            const add = (a, b) => a + b;
+            let pair = [1, 2];
+            let x = pair[0];
+            let y = pair[1];
+            const label = "sum " + add(x, y);
+            let total = 0;
+            var nums = process.argv.slice(2);
+            for (var i = 0; i < nums.length; i++) total += Number(nums[i]);
+            console.log(label);
+            console.log(String(total));
+            console.log(String(require("fs").readFileSync("in", "utf8")).trim());
+        """.trimIndent()
+        val report = com.codingagent.workspace.DeviceCodeRunner.run(
+            com.codingagent.workspace.ProgramRequest("javascript", code, args = listOf("4", "5"), stdin = "hello")
+        )
+        assertEquals(0, report.exitCode)
+        assertTrue(report.stdout.contains("sum 3"))
+        assertTrue(report.stdout.contains("9"))
+        assertTrue(report.stdout.contains("hello"))
+        val modern = """
+            const label = `sum ${'$'}{1 + 2}`;
+            let [x, y] = [1, 2];
+            const add = (a, b) => a + b;
+            let total = 0;
+            for (let n of [4, 5]) total += n;
+            console.log(label);
+            console.log(String(add(x, y)));
+            console.log(String(total));
+        """.trimIndent()
+        val es6 = com.codingagent.workspace.DeviceCodeRunner.run(
+            com.codingagent.workspace.ProgramRequest("javascript", modern)
+        )
+        assertEquals(es6.stderr, 0, es6.exitCode)
+        assertTrue(es6.stdout.contains("sum 3"))
+        val async = com.codingagent.workspace.DeviceCodeRunner.run(
+            com.codingagent.workspace.ProgramRequest("javascript", "async function compile(text) { console.log(text); }\n")
+        )
+        assertTrue(async.exitCode != 0)
+        assertTrue(async.stderr.contains("missing ;"))
+    }
+
+    @Test
     fun aMissingChatReloadStillShowsTheRequestAndTheOutcome() {
         val onScreen = listOf(
             com.codingagent.agent.ChatMessage(role = com.codingagent.agent.ChatRole.USER, content = "Write a tiny compiler")

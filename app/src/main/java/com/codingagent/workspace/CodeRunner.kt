@@ -40,6 +40,19 @@ fun interface CodeRunner {
     fun run(request: ProgramRequest): RunReport
 }
 
+object PhoneJavaScript {
+    /**
+     * Rhino 1.7.15 at ES6. Checked by running each feature through this engine.
+     * let, const, arrows, template strings, for-of, destructuring, rest, and ** work.
+     * class, spread, default parameters, async/await, ?., ??, and import do not.
+     */
+    fun rules(): String = """
+        This phone runs JavaScript in Rhino at ES6. You may use var, let, const, function, arrow functions, template strings, for-of with var or let, destructuring, rest parameters, and **.
+        Do not use class, for (const ... of ...), the spread operator, default parameters, async, await, import, export, optional chaining (?.), nullish coalescing (??), or private fields (#). async fails with "missing ; before statement".
+        console.log prints a line. process.argv[2] is the text to compile. require("fs").readFileSync() returns that same text. Write the whole program in one create_file. A later create_file replaces the draft.
+    """.trimIndent()
+}
+
 object DeviceCodeRunner : CodeRunner {
     override fun run(request: ProgramRequest): RunReport {
         val language = request.language.lowercase()
@@ -95,7 +108,15 @@ object DeviceCodeRunner : CodeRunner {
             function readFile(name) { return Object.prototype.hasOwnProperty.call(__files, name) ? __files[name] : ""; }
             var __args = [$args];
             var __stdin = ${jsString(request.stdin)};
-            var process = { argv: ["javascript", "program.js"].concat(__args) };
+            var process = { argv: ["javascript", "program.js"].concat(__args), env: {} };
+            var fs = { readFileSync: function(){ return __stdin; }, writeFileSync: function(){} };
+            var module = { exports: {} };
+            var exports = module.exports;
+            function require(name) {
+              if (name === "fs") return fs;
+              if (Object.prototype.hasOwnProperty.call(__files, name)) return __files[name];
+              return {};
+            }
             ${request.code}
             __out.join("\n");
         """.trimIndent()
@@ -131,6 +152,7 @@ object DeviceCodeRunner : CodeRunner {
             val cx = factory.enterContext()
             try {
                 cx.optimizationLevel = -1
+                cx.languageVersion = Context.VERSION_ES6
                 cx.instructionObserverThreshold = 10_000
                 val scope = cx.initStandardObjects()
                 val value = cx.evaluateString(scope, script, "program.js", 1, null)

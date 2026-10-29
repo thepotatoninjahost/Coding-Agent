@@ -35,7 +35,7 @@ object ContextBudget {
 
         Make exactly one tool call per turn and include a purpose field. Read real files. Never invent paths, file contents, or test results.
         Code changes (create_file, replace_text) only STAGE a proposal. The owner must approve twice. Never claim a change was applied until then.
-        When the phone must run the program, write JavaScript. Run it after you write it. If the run fails, fix it. If you did not run it, say you have not run it. Do not say the result is correct unless a run showed that.
+        When the phone must run the program, write JavaScript. Phone JavaScript is Rhino ES6: let, const, arrows, and template strings are fine. Do not use class, async, await, import, spread, ?., or ??. Run it after you write it. If the run fails, fix it. If you did not run it, say you have not run it. Do not say the result is correct unless a run showed that.
         A long file is read in parts. If END_OF_FILE is false, call read_file again with the same path and startCharacter set to NEXT_START_CHARACTER. Do not call continue_result for a file. Do not start again at 0. If the whole file is already here, do not read it again.
         After create_file or replace_text stages a file, call review_examples with at least two examples, or run_program. Include a negative number, a decimal, a bad input that should print the word error, and a divide by zero. Do not describe the file. Do not say it works until a run matched.
         When research_web returns a sentence that says was published on and names a Source, that sentence is the answer. Stop searching and give the owner that sentence.

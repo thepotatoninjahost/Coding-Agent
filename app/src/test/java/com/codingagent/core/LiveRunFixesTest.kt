@@ -115,7 +115,15 @@ class LiveRunFixesTest {
         quota.noteFailure("groq", "qwen/qwen3.8-27b", "Model HTTP 413: Request too large. OTPM limit 1000", now)
         assertTrue(quota.isAvailable("groq", "qwen/qwen3.8-27b", now + 1_000))
         quota.noteFailure("groq", "qwen/qwen3.8-27b", "Model HTTP 413: Request too large. OTPM limit 1000", now)
-        assertFalse(quota.isAvailable("groq", "qwen/qwen3.8-27b", now + 1_000))
+        assertTrue(quota.isAvailable("groq", "qwen/qwen3.8-27b", now + 1_000))
+        assertTrue(quota.isAvailable("groq", "qwen/qwen3.8-27b", now + ProviderQuotaBook.MODEL_PARK_MS))
+        val saved = Files.createTempDirectory("quota-strikes").toFile().resolve("quota.json")
+        val far = now + ProviderQuotaBook.MODEL_PARK_MS
+        saved.writeText(
+            """{"models":[{"id":"groq\nopenai/gpt-oss-120b","exhaustedUntil":$far,"remaining":999,"tooLargeStrikes":2,"keyRejected":false}]}"""
+        )
+        val loaded = ProviderQuotaBook(saved)
+        assertTrue(loaded.isAvailable("groq", "openai/gpt-oss-120b", now + 1_000))
         quota.noteFailure("groq", "openai/gpt-oss-120b", "UnknownHostException: 198.18.0.1", now)
         assertTrue(quota.isAvailable("groq", "openai/gpt-oss-120b", now + 1_000))
         val network = ModelFailure.humanize("UnknownHostException: 198.18.0.1")
