@@ -154,12 +154,17 @@ object ProviderCatalog {
     fun endpoints(settings: ModelSettings): List<ProviderEndpoint> {
         val s = settings.normalized()
         val out = mutableListOf<ProviderEndpoint>()
-        if (s.apiKey.isNotBlank() && s.baseUrl.contains("openrouter.ai")) {
+        val otherProviderAddress = listOf("groq.com", "generativelanguage", "mistral.ai", "sambanova", "cerebras", "requesty", "aimlapi", "cloudflare")
+            .any { it in s.baseUrl }
+        if (s.apiKey.isNotBlank() && (s.baseUrl.contains("openrouter.ai") || s.baseUrl.isBlank() || otherProviderAddress)) {
+            val openRouterBase = if (s.baseUrl.contains("openrouter.ai")) s.baseUrl else ModelSettings.OPENROUTER_BASE_URL
             bundled.filter { it.providerId == "openrouter" && !OpenRouterFreeModels.isRetired(it.modelId) }.forEach { model ->
-                out += ProviderEndpoint("openrouter", model.plainName, model.modelId, s.baseUrl, s.apiKey)
+                out += ProviderEndpoint("openrouter", model.plainName, model.modelId, openRouterBase, s.apiKey)
             }
-            if (s.modelName.isNotBlank() && !OpenRouterFreeModels.isRetired(s.modelName) && out.none { it.modelId == s.modelName }) {
-                out += ProviderEndpoint("openrouter", "Chosen helper", s.modelName, s.baseUrl, s.apiKey)
+            if (s.modelName.isNotBlank() && !OpenRouterFreeModels.isRetired(s.modelName) && out.none { it.modelId == s.modelName } &&
+                s.modelName.endsWith(":free")
+            ) {
+                out += ProviderEndpoint("openrouter", "Chosen helper", s.modelName, openRouterBase, s.apiKey)
             }
         } else if (s.baseUrl.isNotBlank() && s.modelName.isNotBlank() &&
             (s.apiKey.isNotBlank() || ModelEndpointPolicy.isLocalEndpoint(s.baseUrl))

@@ -166,7 +166,7 @@ class ChatWorkspace(
             when (val terminal = events.lastOrNull()) {
                 is AutonomousAgentEvent.ApprovalRequired -> AgentRuntimeResult.NeedsApproval(
                     terminal.task,
-                    ChangeDiff.phoneCard(terminal.proposal),
+                    terminal.task.summary,
                     terminal.proposal.id
                 )
                 is AutonomousAgentEvent.Completed -> asRuntime(agent, terminal.task)
@@ -195,7 +195,7 @@ class ChatWorkspace(
         if (task.status == "needs-approval" || task.status == "waiting-approval") {
             val proposal = agent.pendingProposals().firstOrNull()
             if (proposal != null) {
-                return AgentRuntimeResult.NeedsApproval(task, ChangeDiff.phoneCard(proposal), proposal.id)
+                return AgentRuntimeResult.NeedsApproval(task, task.summary, proposal.id)
             }
         }
         if (task.status == "needs-input") {

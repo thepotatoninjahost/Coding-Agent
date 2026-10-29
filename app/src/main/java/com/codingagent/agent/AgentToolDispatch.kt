@@ -308,6 +308,14 @@ class AgentToolDispatch(
             return "ERROR: That file is too long for one write. Create the first part, then use append_chunk for the rest."
         }
         StagedSourceCheck.problem(path, content)?.let { return "ERROR: $it" }
+        val pending = mutations.pending().firstOrNull()
+        if (pending != null) {
+            val sameFile = pending.changeSet.changes.any { it.path.trim().trimStart('/') == path.trim().trimStart('/') }
+            if (!sameFile) {
+                return "ERROR: Another change is waiting for a yes or a no. Finish that one before starting a different file."
+            }
+            mutations.reject(pending.id)
+        }
         return when (val result = mutations.propose(
             request = requestContext.ifBlank { "create_file $path" },
             operations = listOf(

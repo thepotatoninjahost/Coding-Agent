@@ -183,6 +183,75 @@ class Round6FixesTest {
     }
 
     @Test
+    fun aBuggyCompilerIsRunAndFixedBeforeTheCard() {
+        val root = Files.createTempDirectory("round6-buggy").toFile()
+        val buggy = """
+            var expr = String(process.argv[2] || "");
+            console.log("PUSH " + expr);
+        """.trimIndent()
+        val fixed = """
+            var expr = String(process.argv[2] || "");
+            function bad(s) {
+              if (!s) return true;
+              if (/[+\-*/]$/.test(s)) return true;
+              if (s.indexOf("++") >= 0) return true;
+              if (/[^0-9+\-*/().\s]/.test(s)) return true;
+              return false;
+            }
+            if (bad(expr)) console.log("error");
+            else if (expr === "(1+2)*3") console.log("PUSH 1\nPUSH 2\nADD\nPUSH 3\nMUL");
+            else if (expr === "-3+1") console.log("PUSH -3\nPUSH 1\nADD");
+            else console.log("PUSH 0");
+        """.trimIndent()
+        var calls = 0
+        val gateway = object : ModelGateway {
+            override fun complete(request: ModelRequest): ModelResponse {
+                calls++
+                val body = if (calls == 1) buggy else fixed
+                return ModelResponse.ToolCall(
+                    "create_file",
+                    JSONObject().put("path", "compiler.js").put("content", body).toString()
+                )
+            }
+        }
+        val events = AutonomousAgent(root, emptyKnowledge(), gateway).run(
+            "Write a tiny compiler in JavaScript that turns arithmetic like (1+2)*3 into stack-machine instructions, run it, and test it on a few examples including a bad input"
+        )
+        val approvalIndex = events.indexOfFirst { it is AutonomousAgentEvent.ApprovalRequired }
+        assertTrue(approvalIndex > 0)
+        val before = events.take(approvalIndex).joinToString("\n")
+        assertTrue(before.contains("did not match") || before.contains("1+"))
+        val approval = events[approvalIndex] as AutonomousAgentEvent.ApprovalRequired
+        assertTrue(approval.task.summary.contains("compiler.js"))
+        assertTrue(approval.task.summary.contains("I ran the examples and they matched."))
+        assertTrue(approval.task.summary.contains("1+"))
+        assertFalse(approval.task.summary.contains("I have not run this yet"))
+        assertFalse(approval.task.summary.contains("OPEN JOB"))
+        assertFalse(approval.task.summary.contains("PROPOSED CHANGES"))
+        assertTrue(calls >= 2)
+        assertFalse(root.resolve("compiler.js").exists())
+    }
+
+    @Test
+    fun aRequestThatIsTooBigTriesAgainAndThenSaysUnfinished() {
+        val root = Files.createTempDirectory("round6-too-big").toFile()
+        var calls = 0
+        val gateway = object : ModelGateway {
+            override fun complete(request: ModelRequest): ModelResponse {
+                calls++
+                return ModelResponse.Failure("Model HTTP 413: Request too large")
+            }
+        }
+        val events = AutonomousAgent(root, emptyKnowledge(), gateway, AutonomousAgentConfig(maxTurns = 6))
+            .run("Build a tiny compiler in JavaScript")
+        val last = events.last() as AutonomousAgentEvent.Completed
+        assertTrue(calls >= 3)
+        assertTrue(last.task.summary.contains("unfinished"))
+        assertTrue(last.task.summary.contains("Nothing was saved"))
+        assertTrue(events.none { it is AutonomousAgentEvent.ApprovalRequired })
+    }
+
+    @Test
     fun namedVersionIsNotReplacedByTheLatestRelease() {
         val fact = StructuredSources.answer("Kotlin 2.0.0 release date May 2024") {
             json("""[{"cycle":"2.4","latest":"2.4.21","releaseDate":"2026-10-08"}]""")

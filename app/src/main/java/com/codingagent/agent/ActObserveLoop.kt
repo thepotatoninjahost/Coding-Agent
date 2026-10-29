@@ -88,6 +88,22 @@ class ActObserveLoop(
             }
             when (action) {
                 is ModelResponse.Failure -> {
+                    if (ModelFailure.isRequestTooLarge(action.message)) {
+                        cutOffs++
+                        gateway.preferDifferentModel()
+                        val kept = ContextBudget.condense(transcript.toList())
+                        transcript.clear()
+                        transcript.addAll(kept)
+                        transcript += ModelMessage(
+                            "user",
+                            "That helper said the request was too big. I shortened it and will try another helper. Send one smaller step."
+                        )
+                        if (cutOffs >= 3) {
+                            val summary = "This is unfinished. The request was too big for the helpers I tried. Nothing was saved."
+                            return complete(taskId, request, plan, events, summary, "needs-input")
+                        }
+                        continue
+                    }
                     if (action.message.contains("output-truncated") || action.message.contains("output limit")) {
                         cutOffs++
                         if (cutOffs >= 2) gateway.preferDifferentModel()
@@ -97,8 +113,13 @@ class ActObserveLoop(
                     }
                     if (com.codingagent.model.ModelCaps.demoteForLongWrites("") ) Unit
                     val friendly = ModelFailure.humanize(action.message)
-                    val task = AgentTaskBuilders.failed(taskId, request, plan, friendly, changes())
-                    emit(AutonomousAgentEvent.Failed(task, friendly))
+                    val summary = if (changeWork && "nothing was saved" !in friendly.lowercase()) {
+                        "$friendly This is unfinished. Nothing was saved."
+                    } else {
+                        friendly
+                    }
+                    val task = AgentTaskBuilders.failed(taskId, request, plan, summary, changes())
+                    emit(AutonomousAgentEvent.Failed(task, summary))
                     recordTask(task)
                     return events
                 }
@@ -118,6 +139,23 @@ class ActObserveLoop(
                         transcript += ModelMessage("assistant", action.thought.ifBlank { "Calling ${action.name}" }, action.callId, action.name, action.arguments)
                         transcript += ModelMessage("tool", "${action.name}: ${outcome.text}", action.callId ?: "call_unmatched")
                         steps += StuckDetector.Step(key, outcome.text.take(500), outcome.text.startsWith("ERROR:"), textOnly = false)
+                        val gated = if (action.name in setOf("create_file", "replace_text", "edit", "append_chunk")) {
+                            gateStagedJavaScript(request)
+                        } else {
+                            null
+                        }
+                        if (gated != null) {
+                            lastRun = gated
+                            emit(AutonomousAgentEvent.Phase("RUN", gated.stdout.take(500)))
+                            if (!gated.passed) {
+                                transcript += ModelMessage(
+                                    "user",
+                                    "The phone ran the program and it did not match.\n${gated.stdout}\n${gated.stderr}\nFix the file, then write it again. A bad input must print the word error."
+                                )
+                            } else if (readyToShow(lastRun)) {
+                                return showApproval(lastRun, taskId, request, plan, events)
+                            }
+                        }
                         if (action.name == "review_examples" || action.name == "run_program") {
                             val ready = approvalIfChecked(outcome, lastRun, taskId, request, plan, events)
                             if (ready != null) return ready
@@ -147,6 +185,19 @@ class ActObserveLoop(
                         transcript += ModelMessage("assistant", action.content)
                         transcript += ModelMessage("user", applied)
                         steps += StuckDetector.Step("search-replace", applied.take(240), applied.startsWith("ERROR:"), textOnly = false)
+                        val gated = gateStagedJavaScript(request)
+                        if (gated != null) {
+                            lastRun = gated
+                            emit(AutonomousAgentEvent.Phase("RUN", gated.stdout.take(500)))
+                            if (!gated.passed) {
+                                transcript += ModelMessage(
+                                    "user",
+                                    "The phone ran the program and it did not match.\n${gated.stdout}\nFix the file."
+                                )
+                            } else if (readyToShow(lastRun)) {
+                                return showApproval(lastRun, taskId, request, plan, events)
+                            }
+                        }
                     } else if (mutations.pending().isNotEmpty()) {
                         if (readyToShow(lastRun)) return showApproval(lastRun, taskId, request, plan, events)
                         formatErrors++
@@ -342,6 +393,13 @@ class ActObserveLoop(
 
     private fun needsRun(proposal: com.codingagent.workspace.PendingChangeProposal): Boolean =
         proposal.changeSet.changes.any { it.path.endsWith(".js") || it.path.endsWith(".py") }
+
+    private fun gateStagedJavaScript(request: String): com.codingagent.workspace.RunReport? {
+        val proposal = mutations.pending().firstOrNull() ?: return null
+        val code = proposal.changeSet.changes.firstOrNull { it.path.endsWith(".js") }?.after ?: return null
+        if (code.isBlank()) return null
+        return com.codingagent.workspace.JsExampleGate.check(code, request)
+    }
 
     private data class ToolOutcome(val text: String, val report: RunReport?)
 

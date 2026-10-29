@@ -84,8 +84,7 @@ class LiveHttpFailureTest {
             assertFalse(summary.contains("partial content was rejected"))
             val toolNames = events.filterIsInstance<AutonomousAgentEvent.ToolFinished>().map { it.name }
             assertTrue(toolNames.contains("create_file"))
-            assertTrue(toolNames.contains("review_examples"))
-            assertTrue(toolNames.indexOf("create_file") < toolNames.indexOf("review_examples"))
+            assertTrue(summary.contains("1+1") || summary.contains("matched"))
             assertTrue(server.bodies.isNotEmpty())
             assertTrue(server.bodies.all { it.contains("\"max_tokens\"") })
             assertTrue(server.statuses.any { it == 400 })

@@ -8,7 +8,7 @@ local.properties
 .coding-agent/
 *.apk
 *.aab
-app/debug.keystore
 app/debug-signing.keystore.b64
 *.keystore
+!app/debug.keystore
 *.jks

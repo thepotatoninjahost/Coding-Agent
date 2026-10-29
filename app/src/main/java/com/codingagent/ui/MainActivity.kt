@@ -9,14 +9,19 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -286,7 +291,10 @@ private fun CodingAgentApp(
                         .border(1.dp, NeonGreen.copy(alpha = 0.4f), RoundedCornerShape(12.dp))
                         .padding(4.dp)
                 ) {
+                    val setupFocus = remember { FocusRequester() }
+                    LaunchedEffect(Unit) { runCatching { setupFocus.requestFocus() } }
                     Column(Modifier.padding(16.dp).verticalScroll(rememberScrollState())) {
+                        Box(Modifier.size(0.dp).focusRequester(setupFocus).focusable())
                         Text("Connect a code helper", color = NeonGreen, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                         Text(
                             "Writing new code needs a helper on the internet. Paste the OpenRouter password from openrouter.ai/keys. Groq and the other boxes are optional. If one helper is retired or does not answer, I skip it and try the next. Try connection succeeds when any helper answers. Passwords stay on this phone. Looking things up on the Research tab does not need this.",
@@ -307,7 +315,7 @@ private fun CodingAgentApp(
                         }
                         shown.forEach { helper ->
                             TextButton(
-                                onClick = { if (helper.answered) vm.chooseFreeHelper(helper.modelId) },
+                                onClick = { if (helper.answered) vm.chooseFreeHelper(helper.modelId, helper.baseUrl) },
                                 modifier = Modifier.fillMaxWidth()
                             ) {
                                 val mark = if (helper.answered) "" else " — did not answer"

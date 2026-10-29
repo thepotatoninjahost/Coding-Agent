@@ -182,10 +182,13 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
     fun updateDraftApiKey(value: String) = _ui.update { it.copy(draftApiKey = value) }
     fun updateDraftModelName(value: String) = _ui.update { it.copy(draftModelName = value) }
 
-    fun chooseFreeHelper(modelId: String) = _ui.update {
+    fun chooseFreeHelper(modelId: String, baseUrl: String = "") = _ui.update {
+        val address = baseUrl.ifBlank {
+            it.probedHelpers.firstOrNull { helper -> helper.modelId == modelId }?.baseUrl.orEmpty()
+        }.ifBlank { it.draftBaseUrl.ifBlank { ModelSettings.OPENROUTER_BASE_URL } }
         it.copy(
             draftModelName = modelId,
-            draftBaseUrl = if (it.draftBaseUrl.isBlank()) ModelSettings.OPENROUTER_BASE_URL else it.draftBaseUrl,
+            draftBaseUrl = address,
             draftRotationModels = ModelSettings.rotationForChoice(modelId, it.discoveredHelpers),
             draftPreferredModel = modelId
         )
@@ -238,10 +241,9 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
                 { url -> java.net.URL(url).openConnection() as java.net.HttpURLConnection }
             ).filter { it.providerId == "openrouter" && it.modelId != ModelSettings.OPENROUTER_FREE_ROUTER }
             val others = ProviderCatalog.endpoints(candidate).filter { it.providerId != "openrouter" }
-            val endpoints = (if (liveOpenRouter.isNotEmpty()) liveOpenRouter else ProviderCatalog.endpoints(candidate).filter { it.providerId == "openrouter" })
-                .plus(others)
-                .distinctBy { it.providerId + "\n" + it.modelId }
+            val openRouterShown = (if (liveOpenRouter.isNotEmpty()) liveOpenRouter else ProviderCatalog.endpoints(candidate).filter { it.providerId == "openrouter" })
                 .take(8)
+            val endpoints = (openRouterShown + others).distinctBy { it.providerId + "\n" + it.modelId }
             if (endpoints.isEmpty()) {
                 withContext(Dispatchers.Main) {
                     _ui.update { it.copy(probeMessage = "Add a password first, then test the helpers.") }
@@ -285,7 +287,7 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
                     }
                 }
                 val answered = outcome.startsWith("answered")
-                outcomes += ProbedHelper(endpoint.modelId, endpoint.plainName, answered, outcome)
+                outcomes += ProbedHelper(endpoint.modelId, endpoint.plainName, answered, outcome, endpoint.baseUrl)
                 "${endpoint.plainName}: $outcome"
             }
             withContext(Dispatchers.Main) {
@@ -565,8 +567,11 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
                             pendingProposal = proposal,
                             pendingProposalId = proposal?.id,
                             approvalCount = proposal?.approvalCount ?: 0,
-                            pendingReason = proposal?.let { ChangeDiff.phoneCard(it) }
-                                ?: "The helper wants to change your project. Read the file, then say yes if you agree.",
+                            pendingReason = when (result) {
+                                is AgentRuntimeResult.NeedsApproval -> result.question
+                                else -> proposal?.let { ChangeDiff.phoneCard(it) }
+                                    ?: "The helper wants to change your project. Read the file, then say yes if you agree."
+                            },
                             pendingPhoneLock = proposal?.let { pending ->
                                 RiskyChange.kinds(pending.changeSet.changes, pending.request).isNotEmpty()
                             } ?: false,
@@ -577,7 +582,11 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
                             },
                             detail = when (result) {
                                 is AgentRuntimeResult.NeedsApproval ->
-                                    "Please say yes twice before anything is saved."
+                                    if (proposal?.let { RiskyChange.kinds(it.changeSet.changes, it.request).isNotEmpty() } == true) {
+                                        "Please say yes twice before anything is saved."
+                                    } else {
+                                        "One yes saves this file."
+                                    }
                                 is AgentRuntimeResult.Failed ->
                                     result.task?.summary ?: "That request did not finish."
                                 else -> "Ready for your next request."
@@ -929,7 +938,13 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
     }
 }
 
-data class ProbedHelper(val modelId: String, val label: String, val answered: Boolean, val outcome: String)
+data class ProbedHelper(
+    val modelId: String,
+    val label: String,
+    val answered: Boolean,
+    val outcome: String,
+    val baseUrl: String = ""
+)
 
 data class WorkbenchUiState(
     val tab: SurfaceTab = SurfaceTab.CHAT,

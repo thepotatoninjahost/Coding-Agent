@@ -53,6 +53,6 @@ object AgentTaskBuilders {
         events = listOf(
             "${Instant.now()}: proposal ${proposal.id} staged; awaiting two owner approvals"
         ),
-        summary = ChangeDiff.ownerReviewText(proposal)
+        summary = ChangeDiff.phoneCard(proposal)
     )
 }

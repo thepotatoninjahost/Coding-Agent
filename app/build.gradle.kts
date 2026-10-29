@@ -36,7 +36,7 @@ android {
         }
     }
 
-    // Debug builds use Android's standard local debug signing.
+    // The same debug key is in the repo so every CI build installs over the last one.
     // Release signing is optional and reads a keystore that is not in this repository.
     val releaseKeystorePath = System.getenv("CODING_AGENT_KEYSTORE")
     val releaseStorePassword = System.getenv("CODING_AGENT_KEYSTORE_PASSWORD")
@@ -47,6 +47,15 @@ android {
         !releaseKeyAlias.isNullOrBlank() &&
         !releaseKeyPassword.isNullOrBlank() &&
         file(releaseKeystorePath).isFile
+
+    signingConfigs {
+        getByName("debug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
 
     if (releaseSigningReady) {
         signingConfigs {

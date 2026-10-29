@@ -27,7 +27,7 @@ object ReviewBinder {
             proposalId = proposal?.id,
             pendingApproval = proposal != null,
             approvalCount = proposal?.approvalCount ?: 0,
-            reason = proposal?.let { ChangeDiff.ownerReviewText(it) }
+            reason = proposal?.let { ChangeDiff.phoneCard(it) }
                 ?: "No staged file changes. The agent has not proposed a write yet."
         )
     }

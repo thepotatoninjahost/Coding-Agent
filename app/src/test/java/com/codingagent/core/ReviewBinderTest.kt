@@ -52,7 +52,8 @@ class ReviewBinderTest {
         val bound = ReviewBinder.bind(mutations)
         assertTrue(bound.pendingApproval)
         assertEquals("src/Helper.kt", bound.proposal?.changeSet?.changes?.single()?.path)
-        assertTrue(bound.reason.contains("PROPOSED CHANGES"))
+        assertFalse(bound.reason.contains("PROPOSED CHANGES"))
+        assertFalse(bound.reason.contains("OPEN JOB"))
         assertTrue(bound.reason.contains("src/Helper.kt"))
     }
 }

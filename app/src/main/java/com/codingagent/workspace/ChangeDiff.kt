@@ -233,9 +233,7 @@ object ChangeDiff {
     fun approvalCard(proposal: PendingChangeProposal, runMatched: Boolean): String =
         approvalCard(proposal, if (runMatched) RunReport("recorded", 0, "", "", false, listOf(CaseResult("example", "ok", "ok", true))) else null)
 
-    fun approvalCard(proposal: PendingChangeProposal, run: RunReport?): String {
-        return ownerReviewText(proposal, run)
-    }
+    fun approvalCard(proposal: PendingChangeProposal, run: RunReport?): String = phoneCard(proposal, run)
 
     fun runSentence(run: RunReport?): String = when {
         run == null || !run.ran -> "I have not run this yet."
@@ -247,13 +245,26 @@ object ChangeDiff {
     /** Short text for the phone. The internal job prompt is not included. */
     fun phoneCard(proposal: PendingChangeProposal, run: RunReport? = null): String {
         val summary = everydaySummary(proposal, run)
+        val runs = run?.cases?.take(8)?.joinToString("\n") { case ->
+            "${case.label} => ${case.actual} (${if (case.passed) "matched" else "did not match"})"
+        }.orEmpty()
         val files = proposal.changeSet.changes.joinToString("\n\n") { record ->
             val body = (record.after ?: record.before).orEmpty()
             val lines = body.lineSequence().take(40).joinToString("\n")
             val more = if (body.lines().size > 40) "\n… more lines are in the file" else ""
             "File: ${record.path}\n$lines$more"
         }
-        return if (files.isBlank()) summary else "$summary\n\n$files"
+        return buildString {
+            append(summary)
+            if (runs.isNotBlank()) {
+                append("\n\nWhat the phone printed:\n")
+                append(runs)
+            }
+            if (files.isNotBlank()) {
+                append("\n\n")
+                append(files)
+            }
+        }
     }
 
     fun everydaySummary(proposal: PendingChangeProposal, run: RunReport? = null): String {

@@ -88,7 +88,7 @@ internal fun CompactStatusBar(
                     maxLines = 2
                 )
             }
-            if (status != AgentStatus.READY && status != AgentStatus.STOPPED) {
+            if (status != AgentStatus.READY && status != AgentStatus.STOPPED && status != AgentStatus.FAILED) {
                 TextButton(onClick = onStop) { Text("Stop", color = Danger, fontSize = 12.sp) }
             }
             TextButton(onClick = onModelImport) { Text("Setup", color = FluoroOrange, fontWeight = FontWeight.Bold, fontSize = 12.sp) }
