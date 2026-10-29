@@ -53,7 +53,16 @@ class ToolSelector {
         val needsProjectEvidence =
             intake.contract.targetPaths.isNotEmpty() ||
                 intake.contract.targetSymbols.isNotEmpty() ||
-                intake.intent in setOf(TaskIntent.INSPECT, TaskIntent.TEST, TaskIntent.DEBUG, TaskIntent.REFACTOR, TaskIntent.CHANGE, TaskIntent.CREATE)
+                intake.intent in setOf(
+                    TaskIntent.INSPECT,
+                    TaskIntent.TEST,
+                    TaskIntent.DEBUG,
+                    TaskIntent.REFACTOR,
+                    TaskIntent.CHANGE,
+                    TaskIntent.CREATE,
+                    TaskIntent.EXPLAIN,
+                    TaskIntent.UNKNOWN
+                )
         val searchId = if (needsProjectEvidence) {
             add(ToolKind.SEARCH_PROJECT, "Locate target files, symbols, and relevant project evidence", listOf(indexId))
         } else null
@@ -68,13 +77,15 @@ class ToolSelector {
                 listOf(searchId ?: indexId)
             )
         } else null
-        val checksId = if (intake.verificationCommands.isNotEmpty() || changeWork) {
+        if (intake.verificationCommands.isNotEmpty() || changeWork) {
             add(ToolKind.RUN_CHECKS, "Run project diagnostics and selected verification checks", listOf(indexId))
-        } else null
+        }
+        // The repository summary already completes INDEX before the model loop.
+        // Verify must be allowed then. It does not wait for a shell check.
         val verifyId = add(
             ToolKind.VERIFY,
             "Run static verification and evaluate acceptance evidence",
-            listOf(checksId ?: if (changeWork) applyId!! else searchId ?: indexId)
+            listOf(indexId)
         )
         add(ToolKind.RECORD_LESSON, "Persist the selected tools, result, and reusable evidence", listOf(verifyId))
         return ToolSelectionPlan(
@@ -91,7 +102,7 @@ object ToolKindMapper {
         "continue_result", "read_chat_history", "search_chat_history", "read_user_memory", "search_user_memory",
         "search_knowledge", "research_web" -> ToolKind.SEARCH_KNOWLEDGE
         "replace_text", "create_file" -> ToolKind.APPLY_CHANGES
-        "run_command" -> ToolKind.RUN_CHECKS
+        "run_command", "review_examples" -> ToolKind.RUN_CHECKS
         "verify" -> ToolKind.VERIFY
         else -> null
     }

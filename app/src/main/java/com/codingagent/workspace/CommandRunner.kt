@@ -127,14 +127,27 @@ class CommandRunner(private val directory: File) {
 
     private fun readLimited(input: java.io.InputStream, output: StringBuilder, onChunk: ((String) -> Unit)? = null) {
         val buffer = CharArray(8 * 1024)
+        val roomForText = TerminalOutput.STORED_LIMIT - TerminalOutput.TRIM_NOTE.length
+        var discarded = false
         input.reader(Charsets.UTF_8).use { reader ->
             while (true) {
                 val count = reader.read(buffer)
                 if (count < 0) break
                 val chunk = String(buffer, 0, count)
-                output.append(chunk)
-                onChunk?.invoke(chunk)
+                val room = roomForText - output.length
+                if (room <= 0) {
+                    discarded = true
+                    continue
+                }
+                val piece = if (chunk.length <= room) chunk else chunk.take(room)
+                if (piece.length < chunk.length) discarded = true
+                output.append(piece)
+                onChunk?.invoke(piece)
             }
+        }
+        if (discarded) {
+            output.append(TerminalOutput.TRIM_NOTE)
+            onChunk?.invoke(TerminalOutput.TRIM_NOTE)
         }
     }
 

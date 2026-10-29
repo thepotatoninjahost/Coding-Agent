@@ -11,19 +11,42 @@ import com.codingagent.agent.AutonomousAgent
 import com.codingagent.agent.ChatMessage
 import com.codingagent.agent.ChatRole
 import com.codingagent.agent.ChatWorkspace
+import com.codingagent.agent.ModelFailure
 import com.codingagent.core.LocalStore
+import com.codingagent.intake.OperationKind
+import com.codingagent.intake.TaskOperation
 import com.codingagent.knowledge.KnowledgeBase
 import com.codingagent.model.ModelBackend
 import com.codingagent.model.ModelConnectionProbe
 import com.codingagent.model.ModelDownloadProgress
 import com.codingagent.model.ModelGateway
+import com.codingagent.model.ModelRanking
+import com.codingagent.model.ModelRequest
+import com.codingagent.model.ModelResponse
 import com.codingagent.model.ModelSettings
+import com.codingagent.model.OpenRouterFreeModels
+import com.codingagent.model.ModelToolDefinition
 import com.codingagent.model.ProbeResult
+import com.codingagent.model.ProviderCatalog
+import com.codingagent.model.ProviderRotatingGateway
+import com.codingagent.model.RemoteHttpGateway
+import com.codingagent.github.GitHubChangeFiles
+import com.codingagent.github.GitHubFile
+import com.codingagent.github.GitHubPushClient
+import com.codingagent.github.GitHubPushFingerprint
+import com.codingagent.github.GitHubPushRequest
+import com.codingagent.github.GitHubPushResult
+import com.codingagent.github.UrlConnectionGitHubTransport
+import com.codingagent.agent.RiskyChange
+import com.codingagent.research.CompositeWebResearchProvider
 import com.codingagent.research.DurableDeepResearchProvider
 import com.codingagent.research.ResearchDisplayState
+import com.codingagent.workspace.ChangeDiff
+import com.codingagent.workspace.ChangeSet
 import com.codingagent.workspace.EditorDocument
 import com.codingagent.workspace.MutationApprovalResult
 import com.codingagent.workspace.MutationCoordinator
+import com.codingagent.workspace.MutationProposeResult
 import com.codingagent.workspace.PendingChangeProposal
 import com.codingagent.workspace.ProjectWorkspace
 import com.codingagent.workspace.ResearchHit
@@ -59,16 +82,29 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
     private var chat: ChatWorkspace? = null
     private var modelGateway: ModelGateway? = null
     private var activeJob: Job? = null
+    private var approvalJob: Job? = null
+    private var researchJob: Job? = null
+    private var lastApplied: ChangeSet? = null
+    private var pendingGitHubFiles: List<GitHubFile> = emptyList()
     private val progressEpoch = AtomicInteger(0)
 
     init {
         val loadedSettings = runCatching { store.loadModelSettings() }.getOrDefault(ModelSettings())
         applyModelSettings(loadedSettings)
+        _ui.update { it.copy(draftGithubToken = store.loadGitHubToken().orEmpty()) }
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                ModelRanking.refreshIfStale(File(privateDir, "coding-agent")) { query ->
+                    val found = CompositeWebResearchProvider().search(query, 5)
+                    found.hits.joinToString("\n") { hit -> "${hit.title}\n${hit.excerpt}" }
+                }
+            }
+        }
         if (!loadedSettings.isRemoteConfigured()) {
             _ui.update {
                 it.copy(
                     showModelSettings = true,
-                    detail = "Enter base URL, model name, and API key in Model settings."
+                    detail = "To write new code, tap Setup and paste a secret password. No helper is picked until Test models loads the list."
                 )
             }
         }
@@ -92,7 +128,7 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
             }
             restored?.let { (lastQuery, pair) ->
                 val (mounted, files) = pair
-                mountWorkspace(mounted, files, "Restored project · ${files.size} files")
+                mountWorkspace(mounted, files, "Opened your saved project. ${files.size} files.")
                 if (!lastQuery.isNullOrBlank()) {
                     _ui.update { it.copy(researchQuery = lastQuery) }
                 }
@@ -101,9 +137,15 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun applyModelSettings(settings: ModelSettings) {
-        val normalized = settings.normalized().copy(backend = ModelBackend.REMOTE)
+        val normalized = settings.normalized().withOpenRouterDefaults().copy(backend = ModelBackend.REMOTE)
         store.saveModelSettings(normalized)
-        val gateway = normalized.remoteGateway()
+        val rankingDir = _ui.value.workspace?.projectRoot()?.resolve(".coding-agent")
+            ?: File(privateDir, "coding-agent")
+        val gateway = normalized.remoteGateway(
+            quotaFile = File(privateDir, "coding-agent/provider-quota.json"),
+            rankingDirectory = rankingDir
+        )
+        if (gateway is ProviderRotatingGateway) gateway.quota.forgetKeyRejections()
         modelGateway = gateway
         agent?.setGateway(gateway)
         agent?.setSystemPrompt(normalized.effectiveSystemPrompt())
@@ -112,12 +154,26 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
                 modelSettings = normalized,
                 draftApiKey = normalized.apiKey,
                 draftModelName = normalized.modelName,
+                draftRotationModels = normalized.rotationModels,
                 draftBaseUrl = normalized.baseUrl,
                 draftExtraHeaders = normalized.extraHeaders,
                 draftSystemPrompt = normalized.systemPrompt,
+                draftMemoryRetention = normalized.memoryRetention,
+                draftGithubRepo = normalized.githubRepo,
+                draftGithubBranch = normalized.githubBranch,
+                draftPreferredModel = normalized.preferredModel,
+                draftGroqApiKey = normalized.groqApiKey,
+                draftGeminiApiKey = normalized.geminiApiKey,
+                draftMistralApiKey = normalized.mistralApiKey,
+                draftCerebrasApiKey = normalized.cerebrasApiKey,
+                draftSambanovaApiKey = normalized.sambanovaApiKey,
+                draftRequestyApiKey = normalized.requestyApiKey,
+                draftAimlApiKey = normalized.aimlApiKey,
+                draftCloudflareApiToken = normalized.cloudflareApiToken,
+                draftCloudflareAccountId = normalized.cloudflareAccountId,
                 modelStatus = normalized.statusSummary(),
                 modelLoadError = if (gateway == null)
-                    normalized.validationErrors().joinToString("; ").ifBlank { "API key required" }
+                    normalized.validationErrors().joinToString("; ").ifBlank { "The secret password is missing." }
                 else null
             )
         }
@@ -125,10 +181,131 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun updateDraftApiKey(value: String) = _ui.update { it.copy(draftApiKey = value) }
     fun updateDraftModelName(value: String) = _ui.update { it.copy(draftModelName = value) }
+
+    fun chooseFreeHelper(modelId: String, baseUrl: String = "") = _ui.update {
+        val address = baseUrl.ifBlank {
+            it.probedHelpers.firstOrNull { helper -> helper.modelId == modelId }?.baseUrl.orEmpty()
+        }.ifBlank { it.draftBaseUrl.ifBlank { ModelSettings.OPENROUTER_BASE_URL } }
+        it.copy(
+            draftModelName = modelId,
+            draftBaseUrl = address,
+            draftRotationModels = ModelSettings.rotationForChoice(modelId, it.discoveredHelpers),
+            draftPreferredModel = modelId
+        )
+    }
+
+    fun chooseAutomaticHelper() = _ui.update { it.copy(draftPreferredModel = "") }
+    fun updateDraftMemoryRetention(value: String) = _ui.update { it.copy(draftMemoryRetention = value) }
+    fun updateDraftGithubRepo(value: String) = _ui.update { it.copy(draftGithubRepo = value) }
+    fun updateDraftGithubBranch(value: String) = _ui.update { it.copy(draftGithubBranch = value) }
+    fun updateDraftGithubToken(value: String) = _ui.update { it.copy(draftGithubToken = value) }
+    fun updateDraftGroqApiKey(value: String) = _ui.update { it.copy(draftGroqApiKey = value) }
+    fun updateDraftGeminiApiKey(value: String) = _ui.update { it.copy(draftGeminiApiKey = value) }
+    fun updateDraftMistralApiKey(value: String) = _ui.update { it.copy(draftMistralApiKey = value) }
+    fun updateDraftCerebrasApiKey(value: String) = _ui.update { it.copy(draftCerebrasApiKey = value) }
+    fun updateDraftSambanovaApiKey(value: String) = _ui.update { it.copy(draftSambanovaApiKey = value) }
+    fun updateDraftRequestyApiKey(value: String) = _ui.update { it.copy(draftRequestyApiKey = value) }
+    fun updateDraftAimlApiKey(value: String) = _ui.update { it.copy(draftAimlApiKey = value) }
+    fun updateDraftCloudflareApiToken(value: String) = _ui.update { it.copy(draftCloudflareApiToken = value) }
+    fun updateDraftCloudflareAccountId(value: String) = _ui.update { it.copy(draftCloudflareAccountId = value) }
+    fun setShowMoreHelpers(show: Boolean) = _ui.update { it.copy(showMoreHelpers = show) }
     fun updateDraftBaseUrl(value: String) = _ui.update { it.copy(draftBaseUrl = value) }
     fun updateDraftExtraHeaders(value: String) = _ui.update { it.copy(draftExtraHeaders = value) }
     fun updateDraftSystemPrompt(value: String) = _ui.update { it.copy(draftSystemPrompt = value) }
     fun setShowModelSettings(show: Boolean) = _ui.update { it.copy(showModelSettings = show) }
+
+    fun testModels() {
+        val s = _ui.value
+        viewModelScope.launch(Dispatchers.IO) {
+            val candidate = ModelSettings(
+                backend = ModelBackend.REMOTE,
+                baseUrl = s.draftBaseUrl,
+                apiKey = s.draftApiKey,
+                modelName = s.draftModelName,
+                systemPrompt = s.draftSystemPrompt,
+                extraHeaders = s.draftExtraHeaders,
+                onboarded = true,
+                groqApiKey = s.draftGroqApiKey,
+                geminiApiKey = s.draftGeminiApiKey,
+                mistralApiKey = s.draftMistralApiKey,
+                cerebrasApiKey = s.draftCerebrasApiKey,
+                sambanovaApiKey = s.draftSambanovaApiKey,
+                requestyApiKey = s.draftRequestyApiKey,
+                aimlApiKey = s.draftAimlApiKey,
+                cloudflareApiToken = s.draftCloudflareApiToken,
+                cloudflareAccountId = s.draftCloudflareAccountId
+            )
+            OpenRouterFreeModels.clearCache()
+            val liveOpenRouter = OpenRouterFreeModels.apply(
+                ProviderCatalog.endpoints(candidate),
+                { url -> java.net.URL(url).openConnection() as java.net.HttpURLConnection }
+            ).filter { it.providerId == "openrouter" && it.modelId != ModelSettings.OPENROUTER_FREE_ROUTER }
+            val others = ProviderCatalog.endpoints(candidate).filter { it.providerId != "openrouter" }
+            val openRouterShown = (if (liveOpenRouter.isNotEmpty()) liveOpenRouter else ProviderCatalog.endpoints(candidate).filter { it.providerId == "openrouter" })
+                .take(8)
+            val endpoints = (openRouterShown + others).distinctBy { it.providerId + "\n" + it.modelId }
+            if (endpoints.isEmpty()) {
+                withContext(Dispatchers.Main) {
+                    _ui.update { it.copy(probeMessage = "Add a password first, then test the helpers.") }
+                }
+                return@launch
+            }
+            val tool = ModelToolDefinition(
+                "ping",
+                "Reply with this tool and no other text.",
+                """{"type":"object","properties":{}}"""
+            )
+            val outcomes = mutableListOf<ProbedHelper>()
+            val lines = endpoints.map { endpoint ->
+                val gateway = RemoteHttpGateway(
+                    endpoint.baseUrl,
+                    endpoint.apiKey,
+                    endpoint.modelId,
+                    timeoutMillis = 20_000
+                )
+                val response = runCatching {
+                    gateway.complete(
+                        ModelRequest(
+                            system = "Call the ping tool.",
+                            user = "ping",
+                            tools = listOf(tool)
+                        )
+                    )
+                }.getOrElse { error ->
+                    ModelResponse.Failure(error.message ?: "The helper did not answer.")
+                }
+                val outcome = when (response) {
+                    is ModelResponse.ToolCall -> "answered"
+                    is ModelResponse.Text -> if (response.content.isNotBlank()) "answered in words" else "sent an empty reply"
+                    is ModelResponse.Failure -> {
+                        val plain = ModelFailure.humanize(response.message)
+                        if (plain.contains("Model HTTP", ignoreCase = true) || plain.trim().startsWith("{")) {
+                            "did not answer"
+                        } else {
+                            plain
+                        }
+                    }
+                }
+                val answered = outcome.startsWith("answered")
+                outcomes += ProbedHelper(endpoint.modelId, endpoint.plainName, answered, outcome, endpoint.baseUrl)
+                "${endpoint.plainName}: $outcome"
+            }
+            withContext(Dispatchers.Main) {
+                val picked = outcomes.filter { it.answered }.map { it.modelId }
+                _ui.update {
+                    it.copy(
+                        discoveredHelpers = picked,
+                        probedHelpers = outcomes,
+                        probeMessage = if (picked.isEmpty()) {
+                            "No helper answered. Check the password and try Test models again.\n" + lines.joinToString("\n")
+                        } else {
+                            lines.joinToString("\n")
+                        }
+                    )
+                }
+            }
+        }
+    }
 
     fun probeModelConnection() {
         val s = _ui.value
@@ -140,7 +317,16 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
                 modelName = s.draftModelName,
                 systemPrompt = s.draftSystemPrompt,
                 extraHeaders = s.draftExtraHeaders,
-                onboarded = true
+                onboarded = true,
+                groqApiKey = s.draftGroqApiKey,
+                geminiApiKey = s.draftGeminiApiKey,
+                mistralApiKey = s.draftMistralApiKey,
+                cerebrasApiKey = s.draftCerebrasApiKey,
+                sambanovaApiKey = s.draftSambanovaApiKey,
+                requestyApiKey = s.draftRequestyApiKey,
+                aimlApiKey = s.draftAimlApiKey,
+                cloudflareApiToken = s.draftCloudflareApiToken,
+                cloudflareAccountId = s.draftCloudflareAccountId
             )
             val result = ModelConnectionProbe.probe(candidate)
             withContext(Dispatchers.Main) {
@@ -148,7 +334,14 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
                     it.copy(
                         probeMessage = when (result) {
                             is ProbeResult.Ok -> result.detail
-                            is ProbeResult.Failed -> "Probe failed: ${result.reason}"
+                            is ProbeResult.Failed -> {
+                                val plain = ModelFailure.humanize(result.reason)
+                                if (plain.contains("Model HTTP", ignoreCase = true) || plain.trim().startsWith("{")) {
+                                    "I could not connect. That helper did not answer, so I tried the next one."
+                                } else {
+                                    plain
+                                }
+                            }
                         }
                     )
                 }
@@ -164,15 +357,30 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
                 baseUrl = s.draftBaseUrl,
                 apiKey = s.draftApiKey,
                 modelName = s.draftModelName,
+                rotationModels = s.draftRotationModels,
                 systemPrompt = s.draftSystemPrompt,
                 extraHeaders = s.draftExtraHeaders,
-                onboarded = true
+                onboarded = true,
+                memoryRetention = s.draftMemoryRetention,
+                githubRepo = s.draftGithubRepo,
+                githubBranch = s.draftGithubBranch,
+                preferredModel = s.draftPreferredModel,
+                groqApiKey = s.draftGroqApiKey,
+                geminiApiKey = s.draftGeminiApiKey,
+                mistralApiKey = s.draftMistralApiKey,
+                cerebrasApiKey = s.draftCerebrasApiKey,
+                sambanovaApiKey = s.draftSambanovaApiKey,
+                requestyApiKey = s.draftRequestyApiKey,
+                aimlApiKey = s.draftAimlApiKey,
+                cloudflareApiToken = s.draftCloudflareApiToken,
+                cloudflareAccountId = s.draftCloudflareAccountId
             )
         )
+        store.saveGitHubToken(s.draftGithubToken)
         _ui.update {
             it.copy(
                 showModelSettings = false,
-                detail = if (modelGateway != null) "Remote model gateway ready" else "Remote model settings saved (incomplete)"
+                detail = if (modelGateway != null) "The helper is connected." else "Saved, but the helper is not fully set up yet."
             )
         }
     }
@@ -197,6 +405,33 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
             it.copy(terminalHistory = tools?.terminalHistory() ?: emptyList())
         }
         store.saveProjectPath(ws.projectRoot().absolutePath)
+        recoverInterruptedDraft()
+    }
+
+    private fun recoverInterruptedDraft() {
+        val proposal = mutationCoordinator?.pending()?.lastOrNull() ?: return
+        val code = proposal.changeSet.changes.firstOrNull { it.path.endsWith(".js") && !it.after.isNullOrBlank() }?.after
+        val run = code?.let { com.codingagent.workspace.JsExampleGate.check(it, proposal.request) }
+        if (run?.passed == true) mutationCoordinator?.noteChecks(proposal.id, true)
+        val card = ChangeDiff.phoneCard(proposal, run)
+        store.recordChatMessage(
+            com.codingagent.agent.ChatMessage(
+                role = com.codingagent.agent.ChatRole.AGENT,
+                content = "I found a draft from an interrupted run.\n\n$card"
+            )
+        )
+        _ui.update {
+            it.copy(
+                chatMessages = store.recentChatMessages(Int.MAX_VALUE).asReversed(),
+                pendingProposal = proposal,
+                pendingProposalId = proposal.id,
+                pendingApproval = run?.passed == true,
+                pendingReason = card,
+                approvalCount = proposal.approvalCount,
+                status = if (run?.passed == true) AgentStatus.APPROVAL else AgentStatus.READY,
+                detail = if (run?.passed == true) "One yes saves this file." else "The draft is in Review. The checks did not match."
+            )
+        }
     }
 
     private fun rebuildAgentIfNeeded() {
@@ -220,13 +455,13 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
             unavailableMessageProvider = {
                 when {
                     _ui.value.workspace == null ->
-                        "No project mounted. Import a folder, or restore a previous project, before coding requests."
+                        "No project is open. Tap New to start one, or Import to open a folder you already have."
                     agent == null ->
-                        "Project is mounting — try again in a moment."
+                        "The project is still opening. Try again in a moment."
                     _ui.value.modelLoadError != null ->
-                        "Model settings error: ${_ui.value.modelLoadError.orEmpty()}. Local commands still work."
+                        "The helper is not set up yet: ${_ui.value.modelLoadError.orEmpty()} You can still say hello, list files, or ask me to read a file."
                     else ->
-                        "Agent not ready."
+                        "I am not ready yet. Try again in a moment."
                 }
             },
             progressListener = { phase, detailText ->
@@ -256,7 +491,7 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
                 withContext(Dispatchers.Main) {
                     val mounted = ProjectWorkspace(imported)
                     val files = mounted.summary().files.map { it.path }.sorted()
-                    mountWorkspace(mounted, files, "Project mounted · ${files.size} files indexed")
+                    mountWorkspace(mounted, files, "Project is ready. ${files.size} files.")
                     clearPendingApproval()
                 }
             }.onFailure { err ->
@@ -264,7 +499,7 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
                     _ui.update {
                         it.copy(
                             status = AgentStatus.STOPPED,
-                            detail = "Import failed: ${err.message.orEmpty()}"
+                            detail = "Could not open that folder: ${err.message.orEmpty()}"
                         )
                     }
                 }
@@ -279,7 +514,8 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
             }.onSuccess { created ->
                 withContext(Dispatchers.Main) {
                     val mounted = ProjectWorkspace(created)
-                    mountWorkspace(mounted, emptyList(), "New empty project mounted")
+                    val files = mounted.summary().files.map { it.path }.sorted()
+                    mountWorkspace(mounted, files, "Your new project is ready.")
                     clearPendingApproval()
                 }
             }.onFailure { err ->
@@ -287,7 +523,7 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
                     _ui.update {
                         it.copy(
                             status = AgentStatus.STOPPED,
-                            detail = "Could not create project: ${err.message.orEmpty()}"
+                            detail = "Could not start a new project: ${err.message.orEmpty()}"
                         )
                     }
                 }
@@ -312,7 +548,7 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
                 terminalHistory = emptyList(),
                 terminalLiveOutput = "",
                 status = AgentStatus.READY,
-                detail = "Project cleared"
+                detail = "Project closed."
             )
         }
         clearPendingApproval()
@@ -327,65 +563,97 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
             }
             return
         }
-        _ui.update { it.copy(chatInput = "", status = AgentStatus.WORKING, detail = "Working...", agentBusy = true) }
+        val shownNow = com.codingagent.agent.ChatMessage(
+            role = com.codingagent.agent.ChatRole.USER,
+            content = trimmed
+        )
+        _ui.update {
+            it.copy(
+                chatMessages = it.chatMessages + shownNow,
+                chatInput = "",
+                status = AgentStatus.WORKING,
+                detail = "Working on what you asked.",
+                agentBusy = true
+            )
+        }
         progressEpoch.incrementAndGet()
         activeJob = viewModelScope.launch(Dispatchers.IO) {
+            var sendResult: com.codingagent.agent.ChatTurn? = null
+            var failed: Throwable? = null
             try {
                 if (_ui.value.workspace == null && asksToStartProject(trimmed)) {
                     val created = createEmptyProject(privateDir, null)
+                    val mounted = ProjectWorkspace(created)
+                    val files = mounted.summary().files.map { it.path }.sorted()
                     withContext(Dispatchers.Main) {
-                        mountWorkspace(ProjectWorkspace(created), emptyList(), "New empty project mounted")
+                        mountWorkspace(mounted, files, "Your new project is ready.")
                     }
                 }
                 val workspace = chat ?: run {
                     rebuildChat()
-                    chat!!
+                    chat ?: error("Chat workspace could not be created")
                 }
-                val sendResult = workspace.send(trimmed)
+                sendResult = workspace.send(trimmed)
+            } catch (t: Throwable) {
+                failed = t
+                runCatching {
+                    store.recordChatMessage(
+                        com.codingagent.agent.ChatMessage(
+                            role = com.codingagent.agent.ChatRole.AGENT,
+                            content = "This request did not finish. ${t.message ?: "Something went wrong."}"
+                        )
+                    )
+                }
+            } finally {
+                val result = sendResult?.result
+                val error = failed
                 withContext(Dispatchers.Main) {
-                    val result = sendResult.result
+                    progressEpoch.incrementAndGet()
+                    val stored = runCatching { store.recentChatMessages(Int.MAX_VALUE).asReversed() }.getOrDefault(emptyList())
+                    val kept = agent?.pendingProposals()?.lastOrNull()
                     val proposal = when (result) {
                         is AgentRuntimeResult.NeedsApproval ->
-                            agent?.pendingProposals()?.firstOrNull { it.id == result.proposalId }
-                        else -> null
+                            agent?.pendingProposals()?.firstOrNull { it.id == result.proposalId } ?: kept
+                        else -> kept
                     }
                     _ui.update {
                         it.copy(
-                            chatMessages = store.recentChatMessages(Int.MAX_VALUE).asReversed(),
-                            pendingApproval = proposal != null,
+                            chatMessages = com.codingagent.agent.ChatVisibility.merge(it.chatMessages, stored, trimmed),
+                            pendingApproval = result is AgentRuntimeResult.NeedsApproval,
                             pendingProposal = proposal,
                             pendingProposalId = proposal?.id,
                             approvalCount = proposal?.approvalCount ?: 0,
-                            pendingReason = proposal?.request
-                                ?: "The agent proposes a transactional code change.",
-                            status = when (result) {
-                                is AgentRuntimeResult.NeedsApproval -> AgentStatus.APPROVAL
-                                is AgentRuntimeResult.Failed -> AgentStatus.FAILED
+                            pendingReason = when (result) {
+                                is AgentRuntimeResult.NeedsApproval -> result.question
+                                is AgentRuntimeResult.NeedsInput -> result.question
+                                else -> proposal?.let { ChangeDiff.phoneCard(it) }
+                                    ?: "The helper wants to change your project. Read the file, then say yes if you agree."
+                            },
+                            pendingPhoneLock = proposal?.let { pending ->
+                                RiskyChange.kinds(pending.changeSet.changes, pending.request).isNotEmpty()
+                            } ?: false,
+                            status = when {
+                                error != null -> AgentStatus.FAILED
+                                result is AgentRuntimeResult.NeedsApproval -> AgentStatus.APPROVAL
+                                result is AgentRuntimeResult.Failed -> AgentStatus.FAILED
                                 else -> AgentStatus.READY
                             },
-                            detail = when (result) {
-                                is AgentRuntimeResult.NeedsApproval ->
-                                    "Waiting for dual owner approval"
-                                is AgentRuntimeResult.Failed ->
-                                    result.task?.summary ?: "Request failed"
-                                else -> "Ready"
-                            }
+                            detail = when {
+                                error != null -> error.message ?: "This request did not finish."
+                                result is AgentRuntimeResult.NeedsApproval ->
+                                    if (proposal?.let { RiskyChange.kinds(it.changeSet.changes, it.request).isNotEmpty() } == true) {
+                                        "Please say yes twice before anything is saved."
+                                    } else {
+                                        "One yes saves this file."
+                                    }
+                                result is AgentRuntimeResult.Failed ->
+                                    result.task?.summary ?: "That request did not finish."
+                                else -> "Ready for your next request."
+                            },
+                            agentBusy = false
                         )
                     }
-                }
-            } catch (t: Throwable) {
-                withContext(Dispatchers.Main) {
-                    _ui.update {
-                        it.copy(
-                            status = AgentStatus.FAILED,
-                            detail = t.message ?: t.javaClass.simpleName
-                        )
-                    }
-                }
-            } finally {
-                withContext(Dispatchers.Main) {
                     activeJob = null
-                    _ui.update { it.copy(agentBusy = false) }
                     val queue = _ui.value.messageQueue
                     if (queue.isNotEmpty()) {
                         val next = queue.first()
@@ -401,6 +669,10 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
         progressEpoch.incrementAndGet()
         activeJob?.cancel()
         activeJob = null
+        approvalJob?.cancel()
+        approvalJob = null
+        researchJob?.cancel()
+        researchJob = null
         agent?.cancel("Stopped by owner")
         chat?.cancel()
         tools?.cancelTerminal("Stopped by owner")
@@ -414,7 +686,11 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
-    fun isBusy(): Boolean = _ui.value.agentBusy || activeJob != null
+    fun isBusy(): Boolean = _ui.value.agentBusy || activeJob != null || approvalJob?.isActive == true
+
+    fun attachApprovalJob(job: Job?) {
+        approvalJob = job
+    }
 
     private fun asksToStartProject(text: String): Boolean {
         val t = text.lowercase()
@@ -428,18 +704,6 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun onChangeApplied(result: MutationApprovalResult.Applied) {
         val paths = result.changeSet.changes.map { it.path }.distinct()
-        val verification = result.proposal.verification
-        val verificationSummary = buildString {
-            append(if (verification.passed) "Static verification passed." else "Static verification failed.")
-            if (verification.issues.isNotEmpty()) {
-                append("\nIssues:\n")
-                append(verification.issues.joinToString("\n") { "- ${it.path}:${it.line}: ${it.message}" })
-            }
-            if (verification.warnings.isNotEmpty()) {
-                append("\nWarnings:\n")
-                append(verification.warnings.joinToString("\n") { "- $it" })
-            }
-        }
         _ui.value.workspace?.let { ws ->
             _ui.update {
                 it.copy(fileList = ws.summary().files.map { f -> f.path }.sorted())
@@ -448,11 +712,10 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
         store.recordChatMessage(
             ChatMessage(
                 role = ChatRole.SYSTEM,
-                content = "APPLIED to disk after dual approval.\nFiles:\n" +
-                    paths.joinToString("\n") { "- $it" } +
-                    "\nRequest: ${result.proposal.request}\n$verificationSummary"
+                content = "Saved ${paths.joinToString(", ")}."
             )
         )
+        lastApplied = result.changeSet
         _ui.update {
             it.copy(
                 chatMessages = store.recentChatMessages(Int.MAX_VALUE).asReversed(),
@@ -460,9 +723,61 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
                 pendingApproval = false,
                 pendingProposal = null,
                 pendingProposalId = null,
+                pendingPhoneLock = false,
+                lastSavedSummary = paths.joinToString(),
                 status = AgentStatus.READY,
-                detail = "APPLIED ${paths.size} file(s): ${paths.joinToString()}\n$verificationSummary"
+                detail = "Saved ${paths.size} file(s): ${paths.joinToString()}."
             )
+        }
+    }
+
+    fun prepareGitHubPush(): String? {
+        val applied = lastApplied
+        val root = _ui.value.workspace?.projectRoot()
+        if (applied == null || root == null) {
+            setStatus(AgentStatus.FAILED, "Nothing saved is waiting to send.")
+            return null
+        }
+        if (store.loadGitHubToken().isNullOrBlank()) {
+            setStatus(AgentStatus.FAILED, "Paste a GitHub token in Setup first. It stays on this phone.")
+            return null
+        }
+        val prepared = GitHubChangeFiles.fromChanges(root, applied.changes)
+        if (prepared is GitHubPushResult.Failed) {
+            setStatus(AgentStatus.FAILED, prepared.reason)
+            return null
+        }
+        val files = (prepared as GitHubPushResult.Ready).files
+        pendingGitHubFiles = files
+        return GitHubPushFingerprint.of(files)
+    }
+
+    fun pushApprovedGitHub(fingerprint: String) {
+        val files = pendingGitHubFiles
+        if (files.isEmpty() || GitHubPushFingerprint.of(files) != fingerprint) {
+            setStatus(AgentStatus.FAILED, "The files changed after you confirmed. Nothing was sent.")
+            return
+        }
+        val settings = _ui.value.modelSettings
+        val request = GitHubPushRequest(
+            repo = settings.githubRepo,
+            branch = settings.githubBranch,
+            message = "Update from the phone",
+            files = files
+        )
+        viewModelScope.launch(Dispatchers.IO) {
+            val token = store.loadGitHubToken().orEmpty()
+            val result = GitHubPushClient(UrlConnectionGitHubTransport()).push(request, token)
+            withContext(Dispatchers.Main) {
+                when (result) {
+                    is GitHubPushResult.Pushed -> {
+                        pendingGitHubFiles = emptyList()
+                        setStatus(AgentStatus.READY, "Sent to GitHub. Commit ${result.sha.take(7)}.")
+                    }
+                    is GitHubPushResult.Failed -> setStatus(AgentStatus.FAILED, result.reason)
+                    is GitHubPushResult.Ready -> setStatus(AgentStatus.FAILED, "The send did not finish.")
+                }
+            }
         }
     }
 
@@ -472,7 +787,21 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
                 pendingApproval = false,
                 pendingProposal = null,
                 pendingProposalId = null,
+                pendingPhoneLock = false,
                 approvalCount = 0
+            )
+        }
+    }
+
+    fun notePartialApproval(proposal: PendingChangeProposal) {
+        _ui.update {
+            it.copy(
+                pendingApproval = true,
+                pendingProposal = proposal,
+                pendingProposalId = proposal.id,
+                approvalCount = proposal.approvalCount,
+                status = AgentStatus.APPROVAL,
+                detail = "Yes ${proposal.approvalCount} of 2 is saved. Nothing is written until you say yes a second time."
             )
         }
     }
@@ -507,7 +836,7 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
                             terminalHistory = t.terminalHistory(),
                             terminalCommand = "",
                             status = AgentStatus.READY,
-                            detail = "Command finished"
+                            detail = "The command finished."
                         )
                     }
                 }
@@ -516,7 +845,7 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
                     _ui.update {
                         it.copy(
                             status = AgentStatus.FAILED,
-                            detail = e.message ?: "Terminal failed",
+                            detail = e.message ?: "The command failed.",
                             terminalHistory = t.terminalHistory()
                         )
                     }
@@ -531,19 +860,138 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
     fun setChatInput(value: String) = _ui.update { it.copy(chatInput = value) }
     fun setProjectQuery(value: String) = _ui.update { it.copy(projectQuery = value) }
     fun setEditorPath(value: String) = _ui.update { it.copy(editorPath = value) }
-    fun setEditorContent(value: String) = _ui.update { it.copy(editorContent = value) }
+    fun setEditorContent(value: String) = _ui.update {
+        val original = it.editorDocument?.content
+        it.copy(
+            editorContent = value,
+            editorDocument = it.editorDocument?.copy(dirty = original != null && value != original)
+        )
+    }
+
+    fun openEditorFile(path: String) {
+        val doc = tools?.let { runCatching { it.read(path) }.getOrNull() }
+        if (doc == null) {
+            setStatus(AgentStatus.FAILED, "Could not open $path.")
+            return
+        }
+        _ui.update {
+            it.copy(editorPath = doc.path, editorContent = doc.content, editorDocument = doc)
+        }
+    }
     fun setTerminalCommand(value: String) = _ui.update { it.copy(terminalCommand = value) }
     fun setResearchQuery(value: String) = _ui.update { it.copy(researchQuery = value) }
     fun setStatus(status: AgentStatus, detail: String) = _ui.update { it.copy(status = status, detail = detail) }
 
-    private fun mapAgentPhase(phase: String): AgentStatus = when (phase.lowercase()) {
-        "working", "thinking", "tool", "tools" -> AgentStatus.WORKING
-        "approval" -> AgentStatus.APPROVAL
-        "failed", "error" -> AgentStatus.FAILED
-        "stopped" -> AgentStatus.STOPPED
-        else -> AgentStatus.READY
+    fun clearTerminal() {
+        tools?.clearTerminalHistory()
+        _ui.update { it.copy(terminalHistory = emptyList(), terminalLiveOutput = "") }
+    }
+
+    fun searchResearch(query: String) {
+        val trimmed = query.trim()
+        if (trimmed.isEmpty()) return
+        researchJob?.cancel()
+        _ui.update {
+            it.copy(
+                researchQuery = trimmed,
+                researchError = null,
+                researchHits = emptyList(),
+                researchState = ResearchDisplayState(phase = "searching", canSend = false)
+            )
+        }
+        researchJob = viewModelScope.launch(Dispatchers.IO) {
+            val result = runCatching { CompositeWebResearchProvider().search(trimmed, 8) }
+            withContext(Dispatchers.Main) {
+                result.onSuccess { found ->
+                    _ui.update {
+                        it.copy(
+                            researchHits = found.hits,
+                            researchError = found.error,
+                            researchState = ResearchDisplayState(
+                                phase = if (found.hits.isEmpty()) "empty" else "results",
+                                fullSources = found.hits.size,
+                                canSend = true
+                            )
+                        )
+                    }
+                }.onFailure { err ->
+                    _ui.update {
+                        it.copy(
+                            researchError = err.message ?: err.javaClass.simpleName,
+                            researchState = ResearchDisplayState(phase = "failed", canSend = true)
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    fun saveEditor() {
+        val path = _ui.value.editorPath.trim()
+        val edited = _ui.value.editorContent
+        val coordinator = mutationCoordinator
+        val fileTools = tools
+        if (coordinator == null || fileTools == null) {
+            setStatus(AgentStatus.FAILED, "Open or start a project before saving a file.")
+            return
+        }
+        if (path.isBlank()) {
+            setStatus(AgentStatus.FAILED, "Tap a file before saving.")
+            return
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            val current = runCatching { fileTools.read(path).content }.getOrNull()
+            val operation = when {
+                current == null -> TaskOperation(kind = OperationKind.CREATE_FILE, path = path, text = edited)
+                current == edited -> null
+                current.isEmpty() -> TaskOperation(kind = OperationKind.APPEND, path = path, text = edited)
+                else -> TaskOperation(
+                    kind = OperationKind.REPLACE,
+                    path = path,
+                    oldText = current,
+                    newText = edited
+                )
+            }
+            if (operation == null) {
+                withContext(Dispatchers.Main) {
+                    setStatus(AgentStatus.READY, "Nothing new to save in $path.")
+                }
+                return@launch
+            }
+            val request = "Save editor changes to $path"
+            val result = coordinator.propose(request, listOf(operation), request)
+            withContext(Dispatchers.Main) {
+                when (result) {
+                    is MutationProposeResult.Proposed -> {
+                        val proposal = result.proposal
+                        _ui.update {
+                            it.copy(
+                                pendingApproval = true,
+                                pendingProposal = proposal,
+                                pendingProposalId = proposal.id,
+                                approvalCount = proposal.approvalCount,
+                                pendingReason = ChangeDiff.phoneCard(proposal),
+                                pendingPhoneLock = RiskyChange.kinds(proposal.changeSet.changes, proposal.request).isNotEmpty(),
+                                status = AgentStatus.APPROVAL,
+                                detail = "Your edits to $path are waiting. Open Review and say yes before they are saved."
+                            )
+                        }
+                    }
+                    is MutationProposeResult.Rejected ->
+                        setStatus(AgentStatus.FAILED, result.reason)
+                }
+            }
+        }
     }
 }
+
+data class ProbedHelper(
+    val modelId: String,
+    val label: String,
+    val answered: Boolean,
+    val outcome: String,
+    val baseUrl: String = ""
+)
 
 data class WorkbenchUiState(
     val tab: SurfaceTab = SurfaceTab.CHAT,
@@ -567,19 +1015,39 @@ data class WorkbenchUiState(
     val terminalLiveOutput: String = "",
     val pendingApproval: Boolean = false,
     val approvalCount: Int = 0,
-    val pendingReason: String = "The agent proposes a transactional code change.",
+    val pendingReason: String = "The helper wants to change your project. Read the note, then say yes twice if you agree.",
+    val pendingPhoneLock: Boolean = false,
+    val lastSavedSummary: String = "",
     val pendingProposalId: String? = null,
     val pendingProposal: PendingChangeProposal? = null,
     val modelSettings: ModelSettings = ModelSettings(),
-    val modelStatus: String = "Remote · set base URL, model, and API key",
+    val modelStatus: String = "Helper not connected yet",
     val modelProgress: ModelDownloadProgress? = null,
     val modelLoadError: String? = null,
     val showModelSettings: Boolean = false,
     val draftApiKey: String = "",
     val draftModelName: String = "",
-    val draftBaseUrl: String = "",
+    val draftRotationModels: String = "",
+    val discoveredHelpers: List<String> = emptyList(),
+    val probedHelpers: List<ProbedHelper> = emptyList(),
+    val draftBaseUrl: String = ModelSettings.OPENROUTER_BASE_URL,
     val draftExtraHeaders: String = "",
     val draftSystemPrompt: String = "",
+    val draftMemoryRetention: String = ModelSettings.MEMORY_KEEP_CAPPED,
+    val draftGithubRepo: String = ModelSettings.DEFAULT_GITHUB_REPO,
+    val draftGithubBranch: String = "main",
+    val draftGithubToken: String = "",
+    val draftPreferredModel: String = "",
+    val draftGroqApiKey: String = "",
+    val draftGeminiApiKey: String = "",
+    val draftMistralApiKey: String = "",
+    val draftCerebrasApiKey: String = "",
+    val draftSambanovaApiKey: String = "",
+    val draftRequestyApiKey: String = "",
+    val draftAimlApiKey: String = "",
+    val draftCloudflareApiToken: String = "",
+    val draftCloudflareAccountId: String = "",
+    val showMoreHelpers: Boolean = false,
     val probeMessage: String? = null,
     val agentBusy: Boolean = false
 )

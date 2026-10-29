@@ -64,10 +64,9 @@ class AgentJournal(private val root: File) {
     @Synchronized
     fun record(task: AgentTask) {
         flushModelText(task.id)
-        file.parentFile?.mkdirs()
         val line = listOf(task.id, task.status, task.request, task.changes.size, task.verification.passed, task.summary, task.events.joinToString(" | "))
             .joinToString("\t") { sanitize(it.toString()).replace('\t', ' ').replace('\n', ' ') }
-        file.appendText(line + "\n")
+        com.codingagent.core.NotesAtRest.appendLine(file, line)
     }
 
     /** Persist observable events, redacting common credentials before writing them to disk. */
@@ -92,13 +91,12 @@ class AgentJournal(private val root: File) {
     }
 
     private fun writeEvent(taskId: String, type: String, details: String) {
-        personalLog.parentFile?.mkdirs()
         val entry = JSONObject()
             .put("timestamp", System.currentTimeMillis())
             .put("taskId", taskId)
             .put("type", type)
             .put("details", sanitize(details))
-        personalLog.appendText(entry.toString() + "\n")
+        com.codingagent.core.NotesAtRest.appendLine(personalLog, entry.toString())
     }
 
     private fun sanitize(value: String): String {
@@ -116,6 +114,7 @@ class AgentJournal(private val root: File) {
 
     private fun recentLines(source: File, limit: Int): List<String> {
         if (!source.isFile || limit <= 0) return emptyList()
+        com.codingagent.core.NotesAtRest.migrate(source)
         val result = ArrayDeque<String>(limit)
         java.io.RandomAccessFile(source, "r").use { raf ->
             var position = raf.length() - 1
@@ -124,7 +123,9 @@ class AgentJournal(private val root: File) {
                 raf.seek(position--)
                 val value = raf.read()
                 if (value == '\n'.code) {
-                    val line = bytes.toByteArray().reversedArray().toString(Charsets.UTF_8).trim()
+                    val line = com.codingagent.core.NotesAtRest.openLine(
+                        bytes.toByteArray().reversedArray().toString(Charsets.UTF_8).trim()
+                    )
                     if (line.isNotBlank()) {
                         result.addFirst(line)
                         if (result.size > limit) result.removeFirst()
@@ -135,7 +136,9 @@ class AgentJournal(private val root: File) {
                 }
             }
             if (bytes.size() > 0 && result.size < limit) {
-                val line = bytes.toByteArray().reversedArray().toString(Charsets.UTF_8).trim()
+                val line = com.codingagent.core.NotesAtRest.openLine(
+                    bytes.toByteArray().reversedArray().toString(Charsets.UTF_8).trim()
+                )
                 if (line.isNotBlank()) result.addFirst(line)
             }
         }

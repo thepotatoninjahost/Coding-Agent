@@ -104,14 +104,15 @@ object UserMemoryExtractor {
  * ONE JOB: Apply deterministic memory consolidation and relevance rules without Android dependencies.
  */
 class UserMemoryIndex(
-    @Suppress("UNUSED_PARAMETER") private val maxEntries: Int = 64
+    private val maxEntries: Int = 64
 ) {
     fun remember(
         existing: List<UserMemory>,
         text: String,
         kind: UserMemory.Kind,
         importance: Int,
-        now: Long
+        now: Long,
+        retention: String = KEEP_CAPPED
     ): List<UserMemory> {
         val clean = text.replace(Regex("\\s+"), " ").trim().trimEnd('.', '!', '?')
         if (clean.length < 3) return existing
@@ -135,7 +136,7 @@ class UserMemoryIndex(
                 updatedAt = now
             )
         }
-        return compact(next)
+        return compact(next, now, retention)
     }
 
     fun relevant(existing: List<UserMemory>, query: String, limit: Int): List<UserMemory> {
@@ -175,24 +176,14 @@ class UserMemoryIndex(
         }
     }
 
-    private fun compact(memories: List<UserMemory>): List<UserMemory> =
-        memories.sortedWith(compareByDescending<UserMemory> { it.importance }.thenByDescending { it.updatedAt })
-
-    private fun sameDirectiveTopic(a: String, b: String): Boolean {
-        val left = directiveTopic(a)
-        val right = directiveTopic(b)
-        return left.isNotBlank() && left == right
-    }
-
-    private fun directiveTopic(text: String): String {
-        val stripped = text.lowercase(Locale.ROOT)
-            .replace(
-                Regex(
-                    "^(remember that|remember|from now on|i prefer|i like|i don't like|i do not like|i hate|i want you to|i don't want you to|i do not want you to|please always|always|never|do not ever|don't ever)\\s+"
-                ),
-                ""
-            )
-        return tokens(stripped).firstOrNull().orEmpty()
+    private fun compact(memories: List<UserMemory>, now: Long, retention: String): List<UserMemory> {
+        val byValue = compareByDescending<UserMemory> { it.importance }.thenByDescending { it.updatedAt }
+        if (retention == KEEP_FOREVER || maxEntries <= 0) return memories.sortedWith(byValue)
+        val cutoff = now - RETENTION_WINDOW_MS
+        val fresh = memories.filter { memory ->
+            memory.updatedAt == now || memory.importance >= 80 || memory.updatedAt >= cutoff
+        }
+        return fresh.sortedWith(byValue).take(maxEntries)
     }
 
     private fun similarity(a: String, b: String): Double {
@@ -209,6 +200,9 @@ class UserMemoryIndex(
             .toSet()
 
     companion object {
+        const val KEEP_CAPPED = "capped"
+        const val KEEP_FOREVER = "forever"
+        private const val RETENTION_WINDOW_MS = 180L * 24L * 60L * 60L * 1000L
         private val STOP_WORDS = setOf(
             "the", "and", "for", "that", "this", "with", "from", "you",
             "your", "are", "have", "has", "not", "but", "can", "will",

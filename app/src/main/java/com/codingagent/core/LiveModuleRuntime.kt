@@ -2,6 +2,7 @@ package com.codingagent.core
 
 import com.codingagent.agent.AgentAction
 import com.codingagent.knowledge.KnowledgeProvider
+import com.codingagent.workspace.ChangeOperation
 import com.codingagent.workspace.ChangeRecord
 import com.codingagent.workspace.ProjectWorkspace
 import com.codingagent.workspace.VerificationReport
@@ -63,7 +64,17 @@ class LiveModuleRuntime(
                 "replace_exact" -> {
                     val parts = value.split("|||", limit = 3)
                     require(parts.size == 3) { "replace_exact requires path|||old|||new" }
-                    output += "PROPOSAL_REQUIRED: live-module mutations must be approved through MutationCoordinator"
+                    val path = parts[0].trim()
+                    changes += ChangeRecord(
+                        path = path,
+                        operation = ChangeOperation.REPLACE,
+                        before = parts[1],
+                        after = parts[2],
+                        reason = "Waiting for approval. This file was not changed.",
+                        beforeChecksum = "",
+                        afterChecksum = ""
+                    )
+                    output += "PROPOSAL_REQUIRED: $path is not changed until you approve it."
                     verification = workspace.verify()
                 }
                 "verify" -> verification = workspace.verify()

@@ -54,23 +54,34 @@ class GoalInterpreter(private val root: File) {
                 else -> TaskIntent.CHANGE
             }
         }
+        // "Do not change any files" contains the word change. Strip those negated
+        // instructions before verb matching, and treat an explanation request as an
+        // explanation even when a negated change word is still in the original sentence.
+        val forVerbs = withoutNegatedDirectives(request)
         return when {
-            matches(request, "write (?:a )?(?:deep )?(?:technical )?report|write (?:a )?summary|generate (?:a )?(?:technical )?report") -> TaskIntent.INSPECT
-            matches(request, "create|add|new file|write a|generate|build\\s+(?:me|a|an)\\s+") -> TaskIntent.CREATE
-            matches(request, "test|tests|testing|verify|build\\s+(?:the|this|my)\\s+(?:project|app|application|module)") -> TaskIntent.TEST
-            matches(request, "fix|debug|broken|error|crash|bug|repair|patch") -> TaskIntent.DEBUG
-            matches(request, "refactor|restructure|rename|clean up|cleanup") -> TaskIntent.REFACTOR
+            matches(forVerbs, "write (?:a )?(?:deep )?(?:technical )?report|write (?:a )?summary|generate (?:a )?(?:technical )?report") -> TaskIntent.INSPECT
+            matches(forVerbs, "create|add|new file|write a|generate|build\\s+(?:me|a|an)\\s+") -> TaskIntent.CREATE
+            matches(forVerbs, "test|tests|testing|verify|build\\s+(?:the|this|my)\\s+(?:project|app|application|module)") -> TaskIntent.TEST
+            matches(forVerbs, "fix|debug|broken|error|crash|bug|repair|patch") -> TaskIntent.DEBUG
+            matches(forVerbs, "refactor|restructure|rename|clean up|cleanup") -> TaskIntent.REFACTOR
+            matches(forVerbs, "explain|why|what does|understand") -> TaskIntent.EXPLAIN
             matches(
-                request,
+                forVerbs,
                 "change|edit|update|modify|implement|improve|improvement|improvements|enhance|upgrade|add|remove|delete|insert"
             ) -> TaskIntent.CHANGE
-            matches(request, "explain|why|what does|understand") -> TaskIntent.EXPLAIN
-            matches(request, "inspect|list files|search project|find file|analy[sz]e|analysis|review|audit|assess|evaluate|thoughts|look over|report on|summarize") -> TaskIntent.INSPECT
-            matches(request, "research|learn|study|investigate|compare|explore") -> TaskIntent.EXPLAIN
-            isGreetingOrChat(request) -> TaskIntent.UNKNOWN
+            matches(forVerbs, "inspect|list files|search project|find file|analy[sz]e|analysis|review|audit|assess|evaluate|thoughts|look over|report on|summarize") -> TaskIntent.INSPECT
+            matches(forVerbs, "research|learn|study|investigate|compare|explore") -> TaskIntent.EXPLAIN
+            isGreetingOrChat(forVerbs) -> TaskIntent.UNKNOWN
             else -> TaskIntent.UNKNOWN
         }
     }
+
+    private fun withoutNegatedDirectives(request: String): String = request.replace(
+        Regex(
+            """(?i)\b(?:do not|don't|dont|never|without)\s+(?:ever\s+)?(?:changing|change|editing|edit|modifying|modify|updating|update|adding|add|removing|remove|deleting|delete|creating|create|touching|touch|writing|write)\b[^.!?\n]*"""
+        ),
+        " "
+    )
 
     private fun currentRequestFocus(request: String): String {
         val marker = "Current request:"

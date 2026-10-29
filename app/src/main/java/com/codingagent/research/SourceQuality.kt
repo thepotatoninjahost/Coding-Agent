@@ -73,6 +73,13 @@ object SourceQuality {
             u.contains("developer.mozilla.org")
     }
 
+    fun searchKeywords(query: String): String {
+        val versions = Regex("""v?\d+(?:\.\d+)+""").findAll(query).map { it.value }.toList()
+        val words = queryTerms(query).toList()
+        val picked = (words + versions).distinct().take(8)
+        return picked.joinToString(" ").ifBlank { query.trim().take(80) }
+    }
+
     fun queryTerms(query: String): Set<String> =
         query.lowercase()
             .split(Regex("[^a-z0-9+#]+"))
@@ -145,10 +152,15 @@ object SourceQuality {
         return score
     }
 
-    fun isAcceptable(url: String, title: String, excerpt: String): Boolean {
+    fun isAcceptable(url: String, title: String, excerpt: String, query: String = ""): Boolean {
         val u = url.lowercase()
         val t = title.lowercase()
         val e = excerpt.lowercase()
+        if (u.contains("developer.mozilla.org")) {
+            val asked = query.lowercase()
+            val webTopic = listOf("javascript", "css", "html", "dom", "browser")
+            if (webTopic.none { asked.contains(it) }) return false
+        }
         if (u.contains("wikipedia.org")) {
             if (t.contains("talk") || u.contains("talk:") || u.contains("disambiguation")) return false
             if (u.contains("/wiki/talk:") || u.contains("/wiki/user:") || u.contains("/wiki/wikipedia:")) return false
@@ -173,11 +185,13 @@ object SourceQuality {
     fun rankBoost(url: String): Int {
         val u = url.lowercase()
         return when {
+            u.contains("github.com") && u.contains("/releases") -> 16
             u.contains("developer.android.com") || u.contains("kotlinlang.org") -> 14
             u.contains("developer.apple.com") -> 12
             u.contains("github.com") -> 11
             u.contains("stackoverflow.com") -> 10
             u.contains("android.com") -> 9
+            u.contains("developer.mozilla.org") -> 0
             u.contains("docs.") || u.contains("developer.") -> 8
             u.contains("medium.com") || u.contains("dev.to") -> 2
             u.contains("wikipedia.org") -> -6

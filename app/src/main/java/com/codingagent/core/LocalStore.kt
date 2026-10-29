@@ -26,6 +26,10 @@ class LocalStore(context: Context) : ChatMessageStore {
     // that remains inside Android Keystore; only ciphertext is persisted in SharedPreferences.
     private val securePrefs = KeystoreSecretStore(context).also {
         LegacyEncryptedPreferencesMigration.migrateIfNeeded(context, it)
+        NotesAtRest.install(object : NotesAtRest.Cipher {
+            override fun seal(plain: String) = it.sealNotes(plain)
+            override fun open(sealed: String) = it.openNotes(sealed)
+        })
     }
     private val ownerApprovalPhrases = OwnerApprovalPhraseStore(
         readSecret = { key -> securePrefs.getString(key) },
@@ -50,6 +54,14 @@ class LocalStore(context: Context) : ChatMessageStore {
 
     fun loadModelSettings(): ModelSettings = ModelSettings.fromJson(securePrefs.getString(KeystoreSecretStore.MODEL_SETTINGS))
 
+    fun saveGitHubToken(token: String?) {
+        val clean = token?.filterNot { it.isWhitespace() }?.ifBlank { null }
+        securePrefs.putString(KeystoreSecretStore.GITHUB_TOKEN, clean)
+    }
+
+    fun loadGitHubToken(): String? =
+        securePrefs.getString(KeystoreSecretStore.GITHUB_TOKEN)?.takeIf { it.isNotBlank() }
+
     /** True only when both owner-created approval phrases have been enrolled. */
     fun ownerApprovalPhrasesConfigured(): Boolean = ownerApprovalPhrases.isConfigured()
 
@@ -62,12 +74,6 @@ class LocalStore(context: Context) : ChatMessageStore {
 
     fun verifyOwnerSpokenPhrase(recognizedPhrase: String, challengeWord: String): Boolean =
         ownerApprovalPhrases.verifySpoken(recognizedPhrase, challengeWord)
-
-    companion object {
-        private const val KEY_PROJECT_PATH = "project_path"
-        private const val KEY_LAST_RESEARCH = "last_research_query"
-        private const val KEY_MODEL_SETTINGS = "model_settings_v1"
-    }
 
     @Synchronized
     fun recordTask(record: TaskRecord) = append(tasksFile, JSONObject()
@@ -143,20 +149,21 @@ class LocalStore(context: Context) : ChatMessageStore {
     }
 
     private fun append(file: File, line: String) {
-        file.parentFile?.mkdirs()
-        file.appendText(line + "\n")
+        NotesAtRest.appendLine(file, line)
     }
 
     private fun read(file: File, limit: Int): List<JSONObject> {
         if (!file.exists() || limit <= 0) return emptyList()
+        NotesAtRest.migrate(file)
 
         // Keep only the requested physical tail. Parsing happens after the tail is
         // selected so malformed recent records preserve the previous semantics.
         val tail = ArrayDeque<String>(minOf(limit, 1024))
         file.useLines { lines ->
             lines.forEach { line ->
+                val opened = NotesAtRest.openLine(line)
                 if (tail.size == limit) tail.removeFirst()
-                tail.addLast(line)
+                tail.addLast(opened)
             }
         }
 

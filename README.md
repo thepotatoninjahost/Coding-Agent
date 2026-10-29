@@ -14,7 +14,7 @@ It is not a chatbot that answers coding questions in one shot. It works like a c
 
 It does not quit early out of convenience. It only stops early when a specific missing input from the user is required that tools cannot supply.
 
-The runtime keeps a degraded offline knowledge path. Non-trivial coding requests that require external knowledge fail closed unless a web research provider is configured and returns evidence. The model-driven autonomous path uses an OpenAI-compatible gateway with tool calling and streamed server-sent-event deltas. Configure the gateway via the in-app Model settings screen (base URL, model id, API key).
+The runtime keeps a degraded offline knowledge path. Non-trivial coding requests that require external knowledge fail closed unless a web research provider is configured and returns evidence. The model-driven autonomous path uses an OpenAI-compatible gateway with tool calling and streamed server-sent-event deltas. Configure the gateway via the in-app Setup screen (web address, helper name, secret password).
 
 ## Current product status
 
@@ -26,7 +26,7 @@ The current APK supports:
 - Autonomous model loop with real tool calling (list_files, read_file, search_project, verify, mutations with dual approval, etc.)
 - Always-on static verification (unfinished-work marker scan) — never reports a fake pass
 - Evidence requirement: inspect/error/analyze requests must actually read or search project files before a final answer is accepted
-- Model settings UI for any OpenAI-compatible provider (Groq, SambaNova, OpenRouter, local, etc.)
+- Setup screen for an OpenAI-compatible helper. The web address starts at `https://openrouter.ai/api/v1`. No helper name is filled in. Test models loads the live free list, ranked by whether the helper can use tools and how much context it has. You can type a different name. The secret password is typed on the phone and is never stored in this repository.
 - Transactional file changes with checksum-backed rollback
 - Persisted chat history and task journal
 
@@ -37,14 +37,35 @@ Remaining product polish (not blockers for basic use):
 
 Terminal behavior and limits are documented in **Terminal limitations**.
 
-## Recommended remote provider (as of 2026-08)
+## Helper the phone uses
 
+OpenRouter is the default. Setup already shows:
 
-- Base URL: `https://api.groq.com/openai/v1`
-- Model: `llama-3.3-70b-versatile`
-- API key: from console.groq.com
+- Web address: `https://openrouter.ai/api/v1`
+- Helper name: blank until Test models loads the live list. You can type a name. The old name `openrouter/free` is not the starter, because it picked a different model on every step. It is only a last resort.
+- Secret password: paste it from [openrouter.ai/keys](https://openrouter.ai/keys). Leave this blank in the repository. Do not commit a key.
 
-Any other OpenAI-compatible endpoint works the same way.
+A missing password, a rejected password, and a used-up daily limit are explained in plain English. Setup has a separate password box for each helper you use:
+
+- OpenRouter, at `https://openrouter.ai/api/v1`. That password is the Secret password on the main Setup screen.
+- Groq, at `https://api.groq.com/openai/v1`.
+- Requesty, at `https://router.requesty.ai/v1`.
+- AI/ML API, at `https://api.aimlapi.com/v1`, using the helper named `stealth/union-alpha`.
+- Cloudflare. This one needs two boxes. The account id is the long code of letters and numbers on your Cloudflare account page. The token is the secret Cloudflare gives you. The phone puts the account id into the address `https://api.cloudflare.com/client/v4/accounts/{account id}/ai/v1` and sends the token with the request. Both stay on the phone.
+
+Setup can also hold a Google Gemini key, a Mistral key, a SambaNova key, and an optional Cerebras trial key. The phone starts with the best helper that still has room. If one is rate-limited, out of quota, or failing, the same job continues on the next helper. A helper is used again only after its reset time. The owner is told only when every helper is used up, including when work will resume. The ranking is refreshed from free web research about once a week. GitHub's free model service closed in July 2026, so there is no key for it. Another company's web address still works if you type it in Setup. Do not commit any of these passwords.
+
+The computer script uses the same step limit and the same backup helpers as the phone. Optional keys `GROQ_API_KEY`, `REQUESTY_API_KEY`, `AIML_API_KEY`, `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `GEMINI_API_KEY`, `MISTRAL_API_KEY`, `CEREBRAS_API_KEY`, and `SAMBANOVA_API_KEY` are read from the environment and are not printed. Cloudflare needs both the token and the account id.
+
+On a computer, the same loop can be run with your own key. The script reads `OPENROUTER_API_KEY` from the environment and does not print it:
+
+```bash
+export OPENROUTER_API_KEY='paste-your-key-here'
+./scripts/run_openrouter_agent.sh "Explain this project in one short paragraph. Do not change any files."
+
+# Point it at a real project folder. The second argument is that folder.
+./scripts/run_openrouter_agent.sh "Explain this project in one short paragraph. Do not change any files." .
+```
 
 ## Architecture
 
@@ -57,7 +78,7 @@ Production source is split by job under `app/src/main/java/com/codingagent/`:
 | `agent` | Single spine (`AutonomousAgent`), constitution, tool dispatch (`AgentToolDispatch`), planning (`AgentPlanner`), chat workspace, journal |
 | `intake` | Free text → typed goal (`TaskIntakeParser`, `GoalInterpreter`, `CodeSynthesisEngine`) |
 | `workspace` | Project import, index (`ProjectIndexer`), files, diffs, dual-approval mutations, terminal, verification, checksum rollback (`ProjectWorkspace`) |
-| `model` | User-configured OpenAI-compatible HTTP gateway (`RemoteHttpGateway`), settings, streamed SSE tool calls. No vendor is hardcoded. |
+| `model` | OpenAI-compatible HTTP gateway (`RemoteHttpGateway`). OpenRouter's free helper is the default. The secret password is entered at runtime. |
 | `research` | Web evidence (`WebResearchProvider`, `DurableDeepResearchProvider`, `PersonalResearchProvider`, `SourceQuality`, `QueryLanes`) |
 | `knowledge` | Local searchable chunks behind `AgentKnowledge` / `KnowledgeProvider` |
 | `ui` | Compose workbench (`MainActivity`, screens, theme) |
@@ -66,7 +87,7 @@ Production source is split by job under `app/src/main/java/com/codingagent/`:
 Execution path:
 
 1. `TaskIntakeParser` interprets a request into a typed goal contract and operation.
-2. `AutonomousAgent` owns the loop: gather evidence, plan, one tool per turn (queue extras), observe, verify, hand over.
+2. `AutonomousAgent` owns the loop: gather evidence, plan, one tool per turn (if a reply contains several tool calls, the first one runs and the task continues), observe, verify, hand over.
 3. `AgentPlanner` produces and revises the plan from evidence.
 4. `ProjectIndexer` inventories project files, languages, imports, symbols, and checksums.
 5. `AgentKnowledge` supplies local evidence. `WebResearchProvider` / deep-research providers supply internet evidence when the request requires it. Empty research fails closed.
@@ -96,13 +117,14 @@ Unit tests currently live under `app/src/test/java/com/codingagent/core/` even t
 - Run explicit verification commands with bounded timeouts.
 - Persist task, document, and lesson records locally.
 - Persist task, document, lesson, and Chat workspace messages locally in app-private JSONL records.
+- Remember things you ask it to remember. Setup starts on "Clean up old memories": old unimportant notes are dropped after about six months, and strong rules stay. "Keep everything I remember" turns that cleanup off.
 - Include prior Chat workspace messages in subsequent agent requests so follow-up work has conversation context.
 - Store versioned live modules and local model files outside the APK.
 - Reload changed modules and model bytes without rebuilding the Android host.
 
 ## Knowledge and learning boundary
 
-`Coding For Dummies` is an example reference asset used to exercise the local knowledge pipeline. It is not the product's knowledge limit or a hardcoded coding strategy.
+`app/src/main/assets/knowledge/coding-for-dummies.txt` is a short original sample for the on-phone knowledge index. It is not the commercial book, and it is not a coding strategy.
 
 The intended ingestion workflow is:
 
@@ -138,7 +160,7 @@ The Terminal tab and the agent `run_command` tool use the same underlying runner
 - Command: `sh -c <your text>`
 - Working directory: the imported project copy in app-private storage
 - Timeout: 180 seconds (Stop sends `destroy` / `destroyForcibly`)
-- Output: stdout and stderr, each capture capped at 256 KiB
+- Output: the command that is running keeps its full output. Stored history keeps the first 256 KB and adds the note `output trimmed` when the rest is left out.
 
 The **Terminal tab is the owner-controlled terminal** and remains unrestricted. The **agent `run_command` tool is restricted** to project inspection and standard verification commands. Model commands cannot delete or modify files, chain shell commands, redirect output, access parent/absolute paths, use network tools, or change global Gradle configuration.
 
@@ -164,6 +186,17 @@ app/build/outputs/apk/debug/app-debug.apk
 ```
 
 `local.properties`, `.gradle/`, and `app/build/` are machine-local or generated state. They must not be committed.
+
+## Release signing
+
+Debug builds keep using the normal Android debug key. A release build is signed only when all four of these are set and the keystore file is really there:
+
+- `CODING_AGENT_KEYSTORE` — path to the keystore file
+- `CODING_AGENT_KEYSTORE_PASSWORD` — keystore password
+- `CODING_AGENT_KEY_ALIAS` — key name inside the keystore
+- `CODING_AGENT_KEY_PASSWORD` — that key's password
+
+If any of them is missing, the release build still compiles and stays unsigned. Do not commit the keystore. Files named `*.keystore` and `*.jks` are ignored.
 
 ## Verification coverage
 
@@ -217,7 +250,7 @@ A newer push to the same branch cancels the older in-progress run so the APK and
 - Image: `ubuntu-24.04-arm` (arm64 runner; matches S25-class ABI for emulator)
 - Job timeout: 120 minutes (the job is cancelled if it runs longer)
 - Default shell for `run` steps: `bash`
-- One job (`build`), sequential steps — debug APK is assembled and uploaded before the emulator step so a later failure does not depend on skipping the APK upload
+- Two jobs. `build` runs the checks. `publish-debug-apk` runs after a push to `main` or `cursor/audit-fixes-ce5c` and attaches the debug APK to the `latest-debug` prerelease. Debug APK assembly and upload happen before the emulator step, so a later emulator failure does not hide the APK.
 
 ### What the job does
 
@@ -232,9 +265,13 @@ A newer push to the same branch cancels the older in-progress run so the APK and
 9. Enables KVM, starts an **API 35** `google_apis` / **arm64-v8a** / Pixel 7 emulator on `ubuntu-24.04-arm` (pinned `android-emulator-runner@v2.38.0`), and runs instrumentation tests (`connectedDebugAndroidTest`). Clean boot (`-no-snapshot`), animations and spellchecker disabled. **One attempt** — failure fails the job (no retry that could hide a real test failure).
 10. On instrumentation failure, uploads Android test reports (`if-no-files-found: warn`).
 
-Permissions: `contents: read` only.
+The `build` job can read the repository. The publish job can also write a release, and only on a push to `main` or this working branch.
 
 ### Download the debug APK
+
+On your phone, open the repository **Releases** page and install the `latest-debug` prerelease asset named `coding-agent-debug.apk`. That file is replaced each time a push to `main` or the working branch finishes a build. It is a test build, not a store release.
+
+You can also download the same APK from a workflow run:
 
 1. Open the repository on GitHub.
 2. Open **Actions**.
@@ -242,11 +279,11 @@ Permissions: `contents: read` only.
 4. Open a completed run for the commit you want (or start one with **Run workflow**).
 5. Under **Artifacts**, download **`coding-agent-debug-apk`**.
 
-The debug APK upload step runs even when a later step fails (so an emulator failure does not hide a successful debug APK). If `assembleDebug` did not produce an APK, the upload step **fails the job** instead of silently uploading nothing.
+The debug APK upload step runs even when a later step fails (so an emulator failure does not hide a successful debug APK). If `assembleDebug` did not produce an APK, the upload step **fails the job** instead of silently uploading nothing. The phone release is updated only after that artifact exists.
 
 ## Supported device contract
 
-This build targets the Samsung Galaxy S25 class of devices: Android API 35 or newer, `arm64-v8a`, and 64-bit ARM. The APK intentionally does not claim x86_64 or 32-bit ARM support.
+This build targets phones on `minSdk` 34 and `targetSdk` 35, including Samsung Galaxy S25-class devices. The app has no native libraries and Gradle does not set an ABI filter, so the same APK can install on arm64-v8a, armeabi-v7a, and x86_64 devices that meet `minSdk` 34. CI instrumentation uses an arm64 emulator. API 34 devices can install it; it is not limited to API 35.
 
 ## Reproducible source packaging
 

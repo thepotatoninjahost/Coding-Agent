@@ -1,11 +1,8 @@
 package com.codingagent.agent
 
 import java.time.Instant
-import com.codingagent.intake.OperationKind
-import com.codingagent.intake.TaskOperation
 import com.codingagent.workspace.AgentTask
 import com.codingagent.workspace.MutationCoordinator
-import com.codingagent.workspace.MutationProposeResult
 import com.codingagent.workspace.ProjectFileService
 import com.codingagent.workspace.ProjectWorkspace
 import com.codingagent.workspace.VerificationReport
@@ -51,72 +48,15 @@ object SelfRepair {
         }
         if (hasAgentSources) return null
 
-        val op = TaskOperation(
-            kind = OperationKind.CREATE_FILE,
-            path = "src/SelfRepair.kt",
-            text = seedSource()
-        )
-        return propose(
-            taskId = taskId,
+        return AgentTask(
+            id = taskId,
             request = request,
+            status = "needs-input",
             plan = plan,
-            mutations = mutations,
-            operations = listOf(op),
-            reason = "Self-repair: bootstrap src/SelfRepair.kt",
-            summary = "Self-repair proposal staged. Confirm twice to apply src/SelfRepair.kt."
+            changes = emptyList(),
+            verification = VerificationReport(false, emptyList()),
+            events = listOf("${Instant.now()}: self-repair found no app source in this project"),
+            summary = "This project does not contain this app's own source, so there is nothing here to repair. Nothing was written."
         )
-    }
-
-    private fun propose(
-        taskId: String,
-        request: String,
-        plan: AgentPlan,
-        mutations: MutationCoordinator,
-        operations: List<TaskOperation>,
-        reason: String,
-        summary: String
-    ): AgentTask {
-        return when (val result = mutations.propose(request, operations, reason)) {
-            is MutationProposeResult.Proposed -> {
-                val proposal = result.proposal
-                AgentTask(
-                    id = taskId,
-                    request = request,
-                    status = "needs-approval",
-                    plan = plan,
-                    changes = proposal.changeSet.changes,
-                    verification = proposal.verification,
-                    events = listOf("${Instant.now()}: self-repair proposal ${proposal.id} staged; awaiting dual approval"),
-                    summary = summary
-                )
-            }
-            is MutationProposeResult.Rejected -> AgentTask(
-                id = taskId,
-                request = request,
-                status = "failed",
-                plan = plan,
-                changes = emptyList(),
-                verification = VerificationReport(false, emptyList()),
-                events = listOf("${Instant.now()}: self-repair proposal rejected: ${result.reason}"),
-                summary = "Self-repair staging failed: ${result.reason}"
-            )
-        }
-    }
-
-    private fun seedSource(): String = buildString {
-        appendLine("package com.codingagent.agent")
-        appendLine()
-        appendLine("/**")
-        appendLine(" * ONE JOB: Detect self-repair requests against the agent source tree.")
-        appendLine(" */")
-        appendLine("object SelfRepair {")
-        appendLine()
-        appendLine("    private val PHRASES = Regex(")
-        appendLine("        \"\\\\b(fix yourself|modify yourself|self[-\\\\s]?repair|repair yourself|update yourself|improve yourself)\\\\b\",")
-        appendLine("        RegexOption.IGNORE_CASE")
-        appendLine("    )")
-        appendLine()
-        appendLine("    fun isRequest(text: String): Boolean = PHRASES.containsMatchIn(text)")
-        appendLine("}")
     }
 }

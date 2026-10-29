@@ -8,14 +8,22 @@ import com.codingagent.agent.ChatMessage
 import com.codingagent.agent.ChatMessageStore
 import com.codingagent.agent.ChatWorkspace
 import com.codingagent.workspace.KnowledgeHit
+import com.codingagent.core.NotesAtRest
 import org.json.JSONObject
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.nio.file.Files
+import java.util.Base64
 
 class AgentJournalTest {
+    @After
+    fun clearNotesCipher() {
+        NotesAtRest.clear()
+    }
+
     @Test
     fun recordsObservableEventsAndReturnsNewestEntriesFirst() {
         val root = Files.createTempDirectory("agent-personal-log").toFile()
@@ -138,5 +146,53 @@ class AgentJournalTest {
         assertTrue(turn.response.content.contains("Personal logs"))
         assertTrue(turn.response.content.contains("Started"))
         assertTrue(turn.response.content.contains("hello"))
+    }
+
+    @Test
+    fun personalLogIsSealedOnDiskAndStillReadsBack() {
+        val root = Files.createTempDirectory("agent-personal-log-sealed").toFile()
+        NotesAtRest.install(testCipher())
+        val journal = AgentJournal(root)
+        journal.recordEvent(
+            "task-seal",
+            AutonomousAgentEvent.ModelMessage("owner-only note about the porch light")
+        )
+        val raw = root.resolve(".coding-agent/personal-log.jsonl").readText()
+        assertTrue(raw.startsWith(NotesAtRest.PREFIX))
+        assertFalse(raw.contains("porch light"))
+        val opened = JSONObject(journal.recentEvents(1).single())
+        assertTrue(opened.getString("details").contains("porch light"))
+    }
+
+    @Test
+    fun plainNotesAreSealedTheNextTimeTheyAreSaved() {
+        val root = Files.createTempDirectory("agent-personal-log-migrate").toFile()
+        val journal = AgentJournal(root)
+        journal.recordEvent(
+            "task-plain",
+            AutonomousAgentEvent.ModelMessage("plain porch note")
+        )
+        val file = root.resolve(".coding-agent/personal-log.jsonl")
+        assertTrue(file.readText().contains("plain porch note"))
+        NotesAtRest.install(testCipher())
+        journal.recordEvent(
+            "task-plain",
+            AutonomousAgentEvent.ModelMessage("second porch note")
+        )
+        val raw = file.readText()
+        assertFalse(raw.contains("plain porch note"))
+        assertFalse(raw.contains("second porch note"))
+        assertTrue(raw.lineSequence().filter { it.isNotBlank() }.all { it.startsWith(NotesAtRest.PREFIX) })
+        val details = journal.recentEvents(5).map { JSONObject(it).getString("details") }
+        assertTrue(details.any { it.contains("plain porch note") })
+        assertTrue(details.any { it.contains("second porch note") })
+    }
+
+    private fun testCipher() = object : NotesAtRest.Cipher {
+        override fun seal(plain: String): String =
+            Base64.getEncoder().encodeToString(plain.toByteArray(Charsets.UTF_8))
+
+        override fun open(sealed: String): String =
+            String(Base64.getDecoder().decode(sealed), Charsets.UTF_8)
     }
 }

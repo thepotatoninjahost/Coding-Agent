@@ -9,14 +9,13 @@ class LiveModelRouter(private val store: LiveModelStore) {
     @Synchronized
     fun reload(): LiveModel? {
         val active = store.active() ?: run { loaded = null; return null }
-        val bytes = store.modelBytes(active)
-        loaded = LoadedModel(active, bytes, System.currentTimeMillis())
+        loaded = LoadedModel(active, store.modelSize(active), System.currentTimeMillis())
         return active
     }
 
     fun active(): LiveModel? = loaded?.model ?: reload()
-    fun loadedBytes(): Int = loaded?.bytes?.size ?: reload()?.let { loaded?.bytes?.size ?: 0 } ?: 0
+    fun loadedBytes(): Int = loaded?.size ?: reload()?.let { loaded?.size ?: 0 } ?: 0
     fun loadedAt(): Long? = loaded?.loadedAt
 
-    private data class LoadedModel(val model: LiveModel, val bytes: ByteArray, val loadedAt: Long)
+    private data class LoadedModel(val model: LiveModel, val size: Int, val loadedAt: Long)
 }

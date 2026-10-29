@@ -35,7 +35,7 @@ fun interface AgentProgressListener {
 
 class ChatWorkspace(
     private val store: ChatMessageStore,
-    private val unavailableMessageProvider: () -> String = { "Model unavailable. Finish model setup before sending coding requests." },
+    private val unavailableMessageProvider: () -> String = { "I am not ready yet. Open a project, and tap Setup if you want me to write new code." },
     private val progressListener: AgentProgressListener? = null,
     private val memoryStore: UserMemoryStore? = null,
     private val runtimeProvider: () -> AutonomousAgent?
@@ -81,6 +81,30 @@ class ChatWorkspace(
         // awaiting owner action. A new goal must not orphan that proposal or cause its eventual
         // apply/markApplied transition to be recorded against the wrong job.
         if (agent != null && looksLikeNewGoal(trimmed) && agent.pendingProposals().isNotEmpty()) {
+            val proposal = agent.pendingProposals().first()
+            val code = proposal.changeSet.changes.firstOrNull { it.path.endsWith(".js") && !it.after.isNullOrBlank() }?.after
+            if (code != null) {
+                val run = com.codingagent.workspace.JsExampleGate.check(code, proposal.request)
+                if (run.passed) agent.noteDraftChecks(proposal.id, true)
+                val card = com.codingagent.workspace.ChangeDiff.phoneCard(proposal, run)
+                val task = com.codingagent.workspace.AgentTask(
+                    id = UUID.randomUUID().toString(),
+                    request = trimmed,
+                    status = if (run.passed) "needs-approval" else "needs-input",
+                    plan = com.codingagent.workspace.AgentPlan(trimmed, emptyList(), emptyList()),
+                    changes = proposal.changeSet.changes,
+                    verification = proposal.verification,
+                    events = listOf("checked the saved draft again"),
+                    summary = card
+                )
+                val result = if (run.passed) {
+                    AgentRuntimeResult.NeedsApproval(task, card, proposal.id)
+                } else {
+                    AgentRuntimeResult.NeedsInput(task, card)
+                }
+                progressListener?.onProgress("RESUME", "Checking the draft that was already waiting.")
+                return persist(result = result)
+            }
             val pending = PendingWorkResume.tryResume(agent, "review proposal", recentAgentText = null)
             if (pending != null) {
                 progressListener?.onProgress("RESUME", "Pending proposal must be resolved before starting a new coding goal")
@@ -93,7 +117,7 @@ class ChatWorkspace(
             if (existingJob?.status == "recovery-required") {
                 val response = ChatMessage(
                     role = ChatRole.AGENT,
-                    content = "The current coding job is in recovery-required state and cannot be replaced. Resolve the interrupted mutation before starting a new coding goal."
+                    content = "This job needs to be recovered before a new one can start. Finish the interrupted change first."
                 )
                 store.recordChatMessage(response)
                 return ChatTurn(response, AgentRuntimeResult.Failed(
@@ -125,12 +149,16 @@ class ChatWorkspace(
             agent?.let { PendingWorkResume.tryResume(it, trimmed, lastAgent) }
         }
         if (resumed != null) {
-            progressListener?.onProgress("RESUME", "Local pending work / rate-limit gate")
+            progressListener?.onProgress("RESUME", "Picking up the work that was already waiting.")
             return persist(result = resumed)
         }
-        progressListener?.onProgress("PLANNING", "Starting request")
-        val executionRequest = if (resumeOpenJob) openJob!!.goal else trimmed
-        val packaged = packageWithMemory(executionRequest)
+        progressListener?.onProgress("PLANNING", "Starting.")
+        val executionRequest = if (resumeOpenJob) {
+            openJob?.goal ?: trimmed
+        } else {
+            trimmed
+        }
+        val packaged = if (SelfContainedProgram.matches(executionRequest)) executionRequest else packageWithMemory(executionRequest)
         val workLog = mutableListOf<String>()
         val result = if (agent == null) {
             null
@@ -148,21 +176,21 @@ class ChatWorkspace(
                     }
                     is AutonomousAgentEvent.ToolFinished -> progressListener?.onProgress(
                         "TOOL",
-                        if (event.success) "${event.name} ok" else "${event.name} failed"
+                        if (event.success) "That check finished." else "That check did not finish."
                     )
-                    is AutonomousAgentEvent.ModelDelta -> progressListener?.onProgress("MODEL", "Streaming… ${event.text}")
-                    is AutonomousAgentEvent.ModelMessage -> progressListener?.onProgress("MODEL", "Writing reply")
-                    is AutonomousAgentEvent.Started -> progressListener?.onProgress("STARTED", event.request)
-                    is AutonomousAgentEvent.Completed -> progressListener?.onProgress("DONE", "Completed")
+                    is AutonomousAgentEvent.ModelDelta -> progressListener?.onProgress("MODEL", "The helper is writing a reply.")
+                    is AutonomousAgentEvent.ModelMessage -> progressListener?.onProgress("MODEL", "Writing a reply.")
+                    is AutonomousAgentEvent.Started -> progressListener?.onProgress("STARTED", "Working on what you asked.")
+                    is AutonomousAgentEvent.Completed -> progressListener?.onProgress("DONE", "Done.")
                     is AutonomousAgentEvent.Failed -> progressListener?.onProgress("FAILED", event.message)
                     is AutonomousAgentEvent.Stopped -> progressListener?.onProgress("STOPPED", event.message)
-                    is AutonomousAgentEvent.ApprovalRequired -> progressListener?.onProgress("APPROVAL", "Waiting for owner approval")
+                    is AutonomousAgentEvent.ApprovalRequired -> progressListener?.onProgress("APPROVAL", "Waiting for you to say yes.")
                 }
             }
             when (val terminal = events.lastOrNull()) {
                 is AutonomousAgentEvent.ApprovalRequired -> AgentRuntimeResult.NeedsApproval(
                     terminal.task,
-                    ChangeDiff.ownerReviewText(terminal.proposal),
+                    terminal.task.summary,
                     terminal.proposal.id
                 )
                 is AutonomousAgentEvent.Completed -> asRuntime(agent, terminal.task)
@@ -191,7 +219,7 @@ class ChatWorkspace(
         if (task.status == "needs-approval" || task.status == "waiting-approval") {
             val proposal = agent.pendingProposals().firstOrNull()
             if (proposal != null) {
-                return AgentRuntimeResult.NeedsApproval(task, ChangeDiff.ownerReviewText(proposal), proposal.id)
+                return AgentRuntimeResult.NeedsApproval(task, task.summary, proposal.id)
             }
         }
         if (task.status == "needs-input") {
@@ -306,7 +334,7 @@ class ChatWorkspace(
                         append(entry.optString("details")).append("\n\n")
                     }
                 }
-                append("Entries are shortened in this chat view when necessary; the stored JSONL records retain the full event payloads.")
+                append("This view shows the full saved notes. They stay on this phone, in this project.")
             }
         }
         val message = ChatMessage(role = ChatRole.AGENT, content = response)
@@ -354,7 +382,8 @@ class ChatWorkspace(
         return ChatTurn(message, null)
     }
     private fun formatTask(task: AgentTask, workLog: List<String> = emptyList()): String = buildString {
-        if (workLog.isNotEmpty()) {
+        val explainOnly = task.changes.isEmpty() && task.status == "completed"
+        if (workLog.isNotEmpty() && !explainOnly) {
             append("Work:\n")
             workLog.distinct().forEach { line ->
                 append("- ")
@@ -434,6 +463,22 @@ data class ChatTurn(
     val response: ChatMessage,
     val result: AgentRuntimeResult?
 )
+
+/**
+ * The on-screen chat is a snapshot. A long run must still show the request and the outcome
+ * even when the saved copy cannot be read back.
+ */
+object ChatVisibility {
+    fun merge(onScreen: List<ChatMessage>, stored: List<ChatMessage>, request: String): List<ChatMessage> {
+        if (request.isNotBlank() && stored.any { it.role == ChatRole.USER && it.content == request }) return stored
+        if (stored.isEmpty()) return onScreen
+        val knownIds = stored.map { it.id }.toSet()
+        val extra = onScreen.filter { message ->
+            message.id !in knownIds && stored.none { it.role == message.role && it.content == message.content }
+        }
+        return stored + extra
+    }
+}
 
 
 private sealed class MemoryCommand {

@@ -156,6 +156,10 @@ class OperationalAgentTest {
                 name = "replace_text",
                 arguments = """{"path":"src/Main.kt","oldText":"fun main() = 1\n","newText":"fun main() = 2\n","reason":"What I want to do: Change src/Main.kt so main returns 2.\\nWhy: This carries out your request.\\nWhat will change: Replace the current main function with one that returns 2.\\nPossible effects: The program will return 2 instead of 1.\\nRisks: A change to program behavior could affect anything that depends on the old result.\\nWhat your approval means: Nothing is written until you complete both owner approvals."}"""
             ))
+            add(ModelResponse.ToolCall(
+                name = "review_examples",
+                arguments = """{"path":"src/Main.kt","examples":"first call => 2\nsecond call => 2","notes":"Two examples. This file does not read several lines of text."}"""
+            ))
         }
         val gateway = object : ModelGateway {
             override fun complete(request: ModelRequest): ModelResponse =
@@ -169,13 +173,17 @@ class OperationalAgentTest {
     }
 
     @Test
-    fun explicitResearchFailsWithoutCallingModelWhenNoUsableSourcesExist() {
-        val root = Files.createTempDirectory("agent-research-fail-closed").toFile()
+    fun researchKeepsGoingWhenNoUsableSourcesExist() {
+        val root = Files.createTempDirectory("agent-research-continues").toFile()
         var modelCalls = 0
         val gateway = object : ModelGateway {
             override fun complete(request: ModelRequest): ModelResponse {
                 modelCalls++
-                return ModelResponse.Text("Unsupported answer that must never be returned")
+                return if (modelCalls == 1) {
+                    ModelResponse.ToolCall("research_web", """{"query":"Kotlin coroutine cancellation"}""")
+                } else {
+                    ModelResponse.Text("I could not find pages, so this uses only the project.")
+                }
             }
         }
         val emptyResearch = object : DeepResearchProvider {
@@ -191,16 +199,26 @@ class OperationalAgentTest {
                 requestedSources = targetSources,
                 sources = emptyList(),
                 learnedChunks = 0,
-                errors = listOf("No results")
+                errors = listOf("PKIX path building failed: sun.security.provider.certpath.SunCertPathBuilderException")
             )
         }
         val spine = AutonomousAgent(root, emptyKnowledge, gateway, research = emptyResearch)
 
         val events = spine.run("Research the web for the latest Kotlin coroutine cancellation API documentation")
 
-        assertTrue(events.last() is AutonomousAgentEvent.Failed)
-        assertTrue((events.last() as AutonomousAgentEvent.Failed).message.contains("no usable external sources"))
-        assertEquals(0, modelCalls)
+        assertTrue(events.last() is AutonomousAgentEvent.Completed)
+        assertTrue(modelCalls > 0)
+        val shown = events.joinToString("\n") { event ->
+            when (event) {
+                is AutonomousAgentEvent.Phase -> event.detail
+                is AutonomousAgentEvent.Completed -> event.task.summary
+                is AutonomousAgentEvent.Failed -> event.message
+                else -> ""
+            }
+        }
+        assertFalse(shown.contains("PKIX"))
+        assertFalse(shown.contains("SunCertPathBuilderException"))
+        assertTrue(shown.contains("certificate", ignoreCase = true))
     }
 
     @Test

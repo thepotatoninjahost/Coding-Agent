@@ -1,5 +1,6 @@
 package com.codingagent.workspace
 
+import java.nio.file.Files
 import java.util.UUID
 import java.io.File
 import com.codingagent.agent.AgentAction
@@ -89,7 +90,7 @@ class MutationCoordinator(
             )
         }
         if (durableJob?.status == "recovery-required") {
-            return MutationProposeResult.Rejected("This job requires recovery before another mutation can be staged")
+            return MutationProposeResult.Rejected("This job needs to be recovered before another change can be staged")
         }
         if (durableJob?.status == "waiting-approval" || durableJob?.status == "applying") {
             return MutationProposeResult.Rejected(
@@ -107,17 +108,26 @@ class MutationCoordinator(
 
         if (changeSet.changes.isEmpty()) return MutationProposeResult.Rejected("Mutation proposal contains no changes")
 
-        val verification = runCatching { workspace.verifyProposal(changeSet) }
+        val staticVerification = runCatching { workspace.verifyProposal(changeSet) }
             .getOrElse { ex ->
                 return MutationProposeResult.Rejected(
                     "Verification failed: ${ex.message.orEmpty().ifBlank { ex.javaClass.simpleName }}"
                 )
             }
 
-        if (!verification.passed) {
+        if (!staticVerification.passed) {
             return MutationProposeResult.Rejected(
-                "Mutation proposal failed verification: ${verification.issues.joinToString { it.message }}"
+                "Mutation proposal failed verification: ${staticVerification.issues.joinToString { it.message }}"
             )
+        }
+        val runsOnPhone = changeSet.changes.any { it.path.endsWith(".js") || it.path.endsWith(".py") }
+        val verification = if (runsOnPhone) {
+            VerificationReport(
+                false,
+                listOf(VerificationIssue(changeSet.changes.first().path, 0, "The phone has not finished the checks."))
+            )
+        } else {
+            staticVerification
         }
 
         val timestamp = now()
@@ -202,7 +212,8 @@ class MutationCoordinator(
     fun approve(
         id: String,
         ownerApproval: OwnerApprovalToken,
-        modalities: Set<ApprovalModality> = emptySet()
+        modalities: Set<ApprovalModality> = emptySet(),
+        singleConfirmation: Boolean = false
     ): MutationApprovalResult {
         clearExpired()
         if (pendingReconciliationFailed) {
@@ -233,7 +244,7 @@ class MutationCoordinator(
         }
         when {
             openJob.status == "recovery-required" ->
-                return MutationApprovalResult.Rejected("This job requires recovery before another approval can be accepted")
+                return MutationApprovalResult.Rejected("This job needs to be recovered before another yes can be accepted")
             openJob.status == "applying" && openJob.proposalId == id ->
                 return MutationApprovalResult.Rejected("This proposal is already in the apply phase; recover the job before approving again")
             openJob.status == "applied" && openJob.appliedProposalId == id -> {
@@ -249,7 +260,7 @@ class MutationCoordinator(
         val timestamp = now()
         if (timestamp > proposal.expiresAt) {
             return MutationApprovalResult.Rejected(
-                "Change proposal approval window expired. Open Review, reject, and the agent will restage the same files."
+                "This change expired before it was saved. Nothing was written. Say no, then ask again if you still want it."
             )
         }
         val proposalFingerprint = OwnerApprovalKey.fingerprint(proposal.id, proposal.changeSet.changes)
@@ -258,14 +269,29 @@ class MutationCoordinator(
         }
         // Production tokens must carry spoken + typed + device-auth modalities.
         // JVM test-only tokens may omit modalities so unit tests stay focused on coordinator logic.
-        if (!ownerApproval.isTestCapability) {
+        val riskyRefusal = com.codingagent.agent.RiskyChange.deviceLockRefusal(
+            ownerApproval.isTestCapability,
+            proposal.changeSet.changes,
+            proposal.request,
+            modalities
+        )
+        if (riskyRefusal != null) return MutationApprovalResult.Rejected(riskyRefusal)
+        val risky = com.codingagent.agent.RiskyChange.kinds(proposal.changeSet.changes, proposal.request).isNotEmpty()
+        if (!ownerApproval.isTestCapability && !singleConfirmation) {
             val required = AgentConstitution.REQUIRED_PRODUCTION_MODALITIES
             if (!modalities.containsAll(required)) {
                 val missing = (required - modalities).joinToString(", ")
                 return MutationApprovalResult.Rejected(
-                    "Production approval requires spoken phrase, typed phrase, and device authentication. Missing: $missing"
+                    "This kind of change needs your saved words and the phone lock. Missing: $missing"
                 )
             }
+        }
+        if (!ownerApproval.isTestCapability && risky && ApprovalModality.DEVICE_AUTH !in modalities) {
+            return MutationApprovalResult.Rejected(
+                com.codingagent.agent.RiskyChange.plainSummary(
+                    com.codingagent.agent.RiskyChange.kinds(proposal.changeSet.changes, proposal.request)
+                )
+            )
         }
         if (proposal.approvalCount >= 2) {
             return MutationApprovalResult.Rejected("This proposal already has the required two approvals")
@@ -277,7 +303,7 @@ class MutationCoordinator(
             description = proposal.request,
             category = AgentActionCategory.CODE_CHANGE,
             ownerVerified = true,
-            approvalCount = candidate.approvalCount,
+            approvalCount = if (singleConfirmation && !risky) maxOf(candidate.approvalCount, 2) else candidate.approvalCount,
             evaluationPassed = proposal.verification.passed,
             clearPermission = true
         )
@@ -291,7 +317,7 @@ class MutationCoordinator(
                 // was before this attempt, so a later valid approval cannot inherit invalid
                 // authorization state.
                 return MutationApprovalResult.Rejected(
-                    violations.joinToString("; ") { "${it.rule}: ${it.message}" }
+                    violations.joinToString("; ") { it.message }
                 )
             }
 
@@ -516,6 +542,18 @@ class MutationCoordinator(
             }
             MutationApprovalResult.Rejected("Approved change could not be safely completed: ${error.message.orEmpty()}")
         }
+    }
+
+    @Synchronized
+    fun noteChecks(id: String, passed: Boolean) {
+        val current = pending[id] ?: return
+        val verification = if (passed) {
+            VerificationReport(true, emptyList())
+        } else {
+            VerificationReport(false, listOf(VerificationIssue("run", 0, "The checks did not match.")))
+        }
+        pending[id] = current.copy(verification = verification)
+        persist()
     }
 
     @Synchronized
@@ -820,6 +858,8 @@ class MutationCoordinator(
         var after = 0
         for (record in changeSet.changes) {
             val file = try {
+                val raw = workspace.projectRoot().resolve(record.path)
+                if (Files.isSymbolicLink(raw.toPath())) return DiskState.MIXED
                 val candidate = rootSafeFile(record.path)
                 val rootPath = workspace.projectRoot().canonicalFile.toPath()
                 val canonical = candidate.canonicalFile.toPath()

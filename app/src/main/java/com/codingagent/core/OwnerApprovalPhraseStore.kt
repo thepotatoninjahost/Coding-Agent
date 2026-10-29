@@ -32,10 +32,10 @@ internal class OwnerApprovalPhraseStore(
     fun enroll(typedPhrase: String, spokenPhrase: String) {
         val typed = typedPhrase.trim()
         val spoken = normalizeSpoken(spokenPhrase)
-        require(typed.isNotEmpty()) { "Typed owner passphrase cannot be blank" }
-        require(spoken.isNotEmpty()) { "Spoken owner passphrase cannot be blank" }
+        require(typed.length >= MIN_PHRASE_LENGTH) { "Type at least $MIN_PHRASE_LENGTH characters. A shorter line is too easy to guess." }
+        require(spoken.length >= MIN_PHRASE_LENGTH) { "The words you will say need at least $MIN_PHRASE_LENGTH characters." }
         require(normalizeSpoken(typed) != spoken) {
-            "Create different typed and spoken passphrases so they are independent factors"
+            "Use different words for typing and for speaking. They should not be the same."
         }
         val typedVerifier = createVerifier(typed)
         val spokenVerifier = createVerifier(spoken)
@@ -88,6 +88,7 @@ internal class OwnerApprovalPhraseStore(
     private fun normalizeSpoken(value: String): String = normalizeOwnerSpokenPhrase(value)
 
     private companion object {
+        const val MIN_PHRASE_LENGTH = 8
         const val TYPED_KEY = "owner_approval_typed_phrase_v1"
         const val SPOKEN_KEY = "owner_approval_spoken_phrase_v1"
         const val SALT_BYTES = 16

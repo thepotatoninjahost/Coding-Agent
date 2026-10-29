@@ -46,4 +46,17 @@ class ToolPurposeTest {
 
         assertEquals("I need the implementation before designing a safe fix.", purpose)
     }
+
+    @Test
+    fun technicalStepNamesAreRewrittenInPlainEnglish() {
+        val rhino = ToolPurpose.of("create_file", """{"path":"compiler.js","purpose":"Create tiny compiler with Rhino-compatible syntax"}""")
+        val log = ToolPurpose.of("create_file", """{"path":"compiler.js","purpose":"Create tiny compiler using console.log instead of print"}""")
+        val args = ToolPurpose.of("create_file", """{"path":"compiler.js","purpose":"Create tiny compiler that reads from command line args"}""")
+        assertFalse(rhino.contains("Rhino"))
+        assertFalse(rhino.contains("syntax"))
+        assertFalse(log.contains("console.log"))
+        assertFalse(args.contains("command line"))
+        assertTrue(rhino.contains("compiler.js"))
+        assertTrue(log.contains("Preparing"))
+    }
 }

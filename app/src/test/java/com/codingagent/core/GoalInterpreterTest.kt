@@ -147,6 +147,21 @@ class GoalInterpreterTest {
         assertTrue(contract.goal.endsWith("FINAL-OWNER-INSTRUCTION"))
     }
 
+    @Test fun explainThisProjectDoesNotBecomeAChangeWhenToldNotToChangeFiles() {
+        val root = Files.createTempDirectory("goal-explain").toFile()
+        val contract = GoalInterpreter(root).interpret(
+            "Explain this project in one short paragraph. Do not change any files."
+        )
+        assertEquals(TaskIntent.EXPLAIN, contract.intent)
+        assertTrue(contract.constraints.any { it.contains("do not modify project files") })
+    }
+
+    @Test fun positiveChangeRequestStaysAChange() {
+        val root = Files.createTempDirectory("goal-change").toFile()
+        val contract = GoalInterpreter(root).interpret("change Main.kt so it prints hello")
+        assertEquals(TaskIntent.CHANGE, contract.intent)
+    }
+
     @Test fun buildMeACompilerIsCreateNotProjectTest() {
         val root = Files.createTempDirectory("goal-compiler").toFile()
         val contract = GoalInterpreter(root).interpret("Build me a compiler")

@@ -19,6 +19,7 @@ import com.codingagent.workspace.ChangeRecord
  */
 object OwnerApprovalKey {
     private const val KEY_ALIAS = "coding-agent-owner-approval-signing-v3"
+    private const val LOCAL_ALIAS = "coding-agent-owner-approval-local-v1"
     private const val KEYSTORE = "AndroidKeyStore"
     private const val DOMAIN = "coding-agent-owner-approval-v1"
     private val isJvmTestRuntime: Boolean
@@ -80,18 +81,27 @@ object OwnerApprovalKey {
         proposalFingerprint: String,
         signatureBytes: ByteArray,
         testOnly: Boolean
-    ): Boolean = runCatching {
-        val publicKey = if (testOnly) {
+    ): Boolean {
+        val keys = if (testOnly) {
             if (!isJvmTestRuntime) return false
-            testPair().public
+            listOf(testPair().public)
         } else {
-            keyStore().getCertificate(KEY_ALIAS)?.publicKey ?: return false
+            listOfNotNull(
+                keyStore().getCertificate(KEY_ALIAS)?.publicKey,
+                keyStore().getCertificate(LOCAL_ALIAS)?.publicKey
+            )
         }
-        val verifier = Signature.getInstance("SHA256withECDSA")
-        verifier.initVerify(publicKey)
-        verifier.update(canonical(proposalId, approvalNumber, issuedAt, nonce, proposalFingerprint))
-        verifier.verify(signatureBytes)
-    }.getOrDefault(false)
+        if (keys.isEmpty()) return false
+        val payload = canonical(proposalId, approvalNumber, issuedAt, nonce, proposalFingerprint)
+        return keys.any { publicKey ->
+            runCatching {
+                val verifier = Signature.getInstance("SHA256withECDSA")
+                verifier.initVerify(publicKey)
+                verifier.update(payload)
+                verifier.verify(signatureBytes)
+            }.getOrDefault(false)
+        }
+    }
 
     /** JVM-only test capability; production Android code cannot call this successfully. */
     fun testToken(proposalId: String, approvalNumber: Int, now: Long, proposalFingerprint: String = ""): OwnerApprovalToken {
@@ -124,6 +134,34 @@ object OwnerApprovalKey {
                 .setDigests(KeyProperties.DIGEST_SHA256)
                 .setUserAuthenticationRequired(true)
                 .setUserAuthenticationParameters(0, authenticators)
+                .build()
+        )
+        return generator.generateKeyPair().private
+    }
+
+    /** A signature that does not need a screen lock. Used only when the phone has none. */
+    fun prepareLocal(proposalId: String, approvalNumber: Int, now: Long, proposalFingerprint: String): Challenge {
+        require(proposalId.isNotBlank() && approvalNumber in 1..2)
+        require(proposalFingerprint.matches(Regex("[a-f0-9]{64}")))
+        val nonce = UUID.randomUUID().toString()
+        val signature = Signature.getInstance("SHA256withECDSA")
+        signature.initSign(localPrivateKey())
+        return Challenge(proposalId, approvalNumber, now, nonce, proposalFingerprint, signature)
+    }
+
+    private fun localPrivateKey(): java.security.PrivateKey {
+        if (isJvmTestRuntime) return testPair().private
+        val store = keyStore()
+        val existing = store.getKey(LOCAL_ALIAS, null) as? java.security.PrivateKey
+        if (existing != null) return existing
+        val generator = KeyPairGenerator.getInstance(KeyProperties.KEY_ALGORITHM_EC, KEYSTORE)
+        generator.initialize(
+            KeyGenParameterSpec.Builder(
+                LOCAL_ALIAS,
+                KeyProperties.PURPOSE_SIGN or KeyProperties.PURPOSE_VERIFY
+            )
+                .setAlgorithmParameterSpec(ECGenParameterSpec("secp256r1"))
+                .setDigests(KeyProperties.DIGEST_SHA256)
                 .build()
         )
         return generator.generateKeyPair().private

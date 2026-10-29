@@ -9,7 +9,8 @@ import java.util.concurrent.CopyOnWriteArrayList
  * Runs ProcessBuilder([resolvedSh, "-c", command]) with cwd = imported project root.
  * There is no pseudo-terminal: interactive programs (vim, less, ssh password prompts) will not work.
  * The resolved binary is stock Android /system/bin/sh when present, otherwise `sh` on PATH.
- * Default timeout is 180 seconds. Complete stdout and stderr are captured.
+ * Default timeout is 180 seconds. The command that is running keeps its full output.
+ * Older history keeps the first 256 KB and says when the rest was trimmed.
  */
 class TerminalSession(
     private val root: File,
@@ -17,7 +18,12 @@ class TerminalSession(
     private val runner: CommandRunner = CommandRunner(root)
 ) {
     private val entries = CopyOnWriteArrayList<TerminalEntry>()
+    private var currentStdout: String = ""
+    private var currentStderr: String = ""
     val shellPath: String = resolveShell()
+
+    /** Full output of the command that just ran. The next command replaces it. */
+    fun currentOutput(): String = currentStdout + currentStderr
 
     fun workingDirectory(): File = root
     fun timeoutSeconds(): Long = timeoutSeconds
@@ -42,10 +48,12 @@ class TerminalSession(
         )
         val durationMs = System.currentTimeMillis() - started
         val cancelled = result.exitCode == 130 && result.stderr.contains("cancelled")
+        currentStdout = result.stdout
+        currentStderr = result.stderr
         return TerminalEntry(
             command = trimmed,
-            stdout = result.stdout,
-            stderr = result.stderr,
+            stdout = TerminalOutput.cap(result.stdout),
+            stderr = TerminalOutput.cap(result.stderr),
             exitCode = result.exitCode,
             timedOut = result.timedOut,
             durationMs = durationMs,
@@ -69,10 +77,12 @@ class TerminalSession(
         val result = runner.run(command, timeoutSeconds, onStdout, onStderr)
         val durationMs = System.currentTimeMillis() - started
         val cancelled = result.exitCode == 130 && result.stderr.contains("cancelled")
+        currentStdout = result.stdout
+        currentStderr = result.stderr
         return TerminalEntry(
             command = command.joinToString(" "),
-            stdout = result.stdout,
-            stderr = result.stderr,
+            stdout = TerminalOutput.cap(result.stdout),
+            stderr = TerminalOutput.cap(result.stderr),
             exitCode = result.exitCode,
             timedOut = result.timedOut,
             durationMs = durationMs,
@@ -107,5 +117,16 @@ class TerminalSession(
             val hit = candidates.firstOrNull { it.isFile && it.canExecute() }
             return hit?.absolutePath ?: "sh"
         }
+    }
+}
+
+object TerminalOutput {
+    const val STORED_LIMIT = 256 * 1024
+    const val TRIM_NOTE = "\n[output trimmed]\n"
+
+    fun cap(text: String): String {
+        if (text.length <= STORED_LIMIT) return text
+        val keep = (STORED_LIMIT - TRIM_NOTE.length).coerceAtLeast(0)
+        return text.take(keep) + TRIM_NOTE
     }
 }

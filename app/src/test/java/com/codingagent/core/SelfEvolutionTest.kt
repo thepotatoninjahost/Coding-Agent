@@ -114,7 +114,7 @@ class SelfEvolutionTest {
         val root = Files.createTempDirectory("evolution-candidate").toFile()
         val evolution = SelfEvolution(root)
         val target = root.resolve("src/Main.kt")
-        target.parentFile.mkdirs()
+        target.parentFile?.mkdirs()
         target.writeText("approved source\n")
         val staged = evolution.stageSource(target, "self-repair")
         val promoted = evolution.promoteSource(

@@ -71,9 +71,13 @@ class PersonalResearchProvider(
         }.filter { it.isNotBlank() }
 
         val hits = linkedMapOf<String, ResearchHit>()
+        val searchErrors = mutableListOf<String>()
         for (q in searchQueries) {
             check(!isCancelled(runGeneration)) { "Research cancelled" }
             val result = searchProvider.search(q, 14)
+            if (!result.error.isNullOrBlank() && result.hits.isEmpty()) {
+                searchErrors += result.error.trim()
+            }
             result.hits.forEach { hit ->
                 if (!SourceQuality.isAcceptable(hit.url, hit.title, hit.excerpt)) return@forEach
                 if (!SourceQuality.hasQueryRelevance(terms, hit.title, hit.excerpt, hit.url)) return@forEach
@@ -89,12 +93,13 @@ class PersonalResearchProvider(
         onProgress(DeepResearchProgress("fetching", 0, ranked.size.coerceAtLeast(1), 0, 0))
 
         val sources = mutableListOf<ResearchSource>()
+        val fetchErrors = mutableListOf<String>()
         var failed = 0
         ranked.forEachIndexed { index, hit ->
             if (isCancelled(runGeneration)) return@forEachIndexed
             if (sources.size >= target) return@forEachIndexed
-            val fetched = runCatching {
-                ArticleExtractor.fetch(
+            val attempt = runCatching {
+                ArticleExtractor.fetchDetailed(
                     url = hit.url,
                     connectionFactory = connectionFactory,
                     timeoutMillis = pageTimeoutMillis,
@@ -102,11 +107,15 @@ class PersonalResearchProvider(
                     onConnection = { connection -> activeConnection.set(connection) },
                     onCall = { call -> activeCall.set(call) }
                 )
-            }.getOrNull()
+            }.getOrElse { error ->
+                ArticleExtractor.FetchAttempt(null, error.message?.takeIf { it.isNotBlank() } ?: error.javaClass.simpleName)
+            }
             activeConnection.set(null)
             activeCall.set(null)
+            val fetched = attempt.page
             if (fetched == null) {
                 failed++
+                attempt.error?.takeIf { it.isNotBlank() }?.let { fetchErrors += it }
                 onProgress(DeepResearchProgress("fetching", index + 1, ranked.size, sources.size, failed))
                 return@forEachIndexed
             }
@@ -142,8 +151,14 @@ class PersonalResearchProvider(
             sources = sources,
             learnedChunks = sources.size,
             errors = buildList {
-                if (sources.isEmpty()) add("No on-topic sources found for: $normalized")
-                if (failed > 0) add("$failed candidates rejected as off-topic or unreadable")
+                if (sources.isEmpty() && searchErrors.isNotEmpty()) {
+                    add(searchErrors.distinct().take(4).joinToString(" | "))
+                }
+                if (sources.isEmpty() && hits.isEmpty() && searchErrors.isEmpty()) {
+                    add("No on-topic sources found for: $normalized")
+                }
+                fetchErrors.distinct().take(4).forEach { add(it) }
+                if (failed > 0 && fetchErrors.isEmpty()) add("$failed candidates rejected as off-topic or unreadable")
             },
             mode = "personal"
         )

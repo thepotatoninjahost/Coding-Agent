@@ -38,7 +38,11 @@ object StorageGuard {
     ): SpaceReport {
         targetDir.mkdirs()
         val usable = targetDir.usableSpace
-        val required = remainingDownloadBytes + marginBytes
+        val required = try {
+            Math.addExact(remainingDownloadBytes, marginBytes)
+        } catch (_: ArithmeticException) {
+            Long.MAX_VALUE
+        }
         return SpaceReport(targetDir, usable, required, remainingDownloadBytes)
     }
 

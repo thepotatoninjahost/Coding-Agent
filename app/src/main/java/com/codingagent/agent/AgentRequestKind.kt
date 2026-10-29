@@ -48,7 +48,11 @@ object AgentRequestKind {
         )
         if (phrases.any { t == it || t.contains(it) }) return true
         if (Regex("""\bstatus\b""").containsMatchIn(t) && t.length <= 48) return true
-        if (Regex("""\bhelp\b""").containsMatchIn(t) && !Regex("""\b(helper|helpers)\b""").containsMatchIn(t) && t.length <= 32) {
+        if (Regex("""\bhelp\b""").containsMatchIn(t) &&
+            !Regex("""\b(helper|helpers)\b""").containsMatchIn(t) &&
+            t.length <= 32 &&
+            !Regex("""\b(fix|bug|write|create|change|code|file|error|implement|add|remove|replace|debug)\b""").containsMatchIn(t)
+        ) {
             return true
         }
         return false
@@ -73,13 +77,11 @@ object AgentRequestKind {
     fun metaAnswer(t: String): String {
         val aboutRepeat = Regex("""\b(repeat|repeated|identically|loop|same\s+tool|read_file)\b""").containsMatchIn(t)
         return if (aboutRepeat || t.contains("abort") || t.contains("stop")) {
-            "The agent stopped a tool loop: the model called the same tool with the same arguments " +
-                "several times in a row. That used to hard-abort the task. It now forces a final answer " +
-                "from evidence already gathered (or nudges a different tool) instead of aborting. " +
-                "Retry the original request if you still need the review."
+            "I stopped because I was repeating the same step. I will answer from what I already found. " +
+                "Ask again if you still want me to keep going."
         } else {
-            "That question is about the agent runtime, not your project source. " +
-                "Say what you wanted done (review, list files, read a path, fix a bug) and I will run that."
+            "That question is about me, not your project. " +
+                "Say what you want done, such as list the files, read a file, or fix a problem, and I will do that."
         }
     }
 

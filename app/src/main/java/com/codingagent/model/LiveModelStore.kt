@@ -187,9 +187,41 @@ class LiveModelStore(private val root: File) {
         }
     }
 
-    fun modelBytes(model: LiveModel): ByteArray =
-        File(model.sourcePath).walkTopDown().filter { it.isFile }.sortedBy { it.absolutePath }
-            .fold(ByteArray(0)) { acc, file -> acc + file.readBytes() }
+    fun modelSize(model: LiveModel): Int {
+        val file = File(model.sourcePath)
+        if (file.isFile) return file.length().coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+        val names = manifestNames(file)
+        val payloads = if (names.isEmpty()) {
+            file.listFiles().orEmpty().filter { it.isFile && it.name != "model.manifest" }
+        } else {
+            names.map { file.resolve(it) }.filter { it.isFile }
+        }
+        return payloads.sumOf { it.length() }.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+    }
+
+    fun modelBytes(model: LiveModel): ByteArray {
+        val file = File(model.sourcePath)
+        if (file.isFile) return file.readBytes()
+        val names = manifestNames(file)
+        val payloads = if (names.isEmpty()) {
+            file.listFiles().orEmpty().filter { it.isFile && it.name != "model.manifest" }.sortedBy { it.name }
+        } else {
+            names.map { file.resolve(it) }.filter { it.isFile }
+        }
+        return payloads.fold(ByteArray(0)) { acc, part -> acc + part.readBytes() }
+    }
+
+    private fun manifestNames(directory: File): List<String> {
+        val manifest = directory.resolve("model.manifest")
+        if (!manifest.isFile) return emptyList()
+        val array = runCatching { org.json.JSONObject(manifest.readText()).optJSONArray("files") }.getOrNull() ?: return emptyList()
+        return buildList {
+            for (index in 0 until array.length()) {
+                val name = array.optJSONObject(index)?.optString("name").orEmpty()
+                if (name.isNotBlank() && !name.contains('/') && !name.contains('\\')) add(name)
+            }
+        }
+    }
 
     private fun checksum(file: File): String = file.inputStream().use { input ->
         val digest = MessageDigest.getInstance("SHA-256")

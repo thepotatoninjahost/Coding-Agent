@@ -1,8 +1,10 @@
 package com.codingagent.core
 
 import java.io.File
+import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.util.UUID
+import com.codingagent.workspace.AtomicFileWriter
 import com.codingagent.agent.AgentAction
 import com.codingagent.agent.AgentActionCategory
 import com.codingagent.agent.AgentConstitution
@@ -13,8 +15,7 @@ private val SAFE_ID = Regex("[A-Za-z0-9_-]+")
 /**
  * ONE JOB: Persist and version live-module source (install, parse, roll back, list history).
  * Extracted out of LiveModules.kt, which mixed storage, execution, and default-module bootstrap
- * in one file. Runtime/execution now lives in LiveModuleRuntime.kt; default module bootstrap in
- * BuiltInModules.kt.
+ * in one file. Runtime/execution now lives in LiveModuleRuntime.kt.
  */
 sealed class ModuleInstallResult {
     data class Installed(val module: LiveModule) : ModuleInstallResult()
@@ -61,10 +62,12 @@ class LiveModuleStore(private val root: File) {
         if (parsed.version != version) return ModuleInstallResult.Rejected("Module version does not match requested version")
         val id = "${safeKind}-${System.currentTimeMillis()}-${UUID.randomUUID().toString().take(8)}"
         val destination = moduleRoot.resolve(id).apply { mkdirs() }.resolve("module.json")
-        destination.writeText(source)
+        AtomicFileWriter.write(destination, source)
         val module = LiveModule(id, kind, version, destination.absolutePath, checksum(source), System.currentTimeMillis())
-        historyFile.appendText(listOf(module.id, module.kind, module.version, module.checksum, module.createdAt).joinToString("\t") + "\n")
-        activeFile.writeText(module.id)
+        val priorHistory = if (historyFile.isFile) historyFile.readText(StandardCharsets.UTF_8) else ""
+        val historyLine = listOf(module.id, module.kind, module.version, module.checksum, module.createdAt).joinToString("\t") + "\n"
+        AtomicFileWriter.write(historyFile, priorHistory + historyLine)
+        AtomicFileWriter.write(activeFile, module.id)
         return ModuleInstallResult.Installed(module)
     }
 
@@ -89,26 +92,26 @@ class LiveModuleStore(private val root: File) {
         if (!moduleDir.isDirectory) return false
         val moduleFile = moduleDir.resolve("module.json")
         if (!moduleFile.isFile) return false
-        activeFile.writeText(id)
+        AtomicFileWriter.write(activeFile, id)
         return true
     }
 
     fun active(): LiveModule? {
-        val id = activeFile.takeIf { it.isFile }?.readText()?.trim().orEmpty()
+        val id = activeFile.takeIf { it.isFile }?.readText(StandardCharsets.UTF_8)?.trim().orEmpty()
         if (!id.matches(SAFE_ID)) return null
         val source = runCatching {
             com.codingagent.workspace.ProjectMetadataBoundary.resolve(root, ".coding-agent/live-modules/$id/module.json")
         }.getOrNull() ?: return null
         if (!source.isFile) return null
         val recorded = history().lastOrNull { it.id == id } ?: return null
-        val content = runCatching { source.readText() }.getOrNull() ?: return null
+        val content = runCatching { source.readText(StandardCharsets.UTF_8) }.getOrNull() ?: return null
         if (checksum(content) != recorded.checksum) return null
         val parsed = runCatching { parse(content) }.getOrNull() ?: return null
         if (parsed.kind != recorded.kind || parsed.version != recorded.version) return null
         return LiveModule(id, parsed.kind, parsed.version, source.absolutePath, recorded.checksum, recorded.createdAt)
     }
 
-    fun source(module: LiveModule): String = File(module.sourcePath).readText()
+    fun source(module: LiveModule): String = File(module.sourcePath).readText(StandardCharsets.UTF_8)
 
     fun history(): List<LiveModule> = if (!historyFile.isFile) emptyList() else historyFile.readLines().mapNotNull { line ->
         val fields = line.split('\t')
@@ -142,5 +145,6 @@ class LiveModuleStore(private val root: File) {
         return ParsedModule(kind, version, steps)
     }
 
-    private fun checksum(value: String): String = MessageDigest.getInstance("SHA-256").digest(value.toByteArray()).joinToString("") { "%02x".format(it) }
+    private fun checksum(value: String): String =
+        MessageDigest.getInstance("SHA-256").digest(value.toByteArray(StandardCharsets.UTF_8)).joinToString("") { "%02x".format(it) }
 }

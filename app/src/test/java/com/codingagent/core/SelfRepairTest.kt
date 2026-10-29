@@ -45,10 +45,11 @@ class SelfRepairTest {
         val plan = AgentPlan("fix yourself", listOf(AgentStep("repair", "stage")), emptyList())
         val task = SelfRepair.handle("t1", "fix yourself", plan, workspace, files, mutations)
         assertNotNull(task)
-        assertEquals("needs-approval", task!!.status)
-        assertEquals("src/SelfRepair.kt", task.changes.single().path)
-        assertTrue(mutations.pending().isNotEmpty())
-        assertFalse(task.changes.single().after.orEmpty().contains("SELF_REPAIR_CONTRACT"))
+        assertEquals("needs-input", task!!.status)
+        assertTrue(task.changes.isEmpty())
+        assertTrue(mutations.pending().isEmpty())
+        assertTrue(task.summary.contains("Nothing was written"))
+        assertFalse(root.resolve("src/SelfRepair.kt").exists())
     }
 
     @Test

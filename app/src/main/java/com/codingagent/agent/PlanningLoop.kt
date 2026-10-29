@@ -68,8 +68,8 @@ class PlanningLoop(
                 if ("understand" in completed || "change" in completed || "inspect" in completed || "verify" in completed) null
                 else "Tool " + toolName + " is blocked until the work reaches verification"
             ToolKind.VERIFY ->
-                if ("change" in completed || "inspect" in completed || "verify" in completed) null
-                else "Tool " + toolName + " is blocked until the task reaches verification"
+                if ("understand" in completed || "change" in completed || "inspect" in completed || "verify" in completed) null
+                else "Tool " + toolName + " is blocked until the repository summary exists"
             else -> null
         }
     }

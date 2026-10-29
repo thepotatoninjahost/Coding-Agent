@@ -38,6 +38,8 @@ class JsonModelResponseParser {
      */
     private fun parseXmlToolCall(raw: String): ModelResponse.ToolCall? {
         val text = raw.trim()
+        parseHarmonyToolCall(text)?.let { return it }
+        parseEmbeddedToolJson(text)?.let { return it }
         if (!text.contains("<tool_call", ignoreCase = true) &&
             !text.contains("<function=", ignoreCase = true)
         ) {
@@ -60,6 +62,58 @@ class JsonModelResponseParser {
             args.put(match.groupValues[1], match.groupValues[2].trim())
         }
         return ModelResponse.ToolCall(name, if (args.length() == 0) "{}" else args.toString())
+    }
+
+    /** gpt-oss on Groq often puts the call in a harmony channel instead of tool_calls. */
+    private fun parseHarmonyToolCall(text: String): ModelResponse.ToolCall? {
+        val marker = Regex("""to=functions\.([A-Za-z0-9_]+)""").find(text) ?: return null
+        val name = marker.groupValues[1]
+        val after = text.substring(marker.range.last + 1)
+        val jsonStart = after.indexOf('{')
+        if (jsonStart < 0) return null
+        val json = sliceJsonObject(after.substring(jsonStart)) ?: return null
+        return ModelResponse.ToolCall(name, json)
+    }
+
+    /** Nemotron sometimes wraps a JSON tool call in tool_call tags instead of XML parameters. */
+    private fun parseEmbeddedToolJson(text: String): ModelResponse.ToolCall? {
+        if (!text.contains("<tool_call", ignoreCase = true)) return null
+        val inner = text.substringAfter("<tool_call", "").substringAfter(">", "").substringBefore("</tool_call>")
+        val start = inner.indexOf('{')
+        if (start < 0) return null
+        val json = sliceJsonObject(inner.substring(start)) ?: return null
+        val obj = runCatching { JSONObject(json) }.getOrNull() ?: return null
+        val name = obj.optString("name").ifBlank { obj.optString("tool") }
+        if (name.isBlank()) return null
+        val arguments = when (val raw = obj.opt("arguments")) {
+            is JSONObject -> raw.toString()
+            is String -> raw.ifBlank { "{}" }
+            else -> "{}"
+        }
+        return ModelResponse.ToolCall(name.removePrefix("functions."), arguments)
+    }
+
+    private fun sliceJsonObject(text: String): String? {
+        var depth = 0
+        var quote = false
+        var escaped = false
+        text.forEachIndexed { index, char ->
+            if (quote) {
+                if (escaped) escaped = false
+                else if (char == '\\') escaped = true
+                else if (char == '"') quote = false
+                return@forEachIndexed
+            }
+            when (char) {
+                '"' -> quote = true
+                '{' -> depth++
+                '}' -> {
+                    depth--
+                    if (depth == 0) return text.substring(0, index + 1)
+                }
+            }
+        }
+        return null
     }
 }
 
