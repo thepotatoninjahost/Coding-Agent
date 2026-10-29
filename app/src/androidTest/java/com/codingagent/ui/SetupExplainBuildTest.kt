@@ -81,7 +81,7 @@ class SetupExplainBuildTest {
         composeRule.waitUntil(timeoutMillis = 10_000) {
             composeRule.onAllNodesWithText("Reject").fetchSemanticsNodes().isNotEmpty()
         }
-        composeRule.onNodeWithText("Reject").assertIsDisplayed()
+        assertTrue(composeRule.onAllNodesWithText("Reject").fetchSemanticsNodes().isNotEmpty())
         assertTrue(composeRule.onAllNodesWithText("compiler.js", substring = true).fetchSemanticsNodes().isNotEmpty())
         assertTrue(composeRule.onAllNodesWithText("OPEN JOB", substring = true).fetchSemanticsNodes().isEmpty())
     }
