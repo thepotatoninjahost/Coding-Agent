@@ -90,7 +90,7 @@ class MutationCoordinator(
             )
         }
         if (durableJob?.status == "recovery-required") {
-            return MutationProposeResult.Rejected("This job requires recovery before another mutation can be staged")
+            return MutationProposeResult.Rejected("This job needs to be recovered before another change can be staged")
         }
         if (durableJob?.status == "waiting-approval" || durableJob?.status == "applying") {
             return MutationProposeResult.Rejected(
@@ -234,7 +234,7 @@ class MutationCoordinator(
         }
         when {
             openJob.status == "recovery-required" ->
-                return MutationApprovalResult.Rejected("This job requires recovery before another approval can be accepted")
+                return MutationApprovalResult.Rejected("This job needs to be recovered before another yes can be accepted")
             openJob.status == "applying" && openJob.proposalId == id ->
                 return MutationApprovalResult.Rejected("This proposal is already in the apply phase; recover the job before approving again")
             openJob.status == "applied" && openJob.appliedProposalId == id -> {
@@ -299,7 +299,7 @@ class MutationCoordinator(
                 // was before this attempt, so a later valid approval cannot inherit invalid
                 // authorization state.
                 return MutationApprovalResult.Rejected(
-                    violations.joinToString("; ") { "${it.rule}: ${it.message}" }
+                    violations.joinToString("; ") { it.message }
                 )
             }
 

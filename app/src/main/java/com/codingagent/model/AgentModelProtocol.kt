@@ -14,7 +14,7 @@ You investigate the real project, then work toward completing the owner's object
 2. Gather real evidence. Never invent paths, file contents, command output, sources, or test results. Inspect relevant callers, dependencies, tests, and failure paths before changing code.
 3. Make exactly one tool call per turn. Inspect its actual result before choosing the next action.
 4. Continue researching and working for as long as the objective requires. There is no arbitrary two-or-three-result stopping limit. Stop gathering when evidence is sufficient to act; stop work only when the goal is met, a real blocker exists, or owner input is required.
-5. Never mistake a partial tool result for a complete result. If MORE=true, call continue_result with the exact RESULT_ID and NEXT_START_CHARACTER until MORE=false. For read_file, continue with NEXT_START_CHARACTER until END_OF_FILE=true. Use pages instead of silently cutting content.
+5. Never mistake a partial tool result for a complete result. If MORE=true, call continue_result with the exact RESULT_ID from that part and NEXT_START_CHARACTER until MORE=false. Do not invent a result id. For read_file, call read_file again with the same path and startCharacter set to NEXT_START_CHARACTER until END_OF_FILE=true. Do not use continue_result for a file. Do not start the file again at 0.
 5. For undocumented or experimental systems, inspect source and official documentation where available; form hypotheses, run controlled experiments, record observations, and distinguish facts from hypotheses. Prefer official documentation and tested reference implementations; apply only guidance compatible with the configured model/API and this app's security boundaries.
 6. Older conversation history and saved memories remain stored even when not included in the initial context. Use read_chat_history/search_chat_history and read_user_memory/search_user_memory to retrieve relevant complete records before deciding.
 7. Plan at the scale the task requires. A valid objective may need coordinated changes across many files, new tools, architectural work, or several experiments. Avoid unrelated changes, not ambitious work. Do not stop at a plan, a diagnosis, or a superficial edit. Continue through implementation, verification, and correction within the available turn budget.
@@ -70,7 +70,7 @@ list_files, read_file, continue_result, read_chat_history, search_chat_history, 
         ),
         ModelToolDefinition(
             "read_file",
-            "Read the complete content of one project file. Large files arrive in character chunks; continue until END_OF_FILE=true before relying on the full file.",
+            "Read one project file. If END_OF_FILE is false, call read_file again with the same path and startCharacter set to NEXT_START_CHARACTER. Do not call continue_result for a file, and do not start again at 0.",
             """{"type":"object","properties":{"path":{"type":"string","description":"Project-relative file path"},"startCharacter":{"type":"integer","description":"Zero-based character offset for the next part; omit to start at the beginning."},"maxCharacters":{"type":"integer","description":"Maximum characters for this part; omit for the configured page size."},"purpose":{"type":"string","description":"Short evidence-based reason for this tool call."}},"required":["path"]}"""
         ),
         ModelToolDefinition(

@@ -102,6 +102,20 @@ object AgentConstitution {
         if (approvalAt != null && now - approvalAt > APPROVAL_EXPIRATION_MS) {
             violations += ConstitutionViolation(ConstitutionRule.PERMISSION_EXPIRATION, "The approval has expired", true)
         }
+        if (action.description.isBlank()) {
+            violations += ConstitutionViolation(
+                ConstitutionRule.TRANSPARENCY_LOG,
+                "The activity log needs a plain description of this action",
+                true
+            )
+        }
+        if (action.category == AgentActionCategory.DATA_EXPORT && !action.explicitShareApproval) {
+            violations += ConstitutionViolation(
+                ConstitutionRule.SAFETY_BOUNDARY,
+                "Sending work off this phone needs a separate yes",
+                true
+            )
+        }
         return violations.distinctBy { it.rule }
     }
 

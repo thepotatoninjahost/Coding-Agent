@@ -100,7 +100,7 @@ data class ModelSettings(
     val backend: ModelBackend = ModelBackend.REMOTE,
     val baseUrl: String = OPENROUTER_BASE_URL,
     val apiKey: String = "",
-    val modelName: String = OPENROUTER_FREE_MODEL,
+    val modelName: String = "",
     /**
      * Optional ordered fallback model IDs that share the same base URL and API key.
      * Comma, semicolon, or newline separated. When the primary model returns a
@@ -245,30 +245,27 @@ data class ModelSettings(
     }
 
     /**
-     * A saved setup with no web address and no helper name has not chosen a provider.
-     * Fill in one capable free OpenRouter helper. The old name openrouter/free picks
-     * a different model on every step, so it is replaced with the pinned helper.
+     * A saved setup with no web address uses OpenRouter. No helper name is filled in.
+     * The live model list picks the helper. The name openrouter/free picks a different
+     * model on every step, so a saved copy of that name is cleared.
      * Never invent a secret password.
      */
     fun withOpenRouterDefaults(): ModelSettings {
         val s = normalized()
         val blankProvider = s.baseUrl.isBlank() && s.modelName.isBlank()
-        val base = if (blankProvider) {
-            s.copy(baseUrl = OPENROUTER_BASE_URL, modelName = OPENROUTER_FREE_MODEL)
-        } else {
-            s
-        }
+        val base = if (blankProvider) s.copy(baseUrl = OPENROUTER_BASE_URL) else s
         if (!base.baseUrl.contains("openrouter.ai")) return dropRetired(base)
-        val usingRouter = base.modelName.isBlank() ||
-            base.modelName.equals(OPENROUTER_FREE_ROUTER, ignoreCase = true) ||
-            OpenRouterFreeModels.isRetired(base.modelName)
-        val modelName = if (usingRouter) OPENROUTER_FREE_MODEL else base.modelName
-        val rotation = when {
-            base.rotationModels.isNotBlank() -> withoutRetiredIds(base.rotationModels)
-            usingRouter || modelName == OPENROUTER_FREE_MODEL -> OPENROUTER_FREE_FALLBACKS
-            else -> ""
+        val modelName = when {
+            OpenRouterFreeModels.isRetired(base.modelName) -> ""
+            base.modelName.equals(OPENROUTER_FREE_ROUTER, ignoreCase = true) -> ""
+            else -> base.modelName
         }
-        val preferred = if (OpenRouterFreeModels.isRetired(base.preferredModel)) "" else base.preferredModel
+        val rotation = withoutRetiredIds(base.rotationModels)
+        val preferred = when {
+            OpenRouterFreeModels.isRetired(base.preferredModel) -> ""
+            base.preferredModel.equals(OPENROUTER_FREE_ROUTER, ignoreCase = true) -> ""
+            else -> base.preferredModel
+        }
         return if (modelName == base.modelName && rotation == base.rotationModels && preferred == base.preferredModel) {
             base
         } else {
@@ -297,7 +294,7 @@ data class ModelSettings(
         val names = ProviderCatalog.providerNames(s)
         return when {
             !s.isRemoteConfigured() && s.baseUrl.contains("openrouter.ai") && !s.hasAnyProviderKey() ->
-                "Helper not connected yet. Free OpenRouter helper is selected. Paste the secret password in Setup."
+                "Helper not connected yet. No helper is picked until Test models loads the list. Paste the secret password in Setup."
             !s.isRemoteConfigured() -> "Helper not connected yet. ${s.cloudflareSetupNote()}".trim()
             names.isEmpty() -> "Helper not connected yet. ${s.cloudflareSetupNote()}".trim()
             names.size == 1 -> "Helper ready: ${names.first()}. I use the best one that is still available. ${s.cloudflareSetupNote()}".trim()
@@ -332,45 +329,24 @@ data class ModelSettings(
          * very small ones, so it is not the helper this app starts with.
          */
         const val OPENROUTER_FREE_ROUTER = "openrouter/free"
-        /**
-         * One capable free coding helper. Checked against OpenRouter's public model list
-         * on 22 Oct 2026: it supports tool calls and costs nothing. Other free helpers
-         * are used only when this one returns an error or a rate limit.
-         */
-        const val OPENROUTER_FREE_MODEL = "cohere/north-mini-code:free"
-        const val OPENROUTER_FREE_FALLBACKS =
-            "poolside/laguna-s-2.1:free, google/gemma-4-31b-it:free, nvidia/nemotron-3-super-120b-a12b:free"
         const val MEMORY_KEEP_CAPPED = "capped"
         const val MEMORY_KEEP_FOREVER = "forever"
         const val DEFAULT_GITHUB_REPO = "thepotatoninjahost/Coding-Agent"
 
         data class FreeHelperChoice(val plainName: String, val modelId: String, val plainDetail: String)
 
-        fun freeHelperChoices(): List<FreeHelperChoice> = listOf(
-            FreeHelperChoice(
-                "Cohere code helper",
-                OPENROUTER_FREE_MODEL,
-                "Good at writing code. This is the one I start with."
-            ),
-            FreeHelperChoice(
-                "Poolside code helper",
-                "poolside/laguna-s-2.1:free",
-                "Another strong code helper."
-            ),
-            FreeHelperChoice(
-                "Google Gemma",
-                "google/gemma-4-31b-it:free",
-                "A general helper that can also write code."
-            ),
-            FreeHelperChoice(
-                "NVIDIA Nemotron",
-                "nvidia/nemotron-3-super-120b-a12b:free",
-                "A larger free helper."
-            )
-        )
+        fun freeHelperChoices(discovered: List<String> = OpenRouterFreeModels.known()): List<FreeHelperChoice> =
+            discovered.filter { it.isNotBlank() && !it.equals(OPENROUTER_FREE_ROUTER, ignoreCase = true) }
+                .map { id ->
+                    FreeHelperChoice(
+                        id.substringAfter('/').substringBefore(':'),
+                        id,
+                        "From the live list. Free, and able to use tools."
+                    )
+                }
 
-        fun rotationForChoice(modelId: String): String =
-            freeHelperChoices().map { it.modelId }.filter { it != modelId }.joinToString(", ")
+        fun rotationForChoice(modelId: String, discovered: List<String> = OpenRouterFreeModels.known()): String =
+            discovered.filter { it != modelId && !it.equals(OPENROUTER_FREE_ROUTER, ignoreCase = true) }.joinToString(", ")
 
         fun fromJson(raw: String?): ModelSettings {
             if (raw.isNullOrBlank()) return ModelSettings().withOpenRouterDefaults()

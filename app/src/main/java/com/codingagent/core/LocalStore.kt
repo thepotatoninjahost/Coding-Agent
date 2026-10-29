@@ -75,12 +75,6 @@ class LocalStore(context: Context) : ChatMessageStore {
     fun verifyOwnerSpokenPhrase(recognizedPhrase: String, challengeWord: String): Boolean =
         ownerApprovalPhrases.verifySpoken(recognizedPhrase, challengeWord)
 
-    companion object {
-        private const val KEY_PROJECT_PATH = "project_path"
-        private const val KEY_LAST_RESEARCH = "last_research_query"
-        private const val KEY_MODEL_SETTINGS = "model_settings_v1"
-    }
-
     @Synchronized
     fun recordTask(record: TaskRecord) = append(tasksFile, JSONObject()
         .put("id", record.id)

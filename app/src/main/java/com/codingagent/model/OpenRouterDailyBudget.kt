@@ -16,16 +16,26 @@ object OpenRouterDailyBudget {
         remainingRequests = null
     }
 
+    fun remaining(): Int? = remainingRequests
+
+    fun noteRemaining(left: Int?) {
+        remainingRequests = left
+    }
+
     fun sentence(): String? {
         val left = remainingRequests ?: return null
         return " $left free requests left today."
     }
 
-    fun refresh(baseUrl: String, apiKey: String) {
+    fun refresh(
+        baseUrl: String,
+        apiKey: String,
+        connect: (String) -> HttpURLConnection = { URL(it).openConnection() as HttpURLConnection }
+    ) {
         if (!baseUrl.contains("openrouter.ai") || apiKey.isBlank()) return
         val root = baseUrl.trim().trimEnd('/')
         val url = if (root.endsWith("/v1")) "$root/key" else "$root/api/v1/key"
-        val connection = URL(url).openConnection() as HttpURLConnection
+        val connection = connect(url)
         try {
             connection.connectTimeout = 4_000
             connection.readTimeout = 4_000

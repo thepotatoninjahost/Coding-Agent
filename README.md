@@ -26,7 +26,7 @@ The current APK supports:
 - Autonomous model loop with real tool calling (list_files, read_file, search_project, verify, mutations with dual approval, etc.)
 - Always-on static verification (unfinished-work marker scan) — never reports a fake pass
 - Evidence requirement: inspect/error/analyze requests must actually read or search project files before a final answer is accepted
-- Setup screen for an OpenAI-compatible helper. One free OpenRouter helper (`cohere/north-mini-code:free` at `https://openrouter.ai/api/v1`) is filled in already. The same helper is used for the whole job. Another free helper is used only if that one is busy or fails. The secret password is typed on the phone and is never stored in this repository.
+- Setup screen for an OpenAI-compatible helper. The web address starts at `https://openrouter.ai/api/v1`. No helper name is filled in. Test models loads the live free list, ranked by whether the helper can use tools and how much context it has. You can type a different name. The secret password is typed on the phone and is never stored in this repository.
 - Transactional file changes with checksum-backed rollback
 - Persisted chat history and task journal
 
@@ -42,7 +42,7 @@ Terminal behavior and limits are documented in **Terminal limitations**.
 OpenRouter is the default. Setup already shows:
 
 - Web address: `https://openrouter.ai/api/v1`
-- Helper name: `cohere/north-mini-code:free` (one free code helper). Setup lets you pick another free helper in plain English. The old name `openrouter/free` is not used, because it picked a different model on every step.
+- Helper name: blank until Test models loads the live list. You can type a name. The old name `openrouter/free` is not the starter, because it picked a different model on every step. It is only a last resort.
 - Secret password: paste it from [openrouter.ai/keys](https://openrouter.ai/keys). Leave this blank in the repository. Do not commit a key.
 
 A missing password, a rejected password, and a used-up daily limit are explained in plain English. Setup has a separate password box for each helper you use:
@@ -124,7 +124,7 @@ Unit tests currently live under `app/src/test/java/com/codingagent/core/` even t
 
 ## Knowledge and learning boundary
 
-`Coding For Dummies` is an example reference asset used to exercise the local knowledge pipeline. It is not the product's knowledge limit or a hardcoded coding strategy.
+`app/src/main/assets/knowledge/coding-for-dummies.txt` is a short original sample for the on-phone knowledge index. It is not the commercial book, and it is not a coding strategy.
 
 The intended ingestion workflow is:
 

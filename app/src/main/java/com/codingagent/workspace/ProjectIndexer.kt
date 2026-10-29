@@ -12,6 +12,7 @@ import java.nio.charset.StandardCharsets
  * ONE JOB: Project tree → indexed file records with symbols and checksums.
  */
 private const val MAX_SEARCH_QUERY_LENGTH = 256
+private const val MAX_SEARCH_HITS = 400
 private val SYMBOL_PATTERN = Regex("\\b(class|interface|object|fun|function|def|const|val|var|public|private|protected|static)\\s+([A-Za-z_][A-Za-z0-9_]*)")
 
 class ProjectIndexer {
@@ -89,7 +90,13 @@ class ProjectIndexer {
                         if (matches) SearchHit(path, index + 1, text.trim()) else null
                     }.toList()
                 }
-            }.toList()
+            }
+            .take(MAX_SEARCH_HITS + 1)
+            .toList()
+            .let { hits ->
+                if (hits.size <= MAX_SEARCH_HITS) hits
+                else hits.take(MAX_SEARCH_HITS) + SearchHit("", 0, "More matches exist. Search for a narrower phrase.")
+            }
     }
     private fun isSafeProjectPath(root: File, candidate: File): Boolean = runCatching {
         val canonicalRoot = root.canonicalFile.toPath()

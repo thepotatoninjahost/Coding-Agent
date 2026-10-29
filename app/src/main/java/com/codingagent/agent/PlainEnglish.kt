@@ -23,7 +23,7 @@ object PlainEnglish {
         return Regex("\\b(parsers?|lexers?|tokenizers?|bytecodes?|recursive[- ]descent)\\b").containsMatchIn(visible)
     }
 
-    fun soften(text: String): String {
+    fun soften(text: String, oneShortParagraph: Boolean = false): String {
         val hidden = mutableListOf<String>()
         fun hide(match: MatchResult): String {
             hidden += match.value
@@ -48,15 +48,27 @@ object PlainEnglish {
             Regex("(?i)jetpack compose") to "the screen-building tools",
             Regex("(?i)\\bbiometricprompt\\b") to "the fingerprint or face check",
             Regex("(?i)\\btink\\b") to "the lock library",
-            Regex("(?i)\\baead\\b") to "a locked message that also checks it was not changed"
+            Regex("(?i)\\baead\\b") to "a locked message that also checks it was not changed",
+            Regex("(?i)\\bapi keys\\b") to "passwords",
+            Regex("(?i)\\bapi key\\b") to "password",
+            Regex("(?i)\\brepo\\b") to "project",
+            Regex("(?i)\\bindexing\\b") to "listing files"
         )
         replacements.forEach { (pattern, replacement) ->
             out = out.replace(pattern, replacement)
         }
+        out = Regex("\\*\\*([^*]+)\\*\\*").replace(out) { it.groupValues[1] }
+        out = Regex("(?m)^\\s*[*+-]\\s+").replace(out, "")
+        out = out.replace("*", "")
+        if (oneShortParagraph) {
+            val paragraph = out.trim().substringBefore("\n\n").replace("\n", " ").trim()
+            val words = paragraph.split(Regex("\\s+")).filter { it.isNotBlank() }
+            out = if (words.size > 80) words.take(80).joinToString(" ") else paragraph
+        }
         hidden.forEachIndexed { index, original ->
             out = out.replace("\u0001$index\u0001", original)
         }
-        return out
+        return out.trim()
     }
 
     private fun stripCode(text: String): String =

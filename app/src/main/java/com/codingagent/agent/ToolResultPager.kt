@@ -29,7 +29,7 @@ internal class ToolResultPager(pageCharacters: Int) {
     @Synchronized
     fun continueResult(id: String, startCharacter: Int): String {
         val stored = results[id]
-            ?: return "ERROR: The saved result is gone. Call the tool again. Do not guess what it said."
+            ?: return "ERROR: The saved result is gone. The id must be the RESULT_ID from the previous part, not an invented one. Call the tool again. Do not guess what it said."
         if (startCharacter >= stored.text.length && stored.nextOffset >= stored.text.length) {
             return "This result is already complete. There is nothing more to read. Do not guess extra text."
         }

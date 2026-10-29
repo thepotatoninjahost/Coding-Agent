@@ -123,7 +123,7 @@ object ChangeDiff {
             }
         }.ifBlank { "The exact file changes are listed below." }
         val why =
-            "To carry out the request you gave the agent. This proposal did not include a separate, clear explanation of the reason."
+            "You asked for this change. Nothing is saved until you say yes."
         val requestedOutcome = request.trim().ifBlank { "the requested change" }
         return buildString {
             appendLine("What I want to do:")
@@ -263,7 +263,7 @@ object ChangeDiff {
         if (!content.endsWith("\n")) appendLine()
     }
 
-    fun unified(record: ChangeRecord, maxLines: Int = Int.MAX_VALUE): List<DiffLine> {
+    fun unified(record: ChangeRecord): List<DiffLine> {
         val before = record.before?.lines().orEmpty()
         val after = record.after?.lines().orEmpty()
         val out = mutableListOf<DiffLine>()

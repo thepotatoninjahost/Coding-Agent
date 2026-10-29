@@ -20,6 +20,21 @@ object StuckDetector {
             return "The helper is switching between the same two steps."
         }
         val last = steps.lastOrNull() ?: return null
+        if (!last.textOnly && isLongOrSourced(last.observation)) {
+            val copies = steps.takeLast(3)
+            if (copies.size == 3 && copies.all { sameBody(it.observation, last.observation) }) {
+                return "The same result came back three times."
+            }
+        }
+        if (!last.textOnly && last.action.startsWith("read_file|")) {
+            val path = last.action.removePrefix("read_file|").substringBefore("|")
+            if (path.isNotBlank()) {
+                val copies = steps.count {
+                    it.action.startsWith("read_file|$path") && sameBody(it.observation, last.observation)
+                }
+                if (copies >= 2) return "The same file was read again and the result did not change."
+            }
+        }
         if (!last.textOnly && last.error) {
             val sameError = steps.takeLast(3)
             if (sameError.size == 3 && sameError.all { it.action == last.action && it.error && it.observation == last.observation }) {
@@ -41,4 +56,10 @@ object StuckDetector {
         val command = Regex(""""command"\s*:\s*"([^"]+)"""").find(arguments)?.groupValues?.getOrNull(1).orEmpty()
         return listOf(name, path, query, command).joinToString("|")
     }
+
+    private fun sameBody(left: String, right: String): Boolean =
+        left.isNotBlank() && left.trim() == right.trim()
+
+    private fun isLongOrSourced(observation: String): Boolean =
+        observation.length >= 80 || ("was published on" in observation && "Source:" in observation)
 }

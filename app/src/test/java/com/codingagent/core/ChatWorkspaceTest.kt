@@ -81,7 +81,7 @@ class ChatWorkspaceTest {
         assertTrue(turn.result is AgentRuntimeResult.Failed)
         assertEquals("recovery-required", OpenJobStore.load(root)?.status)
         assertEquals("interrupted mutation", OpenJobStore.load(root)?.goal)
-        assertTrue(turn.response.content.contains("recovery-required"))
+        assertTrue(turn.response.content.contains("needs to be recovered"))
     }
 
     @Test

@@ -19,6 +19,8 @@ object StructuredSources {
         val wantsVersion = "version" in lower || "release" in lower || "latest version" in lower
         if (!wantsVersion) return null
         val product = productFor(query)
+        val named = Regex("""\b\d+\.\d+(?:\.\d+)?\b""").find(query)?.value
+        if (product != null && named != null) return namedRelease(product, named, connect)
         if (product != null) {
             endOfLife(product, connect)?.let { return it }
             github(product, connect)?.let { return it }
@@ -46,6 +48,26 @@ object StructuredSources {
             "gradle" in lower -> "gradle"
             else -> null
         }
+    }
+
+    private fun namedRelease(product: String, version: String, connect: (String) -> HttpURLConnection): String {
+        val body = get("https://endoflife.date/api/$product.json", connect, "application/json")
+        val cycles = body?.let { runCatching { JSONArray(it) }.getOrNull() }
+        if (cycles != null) {
+            for (i in 0 until cycles.length()) {
+                val cycle = cycles.optJSONObject(i) ?: continue
+                val latest = cycle.optString("latest").trim()
+                val cycleName = cycle.optString("cycle").trim()
+                if (latest != version && cycleName != version) continue
+                if (latest.isBlank() || isPrerelease(latest)) continue
+                val date = cycle.optString("releaseDate").ifBlank { cycle.optString("latestReleaseDate") }.trim()
+                val name = product.replaceFirstChar { it.uppercase() }
+                val shown = if (latest == version) latest else cycleName
+                return "$name $shown was published on ${speakDate(date)}. Source: https://endoflife.date/$product Date: ${date.ifBlank { "unknown" }}."
+            }
+        }
+        val name = product.replaceFirstChar { it.uppercase() }
+        return "$name $version was not found in the dated release list. Source: https://endoflife.date/$product"
     }
 
     private fun endOfLife(product: String, connect: (String) -> HttpURLConnection): String? {

@@ -4,6 +4,9 @@ import com.codingagent.model.AgentModelProtocol
 import com.codingagent.model.ModelCaps
 import com.codingagent.model.ModelMessage
 import com.codingagent.model.OutputBudget
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 /**
  * ONE JOB: Keep one model request small enough for a free helper's per-minute limit.
@@ -14,14 +17,23 @@ object ContextBudget {
 
     fun estimateTokens(text: String): Int = (text.length + 3) / 4
 
-    private val COMPACT_SYSTEM = """
-        You are a Coding-Agent on the owner's phone. The owner does not know computer jargon.
+    fun todaySentence(today: LocalDate = LocalDate.now()): String {
+        val spoken = today.format(DateTimeFormatter.ofPattern("MMMM d, yyyy", Locale.US))
+        return "Today's date is $spoken. A sourced date is not from the future. Trust a sourced date over your memory."
+    }
+
+    private fun compactSystem(): String = """
+        You are a Coding-Agent on the owner's phone. ${todaySentence()}
+        The owner does not know computer jargon.
         Use plain, everyday language. Never use the words agentic, agentic loop, checksum, or checksum-backed rollback.
         If you must use a technical word, explain it in the same sentence.
 
         Make exactly one tool call per turn and include a purpose field. Read real files. Never invent paths, file contents, or test results.
         Code changes (create_file, replace_text) only STAGE a proposal. The owner must approve twice. Never claim a change was applied until then.
         When the phone must run the program, write JavaScript. Run it after you write it. If the run fails, fix it. If you did not run it, say you have not run it. Do not say the result is correct unless a run showed that.
+        A long file is read in parts. If END_OF_FILE is false, call read_file again with the same path and startCharacter set to NEXT_START_CHARACTER. Do not call continue_result for a file. Do not start again at 0. If the whole file is already here, do not read it again.
+        After create_file or replace_text stages a file, call review_examples with at least two examples, or run_program. Include a negative number, a decimal, a bad input that should print the word error, and a divide by zero. Do not describe the file. Do not say it works until a run matched.
+        When research_web returns a sentence that says was published on and names a Source, that sentence is the answer. Stop searching and give the owner that sentence.
         Verification honesty: a static unfinished-work marker scan is not a substitute for a real run. Never claim it passed when it was not run.
         Do not invoke git, find, gradle, or project-local executables. Use the project tools for files.
         There is no arbitrary two-or-three-result stopping limit. Do not stop at a plan. Continue until the goal is met, you are blocked, or the owner must decide.
@@ -34,8 +46,8 @@ object ContextBudget {
                 configured.removePrefix(AgentModelProtocol.DEFAULT_SYSTEM)
             else -> null
         }
-        if (extra != null) return COMPACT_SYSTEM + extra
-        if (estimateTokens(configured) > 700) return COMPACT_SYSTEM
+        if (extra != null) return compactSystem() + extra
+        if (estimateTokens(configured) > 700) return compactSystem()
         return configured
     }
 

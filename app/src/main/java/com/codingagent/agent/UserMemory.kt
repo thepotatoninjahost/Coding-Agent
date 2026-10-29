@@ -186,23 +186,6 @@ class UserMemoryIndex(
         return fresh.sortedWith(byValue).take(maxEntries)
     }
 
-    private fun sameDirectiveTopic(a: String, b: String): Boolean {
-        val left = directiveTopic(a)
-        val right = directiveTopic(b)
-        return left.isNotBlank() && left == right
-    }
-
-    private fun directiveTopic(text: String): String {
-        val stripped = text.lowercase(Locale.ROOT)
-            .replace(
-                Regex(
-                    "^(remember that|remember|from now on|i prefer|i like|i don't like|i do not like|i hate|i want you to|i don't want you to|i do not want you to|please always|always|never|do not ever|don't ever)\\s+"
-                ),
-                ""
-            )
-        return tokens(stripped).firstOrNull().orEmpty()
-    }
-
     private fun similarity(a: String, b: String): Double {
         val left = tokens(a)
         val right = tokens(b)

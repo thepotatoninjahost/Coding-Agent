@@ -15,8 +15,7 @@ private val SAFE_ID = Regex("[A-Za-z0-9_-]+")
 /**
  * ONE JOB: Persist and version live-module source (install, parse, roll back, list history).
  * Extracted out of LiveModules.kt, which mixed storage, execution, and default-module bootstrap
- * in one file. Runtime/execution now lives in LiveModuleRuntime.kt; default module bootstrap in
- * BuiltInModules.kt.
+ * in one file. Runtime/execution now lives in LiveModuleRuntime.kt.
  */
 sealed class ModuleInstallResult {
     data class Installed(val module: LiveModule) : ModuleInstallResult()

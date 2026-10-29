@@ -46,15 +46,21 @@ class ActObserveLoop(
         var cutOffs = 0
         var lastRun: RunReport? = null
         var condensed = false
+        val dailyRemaining = com.codingagent.model.OpenRouterDailyBudget.remaining()
+        val maxSteps = TaskBudget.callsFor(config.maxTurns, dailyRemaining)
+        TaskBudget.warning(dailyRemaining, maxSteps)?.let { emit(AutonomousAgentEvent.Phase("MODEL", it)) }
         val user = buildString {
             appendLine(request.trim())
             appendLine()
+            appendLine(ContextBudget.todaySentence())
             appendLine(repoMap())
             appendLine("Do one thing each turn: a tool, a SEARCH/REPLACE block, or submit.")
             appendLine("When the phone must run the program, write JavaScript.")
             appendLine("Answer the owner in plain everyday English.")
+            if (request.contains("one short paragraph", ignoreCase = true)) {
+                appendLine("Use one short paragraph. Do not use markdown.")
+            }
         }
-        val maxSteps = config.maxTurns.coerceAtLeast(1)
         for (step in 0 until maxSteps) {
             if (isCancelled()) return stop(taskId, request, plan, events)
             emit(AutonomousAgentEvent.Phase("MODEL", "Thinking about the next step (${step + 1} of $maxSteps)."))
@@ -111,10 +117,16 @@ class ActObserveLoop(
                         if (outcome.report != null) lastRun = outcome.report
                         transcript += ModelMessage("assistant", action.thought.ifBlank { "Calling ${action.name}" }, action.callId, action.name, action.arguments)
                         transcript += ModelMessage("tool", "${action.name}: ${outcome.text}", action.callId ?: "call_unmatched")
-                        steps += StuckDetector.Step(key, outcome.text.take(240), outcome.text.startsWith("ERROR:"), textOnly = false)
+                        steps += StuckDetector.Step(key, outcome.text.take(500), outcome.text.startsWith("ERROR:"), textOnly = false)
                         if (action.name == "review_examples" || action.name == "run_program") {
                             val ready = approvalIfChecked(outcome, lastRun, taskId, request, plan, events)
                             if (ready != null) return ready
+                        }
+                        if (!changeWork && action.name == "research_web") {
+                            sourcedFact(outcome.text)?.let { fact ->
+                                emit(AutonomousAgentEvent.ModelMessage(fact))
+                                return complete(taskId, request, plan, events, fact, "completed")
+                            }
                         }
                         if (isListing(request) && action.name == "list_files" && !outcome.text.startsWith("ERROR:")) {
                             return complete(taskId, request, plan, events, outcome.text.ifBlank { "There are no files yet." }, "completed")
@@ -129,15 +141,18 @@ class ActObserveLoop(
                         transcript += ModelMessage("assistant", action.content)
                         transcript += ModelMessage("user", applied)
                         steps += StuckDetector.Step("search-replace", applied.take(240), applied.startsWith("ERROR:"), textOnly = false)
+                    } else if (mutations.pending().isNotEmpty()) {
+                        return showApproval(lastRun, taskId, request, plan, events)
                     } else if (!changeWork) {
-                        val fact = transcript.map { it.content }.lastOrNull { line ->
-                            "was published on" in line && "Source:" in line
-                        }
+                        val fact = transcript.mapNotNull { sourcedFact(it.content) }.lastOrNull()
                         val version = fact?.let { Regex("""\d+\.\d+\.\d+""").find(it)?.value }
                         val answer = if (fact != null && version != null && version !in action.content) {
-                            fact.lineSequence().first { "was published on" in it }.trim()
+                            fact
                         } else {
-                            PlainEnglish.soften(action.content)
+                            PlainEnglish.soften(
+                                action.content,
+                                oneShortParagraph = request.contains("one short paragraph", ignoreCase = true)
+                            )
                         }
                         emit(AutonomousAgentEvent.ModelMessage(answer))
                         return complete(taskId, request, plan, events, answer, if (isDegenerate(answer)) "completed-with-warning" else "completed")
@@ -150,6 +165,9 @@ class ActObserveLoop(
                         )
                         steps += StuckDetector.Step("text", action.content.take(120), error = false, textOnly = true)
                         if (formatErrors >= 3) {
+                            if (mutations.pending().isNotEmpty()) {
+                                return showApproval(lastRun, taskId, request, plan, events)
+                            }
                             val summary = "I have not built anything yet. Nothing was saved. " +
                                 "The helper only described a plan and asked whether to continue. " +
                                 "Tell me to go ahead if you want the files written."
@@ -160,7 +178,10 @@ class ActObserveLoop(
             }
             val stuck = StuckDetector.check(steps)
             if (stuck != null) {
-                if (!condensed) {
+                val pendingAnswer = bestEnding(taskId, request, plan, events, lastRun)
+                if (pendingAnswer != null) return pendingAnswer
+                val hardStop = stuck.contains("same result") || stuck.contains("same file")
+                if (!condensed && !hardStop) {
                     condensed = true
                     val kept = ContextBudget.condense(transcript.toList())
                     transcript.clear()
@@ -169,6 +190,8 @@ class ActObserveLoop(
                     transcript += ModelMessage("user", "$stuck Try a different step.")
                     continue
                 }
+                val fact = bestFact(transcript)
+                if (fact != null) return complete(taskId, request, plan, events, fact, "completed")
                 val summary = "$stuck I stopped. Nothing new was saved."
                 val task = AgentTaskBuilders.failed(taskId, request, plan, summary, changes())
                 emit(AutonomousAgentEvent.Failed(task, summary))
@@ -176,12 +199,34 @@ class ActObserveLoop(
                 return events
             }
         }
+        bestEnding(taskId, request, plan, events, lastRun)?.let { return it }
+        val fact = bestFact(transcript)
+        if (fact != null) return complete(taskId, request, plan, events, fact, "completed")
         val summary = if (changeWork && mutations.pending().isEmpty()) {
             "I used every step I am allowed and did not finish the change. Nothing was saved."
         } else {
             "I used every step I am allowed. This is as far as I got."
         }
         return complete(taskId, request, plan, events, summary, "completed-with-warning")
+    }
+
+    private fun bestEnding(
+        taskId: String,
+        request: String,
+        plan: AgentPlan,
+        events: MutableList<AutonomousAgentEvent>,
+        lastRun: RunReport?
+    ): List<AutonomousAgentEvent>? {
+        if (mutations.pending().isNotEmpty()) return showApproval(lastRun, taskId, request, plan, events)
+        return null
+    }
+
+    private fun bestFact(transcript: List<ModelMessage>): String? =
+        transcript.mapNotNull { sourcedFact(it.content) }.lastOrNull()
+
+    private fun sourcedFact(text: String): String? {
+        if ("was published on" !in text || "Source:" !in text) return null
+        return text.lineSequence().firstOrNull { "was published on" in it && "Source:" in it }?.trim()
     }
 
     private fun finishSubmit(
@@ -229,6 +274,22 @@ class ActObserveLoop(
         val failed = report != null && report.ran && !report.passed
         if (failed) return null
         val card = ChangeDiff.approvalCard(proposal, report)
+        val task = AgentTaskBuilders.approval(taskId, request, plan, proposal).copy(summary = card)
+        emit(AutonomousAgentEvent.ApprovalRequired(task, proposal))
+        recordTask(task)
+        return events
+    }
+
+    private fun showApproval(
+        lastRun: RunReport?,
+        taskId: String,
+        request: String,
+        plan: AgentPlan,
+        events: MutableList<AutonomousAgentEvent>
+    ): List<AutonomousAgentEvent> {
+        val proposal = mutations.pending().firstOrNull()
+            ?: return complete(taskId, request, plan, events, "Nothing is waiting for approval.", "needs-input")
+        val card = ChangeDiff.approvalCard(proposal, lastRun)
         val task = AgentTaskBuilders.approval(taskId, request, plan, proposal).copy(summary = card)
         emit(AutonomousAgentEvent.ApprovalRequired(task, proposal))
         recordTask(task)

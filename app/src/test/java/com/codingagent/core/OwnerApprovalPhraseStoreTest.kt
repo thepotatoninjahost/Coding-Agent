@@ -30,6 +30,17 @@ class OwnerApprovalPhraseStoreTest {
     }
 
     @Test
+    fun shortPhraseIsRejected() {
+        val s = store()
+        try {
+            s.enroll("short", "spoken secret one")
+            throw AssertionError("expected require failure")
+        } catch (e: IllegalArgumentException) {
+            assertTrue(e.message.orEmpty().contains("8"))
+        }
+    }
+
+    @Test
     fun spokenAndTypedMustDifferWhenNormalized() {
         val s = store()
         try {

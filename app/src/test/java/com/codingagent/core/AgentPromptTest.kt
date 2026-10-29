@@ -26,7 +26,7 @@ class AgentPromptTest {
         """.trimIndent()
 
         val intake = TaskIntakeParser(root).parse(request)
-        val prompt = AgentPrompt.build(request, intake, "real evidence", 4_000, lessons = "")
+        val prompt = AgentPrompt.build(request, intake, "real evidence", lessons = "")
 
         assertTrue(prompt.contains("Build me a compiler", ignoreCase = true))
         assertTrue(prompt.contains("Kotlin and Python", ignoreCase = true))
@@ -63,7 +63,7 @@ class AgentPromptTest {
         val root = Files.createTempDirectory("agent-prompt-ambitious").toFile()
         val request = "Build a compiler with a new parser and test suite"
         val intake = TaskIntakeParser(root).parse(request)
-        val prompt = AgentPrompt.build(request, intake, "repository evidence", 4_000, lessons = "")
+        val prompt = AgentPrompt.build(request, intake, "repository evidence", lessons = "")
 
         assertTrue(prompt.contains("coordinated multi-file changes"))
         assertTrue(prompt.contains("new tools"))
@@ -81,7 +81,7 @@ class AgentPromptTest {
         val intake = TaskIntakeParser(root).parse(request)
         val evidence = "EVIDENCE-BEGIN\n" + "x".repeat(20_000) + "\nEVIDENCE-END"
 
-        val prompt = AgentPrompt.build(request, intake, evidence, 4_000, lessons = "")
+        val prompt = AgentPrompt.build(request, intake, evidence, lessons = "")
 
         assertTrue(prompt.contains(evidence))
         assertTrue(prompt.endsWith(evidence))

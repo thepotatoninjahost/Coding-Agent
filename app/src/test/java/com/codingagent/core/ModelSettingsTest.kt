@@ -120,7 +120,7 @@ class ModelSettingsTest {
         val defaults = ModelSettings.fromJson("{not-json")
         assertEquals(ModelBackend.REMOTE, defaults.backend)
         assertEquals(ModelSettings.OPENROUTER_BASE_URL, defaults.baseUrl)
-        assertEquals(ModelSettings.OPENROUTER_FREE_MODEL, defaults.modelName)
+        assertEquals("", defaults.modelName)
         assertTrue(defaults.apiKey.isEmpty())
         assertFalse(defaults.onboarded)
         assertFalse(defaults.isRemoteConfigured())
@@ -141,7 +141,7 @@ class ModelSettingsTest {
         val defaults = ModelSettings()
         assertEquals(ModelBackend.REMOTE, defaults.backend)
         assertEquals("https://openrouter.ai/api/v1", defaults.baseUrl)
-        assertEquals(ModelSettings.OPENROUTER_FREE_MODEL, defaults.modelName)
+        assertEquals("", defaults.modelName)
         assertFalse(defaults.modelName == "openrouter/free")
         assertTrue(defaults.apiKey.isEmpty())
         assertFalse(defaults.onboarded)
@@ -156,8 +156,8 @@ class ModelSettingsTest {
     fun blankSavedProviderBecomesOpenRouterFreeModel() {
         val restored = ModelSettings.fromJson("""{"baseUrl":"","apiKey":"","modelName":""}""")
         assertEquals(ModelSettings.OPENROUTER_BASE_URL, restored.baseUrl)
-        assertEquals(ModelSettings.OPENROUTER_FREE_MODEL, restored.modelName)
-        assertTrue(restored.rotationModels.contains("poolside/laguna-s-2.1:free"))
+        assertEquals("", restored.modelName)
+        assertFalse(restored.rotationModels.contains("poolside/laguna-s-2.1:free"))
         assertFalse(restored.rotationModels.contains("liquid/lfm-2.5-2.6b"))
         assertTrue(restored.apiKey.isEmpty())
         assertFalse(restored.isRemoteConfigured())
@@ -168,8 +168,9 @@ class ModelSettingsTest {
         val restored = ModelSettings.fromJson(
             """{"baseUrl":"https://openrouter.ai/api/v1","apiKey":"","modelName":"openrouter/free","rotationModels":""}"""
         )
-        assertEquals(ModelSettings.OPENROUTER_FREE_MODEL, restored.modelName)
-        assertTrue(restored.rotationModels.contains("google/gemma-4-31b-it:free"))
+        assertEquals("", restored.modelName)
+        assertFalse(restored.modelName.contains("cohere"))
+        assertFalse(restored.rotationModels.contains("google/gemma-4-31b-it:free"))
         assertFalse(restored.modelName.contains("2.6b"))
     }
 
@@ -272,7 +273,8 @@ class ModelSettingsTest {
         assertFalse(saved.modelName.contains("minimax"))
         assertFalse(saved.preferredModel.contains("minimax"))
         assertFalse(saved.rotationModels.contains("minimax"))
-        assertEquals(ModelSettings.OPENROUTER_FREE_MODEL, saved.modelName)
+        assertEquals("", saved.modelName)
+        assertTrue(saved.rotationModels.contains("cohere/north-mini-code:free"))
     }
 
     @Test
@@ -287,10 +289,9 @@ class ModelSettingsTest {
               {"id":"big/tools:free","pricing":{"prompt":"0","completion":"0"},"supported_parameters":["tools"],"context_length":800000}
             ]}
             """.trimIndent(),
-            listOf("cohere/north-mini-code:free")
         )
-        assertEquals("cohere/north-mini-code:free", ranked[0])
-        assertEquals("big/tools:free", ranked[1])
+        assertEquals("big/tools:free", ranked[0])
+        assertEquals("cohere/north-mini-code:free", ranked[1])
         assertTrue(ranked.contains("no-tools/free"))
         assertTrue(ranked.indexOf("no-tools/free") > ranked.indexOf("big/tools:free"))
         assertFalse(ranked.any { it.contains("minimax") || it.startsWith("paid/") })
@@ -320,7 +321,9 @@ class ModelSettingsTest {
                 quotaFile = java.io.File.createTempFile("quota", ".json"),
                 probe = true,
                 connectionFactory = { url ->
-                    if (url.endsWith("/models")) {
+                    if (url.contains("/key")) {
+                        scriptedConnection(200, """{"data":{}}""")
+                    } else if (url.endsWith("/models")) {
                         scriptedConnection(200, FREE_MODELS_JSON)
                     } else {
                         if (chats.incrementAndGet() == 1) {

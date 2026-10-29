@@ -91,6 +91,7 @@ class AutonomousAgent(
         mutations = mutations,
         terminal = terminal,
         maxOutputCharacters = config.maxOutputCharacters,
+        commandTimeoutSeconds = config.commandTimeoutSeconds,
         sourceConnect = sourceConnect,
         onResearchProgress = { lastResearchProgress = it }
     )
@@ -311,7 +312,7 @@ class AutonomousAgent(
             val msg =
                 "The code helper is not connected yet, so I cannot write new code from this request. " +
                     "You can still say hello, ask me to list files, ask for status, or ask me to read a file you name. " +
-                    "Tap Setup. The free OpenRouter helper is already filled in. Paste the secret password from openrouter.ai/keys. " +
+                    "Tap Setup. No helper is picked until Test models loads the list. Paste the secret password from openrouter.ai/keys. " +
                     "It stays on this phone and is not written into the app."
             val task = AgentTask(
                 taskId, focus, "needs-input", plan, emptyList(),
@@ -435,7 +436,7 @@ class AutonomousAgent(
     // Delegates to AgentPrompt (verified byte-identical before switching) for the same
     // duplication-drift reason as repoMapSummary/ModelFailure above.
     private fun buildPrompt(request: String, intake: TaskIntake, evidence: String): String =
-        AgentPrompt.build(request, intake, evidence, config.maxOutputCharacters)
+        AgentPrompt.build(request, intake, evidence)
 
     private fun synthesizeRepairChangeSet(diagnosis: String, attempt: Int): ChangeSet? {
         val model = gateway ?: return null

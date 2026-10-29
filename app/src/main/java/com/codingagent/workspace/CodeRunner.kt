@@ -61,9 +61,12 @@ object DeviceCodeRunner : CodeRunner {
         val results = examples.map { (input, expected) ->
             val report = run(ProgramRequest("javascript", code, args = argsFor(input), stdin = stdinFor(input)))
             val actual = report.stdout.trim()
-            val crashed = report.stderr.contains("\n\tat ") || report.stderr.contains("Exception")
+            val crashed = report.stderr.contains("\n\tat ") || report.stderr.contains("Exception") ||
+                actual.contains("\n\tat ") || actual.contains("Exception") || actual.contains("Error:") ||
+                Regex("(?i)\\b(typeerror|syntaxerror|referenceerror)\\b").containsMatchIn(actual)
+            val infinity = actual.equals("Infinity", ignoreCase = true)
             val passed = if (expected.equals("error", ignoreCase = true)) {
-                !crashed && (report.exitCode != 0 || actual.contains("error"))
+                !crashed && !infinity && (report.exitCode != 0 || actual.contains("error"))
             } else {
                 report.exitCode == 0 && !report.timedOut && actual == expected.trim()
             }

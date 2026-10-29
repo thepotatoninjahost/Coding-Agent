@@ -40,7 +40,7 @@ class OpenRouterAgentRunner {
         ).withOpenRouterDefaults()
         check(!settings.apiKey.isBlank())
         check(settings.baseUrl == ModelSettings.OPENROUTER_BASE_URL)
-        check(settings.modelName == ModelSettings.OPENROUTER_FREE_MODEL)
+        check(settings.modelName.isBlank() || !com.codingagent.model.OpenRouterFreeModels.isRetired(settings.modelName))
         val gateway = settings.remoteGateway(timeoutMillis = 90_000)
         if (gateway == null) {
             fail("OpenRouter is not usable. The secret password was empty after cleanup.")

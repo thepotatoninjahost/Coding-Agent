@@ -48,7 +48,9 @@ object OpenRouterFreeModels {
         return (chosen + ownerPick + others).distinctBy { it.providerId + "\n" + it.modelId }
     }
 
-    fun rankJson(json: String, preferredOrder: List<String>): List<String> {
+    fun known(): List<String> = synchronized(lock) { cachedIds.toList() }
+
+    fun rankJson(json: String): List<String> {
         val data = runCatching { JSONObject(json).optJSONArray("data") }.getOrNull() ?: return emptyList()
         val models = mutableListOf<FreeModel>()
         for (i in 0 until data.length()) {
@@ -61,11 +63,9 @@ object OpenRouterFreeModels {
             models += FreeModel(id, tools, context)
         }
         if (models.isEmpty()) return emptyList()
-        val withTools = models.filter { it.tools }
-        val withoutTools = models.filter { !it.tools }
-        return (order(withTools, preferredOrder) + order(withoutTools, preferredOrder))
-            .distinct()
-            .take(LIMIT)
+        val withTools = models.filter { it.tools }.sortedByDescending { it.context }.map { it.id }
+        val withoutTools = models.filter { !it.tools }.sortedByDescending { it.context }.map { it.id }
+        return (withTools + withoutTools).distinct().take(LIMIT)
     }
 
     private fun rankedIds(
@@ -78,8 +78,7 @@ object OpenRouterFreeModels {
             if (cachedIds.isNotEmpty() && cachedBase == base && now - cachedAt < CACHE_MS) return cachedIds
         }
         val json = fetch(base, apiKey, connect) ?: return emptyList()
-        val preferred = ProviderCatalog.bundled.filter { it.providerId == "openrouter" }.map { it.modelId }
-        val ids = rankJson(json, preferred)
+        val ids = rankJson(json)
         if (ids.isEmpty()) return emptyList()
         synchronized(lock) {
             cachedBase = base
@@ -110,13 +109,6 @@ object OpenRouterFreeModels {
         } finally {
             runCatching { connection.disconnect() }
         }
-    }
-
-    private fun order(models: List<FreeModel>, preferredOrder: List<String>): List<String> {
-        val ids = models.map { it.id }.toSet()
-        val known = preferredOrder.filter { it in ids }
-        val rest = models.filter { it.id !in known }.sortedByDescending { it.context }.map { it.id }
-        return known + rest
     }
 
     private fun isFreePrice(pricing: JSONObject?): Boolean {

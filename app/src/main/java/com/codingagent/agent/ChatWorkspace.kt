@@ -93,7 +93,7 @@ class ChatWorkspace(
             if (existingJob?.status == "recovery-required") {
                 val response = ChatMessage(
                     role = ChatRole.AGENT,
-                    content = "The current coding job is in recovery-required state and cannot be replaced. Resolve the interrupted mutation before starting a new coding goal."
+                    content = "This job needs to be recovered before a new one can start. Finish the interrupted change first."
                 )
                 store.recordChatMessage(response)
                 return ChatTurn(response, AgentRuntimeResult.Failed(

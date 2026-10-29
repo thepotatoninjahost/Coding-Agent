@@ -180,7 +180,7 @@ class ToolCallOutcomeHandler(
             state.repeatResetCount++
             if (state.repeatResetCount >= 2) {
                 val report = workspace.verify()
-                val msg = "Aborted: ${response.name} was repeated with the same arguments ${state.sameSignatureCalls} times without establishing a new path. The model cannot make progress on this path."
+                val msg = "I stopped because the same step was repeated and nothing new came back."
                 val task = AgentTask(
                     taskId, normalized, "failed", plan,
                     changes(), report,
@@ -196,8 +196,7 @@ class ToolCallOutcomeHandler(
             state.sameSignatureCalls = 0
             transcript += com.codingagent.model.ModelMessage(
                 "user",
-                "SYSTEM: ${response.name} has been called repeatedly with identical arguments. " +
-                    "Do NOT call it again with those arguments. Choose a different diagnostic or implementation path."
+                "SYSTEM: That step was repeated and the result did not change. Do not do that step again. Try a different step."
             )
         }
 
@@ -231,8 +230,7 @@ class ToolCallOutcomeHandler(
                 state.repeatResetCount++
                 if (state.repeatResetCount >= 2) {
                     val report = workspace.verify()
-                    val msg = "Aborted: ${response.name} was repeated ${state.identicalRepeats} times " +
-                        "with no new results, even after specific guidance. The model cannot make progress on this path."
+                    val msg = "I stopped because the same step was repeated and nothing new came back."
                     val task = AgentTask(
                         taskId, normalized, "failed", plan,
                         changes(), report,
@@ -395,7 +393,7 @@ class ToolCallOutcomeHandler(
         } else {
             state.consecutiveFailures++
             if (state.consecutiveFailures >= config.maxConsecutiveToolFailures) {
-                val msg = "Aborted after ${state.consecutiveFailures} consecutive tool failures (last: ${response.name})"
+                val msg = "I stopped because the same kind of step kept failing."
                 val task = AgentTaskBuilders.failed(taskId, normalized, plan, msg, changes())
                 emit(AutonomousAgentEvent.Failed(task, msg))
                 recordTask(task)

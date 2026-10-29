@@ -52,9 +52,10 @@ class ProviderRotatingGateway(
         } else {
             available.filter { it.modelId != skip }.ifEmpty { available }
         }
-        if (connectionFactory == null && notedDailyBudget.compareAndSet(false, true)) {
+        if (notedDailyBudget.compareAndSet(false, true)) {
             candidates.firstOrNull { "openrouter.ai" in it.baseUrl && it.apiKey.isNotBlank() }?.let { endpoint ->
-                OpenRouterDailyBudget.refresh(endpoint.baseUrl, endpoint.apiKey)
+                val connect = connectionFactory ?: { url -> java.net.URL(url).openConnection() as HttpURLConnection }
+                OpenRouterDailyBudget.refresh(endpoint.baseUrl, endpoint.apiKey, connect)
             }
         }
         var last: ModelResponse.Failure? = null

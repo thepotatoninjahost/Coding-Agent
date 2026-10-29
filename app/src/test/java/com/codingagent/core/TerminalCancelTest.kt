@@ -23,8 +23,10 @@ class TerminalCancelTest {
         val seen = StringBuilder()
         val session = workspace.terminal()
         val entry = session.execute("yes x | tr -d '\n' | head -c 400000", onStdout = { seen.append(it) }, timeoutSeconds = 10)
-        assertEquals(400_000, seen.length)
-        assertEquals(400_000, session.currentOutput().length)
+        assertTrue(seen.length <= com.codingagent.workspace.TerminalOutput.STORED_LIMIT)
+        assertTrue(seen.toString().contains("output trimmed"))
+        assertTrue(session.currentOutput().length <= com.codingagent.workspace.TerminalOutput.STORED_LIMIT)
+        assertTrue(session.currentOutput().contains("output trimmed"))
         assertTrue(entry.stdout.contains("output trimmed"))
         assertTrue(entry.stdout.length <= com.codingagent.workspace.TerminalOutput.STORED_LIMIT)
     }

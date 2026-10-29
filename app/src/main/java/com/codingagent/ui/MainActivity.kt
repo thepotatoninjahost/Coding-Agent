@@ -297,18 +297,21 @@ private fun CodingAgentApp(
                         )
                         Spacer(Modifier.height(8.dp))
                         Text("Which free helper?", color = SoftGreen, fontSize = 12.sp)
-                        ModelSettings.freeHelperChoices().forEach { choice ->
+                        if (ui.discoveredHelpers.isEmpty()) {
+                            Text(
+                                "No helper is picked until Test models loads the list. You can type a helper name below.",
+                                color = SoftGreen,
+                                fontSize = 12.sp
+                            )
+                        }
+                        ui.discoveredHelpers.forEach { modelId ->
                             TextButton(
-                                onClick = { vm.chooseFreeHelper(choice.modelId) },
+                                onClick = { vm.chooseFreeHelper(modelId) },
                                 modifier = Modifier.fillMaxWidth()
                             ) {
                                 Text(
-                                    if (ui.draftModelName == choice.modelId) {
-                                        "Selected: ${choice.plainName}. ${choice.plainDetail}"
-                                    } else {
-                                        "${choice.plainName}. ${choice.plainDetail}"
-                                    },
-                                    color = if (ui.draftModelName == choice.modelId) NeonGreen else SoftGreen,
+                                    if (ui.draftModelName == modelId) "Selected: $modelId" else modelId,
+                                    color = if (ui.draftModelName == modelId) NeonGreen else SoftGreen,
                                     fontSize = 12.sp
                                 )
                             }

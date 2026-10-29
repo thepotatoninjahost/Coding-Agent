@@ -24,6 +24,7 @@ import com.codingagent.model.ModelRanking
 import com.codingagent.model.ModelRequest
 import com.codingagent.model.ModelResponse
 import com.codingagent.model.ModelSettings
+import com.codingagent.model.OpenRouterFreeModels
 import com.codingagent.model.ModelToolDefinition
 import com.codingagent.model.ProbeResult
 import com.codingagent.model.ProviderCatalog
@@ -184,7 +185,7 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
         it.copy(
             draftModelName = modelId,
             draftBaseUrl = if (it.draftBaseUrl.isBlank()) ModelSettings.OPENROUTER_BASE_URL else it.draftBaseUrl,
-            draftRotationModels = ModelSettings.rotationForChoice(modelId),
+            draftRotationModels = ModelSettings.rotationForChoice(modelId, it.discoveredHelpers),
             draftPreferredModel = modelId
         )
     }
@@ -230,7 +231,12 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
                 cloudflareApiToken = s.draftCloudflareApiToken,
                 cloudflareAccountId = s.draftCloudflareAccountId
             )
-            val endpoints = ProviderCatalog.endpoints(candidate).take(8)
+            OpenRouterFreeModels.clearCache()
+            val discovered = OpenRouterFreeModels.apply(
+                ProviderCatalog.endpoints(candidate),
+                { url -> java.net.URL(url).openConnection() as java.net.HttpURLConnection }
+            ).filter { it.providerId == "openrouter" && it.modelId != ModelSettings.OPENROUTER_FREE_ROUTER }
+            val endpoints = if (discovered.isNotEmpty()) discovered.take(8) else ProviderCatalog.endpoints(candidate).take(8)
             if (endpoints.isEmpty()) {
                 withContext(Dispatchers.Main) {
                     _ui.update { it.copy(probeMessage = "Add a password first, then test the helpers.") }
@@ -275,7 +281,17 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
                 "${endpoint.plainName}: $outcome"
             }
             withContext(Dispatchers.Main) {
-                _ui.update { it.copy(probeMessage = lines.joinToString("\n")) }
+                _ui.update {
+                    it.copy(
+                        discoveredHelpers = discovered.map { endpoint -> endpoint.modelId },
+                        probeMessage = if (discovered.isEmpty()) {
+                            "No helper is picked until the live list loads. Check the password and try Test models again.\n" +
+                                lines.joinToString("\n")
+                        } else {
+                            lines.joinToString("\n")
+                        }
+                    )
+                }
             }
         }
     }
@@ -941,8 +957,9 @@ data class WorkbenchUiState(
     val modelLoadError: String? = null,
     val showModelSettings: Boolean = false,
     val draftApiKey: String = "",
-    val draftModelName: String = ModelSettings.OPENROUTER_FREE_MODEL,
-    val draftRotationModels: String = ModelSettings.OPENROUTER_FREE_FALLBACKS,
+    val draftModelName: String = "",
+    val draftRotationModels: String = "",
+    val discoveredHelpers: List<String> = emptyList(),
     val draftBaseUrl: String = ModelSettings.OPENROUTER_BASE_URL,
     val draftExtraHeaders: String = "",
     val draftSystemPrompt: String = "",

@@ -364,8 +364,11 @@ class GitHubResearchProvider(
             }
         }
         fetched.error?.let { errors.add(it) }
-        return if (hits.isEmpty()) ResearchResult(query, emptyList(), errors.joinToString(" | ").ifBlank { "GitHub returned no results" })
-        else ResearchResult(query, hits.distinctBy { it.url }.take(limit))
+        return if (hits.isEmpty()) {
+            ResearchResult(query, emptyList(), errors.joinToString(" | ").ifBlank { "GitHub returned no results" })
+        } else {
+            ResearchResult(query, hits.distinctBy { it.url }.take(limit))
+        }
     }
 
     private data class JsonFetch(val json: JSONObject?, val error: String?)

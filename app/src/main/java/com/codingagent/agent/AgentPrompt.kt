@@ -41,7 +41,6 @@ object AgentPrompt {
         request: String,
         intake: TaskIntake,
         evidence: String,
-        maxEvidenceChars: Int,
         lessons: String = LessonContext.prompt()
     ): String = buildString {
         appendLine("You are the Coding-Agent on this device. You extend the model with tools and real evidence — never invent paths or file contents.")
@@ -92,8 +91,6 @@ object AgentPrompt {
         }
         appendLine()
         appendLine("Evidence so far:")
-        // maxEvidenceChars is retained so callers can pass a budget, but the prompt keeps
-        // the full evidence. Cutting it hid owner and tool evidence from the model.
         append(evidence)
     }
 

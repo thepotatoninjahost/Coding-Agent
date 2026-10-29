@@ -1,0 +1,10 @@
+This is a short original sample for the on-phone knowledge index.
+It is not the commercial book Coding For Dummies, and it is not a coding strategy.
+The phone can search this note after Setup loads the example.
+A compiler reads text and turns it into something the computer can run.
+A function is a named set of steps you can run again.
+A variable is a named place that holds a value.
+Keep secrets on the phone. Do not paste them into a project file.
+Say what a change will do in everyday words before you save it.
+Nothing is written until you say yes twice.
+If a check was not run, say it was not run.

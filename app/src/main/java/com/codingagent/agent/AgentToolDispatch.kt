@@ -33,6 +33,7 @@ class AgentToolDispatch(
     private val mutations: MutationCoordinator,
     private val terminal: TerminalSession,
     private val maxOutputCharacters: Int,
+    private val commandTimeoutSeconds: Long = 180,
     private val sourceConnect: (String) -> java.net.HttpURLConnection = { java.net.URL(it).openConnection() as java.net.HttpURLConnection },
     private val onResearchProgress: (String) -> Unit
 ) {
@@ -194,7 +195,12 @@ class AgentToolDispatch(
         val start = arguments.optInt("startCharacter", 0)
         val size = arguments.optInt("maxCharacters", maxOutputCharacters).coerceIn(1, maxOutputCharacters.coerceAtLeast(1))
         val part = files.readChunk(path, start, size)
-        return "FILE_PATH=${part.path}\nSTART_CHARACTER=${part.startCharacter}\nNEXT_START_CHARACTER=${part.nextCharacter}\nEND_OF_FILE=${!part.hasMore}\nCONTENT_START\n${part.content}\nCONTENT_END"
+        val hint = if (part.hasMore) {
+            "More of this file remains. Call read_file again with the same path and startCharacter=${part.nextCharacter}. Do not call continue_result. Do not start again at 0."
+        } else {
+            "The whole file is here. Do not read it again."
+        }
+        return "FILE_PATH=${part.path}\nSTART_CHARACTER=${part.startCharacter}\nNEXT_START_CHARACTER=${part.nextCharacter}\nEND_OF_FILE=${!part.hasMore}\n$hint\nCONTENT_START\n${part.content}\nCONTENT_END"
     }
 
     private fun listFiles(arguments: JSONObject): String {
@@ -288,10 +294,7 @@ class AgentToolDispatch(
             reason = reason
         )) {
             is MutationProposeResult.Proposed ->
-                "PROPOSAL_READY id=${result.proposal.id} path=$path " +
-                    "changes=${result.proposal.changeSet.changes.size} approval_required=2 " +
-                    "Confirm twice in the authenticated Review flow to APPLY this change to disk. " +
-                    "I checked that the file is not cut off. I have not run it. Do not say it works."
+                proposalReady(result.proposal.id, path, result.proposal.changeSet.changes.size)
             is MutationProposeResult.Rejected ->
                 "ERROR: replace_text proposal rejected — ${result.reason}"
         }
@@ -317,10 +320,7 @@ class AgentToolDispatch(
             reason = reason
         )) {
             is MutationProposeResult.Proposed ->
-                "PROPOSAL_READY id=${result.proposal.id} path=$path " +
-                    "changes=${result.proposal.changeSet.changes.size} approval_required=2 " +
-                    "Confirm twice in the authenticated Review flow to APPLY this file to disk. " +
-                    "I checked that the file is not cut off. I have not run it. Do not say it works."
+                proposalReady(result.proposal.id, path, result.proposal.changeSet.changes.size)
             is MutationProposeResult.Rejected ->
                 "ERROR: create_file proposal rejected — ${result.reason}"
         }
@@ -430,7 +430,7 @@ class AgentToolDispatch(
         }
         return when (val result = mutations.propose(request.ifBlank { "edit $path" }, listOf(operation), request.ifBlank { "edit $path" })) {
             is MutationProposeResult.Proposed ->
-                "PROPOSAL_READY id=${result.proposal.id} path=$path changes=${result.proposal.changeSet.changes.size} approval_required=2"
+                proposalReady(result.proposal.id, path, result.proposal.changeSet.changes.size)
             is MutationProposeResult.Rejected -> "ERROR: edit proposal rejected — ${result.reason}"
         }
     }
@@ -481,13 +481,19 @@ class AgentToolDispatch(
         AgentCommandPolicy.rejectionReason(command, workspace.projectRoot())?.let { reason ->
             return "ERROR: run_command blocked — $reason"
         }
-        val entry = terminal.execute(command)
+        val entry = terminal.execute(command, timeoutSeconds = commandTimeoutSeconds)
         return "exit=${entry.exitCode} timeout=${entry.timedOut}\n${entry.stdout}\n${entry.stderr}"
             
     }
 
     private fun ownerOnlyMutationControl(name: String): String =
         "ERROR: $name is owner-only. Use Review or chat for owner-controlled proposal decisions."
+
+    private fun proposalReady(id: String, path: String, changes: Int): String =
+        "PROPOSAL_READY id=$id path=$path changes=$changes approval_required=2. " +
+            "The file is staged. Next, call review_examples with at least two examples, or run_program. " +
+            "Include a negative number, a decimal, a bad input that should print the word error, and a divide by zero. " +
+            "Do not describe the file. I have not run it. Do not say it works."
 
     private companion object {
         const val KNOWLEDGE_RESULT_CAP = 30
