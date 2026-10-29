@@ -114,13 +114,13 @@ class SetupExplainBuildTest {
             }
             val payload = when {
                 header.contains("GET") -> """{"data":[{"id":"local-helper"}]}"""
-                "Explain this project" in body -> sseText("This project is an empty folder.")
                 "PROPOSAL_READY" in body || "proposal_ready" in body.lowercase() ->
-                    sseTool("review_examples", """{"path":"compiler.js","examples":"1+1 => 2\n1+ => error"}""")
-                else -> sseTool(
+                    sseTool("review_examples", """{"path":"compiler.js","examples":"1+1 => 2\nok => 2"}""")
+                "Build a tiny compiler" in body -> sseTool(
                     "create_file",
-                    """{"path":"compiler.js","content":"var text = String(__stdin || \"\").trim();\nif (!text || /[+\\-*/]$/.test(text)) console.log(\"error\");\nelse console.log(\"2\");\n"}"""
+                    """{"path":"compiler.js","content":"console.log(\"2\");\n"}"""
                 )
+                else -> sseText("This project is an empty folder.")
             }
             val bytes = payload.toByteArray()
             val type = if (header.contains("GET")) "application/json" else "text/event-stream"
