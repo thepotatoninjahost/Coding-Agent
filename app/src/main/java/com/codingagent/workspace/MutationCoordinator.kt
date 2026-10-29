@@ -203,7 +203,8 @@ class MutationCoordinator(
     fun approve(
         id: String,
         ownerApproval: OwnerApprovalToken,
-        modalities: Set<ApprovalModality> = emptySet()
+        modalities: Set<ApprovalModality> = emptySet(),
+        singleConfirmation: Boolean = false
     ): MutationApprovalResult {
         clearExpired()
         if (pendingReconciliationFailed) {
@@ -266,14 +267,22 @@ class MutationCoordinator(
             modalities
         )
         if (riskyRefusal != null) return MutationApprovalResult.Rejected(riskyRefusal)
-        if (!ownerApproval.isTestCapability) {
+        val risky = com.codingagent.agent.RiskyChange.kinds(proposal.changeSet.changes, proposal.request).isNotEmpty()
+        if (!ownerApproval.isTestCapability && !singleConfirmation) {
             val required = AgentConstitution.REQUIRED_PRODUCTION_MODALITIES
             if (!modalities.containsAll(required)) {
                 val missing = (required - modalities).joinToString(", ")
                 return MutationApprovalResult.Rejected(
-                    "Production approval requires spoken phrase, typed phrase, and device authentication. Missing: $missing"
+                    "This kind of change needs your saved words and the phone lock. Missing: $missing"
                 )
             }
+        }
+        if (!ownerApproval.isTestCapability && risky && ApprovalModality.DEVICE_AUTH !in modalities) {
+            return MutationApprovalResult.Rejected(
+                com.codingagent.agent.RiskyChange.plainSummary(
+                    com.codingagent.agent.RiskyChange.kinds(proposal.changeSet.changes, proposal.request)
+                )
+            )
         }
         if (proposal.approvalCount >= 2) {
             return MutationApprovalResult.Rejected("This proposal already has the required two approvals")
@@ -285,7 +294,7 @@ class MutationCoordinator(
             description = proposal.request,
             category = AgentActionCategory.CODE_CHANGE,
             ownerVerified = true,
-            approvalCount = candidate.approvalCount,
+            approvalCount = if (singleConfirmation && !risky) maxOf(candidate.approvalCount, 2) else candidate.approvalCount,
             evaluationPassed = proposal.verification.passed,
             clearPermission = true
         )

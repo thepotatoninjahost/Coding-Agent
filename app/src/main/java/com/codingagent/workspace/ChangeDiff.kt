@@ -244,6 +244,18 @@ object ChangeDiff {
         else -> "I ran the examples and they did not match. I did not save the file."
     }
 
+    /** Short text for the phone. The internal job prompt is not included. */
+    fun phoneCard(proposal: PendingChangeProposal, run: RunReport? = null): String {
+        val summary = everydaySummary(proposal, run)
+        val files = proposal.changeSet.changes.joinToString("\n\n") { record ->
+            val body = (record.after ?: record.before).orEmpty()
+            val lines = body.lineSequence().take(40).joinToString("\n")
+            val more = if (body.lines().size > 40) "\n… more lines are in the file" else ""
+            "File: ${record.path}\n$lines$more"
+        }
+        return if (files.isBlank()) summary else "$summary\n\n$files"
+    }
+
     fun everydaySummary(proposal: PendingChangeProposal, run: RunReport? = null): String {
         val files = proposal.changeSet.changes.map { it.path }.distinct()
         val fileWords = if (files.isEmpty()) "the files listed below" else files.joinToString(", ")

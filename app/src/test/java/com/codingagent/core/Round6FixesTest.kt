@@ -73,9 +73,11 @@ class Round6FixesTest {
     fun lowDailyQuotaCapsTheTaskAndWarns() {
         OpenRouterDailyBudget.noteRemaining(10)
         try {
-            assertEquals(2, TaskBudget.callsFor(40, 10))
-            assertEquals(8, TaskBudget.callsFor(40, 50))
-            assertEquals(1, TaskBudget.callsFor(40, 2))
+        assertEquals(2, TaskBudget.callsFor(40, 10))
+        assertEquals(8, TaskBudget.callsFor(40, 50))
+        assertEquals(1, TaskBudget.callsFor(40, 2))
+        assertEquals(24, TaskBudget.callsFor(40, 1000, changeWork = true))
+        assertTrue(TaskBudget.callsFor(40, 45, changeWork = true) >= 12)
             val root = Files.createTempDirectory("round6-budget").toFile()
             var calls = 0
             val gateway = object : ModelGateway {
@@ -142,16 +144,41 @@ class Round6FixesTest {
                 }
             }
         }
-        val events = AutonomousAgent(root, emptyKnowledge(), gateway, AutonomousAgentConfig(maxTurns = 6))
+        val events = AutonomousAgent(root, emptyKnowledge(), gateway, AutonomousAgentConfig(maxTurns = 4))
             .run("Build a tiny compiler in JavaScript that turns arithmetic expressions like 1+2*3 into JavaScript")
         val ready = events.filterIsInstance<AutonomousAgentEvent.ToolFinished>().first { it.name == "create_file" }
         assertTrue(ready.result.contains("review_examples"))
-        assertTrue(ready.result.contains("run_program"))
-        assertTrue(events.any { it is AutonomousAgentEvent.ApprovalRequired })
-        val summary = events.filterIsInstance<AutonomousAgentEvent.ApprovalRequired>().last().task.summary
-        assertFalse(summary.contains("Nothing was saved"))
-        assertFalse(summary.contains("I have not built anything"))
-        assertTrue(summary.contains("I have not run this yet"))
+        assertTrue(events.none { it is AutonomousAgentEvent.ApprovalRequired })
+        val last = events.last() as AutonomousAgentEvent.Completed
+        assertTrue(last.task.summary.contains("unfinished"))
+        assertFalse(last.task.summary.contains("I ran the examples"))
+        assertFalse(root.resolve("compiler.js").exists())
+    }
+
+    @Test
+    fun aPassingRunShowsTheFileNameOnTheApprovalCard() {
+        val root = Files.createTempDirectory("round6-run").toFile()
+        val content = """
+            var text = String(__stdin || "").trim();
+            if (!text || /[+\-*/]$/.test(text)) console.log("error");
+            else console.log("2");
+        """.trimIndent()
+        val create = JSONObject().put("path", "compiler.js").put("content", content).toString()
+        val review = JSONObject().put("path", "compiler.js").put("examples", "1+1 => 2\n1+ => error").toString()
+        var calls = 0
+        val gateway = object : ModelGateway {
+            override fun complete(request: ModelRequest): ModelResponse {
+                calls++
+                return if (calls == 1) ModelResponse.ToolCall("create_file", create)
+                else ModelResponse.ToolCall("review_examples", review)
+            }
+        }
+        val events = AutonomousAgent(root, emptyKnowledge(), gateway)
+            .run("Build a tiny compiler in JavaScript")
+        val approval = events.filterIsInstance<AutonomousAgentEvent.ApprovalRequired>().last()
+        assertTrue(approval.task.summary.contains("compiler.js"))
+        assertTrue(approval.task.summary.contains("I ran the examples and they matched."))
+        assertFalse(approval.task.summary.contains("OPEN JOB"))
         assertFalse(root.resolve("compiler.js").exists())
     }
 

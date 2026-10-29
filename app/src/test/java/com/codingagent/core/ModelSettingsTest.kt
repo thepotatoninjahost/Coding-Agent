@@ -353,7 +353,7 @@ class ModelSettingsTest {
     @Test
     fun modelConnectionProbeAcceptsNonBlankTextResponse() {
         assertEquals(
-            ProbeResult.Ok("Connected. A helper answered."),
+            ProbeResult.Ok("Connected. test-model answered."),
             probeResponse(ModelResponse.Text("  pong  "))
         )
     }

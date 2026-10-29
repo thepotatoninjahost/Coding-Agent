@@ -41,6 +41,7 @@ import com.codingagent.agent.RiskyChange
 import com.codingagent.research.CompositeWebResearchProvider
 import com.codingagent.research.DurableDeepResearchProvider
 import com.codingagent.research.ResearchDisplayState
+import com.codingagent.workspace.ChangeDiff
 import com.codingagent.workspace.ChangeSet
 import com.codingagent.workspace.EditorDocument
 import com.codingagent.workspace.MutationApprovalResult
@@ -103,7 +104,7 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
             _ui.update {
                 it.copy(
                     showModelSettings = true,
-                    detail = "To write new code, tap Setup and paste the secret password from openrouter.ai/keys. A free helper is already selected."
+                    detail = "To write new code, tap Setup and paste a secret password. No helper is picked until Test models loads the list."
                 )
             }
         }
@@ -232,11 +233,15 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
                 cloudflareAccountId = s.draftCloudflareAccountId
             )
             OpenRouterFreeModels.clearCache()
-            val discovered = OpenRouterFreeModels.apply(
+            val liveOpenRouter = OpenRouterFreeModels.apply(
                 ProviderCatalog.endpoints(candidate),
                 { url -> java.net.URL(url).openConnection() as java.net.HttpURLConnection }
             ).filter { it.providerId == "openrouter" && it.modelId != ModelSettings.OPENROUTER_FREE_ROUTER }
-            val endpoints = if (discovered.isNotEmpty()) discovered.take(8) else ProviderCatalog.endpoints(candidate).take(8)
+            val others = ProviderCatalog.endpoints(candidate).filter { it.providerId != "openrouter" }
+            val endpoints = (if (liveOpenRouter.isNotEmpty()) liveOpenRouter else ProviderCatalog.endpoints(candidate).filter { it.providerId == "openrouter" })
+                .plus(others)
+                .distinctBy { it.providerId + "\n" + it.modelId }
+                .take(8)
             if (endpoints.isEmpty()) {
                 withContext(Dispatchers.Main) {
                     _ui.update { it.copy(probeMessage = "Add a password first, then test the helpers.") }
@@ -248,6 +253,7 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
                 "Reply with this tool and no other text.",
                 """{"type":"object","properties":{}}"""
             )
+            val outcomes = mutableListOf<ProbedHelper>()
             val lines = endpoints.map { endpoint ->
                 val gateway = RemoteHttpGateway(
                     endpoint.baseUrl,
@@ -278,15 +284,18 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
                         }
                     }
                 }
+                val answered = outcome.startsWith("answered")
+                outcomes += ProbedHelper(endpoint.modelId, endpoint.plainName, answered, outcome)
                 "${endpoint.plainName}: $outcome"
             }
             withContext(Dispatchers.Main) {
+                val picked = outcomes.filter { it.answered }.map { it.modelId }
                 _ui.update {
                     it.copy(
-                        discoveredHelpers = discovered.map { endpoint -> endpoint.modelId },
-                        probeMessage = if (discovered.isEmpty()) {
-                            "No helper is picked until the live list loads. Check the password and try Test models again.\n" +
-                                lines.joinToString("\n")
+                        discoveredHelpers = picked,
+                        probedHelpers = outcomes,
+                        probeMessage = if (picked.isEmpty()) {
+                            "No helper answered. Check the password and try Test models again.\n" + lines.joinToString("\n")
                         } else {
                             lines.joinToString("\n")
                         }
@@ -556,8 +565,8 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
                             pendingProposal = proposal,
                             pendingProposalId = proposal?.id,
                             approvalCount = proposal?.approvalCount ?: 0,
-                            pendingReason = proposal?.request
-                                ?: "The helper wants to change your project. Read the note, then say yes twice if you agree.",
+                            pendingReason = proposal?.let { ChangeDiff.phoneCard(it) }
+                                ?: "The helper wants to change your project. Read the file, then say yes if you agree.",
                             pendingPhoneLock = proposal?.let { pending ->
                                 RiskyChange.kinds(pending.changeSet.changes, pending.request).isNotEmpty()
                             } ?: false,
@@ -639,21 +648,6 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun onChangeApplied(result: MutationApprovalResult.Applied) {
         val paths = result.changeSet.changes.map { it.path }.distinct()
-        val verification = result.proposal.verification
-        val verificationSummary = buildString {
-            append(
-                if (verification.passed) "A simple text check passed. This does not prove the program runs."
-                else "A simple text check found problems. This does not by itself prove the program is broken."
-            )
-            if (verification.issues.isNotEmpty()) {
-                append("\nIssues:\n")
-                append(verification.issues.joinToString("\n") { "- ${it.path}:${it.line}: ${it.message}" })
-            }
-            if (verification.warnings.isNotEmpty()) {
-                append("\nWarnings:\n")
-                append(verification.warnings.joinToString("\n") { "- $it" })
-            }
-        }
         _ui.value.workspace?.let { ws ->
             _ui.update {
                 it.copy(fileList = ws.summary().files.map { f -> f.path }.sorted())
@@ -662,9 +656,7 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
         store.recordChatMessage(
             ChatMessage(
                 role = ChatRole.SYSTEM,
-                content = "Saved after you said yes twice.\nFiles:\n" +
-                    paths.joinToString("\n") { "- $it" } +
-                    "\nYou asked: ${result.proposal.request}\n$verificationSummary"
+                content = "Saved ${paths.joinToString(", ")}."
             )
         )
         lastApplied = result.changeSet
@@ -678,7 +670,7 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
                 pendingPhoneLock = false,
                 lastSavedSummary = paths.joinToString(),
                 status = AgentStatus.READY,
-                detail = "Saved ${paths.size} file(s): ${paths.joinToString()}. $verificationSummary"
+                detail = "Saved ${paths.size} file(s): ${paths.joinToString()}."
             )
         }
     }
@@ -741,6 +733,19 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
                 pendingProposalId = null,
                 pendingPhoneLock = false,
                 approvalCount = 0
+            )
+        }
+    }
+
+    fun notePartialApproval(proposal: PendingChangeProposal) {
+        _ui.update {
+            it.copy(
+                pendingApproval = true,
+                pendingProposal = proposal,
+                pendingProposalId = proposal.id,
+                approvalCount = proposal.approvalCount,
+                status = AgentStatus.APPROVAL,
+                detail = "Yes ${proposal.approvalCount} of 2 is saved. Nothing is written until you say yes a second time."
             )
         }
     }
@@ -909,10 +914,10 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
                                 pendingProposal = proposal,
                                 pendingProposalId = proposal.id,
                                 approvalCount = proposal.approvalCount,
-                                pendingReason = proposal.request,
+                                pendingReason = ChangeDiff.phoneCard(proposal),
                                 pendingPhoneLock = RiskyChange.kinds(proposal.changeSet.changes, proposal.request).isNotEmpty(),
                                 status = AgentStatus.APPROVAL,
-                                detail = "Your edits to $path are waiting. Open Review and say yes twice before they are saved."
+                                detail = "Your edits to $path are waiting. Open Review and say yes before they are saved."
                             )
                         }
                     }
@@ -923,6 +928,8 @@ class WorkbenchViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 }
+
+data class ProbedHelper(val modelId: String, val label: String, val answered: Boolean, val outcome: String)
 
 data class WorkbenchUiState(
     val tab: SurfaceTab = SurfaceTab.CHAT,
@@ -960,6 +967,7 @@ data class WorkbenchUiState(
     val draftModelName: String = "",
     val draftRotationModels: String = "",
     val discoveredHelpers: List<String> = emptyList(),
+    val probedHelpers: List<ProbedHelper> = emptyList(),
     val draftBaseUrl: String = ModelSettings.OPENROUTER_BASE_URL,
     val draftExtraHeaders: String = "",
     val draftSystemPrompt: String = "",

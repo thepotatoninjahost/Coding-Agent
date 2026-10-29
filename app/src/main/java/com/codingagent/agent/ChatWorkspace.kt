@@ -166,7 +166,7 @@ class ChatWorkspace(
             when (val terminal = events.lastOrNull()) {
                 is AutonomousAgentEvent.ApprovalRequired -> AgentRuntimeResult.NeedsApproval(
                     terminal.task,
-                    ChangeDiff.ownerReviewText(terminal.proposal),
+                    ChangeDiff.phoneCard(terminal.proposal),
                     terminal.proposal.id
                 )
                 is AutonomousAgentEvent.Completed -> asRuntime(agent, terminal.task)
@@ -195,7 +195,7 @@ class ChatWorkspace(
         if (task.status == "needs-approval" || task.status == "waiting-approval") {
             val proposal = agent.pendingProposals().firstOrNull()
             if (proposal != null) {
-                return AgentRuntimeResult.NeedsApproval(task, ChangeDiff.ownerReviewText(proposal), proposal.id)
+                return AgentRuntimeResult.NeedsApproval(task, ChangeDiff.phoneCard(proposal), proposal.id)
             }
         }
         if (task.status == "needs-input") {
@@ -358,7 +358,8 @@ class ChatWorkspace(
         return ChatTurn(message, null)
     }
     private fun formatTask(task: AgentTask, workLog: List<String> = emptyList()): String = buildString {
-        if (workLog.isNotEmpty()) {
+        val explainOnly = task.changes.isEmpty() && task.status == "completed"
+        if (workLog.isNotEmpty() && !explainOnly) {
             append("Work:\n")
             workLog.distinct().forEach { line ->
                 append("- ")

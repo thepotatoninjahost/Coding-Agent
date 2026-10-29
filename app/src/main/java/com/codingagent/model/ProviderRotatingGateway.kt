@@ -34,6 +34,8 @@ class ProviderRotatingGateway(
 
     fun modelIds(): List<String> = ordered().map { it.modelId }
 
+    fun answeredModel(): String = lastTriedModelId.get().orEmpty()
+
     override fun complete(request: ModelRequest): ModelResponse = stream(request) {}
 
     override fun preferDifferentModel() {

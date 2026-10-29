@@ -47,7 +47,7 @@ class ActObserveLoop(
         var lastRun: RunReport? = null
         var condensed = false
         val dailyRemaining = com.codingagent.model.OpenRouterDailyBudget.remaining()
-        val maxSteps = TaskBudget.callsFor(config.maxTurns, dailyRemaining)
+        val maxSteps = TaskBudget.callsFor(config.maxTurns, dailyRemaining, changeWork)
         TaskBudget.warning(dailyRemaining, maxSteps)?.let { emit(AutonomousAgentEvent.Phase("MODEL", it)) }
         val user = buildString {
             appendLine(request.trim())
@@ -121,6 +121,12 @@ class ActObserveLoop(
                         if (action.name == "review_examples" || action.name == "run_program") {
                             val ready = approvalIfChecked(outcome, lastRun, taskId, request, plan, events)
                             if (ready != null) return ready
+                            if (outcome.report != null && outcome.report.ran && !outcome.report.passed) {
+                                transcript += ModelMessage(
+                                    "user",
+                                    "The examples did not match. Fix the file, then call review_examples again. Include a bad input that should print the word error."
+                                )
+                            }
                         }
                         if (!changeWork && action.name == "research_web") {
                             sourcedFact(outcome.text)?.let { fact ->
@@ -142,7 +148,15 @@ class ActObserveLoop(
                         transcript += ModelMessage("user", applied)
                         steps += StuckDetector.Step("search-replace", applied.take(240), applied.startsWith("ERROR:"), textOnly = false)
                     } else if (mutations.pending().isNotEmpty()) {
-                        return showApproval(lastRun, taskId, request, plan, events)
+                        if (readyToShow(lastRun)) return showApproval(lastRun, taskId, request, plan, events)
+                        formatErrors++
+                        transcript += ModelMessage("assistant", action.content)
+                        transcript += ModelMessage(
+                            "user",
+                            "The file is only staged. Call review_examples now with at least two examples. One must be a bad input that expects the word error. If the run fails, fix the file and run it again. Do not describe the file."
+                        )
+                        steps += StuckDetector.Step("text", action.content.take(120), error = false, textOnly = true)
+                        if (formatErrors >= 3) return unfinished(taskId, request, plan, events)
                     } else if (!changeWork) {
                         val fact = transcript.mapNotNull { sourcedFact(it.content) }.lastOrNull()
                         val version = fact?.let { Regex("""\d+\.\d+\.\d+""").find(it)?.value }
@@ -166,7 +180,8 @@ class ActObserveLoop(
                         steps += StuckDetector.Step("text", action.content.take(120), error = false, textOnly = true)
                         if (formatErrors >= 3) {
                             if (mutations.pending().isNotEmpty()) {
-                                return showApproval(lastRun, taskId, request, plan, events)
+                                return if (readyToShow(lastRun)) showApproval(lastRun, taskId, request, plan, events)
+                                else unfinished(taskId, request, plan, events)
                             }
                             val summary = "I have not built anything yet. Nothing was saved. " +
                                 "The helper only described a plan and asked whether to continue. " +
@@ -200,10 +215,15 @@ class ActObserveLoop(
             }
         }
         bestEnding(taskId, request, plan, events, lastRun)?.let { return it }
+        if (changeWork && mutations.pending().isNotEmpty() && !readyToShow(lastRun)) {
+            return unfinished(taskId, request, plan, events)
+        }
         val fact = bestFact(transcript)
         if (fact != null) return complete(taskId, request, plan, events, fact, "completed")
         val summary = if (changeWork && mutations.pending().isEmpty()) {
             "I used every step I am allowed and did not finish the change. Nothing was saved."
+        } else if (changeWork) {
+            "This is unfinished. I stopped before the change was ready, so nothing was saved."
         } else {
             "I used every step I am allowed. This is as far as I got."
         }
@@ -217,8 +237,32 @@ class ActObserveLoop(
         events: MutableList<AutonomousAgentEvent>,
         lastRun: RunReport?
     ): List<AutonomousAgentEvent>? {
-        if (mutations.pending().isNotEmpty()) return showApproval(lastRun, taskId, request, plan, events)
-        return null
+        if (mutations.pending().isEmpty()) return null
+        return if (readyToShow(lastRun)) showApproval(lastRun, taskId, request, plan, events)
+        else unfinished(taskId, request, plan, events)
+    }
+
+    private fun readyToShow(lastRun: RunReport?): Boolean {
+        val proposal = mutations.pending().firstOrNull() ?: return false
+        if (!needsRun(proposal)) return true
+        return lastRun != null && lastRun.ran && lastRun.passed
+    }
+
+    private fun unfinished(
+        taskId: String,
+        request: String,
+        plan: AgentPlan,
+        events: MutableList<AutonomousAgentEvent>
+    ): List<AutonomousAgentEvent> {
+        mutations.pending().firstOrNull()?.let { mutations.reject(it.id) }
+        return complete(
+            taskId,
+            request,
+            plan,
+            events,
+            "This is unfinished. I have not run it, so nothing was saved.",
+            "needs-input"
+        )
     }
 
     private fun bestFact(transcript: List<ModelMessage>): String? =

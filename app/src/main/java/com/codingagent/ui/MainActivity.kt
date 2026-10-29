@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -111,10 +112,7 @@ private fun CodingAgentApp(
             vm.setStatus(AgentStatus.STOPPED, newDetail)
         }
         override fun onAwaitingSecond(proposal: PendingChangeProposal) {
-            vm.setStatus(
-                AgentStatus.APPROVAL,
-                "Yes ${proposal.approvalCount} of 2 is saved. Nothing is written until you say yes a second time."
-            )
+            vm.notePartialApproval(proposal)
         }
         override fun onRepairRequired(proposal: PendingChangeProposal, newDetail: String) {
             vm.setStatus(AgentStatus.APPROVAL, newDetail)
@@ -179,7 +177,7 @@ private fun CodingAgentApp(
                 }
             }
         ) { padding ->
-            Column(Modifier.fillMaxSize().padding(padding)) {
+            Column(Modifier.fillMaxSize().padding(padding).imePadding()) {
                 when (ui.tab) {
                     SurfaceTab.CHAT -> ChatSurface(
                         messages = ui.chatMessages,
@@ -297,21 +295,26 @@ private fun CodingAgentApp(
                         )
                         Spacer(Modifier.height(8.dp))
                         Text("Which free helper?", color = SoftGreen, fontSize = 12.sp)
-                        if (ui.discoveredHelpers.isEmpty()) {
+                        if (ui.discoveredHelpers.isEmpty() && ui.probedHelpers.isEmpty()) {
                             Text(
                                 "No helper is picked until Test models loads the list. You can type a helper name below.",
                                 color = SoftGreen,
                                 fontSize = 12.sp
                             )
                         }
-                        ui.discoveredHelpers.forEach { modelId ->
+                        val shown = if (ui.probedHelpers.isNotEmpty()) ui.probedHelpers else {
+                            ui.discoveredHelpers.map { ProbedHelper(it, it, true, "answered") }
+                        }
+                        shown.forEach { helper ->
                             TextButton(
-                                onClick = { vm.chooseFreeHelper(modelId) },
+                                onClick = { if (helper.answered) vm.chooseFreeHelper(helper.modelId) },
                                 modifier = Modifier.fillMaxWidth()
                             ) {
+                                val mark = if (helper.answered) "" else " — did not answer"
                                 Text(
-                                    if (ui.draftModelName == modelId) "Selected: $modelId" else modelId,
-                                    color = if (ui.draftModelName == modelId) NeonGreen else SoftGreen,
+                                    if (ui.draftModelName == helper.modelId) "Selected: ${helper.label}$mark" else "${helper.label}$mark",
+                                    color = if (!helper.answered) SoftGreen.copy(alpha = 0.6f)
+                                    else if (ui.draftModelName == helper.modelId) NeonGreen else SoftGreen,
                                     fontSize = 12.sp
                                 )
                             }

@@ -434,10 +434,10 @@ object ModelConnectionProbe {
                     if (content.isEmpty()) {
                         ProbeResult.Failed("Model returned no usable message content")
                     } else {
-                        ProbeResult.Ok("Connected. A helper answered." + OpenRouterDailyBudget.sentence().orEmpty())
+                        ProbeResult.Ok(connectedSentence(settings, gateway) + OpenRouterDailyBudget.sentence().orEmpty())
                     }
                 }
-                is ModelResponse.ToolCall -> ProbeResult.Ok("Connected. A helper answered.")
+                is ModelResponse.ToolCall -> ProbeResult.Ok(connectedSentence(settings, gateway))
                 is ModelResponse.Failure -> {
                     val raw = explainProviderError(settings.modelName, response.message)
                     val plain = if (ModelFailure.isUnavailableModel(raw)) {
@@ -459,6 +459,12 @@ object ModelConnectionProbe {
      * Never echo secrets (API keys, Bearer tokens) into UI-facing probe failures.
      * Phone paste of long keys often injects newlines; the raw JVM message includes the header.
      */
+    private fun connectedSentence(settings: ModelSettings, gateway: ModelGateway): String {
+        val named = (gateway as? ProviderRotatingGateway)?.answeredModel().orEmpty().ifBlank { settings.modelName.trim() }
+        val who = named.ifBlank { "A helper" }
+        return "Connected. $who answered."
+    }
+
     fun sanitizeProbeError(raw: String): String {
         var msg = raw
         msg = msg.replace(

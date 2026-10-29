@@ -5,11 +5,15 @@ package com.codingagent.agent
  */
 object TaskBudget {
     const val PER_TASK = 8
+    const val BUILD_CAP = 24
 
-    fun callsFor(stepLimit: Int, dailyRemaining: Int?): Int {
+    fun callsFor(stepLimit: Int, dailyRemaining: Int?, changeWork: Boolean = false): Int {
         val cap = when {
+            dailyRemaining != null && dailyRemaining <= 2 -> 1
+            changeWork && (dailyRemaining == null || dailyRemaining >= 100) ->
+                if (dailyRemaining == null) 16 else BUILD_CAP
+            changeWork && dailyRemaining != null -> minOf(BUILD_CAP, dailyRemaining, maxOf(6, dailyRemaining / 3))
             dailyRemaining == null -> PER_TASK
-            dailyRemaining <= 2 -> 1
             else -> minOf(PER_TASK, maxOf(2, dailyRemaining / 6))
         }
         return minOf(stepLimit.coerceAtLeast(1), cap)

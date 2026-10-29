@@ -123,6 +123,10 @@ internal class OwnerApprovalController(
         val kinds = if (proposal == null) emptySet() else RiskyChange.kinds(proposal.changeSet.changes, proposal.request)
         phoneLock = kinds.isNotEmpty()
         riskNote = RiskyChange.plainSummary(kinds)
+        if (kinds.isEmpty() && proposal != null) {
+            confirmOrdinary(proposal)
+            return
+        }
         error = null
         speechVerified = false
         spokenPhrase = ""
@@ -136,6 +140,61 @@ internal class OwnerApprovalController(
             "Say the words you saved, then these words: $speechChallenge"
         }
         showDialog = true
+    }
+
+    private fun confirmOrdinary(proposal: PendingChangeProposal) {
+        val activity = activityProvider()
+        val job = scope.launch(Dispatchers.Main) {
+            try {
+                val now = System.currentTimeMillis()
+                val fingerprint = OwnerApprovalKey.fingerprint(proposal.id, proposal.changeSet.changes)
+                val nextOrdinal = proposal.approvalCount + 1
+                var usedLock = true
+                val token = try {
+                    val signingChallenge = withContext(Dispatchers.IO) {
+                        OwnerApprovalKey.prepare(proposal.id, nextOrdinal, now, fingerprint)
+                    }
+                    val unlocked = awaitDeviceSignature(
+                        activity,
+                        signingChallenge.signature,
+                        "Confirm it is you",
+                        "Use your fingerprint, face, or screen lock. One yes saves this file."
+                    )
+                    withContext(Dispatchers.IO) { OwnerApprovalKey.complete(signingChallenge, unlocked) }
+                } catch (t: Throwable) {
+                    if (t is CancellationException) throw t
+                    if (!lockScreenMissing(t)) throw t
+                    usedLock = false
+                    host?.setStatus(
+                        AgentStatus.APPROVAL,
+                        "This phone has no screen lock. One tap saves this file."
+                    )
+                    val local = withContext(Dispatchers.IO) {
+                        OwnerApprovalKey.prepareLocal(proposal.id, nextOrdinal, now, fingerprint)
+                    }
+                    withContext(Dispatchers.IO) { OwnerApprovalKey.complete(local, local.signature) }
+                }
+                val modalities = if (usedLock) setOf(ApprovalModality.DEVICE_AUTH) else emptySet()
+                val result = withContext(Dispatchers.IO) {
+                    coordinatorProvider()?.approve(proposal.id, token, modalities, singleConfirmation = true)
+                        ?: MutationApprovalResult.Rejected("This project is not open, so the change cannot be saved.")
+                }
+                when (result) {
+                    is MutationApprovalResult.AwaitingSecond -> host?.onAwaitingSecond(result.proposal)
+                    is MutationApprovalResult.Applied -> host?.onApplied(result)
+                    is MutationApprovalResult.RepairRequired -> host?.onRepairRequired(result.proposal, result.failure)
+                    is MutationApprovalResult.Rejected -> host?.onRejected(result.reason)
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (t: Throwable) {
+                host?.onFailed(plainApprovalError(t))
+            } finally {
+                biometricPrompt = null
+                host?.setActiveJob(null)
+            }
+        }
+        host?.setActiveJob(job)
     }
 
     fun beginGitHubPush(fingerprint: String) {
@@ -461,8 +520,19 @@ private fun plainApprovalError(error: Throwable): String {
     if (kind.contains("UserNotAuthenticated") || raw.contains("UserNotAuthenticated", ignoreCase = true)) {
         return "This phone needs a screen lock (PIN, pattern, or fingerprint) before it can confirm you. Set one in the phone's security settings, then try again."
     }
+    if (lockScreenMissing(error)) {
+        return "This phone has no screen lock. Ordinary files can still be saved with one tap. A delete or a change to this app still needs a screen lock."
+    }
     if (raw.isBlank()) return "The phone could not confirm it is you. Try again."
+    if (raw.contains("Exception") || raw.contains("java.")) return "The phone could not confirm it is you. Try again."
     return raw
+}
+
+private fun lockScreenMissing(error: Throwable): Boolean {
+    val raw = error.message.orEmpty()
+    return raw.contains("Secure lock screen", ignoreCase = true) ||
+        raw.contains("user authentication", ignoreCase = true) ||
+        raw.contains("KeyStoreException", ignoreCase = true)
 }
 
 private fun freshSpeechChallenge(): String {

@@ -199,20 +199,26 @@ internal fun ApprovalCard(approvalCount: Int, reason: String, onApprove: () -> U
     ) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("PLEASE CHECK THIS", color = FluoroOrange, fontWeight = FontWeight.Bold)
-            Text(reason, color = NeonGreen, fontSize = 13.sp)
-            Text(
-                if (phoneLock) "Spoken words are not enough. Confirm with the phone lock, twice, before anything is saved."
-                else "Say yes twice, on purpose, before anything is saved.",
-                color = SoftGreen,
-                fontSize = 12.sp
-            )
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("${approvalCount}/2", color = SoftGreen, modifier = Modifier.weight(1f))
+                Text(
+                    if (phoneLock) "$approvalCount of 2" else if (approvalCount == 0) "Not saved yet" else "One yes is saved",
+                    color = SoftGreen,
+                    modifier = Modifier.weight(1f)
+                )
                 Button(
                     onClick = onApprove,
                     colors = ButtonDefaults.buttonColors(containerColor = FluoroOrange, contentColor = DarkPurple)
-                ) { Text(if (phoneLock) "Confirm with phone lock" else if (approvalCount == 0) "Say yes" else "Say yes again") }
+                ) { Text(if (phoneLock) "Confirm with phone lock" else "Save this file") }
+                Spacer(Modifier.width(8.dp))
+                Text("Reject is on the Review tab", color = SoftGreen, fontSize = 11.sp)
             }
+            Text(
+                if (phoneLock) "This deletes something or changes the app. Confirm with the phone lock, twice, before anything is saved."
+                else "One yes saves this file. Nothing is written until you do.",
+                color = SoftGreen,
+                fontSize = 12.sp
+            )
+            Text(reason, color = NeonGreen, fontSize = 13.sp)
         }
     }
 }
@@ -345,14 +351,19 @@ internal fun ReviewSurface(
         if (!pending) {
             Text("Nothing is waiting for you to approve.", color = SoftGreen)
         } else {
-            Text(reason, color = NeonGreen, fontSize = 14.sp)
-            Text("Yes so far: $approvals of 2", color = SoftGreen)
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Button(onClick = onApprove, colors = ButtonDefaults.buttonColors(containerColor = FluoroOrange, contentColor = DarkPurple)) {
-                    Text(if (phoneLock) "Confirm with phone lock" else "Say yes")
+                    Text(if (phoneLock) "Confirm with phone lock" else "Save this file")
                 }
-                TextButton(onClick = onReject) { Text("Reject", color = Danger) }
+                Button(onClick = onReject, colors = ButtonDefaults.buttonColors(containerColor = Danger, contentColor = DarkPurple)) {
+                    Text("Reject")
+                }
             }
+            Text(
+                if (phoneLock) "Yes so far: $approvals of 2" else "One yes saves this file.",
+                color = SoftGreen
+            )
+            Text(reason, color = NeonGreen, fontSize = 14.sp)
         }
         if (canSendToGitHub && !pending) {
             Text("The last saved change can be sent to GitHub. The phone lock has to approve it first.", color = SoftGreen, fontSize = 13.sp)
