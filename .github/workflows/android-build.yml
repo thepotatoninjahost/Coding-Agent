@@ -77,7 +77,9 @@ jobs:
         run: |
           set -euo pipefail
 
-          # 1) No private signing material tracked or left in the tree
+          # 1) No private release signing material. app/debug.keystore is the public
+          # Android debug key (store password android) so every CI build installs
+          # over the last one. Any other keystore is still refused.
           if git ls-files --error-unmatch app/debug-signing.keystore.b64 >/dev/null 2>&1; then
             echo "ERROR: repository-stored private debug signing material is tracked."
             exit 1
@@ -85,10 +87,11 @@ jobs:
           if find . -type f \( -name "*.keystore" -o -name "*.jks" \) \
               ! -path "./.git/*" \
               ! -path "*/build/*" \
+              ! -path "./app/debug.keystore" \
               -print -quit | grep -q .; then
             echo "ERROR: private signing material exists in the source tree."
             find . -type f \( -name "*.keystore" -o -name "*.jks" \) \
-              ! -path "./.git/*" ! -path "*/build/*" -print
+              ! -path "./.git/*" ! -path "*/build/*" ! -path "./app/debug.keystore" -print
             exit 1
           fi
 
