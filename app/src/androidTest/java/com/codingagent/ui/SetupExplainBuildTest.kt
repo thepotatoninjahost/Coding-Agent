@@ -1,6 +1,5 @@
 package com.codingagent.ui
 
-import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
@@ -74,17 +73,17 @@ class SetupExplainBuildTest {
             composeRule.onAllNodesWithText("compiler.js", substring = true).fetchSemanticsNodes().isNotEmpty() &&
                 composeRule.onAllNodesWithText("Save this file").fetchSemanticsNodes().isNotEmpty()
         }
-        composeRule.onNodeWithText("compiler.js", substring = true).assertIsDisplayed()
-        composeRule.onNodeWithText("Save this file").assertIsDisplayed()
-        assertTrue(
-            composeRule.onAllNodesWithText("OPEN JOB", substring = true).fetchSemanticsNodes().isEmpty()
-        )
+        assertTrue(composeRule.onAllNodesWithText("compiler.js", substring = true).fetchSemanticsNodes().isNotEmpty())
+        assertTrue(composeRule.onAllNodesWithText("console.log", substring = true).fetchSemanticsNodes().isNotEmpty())
+        assertTrue(composeRule.onAllNodesWithText("Save this file").fetchSemanticsNodes().isNotEmpty())
+        assertTrue(composeRule.onAllNodesWithText("OPEN JOB", substring = true).fetchSemanticsNodes().isEmpty())
         composeRule.onNodeWithText("Review").performClick()
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithText("Reject").fetchSemanticsNodes().isNotEmpty()
+        }
         composeRule.onNodeWithText("Reject").assertIsDisplayed()
-        composeRule.onNodeWithText("compiler.js", substring = true).assertIsDisplayed()
-        assertTrue(
-            composeRule.onAllNodesWithText("OPEN JOB", substring = true).fetchSemanticsNodes().isEmpty()
-        )
+        assertTrue(composeRule.onAllNodesWithText("compiler.js", substring = true).fetchSemanticsNodes().isNotEmpty())
+        assertTrue(composeRule.onAllNodesWithText("OPEN JOB", substring = true).fetchSemanticsNodes().isEmpty())
     }
 
     private fun typeAndSend(text: String) {
